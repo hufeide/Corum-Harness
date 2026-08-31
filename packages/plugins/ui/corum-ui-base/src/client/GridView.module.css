@@ -1,0 +1,183 @@
+/* GridView —— 自由二维网格。token-only。 */
+
+.grid {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* VSCode SplitView 式绝对定位：分支容器 relative，每格 absolute，位置/尺寸
+   由 JS 计算并直接写 DOM style（left/top/width/height）。不再用 flex。 */
+.branchRow,
+.branchColumn {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.branchCell {
+  position: absolute;
+  /* 最小宽度约束由 JS 布局夹取（computeCellSizes 的 MIN_MAIN_SIZE），CSS 不再
+    用 min-width——绝对定位下 min-width 会与 JS 写入的 width 冲突造成溢出。 */
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 顶层 row 格的内容让位包装（leafTopOffset）：JS 写入 top/height（内容格
+   顶部下移、高度缩短——如 sidebar/conversation 让位标题栏行，right-col 顶到
+   容器顶）。格自身仍绝对定位占满全高，包装在内层绝对定位。
+   注意不设 overflow:hidden——浮动窗拖回的 dock 预览（dropHint/dockPreview）
+   需要能透出到格边界外（overflow 在 .leaf 层裁剪）。 */
+.branchInner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── sash（沿用 VSCode Sash 视觉）── */
+.sashV {
+  position: absolute; /* JS 写 left/top/height；命中区 8px 宽压在缝上 */
+  width: 8px;
+  cursor: col-resize;
+  z-index: 35;
+  touch-action: none;
+}
+
+.sashH {
+  position: absolute; /* JS 写 left/top/width */
+  height: 8px;
+  cursor: row-resize;
+  z-index: 35;
+  touch-action: none;
+}
+
+.sashV::after,
+.sashH::after {
+  content: '';
+  position: absolute;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  opacity: 0;
+  transition: opacity 120ms ease;
+  border-radius: 2px;
+}
+
+.sashV::after {
+  top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px;
+}
+
+.sashH::after {
+  left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px;
+}
+
+.sashV:hover::after,
+.sashH:hover::after {
+  opacity: 1;
+}
+
+/* ── 叶子窗格 ──
+   .leaf 只是 grid 拖放高亮的定位包装（drop zone / dropHint 的锚），卡片
+   外观与区域操作按钮由 RegionCard 基座承载。
+   overflow:hidden 裁剪叶内容（如 Monaco 的 16777214px 虚拟画布），避免
+   HTML5 拖拽 ghost 快照把这些巨大画布一并拍进去、覆盖相邻区域。 */
+.leaf {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  /* 创建独立合成层，隔离 leaf 的渲染——否则 HTML5 拖拽的 ghost 快照会把相邻
+     leaf 一起拍进去（manifest 为「拖动带动相邻区域」）。
+     注意：本层 + 0.1.2 会话区换肤的 backdrop-filter 玻璃层组合会让 Chromium
+     的整页 native ghost 失效（空态拍进相邻区域 / 非空态无 ghost），故
+     GridView 改为 dragstart 克隆 leaf 作显式 drag image（见 .dragGhost）。 */
+  will-change: transform;
+  /* Chromium 对 draggable=true 元素的默认行为：整棵子树 user-select:none
+     （实测：leaf draggable=true → 子树全 none，去掉 draggable 立即回 auto）——
+     这会让「draggable 整叶」里的文本（结论正文/消息/树行）无法选中。显式覆盖
+     回 text：文本恢复可选中；拖拽让位由 GridView 的 CARD_SELECTOR/INTERACTIVE
+     判定（卡片/交互上 preventDefault dragstart）保证「可选中且不拖」并存。 */
+  user-select: text;
+}
+
+/* 拖拽时的显式 drag image 快照（GridView dragstart 克隆的 leaf）：必须是干净的
+   静态快照——剥离一切 backdrop-filter（玻璃层会让 Chromium 快照失效/半透明穿帮），
+   快照自身不再 blur（拍的是「当前画面」，底层内容在快照生成时已定格）。 */
+[data-drag-ghost],
+[data-drag-ghost] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 已脱出占位卡。 */
+.detachedPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.detachedIcon {
+  font-size: 20px;
+  color: var(--dsw-alias-brand-primary);
+}
+
+.detachedHint {
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* drop 高亮：四边或中心。 */
+.dropHint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  opacity: 0.16;
+  z-index: 5;
+}
+
+.dropHint[data-zone='left'] { right: 50%; border-radius: 14px 0 0 14px; }
+.dropHint[data-zone='right'] { left: 50%; border-radius: 0 14px 14px 0; }
+.dropHint[data-zone='top'] { bottom: 50%; border-radius: 14px 14px 0 0; }
+.dropHint[data-zone='bottom'] { top: 50%; border-radius: 0 0 14px 14px; }
+.dropHint[data-zone='center'] { inset: 0; border-radius: 14px; opacity: 0.22; }
+
+/* 正在被拖的窗格（HTML5 DnD 源）略透明。 */
+.leaf[data-drop-zone] {
+  outline: 2px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  outline-offset: -2px;
+}
+
+/* 浮动窗拖回的实时插入预览块。 */
+.dockPreview {
+  position: absolute;
+  pointer-events: none;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  opacity: 0.22;
+  border: 2px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  border-radius: 12px;
+  z-index: 40;
+  transition: left 80ms ease, top 80ms ease, width 80ms ease, height 80ms ease;
+}

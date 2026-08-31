@@ -628,7 +628,8 @@ select.input {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .customizedSummary::before {
+  .customizedSummary::before,
+  .switchThumb {
     transition: none;
   }
 }
@@ -642,6 +643,12 @@ select.input {
      ui-theme styles/scrollbar.css for the contract). */
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.candidateActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
 }
 
 .candidateList {

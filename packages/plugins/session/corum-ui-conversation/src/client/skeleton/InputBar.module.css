@@ -1,0 +1,438 @@
+
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Side pads ride the shared clearance (figma Input_Bottom drew L32/R32/B8;
+     the sides narrow with the shared width axis); the bottom gradient mask
+     is owned by the chat scroller. No top pad: the composer stack's gap owns
+     the space above; the status strip still carries its own margin. */
+  padding: 0 var(--dsh-composer-side-clearance) 8px;
+}
+
+.hero {
+  /* No bottom pad in the centered hero, but the side clearance must survive:
+     the hero wrapper is full-width on narrow viewports, so this padding is
+     the only thing keeping the card off the edges there. */
+  padding: 0 var(--dsh-composer-side-clearance);
+}
+
+.notice {
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width);
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.card {
+  box-sizing: border-box;
+  position: relative; /* overlay anchor positioning context */
+  display: flex;
+  flex-direction: column;
+  /* 设计稿 htxWi：padding [12, 12, 10, 14]（上 12 / 右 12 / 下 10 / 左 14）。
+     gap 10（设计稿 Chat Input 的 layout gap）。 */
+  gap: 10px;
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width);
+  padding: 12px 12px 10px 14px;
+  /* Input stroke: black/0.10 light, white/0.06 dark (figma darkmode note says
+     the input border is one notch weaker than buttons) — exactly the
+     l2-darkmode-thin pair. Fill: the input surface token (elevated in dark). */
+  /* fork（corum 液态玻璃）：glass-2 半透明底 + 玻璃光边 + backdrop blur，
+     输入区圆角 16px，透出底部 ambient 光斑。 */
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-2);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: var(--dsw-shadow-lv2);
+  /* The draft text follows the Settings font-size preference (the textarea,
+     mirror, and backdrop all inherit from here, so the three layers stay in
+     step); the line height keeps the default 10px leading via the shared px
+     delta. */
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  /* Elevated surface in dark, same as the menus: the draft scrollport inside
+     scrolls once the composer hits its height cap, so the thumb takes the l2
+     pair. Declared on the card because the elevation belongs to the surface,
+     and the custom properties inherit down to the box that actually scrolls
+     (see ui-theme styles/scrollbar.css for the rebinding contract). */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+/* No-workspace trigger state: dashed l4 stroke marks the card as a pick-a-
+   workspace affordance rather than a live composer; hover answers in the
+   business blue to invite the click. Native `dashed` has a fixed browser
+   pattern, so the stroke is an ::after overlay: theme-token background masked
+   by an SVG dash ring (stroke-width 2 centered on the box edge = 1px visible
+   inside), which keeps the card radius and both themes. */
+.cardWorkspaceTrigger {
+  border-color: transparent;
+  cursor: pointer;
+}
+
+.cardWorkspaceTrigger::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  /* fork：跟随输入卡的 16px 玻璃圆角。 */
+  border-radius: 16px;
+  background: var(--dsw-alias-border-l4);
+  transition: background-color 100ms ease;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='16' ry='16' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='16' ry='16' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
+/* Disabled toolbar controls neither receive nor swallow clicks in the trigger
+   state: pointer events fall through to the card's own click handler, making
+   the full capsule one pick target. */
+.cardWorkspaceTrigger :disabled {
+  pointer-events: none;
+}
+
+.cardWorkspaceTrigger:hover::after {
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.accessory {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+
+/* Floating overlay anchor (menu / popupSelect shell): entries position
+   themselves against the card (bottom: 100% + gap); closed entries render null. */
+.overlayAnchor {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 0;
+}
+
+/* The draft's scrollport, and the ONLY scrolling box in the composer. The
+   contenteditable grows with its content inside; the 14-line cap lives here
+   because this is the box the cap describes. */
+.scroll {
+  max-height: var(--dsh-composer-text-max-height);
+  overflow-y: auto;
+}
+
+/* Auto-grow anchor: the contenteditable is in normal flow and sets the
+   draft's height; the placeholder rides it absolutely. */
+.grow {
+  position: relative;
+}
+
+/* Machine pending dot (adjudicating / submitting). */
+.pending {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-business-primary);
+  animation: input-pending 1s ease-in-out infinite alternate;
+}
+
+@keyframes input-pending {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+/* The contenteditable draft surface (grows with its content; .scroll caps
+   and scrolls it). 设计稿 htxWi input-line：fontSize 17，height 100。 */
+.input {
+  box-sizing: border-box;
+  padding: 4px 12px 0 16px;
+  font-family: var(--dsw-font-family);
+  font-size: 17px;
+  line-height: 1.5;
+  min-height: 100px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  outline: none;
+  color: var(--dsw-alias-label-primary);
+  /* Business blue, not brand-primary: that token resolves to ink in this sheet. */
+  caret-color: var(--dsw-alias-state-business-primary);
+}
+
+/* Lexical paragraphs are <p> blocks: strip the UA margins so the surface
+   keeps the textarea's line rhythm. */
+.input p {
+  margin: 0;
+}
+
+/* Claim ghost hint as generated content after the last paragraph: the bar
+   sets --dsh-composer-hint (a quoted string) while the claim's args are
+   blank; without the variable the declaration is invalid and nothing shows. */
+.input p:last-child::after {
+  content: var(--dsh-composer-hint);
+  color: var(--dsw-alias-label-caption);
+}
+
+/* figma 34:10434: #ADB2B8 light / #81858C dark — the caption pair exactly.
+   设计稿 htxWi placeholder：fontSize 17。 */
+.placeholder {
+  position: absolute;
+  inset: 4px 12px auto 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 17px;
+  line-height: 1.5;
+  pointer-events: none;
+  user-select: none;
+}
+
+.inputDisabled {
+  color: var(--dsw-alias-label-tertiary);
+  cursor: not-allowed;
+}
+
+.input[aria-haspopup='menu'] {
+  cursor: pointer;
+}
+
+/* Hero (centered empty-state) keeps the 2-line floor (figma min-h 52 = ~2 × 24
+   line + 4pt); the docked composer collapses to the content height. */
+.hero .input {
+  min-height: 52px;
+}
+
+/* 设计稿 htxWi toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送，gap 6。
+   会话区最小宽度时不换行（flex-wrap: nowrap），工具栏保持单行布局。 */
+.row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0;
+  min-width: 0;
+}
+
+.tools,
+.modes,
+.trailing {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.tools {
+  gap: 6px;
+  flex: none;
+}
+
+.modes {
+  gap: 6px;
+}
+
+/* 设计稿 spacer：fill_container */
+.spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.trailing {
+  flex: none;
+  gap: 6px;
+}
+
+/* 设计稿 tbtn：26×26 r8 ghost 按钮 */
+.tbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.tbtn:hover:not(:disabled) {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.tbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 设计稿 tbtn-shield：warn 色图标（$state-warn：浅 #E07A00 / 深 #FFB45C） */
+.tbtnWarn {
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
+
+.tbtnWarn svg {
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
+
+.tbtnWarn svg path {
+  stroke: currentColor;
+}
+
+.tbtnWarn:hover:not(:disabled) {
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
+
+.tbtnWarn:hover:not(:disabled) svg {
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
+
+/* 设计稿 tbtn-agent：@Agent 按钮（26 高，r8，文本 + chevron，padding 0 8px，gap 4）
+   @ 文本：fontSize 16，fontWeight 600；Agent 文本：fontSize 16。
+   会话区最小宽度时允许缩小（flex-shrink: 1），文本截断显示。 */
+.tbtnAgent {
+  width: auto;
+  padding: 0 8px;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tbtnAgentAt {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  flex: none;
+}
+
+.tbtnAgentLabel {
+  font-size: 16px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tbtnChevron {
+  width: 16px;
+  height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 设计稿 tbtn-model：模型选择按钮（26 高，r8，文本 + chevron，padding 0 6px，gap 5）
+   模型名文本：fontSize 16；effort 文本：fontSize 13，$label-tertiary。
+   会话区最小宽度时允许缩小（flex-shrink: 1），文本截断显示。 */
+.tbtnModel {
+  width: auto;
+  padding: 0 6px;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tbtnModelLabel {
+  font-size: 16px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tbtnModelEffort {
+  font-size: 13px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+}
+
+/* 设计稿 tbtn-send：28×26 r8 品牌实底 arrow-up 图标 */
+.tbtnSend {
+  width: 28px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+}
+
+.tbtnSend:hover:not(:disabled) {
+  background: var(--dsw-alias-brand-primary);
+  filter: brightness(1.08);
+  color: var(--corum-label-on-brand);
+}
+
+.tbtnSend:disabled {
+  opacity: 0.4;
+}
+
+/* 设计稿 sparkle 图标（输入行右侧）：19×19，可点击 */
+.sparkleIcon {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 19px;
+  height: 19px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: color 100ms ease;
+}
+
+.sparkleIcon:hover:not(:disabled) {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.sparkleIcon:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Plan / Read-only / model — native <select>, chip-like closed chrome
+   (figma ToggleButton: 13/20 medium secondary, 12px chevron). */
+.select {
+  max-width: 220px;
+  height: 26px;
+  padding: 0 20px 0 8px;
+  border: none;
+  border-radius: 8px;
+  outline: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 12px 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  appearance: none;
+}
+
+.select:hover:not(:disabled) {
+  background-color: var(--corum-glass-2);
+}
+
+.select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.retry {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}

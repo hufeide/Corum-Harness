@@ -1,5 +1,5 @@
 {
-  "name": "@corum/ui-settings-models",
+  "name": "@corum/corum-ui-settings-models",
   "version": "0.1.0",
   "description": "corum 定制版模型设置页（fork 官方 dsh-client-ui-settings-models）：pi-ai 模型行新增「支持图片」开关，其余与官方逐行一致",
   "private": true,
@@ -8,7 +8,6 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-api-remotes"
@@ -33,16 +32,15 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-schema-form": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-web-react": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-api-remotes": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-connection": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-store": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-invariants": "^0.1.2-alpha.1",
     "react": "^18.2.0"
   },
   "devDependencies": {

@@ -1,0 +1,629 @@
+/* EmptyStateHero —— 会话区空态（2026-08-30 重设计定稿，设计稿 DjFev 重排版式）。
+   token 全走 corum 玻璃体系（--corum-glass-* / --dsw-alias-*）。 */
+
+.emptyHero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 44px;
+  padding: 24px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 大 logo（340×262 r16，fit）。 */
+.bigLogo {
+  width: 300px;
+  height: 231px;
+  border-radius: 16px;
+  overflow: hidden;
+  flex: none;
+}
+.bigLogo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* 新建双按钮（设计稿：两个横排大按钮，gap 20）。 */
+.actions {
+  display: flex;
+  gap: 20px;
+  flex: none;
+}
+/* 横排大按钮（设计稿 card-*：360×97、ic 左 tx 右、横排 alignItems center、
+   padding 22、gap 16、r18、glass-1 底、active 描边）。 */
+.card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 360px;
+  height: 97px;
+  padding: 22px;
+  box-sizing: border-box;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  border-radius: 18px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background 120ms ease;
+  flex: none;
+}
+.card:hover {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+/* ic（设计稿 44×44 r12）：两卡统一 $brand-primary 实底 + on-brand 白 icon
+   （2026-08-30 用户走查：图标大小/颜色要一致——原主卡实底白 icon、次卡玻璃
+   底 brand icon，不统一）。icon 尺寸统一 20（组件侧 size=20）。 */
+.ic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  flex: none;
+  background: var(--dsw-alias-brand-primary);
+  border: 1px solid transparent;
+  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
+}
+/* tx（设计稿：标题 20/600 + 副标题 15 secondary，vertical gap 2）。 */
+.tx {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+}
+.t {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  line-height: 1.2;
+}
+.d {
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 最近合一列（设计稿 recents 420 宽）。 */
+.recents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 420px;
+  max-width: 100%;
+  flex: none;
+}
+.recentsHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 0 4px;
+}
+.recentsList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* 行（设计稿 recent-row：icon 18 brand + 标题 15 + kind 12 tertiary + 时间 13
+   secondary，padding [9,12]、gap 12、r12、hover glass-2）。 */
+.recentRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--dsw-alias-label-primary);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.recentRow:hover {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-1));
+  border-color: var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+.recentIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.recentTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* kind 标签 + 时间**固定列绝对对齐**（2026-08-30 用户走查：标签随时间长度
+   参差不齐——kind/time 要固定宽右对齐成列，不随内容长度漂移）。kind 固定
+   3em 右对齐、time 固定 5em 右对齐 tabular-nums，各行严格对齐。 */
+.recentKind {
+  flex: none;
+  width: 3em;
+  text-align: right;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.recentTime {
+  flex: none;
+  width: 5em;
+  text-align: right;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 新建任务表单（设计稿 btAJh，2026-08-30）────────────────────────────
+   沿用 o4fBad 项目创建向导 dialog 范式：glass-1 底 + r20 + 外阴影
+   （0/10/32）+ padding 18 + gap 12，宽 420。字段：Agent 下拉 / 工作目录 /
+   访问权限三档；footer 取消 + 开始。 */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 420px;
+  max-width: 100%;
+  padding: 18px;
+  box-sizing: border-box;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 20px;
+  box-shadow: 0 10px 32px #00000040;
+  flex: none;
+}
+.formHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.formTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  flex: none;
+}
+.iconBtn:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 字段组：label 11/600 secondary + 控件。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 下拉（设计稿 select-field：glass-2 + r10 + border + padding 8/12）。 */
+.selectWrap {
+  display: flex;
+}
+.select {
+  width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-primary);
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  appearance: none;
+}
+
+/* 工作目录：folder 图标 + mono 路径（可截断）+ 行内「选择」按钮。 */
+.dirField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+}
+.dirIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.dirPath {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dirPath:not([title=""]) {
+  color: var(--dsw-alias-label-primary);
+}
+.pickBtn {
+  flex: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  cursor: pointer;
+}
+.pickBtn:hover {
+  background: var(--corum-glass-3, var(--dsw-alias-bg-layer-2));
+}
+
+/* 目录选择失败提示（不静默吞，见 PROGRESS §4）。 */
+.fieldError {
+  font-size: 11px;
+  color: var(--dsw-alias-state-error, #ff5c8a);
+  word-break: break-all;
+}
+
+/* 工作区字段下方的说明（blank 会话语义提示）。 */
+.fieldHint {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 工作区列表（新建任务在**已有列表里选**，列表下方给「选择新目录」入口）。
+   选中态与权限档位一致：active 描边 + brand-text 标题。 */
+.wsGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.wsRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms ease;
+  flex: none;
+}
+.wsRow:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.wsRow[data-active='true'] {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+.wsIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.wsRow[data-active='true'] .wsIcon {
+  color: var(--dsw-alias-brand-primary);
+}
+.wsRow[data-active='true'] .permName {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+/* 「选择新目录…」入口（列表下方，brand 色弱化按钮）。 */
+.wsAdd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px dashed var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  flex: none;
+}
+.wsAdd:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+
+/* 访问权限三档（官方 permissionPresets 预设表投影）。 */
+.permGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.permEmpty {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.permOpt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms ease;
+}
+.permOpt:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+/* 选中态（设计稿：active 描边 + brand 实心 radio + brand-text 标题）。 */
+.permOpt[data-active='true'] {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+.radio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1.5px solid var(--dsw-alias-label-tertiary);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.permOpt[data-active='true'] .radio {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.radioDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+.permIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.permOpt[data-active='true'] .permIcon {
+  color: var(--dsw-alias-brand-primary);
+}
+.permTx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.permName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.permOpt[data-active='true'] .permName {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.permDesc {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* footer：取消（ghost）+ 开始（brand primary）。 */
+.formFooter {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.ghostBtn {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.ghostBtn:hover:not(:disabled) {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+.primaryBtn {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 9px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
+  cursor: pointer;
+}
+.primaryBtn:disabled,
+.ghostBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 工作区自绘下拉（设计稿 1:1：trigger + 展开面板）────────────────────
+   trigger：glass-2 + border-active + pad[8,12] + r10（folder icon + 名称/路径 + chevron）。
+   panel：glass-2 + border + pad 6 + r12 + 投影；顶部「选择新目录」，下方带选中态的工作区。 */
+.wsSelect {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wsTrigger {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  cursor: pointer;
+  text-align: left;
+}
+.wsTriggerIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.wsTriggerTx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wsTriggerName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-label-primary));
+}
+.wsTriggerPath {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wsTriggerChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.wsOptAdd {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.wsOptAdd:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.04));
+}
+.wsDivider {
+  width: 100%;
+  height: 1px;
+  background: var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+.wsOpt {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+.wsOpt:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.04));
+}
+.wsOpt[data-active] {
+  background: rgba(1, 205, 254, 0.1); /* 设计稿 #01CDFE1A */
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.wsOptTx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wsOptName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.wsOpt[data-active] .wsOptName {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.wsOptPath {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wsOptCheck {
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+}
