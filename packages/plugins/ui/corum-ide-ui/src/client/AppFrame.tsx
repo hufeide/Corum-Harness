@@ -210,7 +210,12 @@ function TrendLine({ color, width = 170, height = 40 }: { color: string; width?:
 /** 状态栏详情卡（设计稿 GpfJh，×1.25 放大 + 长方形三列 chart）：hover/点击
  *  status-pill 展开的会话统计浮层。长方形 = 左（上下文 donut+图例）右（命中率/
  *  累计费用两个趋势曲线）三列撑宽。 */
-function AgentStatusDetail({ title, projections: p }: { title: string; projections: AgentSessionProjections | undefined }) {
+function AgentStatusDetail({ title, projections: p, anchor }: {
+  title: string
+  projections: AgentSessionProjections | undefined
+  /** 会话区在视口中的水平锚点（left/width），详情卡据此在会话区水平居中（用户定调）。 */
+  anchor: { left: number; width: number }
+}) {
   const stats = p?.sessionStats
   const usage = p?.tokenUsage
   const pressure = p?.contextPressure
@@ -242,7 +247,12 @@ function AgentStatusDetail({ title, projections: p }: { title: string; projectio
     ['工具调用 Tool', compactDuration(stats?.toolMs ?? 0)],
   ]
   return (
-    <div className={css.statusDetail} role="dialog" aria-label="会话统计详情">
+    <div
+      className={css.statusDetail}
+      role="dialog"
+      aria-label="会话统计详情"
+      style={{ left: anchor.left + anchor.width / 2 }}
+    >
       <div className={css.statusDetailHead}>
         <span className={css.statusDetailDot} />
         <span className={css.statusDetailTitle}>会话统计 · {title}</span>
@@ -326,12 +336,14 @@ function AgentStatusDetail({ title, projections: p }: { title: string; projectio
   )
 }
 
-function AgentTitleBar({ sessionTitle, currentSessionId, useSessions }: {
+function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor }: {
   sessionTitle?: string | undefined
   /** 当前会话 id（AppFrame 从 useSessions 取 current 下发；空态/blank 为 undefined）。 */
   currentSessionId?: string | undefined
   /** 官方 useSessions 选择器 hook（读当前会话 projectionValues 投影）。 */
   useSessions: AppFrameProps['useSessions']
+  /** 会话区在视口中的水平锚点（left/width），详情卡据此在会话区水平居中。 */
+  sessionAnchor: { left: number; width: number }
 }) {
   const titleRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
@@ -402,7 +414,7 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions }: {
           <span className={css.agentStats}>{agentStatsSummary(projections)}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${css.agentChev}${detailOpen ? ` ${css.agentChevOpen}` : ''}`}><path d="m6 9 6 6 6-6" /></svg>
         </button>
-        {detailOpen && <AgentStatusDetail title={title} projections={projections} />}
+        {detailOpen && <AgentStatusDetail title={title} projections={projections} anchor={sessionAnchor} />}
       </span>
       <span className={css.agentSpacer} />
       <button type="button" className={css.agentTrajBtn} title="轨迹">
@@ -1083,6 +1095,7 @@ export function IdeAppFrame({
               sessionTitle={currentSessionTitle}
               currentSessionId={detailsSession}
               useSessions={useSessions}
+              sessionAnchor={{ left: convoBox.x, width: convoBox.width }}
             />
           )}
         </div>
