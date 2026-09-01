@@ -273,6 +273,14 @@
   background: var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
 
+/* 状态胶囊 + 详情卡的相对定位容器（详情卡 absolute 挂胶囊下方）。 */
+.agentStatusWrap {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
 .agentStatusPill {
   -webkit-app-region: no-drag; /* 状态胶囊（含 chevron 可点）不拖窗 */
   /* 状态胶囊不收缩（设计稿 b4p03B：轮次/耗时/token/命中率是核心信息，完整
@@ -283,8 +291,18 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 0;
+  padding: 5px 8px;
+  margin: 0 -8px 0 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
   overflow: hidden;
+  transition: background 0.15s ease;
+}
+
+.agentStatusPill:hover {
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.55));
 }
 
 /* 状态点（design.pen status-pill d，$state-success 6×6）。 */
@@ -309,6 +327,200 @@
 
 .agentChev {
   color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s ease;
+}
+
+.agentChevOpen {
+  transform: rotate(180deg);
+}
+
+/* 状态栏详情卡（design.pen GpfJh）：hover/点击 status-pill 展开的会话统计浮层。 */
+.statusDetail {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 300px;
+  padding: 14px 16px;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
+  border: 1px solid var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
+  border-radius: 14px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.statusDetailHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statusDetailDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+
+.statusDetailTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusDetailRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.statusDetailKey {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.statusDetailValue {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+.statusDetailBarWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statusDetailBar {
+  width: 64px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  overflow: hidden;
+}
+
+.statusDetailBarFill {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-success, #22c55e);
+}
+
+.statusDetailDivider {
+  height: 1px;
+  background: var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  margin: 2px 0;
+}
+
+.statusDetailChartHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusDetailPulse {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+
+.statusDetailChartTitle {
+  flex: 1;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.statusDetailChartPct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.statusDetailChartRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.statusDetailDonut {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+}
+
+.statusDetailDonutCenter {
+  position: absolute;
+  inset: 18%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
+}
+
+.statusDetailDonutPct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+
+.statusDetailDonutCap {
+  font-size: 8px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.statusDetailLegend {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.statusDetailLegendRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusDetailLegendDot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.statusDetailLegendLabel {
+  flex: 1;
+  font-size: 9px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.statusDetailLegendValue {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
 }
 
 .agentSpacer {

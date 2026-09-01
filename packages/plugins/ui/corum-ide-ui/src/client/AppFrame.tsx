@@ -136,10 +136,170 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
  * 根容器整段 app-region:drag（空白处拖窗口），内部文字/状态胶囊/轨迹按钮各自
  * no-drag（文字可选、按钮可点）；spacer 无声明、落入根 drag 命中区（可拖）。
  */
-function AgentTitleBar({ sessionTitle }: { sessionTitle?: string | undefined }) {
+/** session/list 行 projectionValues 的窄化形（Agent 标题栏统计的数据源）。 */
+interface SessionStatsProjection {
+  turns?: number
+  steps?: number
+  llmMs?: number
+  toolMs?: number
+  decodeMs?: number
+  decodeTokens?: number
+}
+interface TokenUsageProjection {
+  uncachedInputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+}
+interface ContextPressureProjection {
+  pressureTokens?: number
+  projectedTokens?: number
+  contextWindow?: number
+}
+interface ContextBreakdownProjection {
+  systemTokens?: number
+  toolsTokens?: number
+  messageTokens?: number
+}
+interface AgentSessionProjections {
+  sessionStats?: SessionStatsProjection
+  tokenUsage?: TokenUsageProjection
+  contextPressure?: ContextPressureProjection
+  contextBreakdown?: ContextBreakdownProjection
+}
+
+/** 紧凑时长：12m 34s / 3.8秒（标题栏摘要 + 详情 Active 共用）。 */
+function compactDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${s % 60}s`
+}
+
+/** 紧凑 token：12.4k / 3.1k / 178.3k（千分位紧凑，详情行用全量 toLocaleString）。 */
+function compactTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+/** Agent 标题栏统计（真实数据，session/list 投影折叠）。 */
+function agentStatsSummary(p: AgentSessionProjections | undefined): string {
+  if (p === undefined) return '—'
+  const turns = p.sessionStats?.turns ?? 0
+  const active = (p.sessionStats?.llmMs ?? 0) + (p.sessionStats?.toolMs ?? 0)
+  const input = (p.tokenUsage?.uncachedInputTokens ?? 0) + (p.tokenUsage?.cacheReadTokens ?? 0) + (p.tokenUsage?.cacheWriteTokens ?? 0)
+  const output = p.tokenUsage?.outputTokens ?? 0
+  const cacheRead = p.tokenUsage?.cacheReadTokens ?? 0
+  const hit = input > 0 ? Math.round((cacheRead / input) * 100) : 0
+  return `${turns} 轮 · ${compactDuration(active)} · In ${compactTokens(input)} / Out ${compactTokens(output)} · 命中 ${hit}%`
+}
+
+/** 状态栏详情卡（设计稿 GpfJh）：hover/点击 status-pill 展开的会话统计浮层。 */
+function AgentStatusDetail({ title, projections: p }: { title: string; projections: AgentSessionProjections | undefined }) {
+  const stats = p?.sessionStats
+  const usage = p?.tokenUsage
+  const pressure = p?.contextPressure
+  const breakdown = p?.contextBreakdown
+  const turns = stats?.turns ?? 0
+  const steps = stats?.steps ?? 0
+  const active = (stats?.llmMs ?? 0) + (stats?.toolMs ?? 0)
+  const input = (usage?.uncachedInputTokens ?? 0) + (usage?.cacheReadTokens ?? 0) + (usage?.cacheWriteTokens ?? 0)
+  const output = usage?.outputTokens ?? 0
+  const cacheRead = usage?.cacheReadTokens ?? 0
+  const hit = input > 0 ? Math.round((cacheRead / input) * 100) : 0
+  const ctxUsed = pressure?.pressureTokens ?? 0
+  const ctxWindow = pressure?.contextWindow ?? 0
+  const ctxPct = ctxWindow > 0 ? Math.round((ctxUsed / ctxWindow) * 1000) / 10 : 0
+  const system = breakdown?.systemTokens ?? 0
+  const tools = breakdown?.toolsTokens ?? 0
+  const messages = breakdown?.messageTokens ?? 0
+  const ctxFree = Math.max(0, ctxWindow - ctxUsed)
+  const segOf = (n: number): number => (ctxWindow > 0 ? (n / ctxWindow) * 360 : 0)
+  const inputDeg = segOf(input)
+  const outputDeg = segOf(output)
+  const systemDeg = segOf(system)
+  const toolCalls = 0 // 工具调用次数无现成投影（sessionStats 无 callCount），暂以 steps 近似展示耗时。
+  const rows: ReadonlyArray<readonly [string, string]> = [
+    ['轮次 Turns', String(turns)],
+    ['工作时长 Active', compactDuration(active)],
+    ['Token 输入 Input', input.toLocaleString('en-US')],
+    ['Token 输出 Output', output.toLocaleString('en-US')],
+    ['执行步骤 Steps', String(steps)],
+    ['工具耗时 Tool', compactDuration(stats?.toolMs ?? 0)],
+    ['LLM 耗时', compactDuration(stats?.llmMs ?? 0)],
+  ]
+  void toolCalls
+  return (
+    <div className={css.statusDetail} role="dialog" aria-label="会话统计详情">
+      <div className={css.statusDetailHead}>
+        <span className={css.statusDetailDot} />
+        <span className={css.statusDetailTitle}>会话统计 · {title}</span>
+      </div>
+      {rows.map(([k, v]) => (
+        <div key={k} className={css.statusDetailRow}>
+          <span className={css.statusDetailKey}>{k}</span>
+          <span className={css.statusDetailValue}>{v}</span>
+        </div>
+      ))}
+      <div className={css.statusDetailRow}>
+        <span className={css.statusDetailKey}>命中率 Cache Hit</span>
+        <span className={css.statusDetailBarWrap}>
+          <span className={css.statusDetailBar}><span className={css.statusDetailBarFill} style={{ width: `${hit}%` }} /></span>
+          <span className={css.statusDetailValue}>{hit}%</span>
+        </span>
+      </div>
+      <div className={css.statusDetailDivider} />
+      <div className={css.statusDetailChartHead}>
+        <span className={css.statusDetailPulse} />
+        <span className={css.statusDetailChartTitle}>上下文 Context{ctxWindow > 0 ? ` · 上限 ${compactTokens(ctxWindow)}` : ''}</span>
+        <span className={css.statusDetailChartPct}>{ctxWindow > 0 ? `${ctxPct}%` : '—'}</span>
+      </div>
+      {ctxWindow > 0 && (
+        <div className={css.statusDetailChartRow}>
+          <span className={css.statusDetailDonut} style={{
+            background: `conic-gradient(var(--dsw-alias-brand-primary) 0deg ${inputDeg}deg, var(--corum-brand-accent, #FF71CE) ${inputDeg}deg ${inputDeg + outputDeg}deg, var(--dsw-alias-state-warn-primary, #FFB45C) ${inputDeg + outputDeg}deg ${inputDeg + outputDeg + systemDeg}deg, var(--corum-glass-2, rgba(42,24,64,.85)) ${inputDeg + outputDeg + systemDeg}deg 360deg)`,
+          }}>
+            <span className={css.statusDetailDonutCenter}>
+              <span className={css.statusDetailDonutPct}>{ctxPct}%</span>
+              <span className={css.statusDetailDonutCap}>已用</span>
+            </span>
+          </span>
+          <span className={css.statusDetailLegend}>
+            {([
+              ['var(--dsw-alias-brand-primary)', '输入', input],
+              ['var(--corum-brand-accent, #FF71CE)', '输出', output],
+              ['var(--dsw-alias-state-warn-primary, #FFB45C)', '系统+工具', system + tools],
+              ['var(--corum-glass-2, rgba(42,24,64,.85))', '未用', ctxFree],
+            ] as const).map(([color, label, n]) => (
+              <span key={label} className={css.statusDetailLegendRow}>
+                <span className={css.statusDetailLegendDot} style={{ background: color }} />
+                <span className={css.statusDetailLegendLabel}>{label}</span>
+                <span className={css.statusDetailLegendValue}>{compactTokens(n)} · {ctxWindow > 0 ? Math.round((n / ctxWindow) * 1000) / 10 : 0}%</span>
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AgentTitleBar({ sessionTitle, currentSessionId, useSessions }: {
+  sessionTitle?: string | undefined
+  /** 当前会话 id（AppFrame 从 useSessions 取 current 下发；空态/blank 为 undefined）。 */
+  currentSessionId?: string | undefined
+  /** 官方 useSessions 选择器 hook（读当前会话 projectionValues 投影）。 */
+  useSessions: AppFrameProps['useSessions']
+}) {
   const titleRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
   const title = sessionTitle || '新会话'
+  // 当前会话的统计投影（session/list 行 projectionValues）——真实数据，替代硬编码。
+  const projections = useSessions((s) => {
+    if (currentSessionId === undefined) return undefined
+    return (s.byId as Readonly<Record<string, { projectionValues?: AgentSessionProjections }>>)[currentSessionId]?.projectionValues
+  })
 
   // 标题溢出检测（字号/内容/宽度变化时重测）。用 useLayoutEffect 在 paint 前
   // 同步测量——避免「旧 overflowing=true + 新标题」先渲染一帧跑马灯双份文本。
@@ -152,6 +312,22 @@ function AgentTitleBar({ sessionTitle }: { sessionTitle?: string | undefined }) 
     ro.observe(el)
     return () => { ro.disconnect() }
   }, [title])
+
+  // 详情卡外点击关闭（Escape 同步关）。
+  const detailRef = useRef<HTMLSpanElement | null>(null)
+  useLayoutEffect(() => {
+    if (!detailOpen) return undefined
+    const onPointerDown = (e: PointerEvent): void => {
+      if (detailRef.current !== null && !detailRef.current.contains(e.target as Node)) setDetailOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setDetailOpen(false) }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [detailOpen])
 
   return (
     <div className={css.agentTitleBar}>
@@ -171,11 +347,20 @@ function AgentTitleBar({ sessionTitle }: { sessionTitle?: string | undefined }) 
         )}
       </span>
       <span className={css.agentDivider} />
-      <span className={css.agentStatusPill}>
-        {/* design.pen status-pill：$state-success 状态点 6×6 + stats + chevron。 */}
-        <span className={css.agentStatusDot} />
-        <span className={css.agentStats}>7 轮 · 12m 34s · In 12.4k / Out 3.1k · 命中 61%</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.agentChev}><path d="m6 9 6 6 6-6" /></svg>
+      {/* 状态胶囊（design.pen status-pill + GpfJh 详情卡）：真实统计 + 点击展开详情。 */}
+      <span ref={detailRef} className={css.agentStatusWrap}>
+        <button
+          type="button"
+          className={css.agentStatusPill}
+          aria-expanded={detailOpen}
+          aria-label="会话统计，点击展开详情"
+          onClick={() => { setDetailOpen(open => !open) }}
+        >
+          <span className={css.agentStatusDot} />
+          <span className={css.agentStats}>{agentStatsSummary(projections)}</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${css.agentChev}${detailOpen ? ` ${css.agentChevOpen}` : ''}`}><path d="m6 9 6 6 6-6" /></svg>
+        </button>
+        {detailOpen && <AgentStatusDetail title={title} projections={projections} />}
       </span>
       <span className={css.agentSpacer} />
       <button type="button" className={css.agentTrajBtn} title="轨迹">
@@ -851,7 +1036,13 @@ export function IdeAppFrame({
           data-hero={isHero || undefined}
           style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
         >
-          {!isHero && <AgentTitleBar sessionTitle={currentSessionTitle} />}
+          {!isHero && (
+            <AgentTitleBar
+              sessionTitle={currentSessionTitle}
+              currentSessionId={detailsSession}
+              useSessions={useSessions}
+            />
+          )}
         </div>
       </div>
 
