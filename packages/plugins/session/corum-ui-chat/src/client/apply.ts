@@ -25,7 +25,6 @@ import { ChatView } from './chat/ChatView.tsx'
 // fork（corum 重设计）：全局换肤——官方默认风 → corum 液态玻璃语言（见 corum-reskin.css）。
 import './corum-reskin.css'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
-import { StatsLine } from './chat/StatsLine.tsx'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
 import { createReviewSource, type ReviewSource } from './chat/review-source.ts'
 import { DetailsPanel } from './details/DetailsPanel.tsx'
@@ -233,10 +232,9 @@ export function apply(ctx: Context): void {
     return disposeView
   })
 
-  ctx.slots.inject('conversation.composer.dock', () =>
-    ctx.slots.register({
-      name: 'conversation.composer.dock', id: 'stats', order: 0, locale: NS,
-    }, StatsLine))
+  // 底部状态行（conversation.composer.dock 的 StatsLine）已退役（2026-09-02 用户
+  // 定调）：会话统计上移 Agent 标题栏状态胶囊 + 下拉详情卡（corum-ide-ui
+  // AgentTitleBar + AgentStatusDetail），composer 下方不再重复展示。
 
   ctx.slots.inject('conversation.approval.detail', () =>
     ctx.slots.register({ name: 'conversation.approval.detail' }, ApprovalCommand))
