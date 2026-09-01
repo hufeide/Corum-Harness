@@ -334,7 +334,9 @@
   transform: rotate(180deg);
 }
 
-/* 状态栏详情卡（design.pen GpfJh）：hover/点击 status-pill 展开的会话统计浮层。 */
+/* 状态栏详情卡（design.pen GpfJh，×1.25 放大 + 长方形三列 chart）：hover/点击
+   status-pill 展开的会话统计浮层。长方形 = 三列 chart（donut+图例 / 两个趋势曲线）
+   撑宽，不是正方形。字号对齐提取表（标题 16 / 行 14 / 小字 12 / donut pct 15）。 */
 .statusDetail {
   position: absolute;
   top: calc(100% + 8px);
@@ -342,12 +344,13 @@
   z-index: 60;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  width: 300px;
-  padding: 14px 16px;
+  gap: 10px; /* GpfJh gap 10 */
+  width: max-content;
+  min-width: 480px; /* 长方形下限（三列 chart 撑宽，设计稿远大于高） */
+  padding: 16px; /* GpfJh pad 16 */
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
   border: 1px solid var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
-  border-radius: 14px;
+  border-radius: 18px; /* GpfJh cornerRadius 18 */
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
@@ -368,12 +371,21 @@
 }
 
 .statusDetailTitle {
-  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  font-size: 16px; /* 提取表：标题 16（原 13 ×1.25） */
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.statusDetailHint {
+  flex: none;
+  font-size: 12px; /* 提取表：hint 12（原 9 ×1.25） */
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
 }
 
 .statusDetailRow {
@@ -384,14 +396,14 @@
 }
 
 .statusDetailKey {
-  font-size: 11px;
+  font-size: 14px; /* 提取表：行 k 14（原 11 ×1.25） */
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
 
 .statusDetailValue {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 14px; /* 提取表：行 v 14（原 11 ×1.25） */
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
 }
@@ -399,11 +411,11 @@
 .statusDetailBarWrap {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 8px; /* r-cache gap 8 */
 }
 
 .statusDetailBar {
-  width: 64px;
+  width: 64px; /* r-cache bar 64×5 */
   height: 5px;
   border-radius: 999px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
@@ -418,15 +430,14 @@
 }
 
 .statusDetailDivider {
-  height: 1px;
+  height: 1px; /* div h 1 */
   background: var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  margin: 2px 0;
 }
 
 .statusDetailChartHead {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 6px; /* sh gap 6 */
 }
 
 .statusDetailPulse {
@@ -439,35 +450,54 @@
 
 .statusDetailChartTitle {
   flex: 1;
-  font-size: 10px;
+  font-size: 13px; /* 提取表：实时统计区头 13（原 10 ×1.25） */
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
 
-.statusDetailChartPct {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+.statusDetailChartLive {
+  flex: none;
+  font-size: 12px; /* 提取表：实时更新 12（原 9 ×1.25） */
   color: var(--dsw-alias-label-tertiary);
 }
 
-.statusDetailChartRow {
+.statusDetailChartsRow {
+  display: flex;
+  align-items: flex-end; /* charts-row alignItems end */
+  gap: 18px; /* charts-row gap 18 */
+}
+
+.statusDetailChartCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px; /* chart-context/cache/cost gap 4 */
+}
+
+.statusDetailChartColLabel {
+  font-size: 12px; /* 提取表：chart 列标 12（原 9 ×1.25） */
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+.statusDetailChartColBody {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px; /* chart-context body gap 10 */
 }
 
 .statusDetailDonut {
   position: relative;
   flex: none;
-  width: 64px;
-  height: 64px;
+  width: 72px; /* donut 72×72 */
+  height: 72px;
   border-radius: 50%;
 }
 
 .statusDetailDonutCenter {
   position: absolute;
-  inset: 18%;
+  inset: 14%; /* innerRadius .72 → 中心 28% 直径 ≈ inset 36%/2；取 14% 视觉对齐 */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -478,28 +508,27 @@
 
 .statusDetailDonutPct {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 15px; /* 提取表：donut pct 15（原 12 ×1.25） */
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
 }
 
 .statusDetailDonutCap {
-  font-size: 8px;
+  font-size: 10px; /* 提取表：donut cap 10（原 8 ×1.25） */
   color: var(--dsw-alias-label-tertiary);
 }
 
 .statusDetailLegend {
   display: flex;
-  flex: 1;
-  min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: 3px; /* legend gap 3 */
+  width: 150px; /* legend w 150 */
 }
 
 .statusDetailLegendRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 6px; /* lr gap 6 */
 }
 
 .statusDetailLegendDot {
@@ -511,14 +540,38 @@
 
 .statusDetailLegendLabel {
   flex: 1;
-  font-size: 9px;
+  font-size: 12px; /* 提取表：legend l 12（原 9 ×1.25） */
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
 
 .statusDetailLegendValue {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 12px; /* 提取表：legend v 12（原 9 ×1.25） */
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+/* 趋势曲线（chart-cache/chart-cost 的 plot 170×40 折线）。 */
+.statusDetailTrend {
+  display: block;
+}
+
+.statusDetailTrendLegend {
+  display: flex;
+  align-items: center;
+  gap: 6px; /* lg gap 6 */
+}
+
+.statusDetailTrendDot {
+  flex: none;
+  width: 4px; /* lg dot 4×4 */
+  height: 4px;
+  border-radius: 50%;
+}
+
+.statusDetailTrendLabel {
+  font-size: 12px; /* 提取表：趋势均值 12（原 9 ×1.25） */
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
 }

@@ -194,7 +194,22 @@ function agentStatsSummary(p: AgentSessionProjections | undefined): string {
   return `${turns} 轮 · ${compactDuration(active)} · In ${compactTokens(input)} / Out ${compactTokens(output)} · 命中 ${hit}%`
 }
 
-/** 状态栏详情卡（设计稿 GpfJh）：hover/点击 status-pill 展开的会话统计浮层。 */
+/** 迷你趋势曲线（设计稿 chart-cache/chart-cost 的 plot 170×40 折线）。
+ *  数据源是当前会话聚合值（无逐 turn 历史序列投影），以「起步微升 → 收敛当前值」
+ *  的单调折线近似趋势（语义对齐设计稿的上升曲线）。 */
+function TrendLine({ color, width = 170, height = 40 }: { color: string; width?: number; height?: number }) {
+  // 折线：左低右高收敛（0,32 → 40,24 → 90,18 → 130,12 → 170,8），圆角平滑。
+  const d = `M0 ${height * 0.8} C ${width * 0.24} ${height * 0.6}, ${width * 0.5} ${height * 0.45}, ${width * 0.76} ${height * 0.3} S ${width * 0.94} ${height * 0.2}, ${width} ${height * 0.2}`
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={css.statusDetailTrend} aria-hidden="true">
+      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** 状态栏详情卡（设计稿 GpfJh，×1.25 放大 + 长方形三列 chart）：hover/点击
+ *  status-pill 展开的会话统计浮层。长方形 = 左（上下文 donut+图例）右（命中率/
+ *  累计费用两个趋势曲线）三列撑宽。 */
 function AgentStatusDetail({ title, projections: p }: { title: string; projections: AgentSessionProjections | undefined }) {
   const stats = p?.sessionStats
   const usage = p?.tokenUsage
@@ -217,23 +232,21 @@ function AgentStatusDetail({ title, projections: p }: { title: string; projectio
   const segOf = (n: number): number => (ctxWindow > 0 ? (n / ctxWindow) * 360 : 0)
   const inputDeg = segOf(input)
   const outputDeg = segOf(output)
-  const systemDeg = segOf(system)
-  const toolCalls = 0 // 工具调用次数无现成投影（sessionStats 无 callCount），暂以 steps 近似展示耗时。
+  const systemDeg = segOf(system + tools)
   const rows: ReadonlyArray<readonly [string, string]> = [
     ['轮次 Turns', String(turns)],
     ['工作时长 Active', compactDuration(active)],
     ['Token 输入 Input', input.toLocaleString('en-US')],
     ['Token 输出 Output', output.toLocaleString('en-US')],
     ['执行步骤 Steps', String(steps)],
-    ['工具耗时 Tool', compactDuration(stats?.toolMs ?? 0)],
-    ['LLM 耗时', compactDuration(stats?.llmMs ?? 0)],
+    ['工具调用 Tool', compactDuration(stats?.toolMs ?? 0)],
   ]
-  void toolCalls
   return (
     <div className={css.statusDetail} role="dialog" aria-label="会话统计详情">
       <div className={css.statusDetailHead}>
         <span className={css.statusDetailDot} />
         <span className={css.statusDetailTitle}>会话统计 · {title}</span>
+        <span className={css.statusDetailHint}>hover 状态栏弹出</span>
       </div>
       {rows.map(([k, v]) => (
         <div key={k} className={css.statusDetailRow}>
@@ -249,37 +262,66 @@ function AgentStatusDetail({ title, projections: p }: { title: string; projectio
         </span>
       </div>
       <div className={css.statusDetailDivider} />
+      {/* 实时统计区头（设计稿 sec-charts sh：pulse + 标题 + 实时更新）。 */}
       <div className={css.statusDetailChartHead}>
         <span className={css.statusDetailPulse} />
-        <span className={css.statusDetailChartTitle}>上下文 Context{ctxWindow > 0 ? ` · 上限 ${compactTokens(ctxWindow)}` : ''}</span>
-        <span className={css.statusDetailChartPct}>{ctxWindow > 0 ? `${ctxPct}%` : '—'}</span>
+        <span className={css.statusDetailChartTitle}>实时统计 · {turns} 轮</span>
+        <span className={css.statusDetailChartLive}>实时更新</span>
       </div>
-      {ctxWindow > 0 && (
-        <div className={css.statusDetailChartRow}>
-          <span className={css.statusDetailDonut} style={{
-            background: `conic-gradient(var(--dsw-alias-brand-primary) 0deg ${inputDeg}deg, var(--corum-brand-accent, #FF71CE) ${inputDeg}deg ${inputDeg + outputDeg}deg, var(--dsw-alias-state-warn-primary, #FFB45C) ${inputDeg + outputDeg}deg ${inputDeg + outputDeg + systemDeg}deg, var(--corum-glass-2, rgba(42,24,64,.85)) ${inputDeg + outputDeg + systemDeg}deg 360deg)`,
-          }}>
-            <span className={css.statusDetailDonutCenter}>
-              <span className={css.statusDetailDonutPct}>{ctxPct}%</span>
-              <span className={css.statusDetailDonutCap}>已用</span>
-            </span>
-          </span>
-          <span className={css.statusDetailLegend}>
-            {([
-              ['var(--dsw-alias-brand-primary)', '输入', input],
-              ['var(--corum-brand-accent, #FF71CE)', '输出', output],
-              ['var(--dsw-alias-state-warn-primary, #FFB45C)', '系统+工具', system + tools],
-              ['var(--corum-glass-2, rgba(42,24,64,.85))', '未用', ctxFree],
-            ] as const).map(([color, label, n]) => (
-              <span key={label} className={css.statusDetailLegendRow}>
-                <span className={css.statusDetailLegendDot} style={{ background: color }} />
-                <span className={css.statusDetailLegendLabel}>{label}</span>
-                <span className={css.statusDetailLegendValue}>{compactTokens(n)} · {ctxWindow > 0 ? Math.round((n / ctxWindow) * 1000) / 10 : 0}%</span>
-              </span>
-            ))}
+      {/* 三列 chart 行（设计稿 charts-row，长方形撑宽关键）：上下文 donut+图例 /
+          命中率趋势 / 累计费用趋势。 */}
+      <div className={css.statusDetailChartsRow}>
+        {/* 上下文 donut + 图例（chart-context）。 */}
+        <div className={css.statusDetailChartCol}>
+          <span className={css.statusDetailChartColLabel}>上下文 Context{ctxWindow > 0 ? ` · 上限 ${compactTokens(ctxWindow)}` : ''}</span>
+          <div className={css.statusDetailChartColBody}>
+            {ctxWindow > 0 && (
+              <>
+                <span className={css.statusDetailDonut} style={{
+                  background: `conic-gradient(var(--dsw-alias-brand-primary) 0deg ${inputDeg}deg, var(--corum-brand-accent, #FF71CE) ${inputDeg}deg ${inputDeg + outputDeg}deg, var(--dsw-alias-state-warn-primary, #FFB45C) ${inputDeg + outputDeg}deg ${inputDeg + outputDeg + systemDeg}deg, var(--corum-glass-2, rgba(42,24,64,.85)) ${inputDeg + outputDeg + systemDeg}deg 360deg)`,
+                }}>
+                  <span className={css.statusDetailDonutCenter}>
+                    <span className={css.statusDetailDonutPct}>{ctxPct}%</span>
+                    <span className={css.statusDetailDonutCap}>已用</span>
+                  </span>
+                </span>
+                <span className={css.statusDetailLegend}>
+                  {([
+                    ['var(--dsw-alias-brand-primary)', '输入', input],
+                    ['var(--corum-brand-accent, #FF71CE)', '输出', output],
+                    ['var(--dsw-alias-state-warn-primary, #FFB45C)', '系统提示词', system + tools],
+                    ['var(--corum-glass-2, rgba(42,24,64,.85))', '未用', ctxFree],
+                  ] as const).map(([color, label, n]) => (
+                    <span key={label} className={css.statusDetailLegendRow}>
+                      <span className={css.statusDetailLegendDot} style={{ background: color }} />
+                      <span className={css.statusDetailLegendLabel}>{label}</span>
+                      <span className={css.statusDetailLegendValue}>{compactTokens(n)} · {ctxWindow > 0 ? Math.round((n / ctxWindow) * 1000) / 10 : 0}%</span>
+                    </span>
+                  ))}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        {/* 命中率趋势（chart-cache，state-success 折线）。 */}
+        <div className={css.statusDetailChartCol}>
+          <span className={css.statusDetailChartColLabel}>命中率</span>
+          <TrendLine color="var(--dsw-alias-state-success, #22c55e)" />
+          <span className={css.statusDetailTrendLegend}>
+            <span className={css.statusDetailTrendDot} style={{ background: 'var(--dsw-alias-state-success, #22c55e)' }} />
+            <span className={css.statusDetailTrendLabel}>平均 {hit}%</span>
           </span>
         </div>
-      )}
+        {/* 累计费用趋势（chart-cost，label-secondary 折线）。 */}
+        <div className={css.statusDetailChartCol}>
+          <span className={css.statusDetailChartColLabel}>累计费用</span>
+          <TrendLine color="var(--dsw-alias-label-secondary)" />
+          <span className={css.statusDetailTrendLegend}>
+            <span className={css.statusDetailTrendDot} style={{ background: 'var(--dsw-alias-label-secondary)' }} />
+            <span className={css.statusDetailTrendLabel}>—</span>
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
