@@ -3,6 +3,18 @@
 /** Turn-local subagent invocation encoded as a reference-stable Location-data scalar. */
 export type SubagentTurnSignature = string
 
+/** Live progress snapshot of one matched child Session (polled by the renderer). */
+export interface SubagentProgressSnapshot {
+  /** Latest turn opened in the child's event window (0 = none yet). */
+  readonly turn: number
+  /** Steps closed in the current turn. */
+  readonly step: number
+  /** Latest tool-call name when the child is mid-action. */
+  readonly currentAction?: string
+  /** The child's latest turn closed (`turn/end`). */
+  readonly done: boolean
+}
+
 /** Static identity of one delegated subagent invocation, folded from the parent log. */
 export interface SubagentInvocation {
   /** Parent-side `tool/call` identity of the delegation. */
@@ -19,6 +31,8 @@ export interface SubagentInvocation {
   readonly prompt?: string
   /** Matched child Session id (`origin: 'subagent'` + parent lineage + nearest start time). */
   readonly childSessionId?: string
+  /** Renderer-polled child progress (not folded by the Definition). */
+  readonly progress?: SubagentProgressSnapshot
 }
 
 /** One matched child Session's latest observed progress, folded from its event window. */
@@ -89,7 +103,24 @@ export function encodeSubagentTurn(invocations: readonly SubagentInvocation[]): 
     invocation.description ?? '',
     invocation.prompt ?? '',
     invocation.childSessionId ?? '',
+    invocation.progress === undefined ? '' : [
+      invocation.progress.turn,
+      invocation.progress.step,
+      invocation.progress.currentAction ?? '',
+      invocation.progress.done ? 1 : 0,
+    ].join(','),
   ].join('~')).join('|')
+}
+
+function decodeProgress(raw: string | undefined): SubagentProgressSnapshot | undefined {
+  if (raw === undefined || raw === '') return undefined
+  const [turn, step, action, done] = raw.split(',')
+  return {
+    turn: Number(turn),
+    step: Number(step),
+    ...action === '' ? {} : { currentAction: action },
+    done: done === '1',
+  }
 }
 
 /**
@@ -100,7 +131,8 @@ export function encodeSubagentTurn(invocations: readonly SubagentInvocation[]): 
 export function decodeSubagentTurn(signature: SubagentTurnSignature): readonly SubagentInvocation[] {
   if (signature === '') return []
   return signature.split('|').map((entry) => {
-    const [callId, anchorSeq, time, description, prompt, childSessionId] = entry.split('~')
+    const [callId, anchorSeq, time, description, prompt, childSessionId, progressRaw] = entry.split('~')
+    const progress = decodeProgress(progressRaw)
     return {
       callId,
       turn: 0,
@@ -109,6 +141,7 @@ export function decodeSubagentTurn(signature: SubagentTurnSignature): readonly S
       ...description === '' ? {} : { description },
       ...prompt === '' ? {} : { prompt },
       ...childSessionId === '' ? {} : { childSessionId },
+      ...progress === undefined ? {} : { progress },
     }
   })
 }

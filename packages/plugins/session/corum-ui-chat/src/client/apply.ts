@@ -48,6 +48,23 @@ const CHAT_NODE_INJECT: ChatNodeTurnDataInjected = {
   },
 }
 
+/**
+ * fork（corum）：子 Agent 卡的跨 bundle 会话/RPC 句柄。
+ *
+ * `corum-ide-ui` 壳与 `corum-ui-chat` 渲染层是两个 bundle，模块级状态互不通
+ * （tsdown noExternal 各自内联）——cordis 服务实例天然跨 bundle 单例（root
+ * reflect.store），所以在 apply 时把「当前会话 id + connection」挂到 window
+ * 单例，供 SubagentCard 轮询子会话进度时读取（与 __corumSidebarMode /
+ * __corumSlotRegistry 同模式：write-once-per-mount，只读消费）。
+ */
+interface CorumChatRuntime {
+  sessionId: string | undefined
+  connection: ConnectionHandle | undefined
+}
+declare global {
+  interface Window { __corumChatRuntime?: CorumChatRuntime }
+}
+
 /** Services required by the Chat target and its presentation registrations. */
 export const inject = [
   'slots', 'sessions', 'uiSession', 'uiConversation', 'layout', 'locale',
@@ -130,6 +147,11 @@ export function apply(ctx: Context): void {
         const binding = ctx.sessions.binding(sessionId)
         const session = binding?.session
         if (binding === undefined || session === undefined) throw new Error(`ui-chat: unknown session "${sessionId}"`)
+        // 子 Agent 卡轮询的当前会话/RPC 句柄（view 挂载即更新；cordis 服务跨 bundle 单例）。
+        window.__corumChatRuntime = {
+          sessionId: String(sessionId),
+          connection: ctx.get('connection') as ConnectionHandle,
+        }
         return {
           review: reviewSource(binding),
           hooks: { transcriptView: transcriptView.mode },

@@ -99,10 +99,33 @@
   white-space: nowrap;
 }
 
+/* 进度条（设计稿 BetQ9 prog/bar）：4px 轨道 + brand 填充，宽度由 step 步数驱动。 */
+.prog {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  overflow: hidden;
+}
+
+.progBar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary);
+  transition: width 0.3s ease;
+}
+
+/* 填充进度不确定时（仅知运行中）的呼吸动画。 */
+.progBarIndeterminate {
+  width: 40%;
+  animation: subagentProgSlide 1.4s ease-in-out infinite;
+}
+
 .stepRow {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .stepIcon {
@@ -126,4 +149,10 @@
 
 @keyframes subagentSpin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes subagentProgSlide {
+  0% { margin-left: 0; }
+  50% { margin-left: 60%; }
+  100% { margin-left: 0; }
 }

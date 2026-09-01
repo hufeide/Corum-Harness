@@ -7,7 +7,7 @@ import type {} from '@deepseek-ai/dsh-tools/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import { isSubagentDelegationTool } from '../contract/turn-process.ts'
 import {
-  encodeSubagentTurn, subagentDelegationFields,
+  decodeSubagentTurn, encodeSubagentTurn, subagentDelegationFields,
   type SubagentInvocation, type SubagentTurnSignature,
 } from '../contract/subagent.ts'
 import { chatNode } from './common.ts'
@@ -29,6 +29,8 @@ declare module '@corum/corum-ui-conversation/client' {
 interface SubagentTurnState {
   readonly turn: number
   readonly invocations: readonly SubagentInvocation[]
+  /** Whether this Context saw a delegation tool/call in the live feed. */
+  readonly sawDelegation: boolean
 }
 
 type ConversationEvent = Parameters<ConversationNodeDefinition['match']>[0]
@@ -97,10 +99,10 @@ function startInvocation(match: ConversationMatch): SubagentInvocation {
 function fallbackState(context: ConversationNodeContext<SubagentTurnState>): SubagentTurnState | undefined {
   const turn = context.matches.map(match => eventTurn(match.event)).find(candidate => candidate !== undefined)
   if (turn === undefined) return undefined
-  let state: SubagentTurnState = { turn, invocations: [] }
+  let state: SubagentTurnState = { turn, invocations: [], sawDelegation: false }
   for (const match of context.matches) {
     if (match.event.type === 'tool/call' && isSubagentDelegationTool(match.event.data.name)) {
-      state = withInvocation(state, startInvocation(match))
+      state = { ...withInvocation(state, startInvocation(match)), sawDelegation: true }
     }
   }
   return state
@@ -121,19 +123,7 @@ function decodeSubagentTurnRows(
   signature: SubagentTurnSignature,
   turn: number,
 ): readonly SubagentInvocation[] {
-  if (signature === '') return []
-  return signature.split('|').map((entry) => {
-    const [callId, anchorSeq, time, description, prompt, childSessionId] = entry.split('~')
-    return {
-      callId,
-      turn,
-      anchorSeq: Number(anchorSeq),
-      time: Number(time),
-      ...description === '' ? {} : { description },
-      ...prompt === '' ? {} : { prompt },
-      ...childSessionId === '' ? {} : { childSessionId },
-    }
-  })
+  return decodeSubagentTurn(signature).map(invocation => ({ ...invocation, turn }))
 }
 
 /**
@@ -149,20 +139,32 @@ export function subagentTurnDefinition(
     kind: 'subagent-progress',
     target: 'chat',
     match: (event) => {
+      // Anchor each Turn Context on its durable `turn/start` (the engine folds
+      // any earlier same-id updates into a replay of matches[0] = start).
+      // Everything else is an update — pre-start leftovers replay through
+      // start(), live events fold through update().
+      if (event.type === 'turn/start') return { id: String(event.data.turn), role: 'start' }
       const turn = eventTurn(event)
       if (turn === undefined) return null
-      if (event.type === 'tool/call' && isSubagentDelegationTool(event.data.name)) {
-        return { id: String(turn), role: 'start' }
-      }
       return { id: String(turn), role: 'update' }
     },
-    start: (_context, match) => ({
-      turn: eventTurn(match.event) ?? 0,
-      invocations: [startInvocation(match)],
-    }),
+    start: (context, match) => {
+      if (match.event.type !== 'turn/start') throw new Error('subagent start requires turn/start')
+      // Replay every pre-start update folded into this Context (the turn's
+      // delegation tool/call may precede its projected `turn/start` in cold
+      // feeds, and matches[0] must be the start Match — same anchor
+      // discipline as turn-process / turn-error).
+      const base: SubagentTurnState = { turn: match.event.data.turn, invocations: [], sawDelegation: false }
+      return context.matches.slice(1).reduce<SubagentTurnState>((state, entry) => {
+        if (entry.event.type === 'tool/call' && isSubagentDelegationTool(entry.event.data.name)) {
+          return { ...withInvocation(state, startInvocation(entry)), sawDelegation: true }
+        }
+        return state
+      }, base)
+    },
     update: (context, match) => {
       if (match.event.type === 'tool/call' && isSubagentDelegationTool(match.event.data.name)) {
-        return withInvocation(context.state, startInvocation(match))
+        return { ...withInvocation(context.state, startInvocation(match)), sawDelegation: true }
       }
       return context.state
     },

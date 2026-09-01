@@ -1114,6 +1114,80 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * 按子会话 id 折叠子 Agent 精确进度（子 Agent 进度卡数据源）。
+   *
+   * 与 getTaskSessionEvents 的差异：本端点不限 task 泳道索引——子 Agent 会话
+   * （origin='subagent'，UUID id）不进 task 索引，但同样持久化在 sessionPersistence。
+   * 从子会话事件窗算：turn（最新 turn/start）、step（当前 turn 已闭合 step 数）、
+   * currentAction（最新工具调用名 / 生成中）、done（turn/end 闭合）。
+   */
+  @Remote('getChildSessionProgress')
+  async getChildSessionProgressRemote(sessionId: string): Promise<{
+    progress?: {
+      turn: number
+      step: number
+      currentAction?: string
+      done: boolean
+      lastActive: number
+    }
+  }> {
+    let stored: readonly SessionEvent[]
+    try {
+      const { events } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), 0)
+      stored = events
+    } catch {
+      return {}
+    }
+    if (stored.length === 0) return {}
+    let turn = 0
+    let step = 0
+    let done = false
+    let currentAction: string | undefined
+    for (const event of stored) {
+      switch (event.type) {
+        case 'turn/start': {
+          const t = (event.data as { turn?: number }).turn ?? 0
+          if (t > turn) { turn = t; step = 0 }
+          done = false
+          break
+        }
+        case 'step/end': {
+          const t = (event.data as { turn?: number }).turn ?? 0
+          const s = (event.data as { step?: number }).step ?? 0
+          if (t === turn && s >= step) step = s
+          break
+        }
+        case 'tool/call': {
+          const name = (event.data as { name?: string }).name
+          if (name !== undefined && name !== '') currentAction = name
+          break
+        }
+        case 'assistant/message': {
+          // 一条 assistant 正文闭合 = 当前 step 的生成结束，清掉工具动作避免滞留。
+          const content = (event.data as { message?: { content?: Array<{ type: string }> } }).message?.content ?? []
+          if (content.some(b => b.type === 'text' || b.type === 'reasoning')) currentAction = undefined
+          break
+        }
+        case 'turn/end': {
+          done = true
+          currentAction = undefined
+          break
+        }
+      }
+    }
+    const lastActive = stored[stored.length - 1].time
+    return {
+      progress: {
+        turn,
+        step,
+        ...currentAction === undefined ? {} : { currentAction },
+        done,
+        lastActive,
+      },
+    }
+  }
+
+  /**
    * 列出 task 模式会话（侧栏 task 列表数据源；可按 cwd 过滤）。
    * 合并存活表与持久化索引：附标题（首条 user 消息摘要）、cwd、sessionId、
    * 最后活动时间、是否存活。一个工作区可多个会话。
