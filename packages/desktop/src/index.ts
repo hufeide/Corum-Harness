@@ -13,7 +13,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import { addHarnessSourceSection } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-shell-env'
-import type {} from '@deepseek-ai/dsh-host-webserver'
 
 /** Stable Cordis plugin name. */
 export const name = 'corum-desktop-app'
@@ -24,55 +23,6 @@ const SOURCE_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
 /** Environment variable naming this desktop surface to the model's shell. */
 const DSH_CORUM_DESKTOP = 'DSH_CORUM_DESKTOP' as const
 
-/**
- * The minimal `webServer`-shaped shim the desktop composition mounts in place
- * of the HTTP server. Official transport rows — today only `ui-theme`'s node
- * half — inject `webServer` to register an index.html transform; the shim
- * collects those transforms (no listener) and replays them through the
- * `corumapp://` protocol handler, so the theme bootstrap keeps working with zero
- * HTTP. The route/upgrade registrars are no-ops because no desktop row calls
- * them.
- */
-interface DesktopWebServerShim {
-  tapIndex(transform: (html: string) => string): () => void
-  applyIndexTaps(html: string): string
-  register(route: unknown): () => void
-  registerFallback(handler: unknown): () => void
-  registerUpgrade(route: unknown): () => void
-  readonly port: number
-  readonly host: string
-}
-
-/** Collects the index transforms transport rows register. */
-function createWebServerShim(): DesktopWebServerShim {
-  const taps: Array<(html: string) => string> = []
-  return {
-    tapIndex(transform) {
-      taps.push(transform)
-      return () => {
-        const at = taps.indexOf(transform)
-        if (at !== -1) taps.splice(at, 1)
-      }
-    },
-    applyIndexTaps(html) {
-      let out = html
-      for (const transform of taps) out = transform(out)
-      return out
-    },
-    register() {
-      return () => {}
-    },
-    registerFallback() {
-      return () => {}
-    },
-    registerUpgrade() {
-      return () => {}
-    },
-    port: 0,
-    host: '127.0.0.1',
-  }
-}
-
 /** Model-visible orientation for sessions created through the desktop app. */
 function desktopSurfacePrompt(): string {
   return 'You are interacting with the user through the Corum desktop application. '
@@ -82,15 +32,14 @@ function desktopSurfacePrompt(): string {
 }
 
 /**
- * Mount the desktop runtime glue: the webServer shim, surface prompt sections,
- * and the shell variable.
+ * Mount the desktop runtime glue: surface prompt sections and the shell
+ * variable. The webServer shim (0.1.2 legacy) is retired — the real
+ * @deepseek-ai/dsh-host-webserver Service provides `webServer` in the composed
+ * tree, and no desktop row calls `tapIndex` anymore.
  * @param ctx - plugin context (no required services; prompt sections wait for
  * the systemPrompt service and the shell variable for shellEnv).
  */
 export function apply(ctx: Context): void {
-  // The shim must exist before any transport row that injects webServer
-  // (ui-theme) resolves its inject; provide it eagerly on this plugin's ctx.
-  ctx.provide('webServer', createWebServerShim() as unknown as import('@deepseek-ai/dsh-host-webserver').default)
   ctx.inject(['systemPrompt'], (promptCtx) => {
     addHarnessSourceSection(promptCtx, SOURCE_ROOT)
     promptCtx.systemPrompt.section({

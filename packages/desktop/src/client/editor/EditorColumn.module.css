@@ -1,13 +1,65 @@
-/* EditorColumn — design.pen ③ 编辑器区（430px 固定，r18）。仅用设计 token。
-   结构对应 design frame sswc6 浅 / KTXnd 深：Editor Tabs → crumb → Code → Editor Status。 */
+/* EditorColumn — design.pen ③ 编辑器区合并卡（cZcBX，2026-09-03 改版：编辑器 +
+   资源管理器合一张玻璃卡）。仅用设计 token。
+   结构对应 design frame：editor-main（Editor Tabs → crumb → Code → Editor Status）
+   → 卡内 sash → divider（1px $glass-border）→ 资源管理器子面板（210px 可调宽）。 */
 
 .column {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   min-width: 0;
   overflow: hidden;
   /* 玻璃卡外观由 RegionCard 基座统一承载，本根卡透明（避免双层叠加）。 */
+}
+
+/* ljiCn — editor-main（flex:1 吸收剩余，内部纵向）。 */
+.editorMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 卡内 sash（资源管理器子面板调宽；命中区 8px 压在 divider 左缘）。 */
+.sash {
+  flex: none;
+  width: 8px;
+  margin-right: -4px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+  position: relative;
+}
+.sash::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  opacity: 0;
+  transition: opacity 120ms ease;
+  border-radius: 2px;
+}
+.sash:hover::after {
+  opacity: 1;
+}
+
+/* f87vQ — divider（1px $glass-border 竖线）。 */
+.divider {
+  flex: none;
+  width: 1px;
+  background: var(--corum-glass-border);
+}
+
+/* WJ4dP — 资源管理器子面板容器（宽度由 inline style 给：210 默认/调宽，折叠 32）。 */
+.explorerPane {
+  flex: none;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ── nT1EK Editor Tabs（gap6 pad[10,10,6,10]） ─────────────────────── */
@@ -19,6 +71,10 @@
   gap: 6px;
   padding: 10px 10px 6px;
   min-width: 0;
+  /* 固定高度对齐 ExplorerPane titlebar（同 53px），消除子像素取整导致的
+     折叠/展开两态按钮 Y 差 1px。 */
+  height: 53px;
+  box-sizing: border-box;
 }
 /* tab-file（s9GKh5：r12 pad[9,10,9,12] gap8）。 */
 .tab {
@@ -61,24 +117,45 @@
   flex: 1;
   min-width: 0;
 }
-/* detach（26×26 r8 glass-2 + border）。 */
-.detach {
+/* 折叠态 Editor Tabs 行尾两钮（design waRkJ：btn-expand-explorer + btn-close-explorer）。
+   20×20 r5 透明底，同 ExplorerPane 的 .tb 规格；icon label-secondary / label-tertiary。 */
+.tbExpandExplorer {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   padding: 0;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 8px;
-  background: var(--corum-glass-2);
+  border: none;
+  border-radius: 5px;
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   transition: background 0.12s ease;
 }
-.detach:hover {
-  background: var(--corum-glass-3);
+.tbExpandExplorer:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.tbCloseExplorer {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.tbCloseExplorer:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 /* ── Ji9cT crumb（pad[0,14,8,14] gap6） ─────────────────────────────── */

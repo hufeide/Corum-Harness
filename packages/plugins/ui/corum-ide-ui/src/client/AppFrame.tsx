@@ -546,7 +546,7 @@ function FloatingChrome({ slotKey }: { slotKey: string }) {
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.explorer' | 'corum.tabStrip' | 'corum.panel'>
+  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.tabStrip' | 'corum.panel'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & {
     /** 主题偏好选择器 hook（inject hooks.theme 绑定而来，selector 形式）。 */
@@ -740,11 +740,12 @@ export function IdeAppFrame({
     () => (sidebarCollapsed ? new Set(['corum.sidebar']) : new Set()),
     [sidebarCollapsed],
   )
-  // 右侧三区域默认隐藏（2026-08-30 用户定调：编辑器/资源管理器/终端默认
+  // 右侧两区域默认隐藏（2026-08-30 用户定调：编辑器/终端默认
   // 不展示——不只空态，进入项目/会话后也不显示；**只有点左上角快捷按钮
   // （面板/终端切换）才显示**，后续显示规则再定义）。userShown 记录用户
-  // 手动点亮的区域（显示态），默认空 = 三区域全隐藏。
-  const DEFAULT_HIDDEN = ['corum.editor', 'corum.explorer', 'corum.panel'] as const
+  // 手动点亮的区域（显示态），默认空 = 两区域全隐藏。
+  // 2026-09-03 设计改版：资源管理器并入编辑器卡（子面板），不再是独立区域。
+  const DEFAULT_HIDDEN = ['corum.editor', 'corum.panel'] as const
   const [userShown, setUserShown] = useState<ReadonlySet<string>>(new Set())
   // 快捷按钮显示某区域：移出 userShown 隐藏集（显示）+ 保证树里 hidden=false。
   const showRegion = useCallback((slots: readonly GridSlot[]) => {
@@ -784,7 +785,7 @@ export function IdeAppFrame({
       showRegion(slots)
     }
   }, [userShown, showRegion, saveIdeGrid])
-  const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor', 'corum.explorer']) }, [toggleRegionVisibility])
+  const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor']) }, [toggleRegionVisibility])
   const onToggleTerminal = useCallback(() => { toggleRegionVisibility(['corum.panel']) }, [toggleRegionVisibility])
   // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
   const onToggleTheme = useCallback(() => {

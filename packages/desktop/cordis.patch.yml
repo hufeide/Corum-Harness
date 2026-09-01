@@ -104,3 +104,13 @@
     # ui-model-selection row above).
     - id: corum-ui-model-selection
       name: '@corum/corum-ui-model-selection'
+
+    # The desktop bundle's own host + client halves. The host half
+    # (corum-desktop-app, src/index.ts) provides the desktop surface prompt +
+    # DSH_CORUM_DESKTOP shell variable; the client half (src/client/index.ts)
+    # registers framework surfaces: the notification store + the resident Monaco
+    # editor column (with embedded resource-manager sub-pane) into the shell's
+    # `corum.editor` slot. Without this entry the ModuleRegistry never discovers
+    # the dsh.client declaration and the editor + resource manager never mount.
+    - id: corum-desktop-app
+      name: 'corum-desktop'

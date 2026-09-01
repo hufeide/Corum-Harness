@@ -15,8 +15,10 @@ import { mountNotificationHost } from './mount-notifications.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/corum-ide-ui).
 import type {} from '@corum/corum-ide-ui/client'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { EditorColumn } from './editor/EditorColumn.tsx'
 import type { EditorColumnInjected } from './editor/EditorColumn.tsx'
+import type { FsEntry } from './editor/ExplorerPane.tsx'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
 export const inject: string[] = []
@@ -47,19 +49,29 @@ export function apply(ctx: Context): void {
     ;(window as unknown as { __corumNotify?: NotificationStore['notify'] }).__corumNotify = notifications.notify
   }
 
-  // The resident Monaco editor (design.pen ③ 编辑器区): registered into the
-  // shell's `corum.editor` slot (declared by @corum/corum-ide-ui, IDE mode only).
-  // Monaco's worker/protocol infrastructure lives in this client bundle, so
-  // the editor column registers here rather than in a separate plugin (which
-  // would have to re-bundle Monaco + re-plumb the worker protocol).
+  // The resident Monaco editor (design.pen ③ 编辑器区合并卡，2026-09-03 改版：
+  // 编辑器 + 资源管理器合一张卡): registered into the shell's `corum.editor`
+  // slot (declared by @corum/corum-ide-ui, IDE mode only). Monaco's worker/
+  // protocol infrastructure lives in this client bundle, so the editor column
+  // registers here rather than in a separate plugin (which would have to
+  // re-bundle Monaco + re-plumb the worker protocol).
   // inject 面 closeRegion 直通 ctx.layout.closeRegion（原 CLOSE_REGION_EVENT
-  // 窗口事件桥已退役）。
-  ctx.inject(['slots', 'layout'], (editorCtx) => {
+  // 窗口事件桥已退役）；explorer 面（listDir + generation）内嵌资源管理器
+  // 子面板的数据源——原独立插件 @corum/corum-ide-explorer-ui 已并入本卡。
+  ctx.inject(['slots', 'layout', 'connection'], (editorCtx) => {
+    const connection = editorCtx.get('connection') as ConnectionHandle
     const dispose = editorCtx.slots.inject('corum.editor', () => editorCtx.slots.register(
       {
         name: 'corum.editor',
         inject: (): EditorColumnInjected => ({
           closeRegion: () => { editorCtx.layout.closeRegion('corum.editor') },
+          explorer: {
+            generation: connection.generation,
+            listDir: async (path) => {
+              const result = await connection.rpc.call('/api', 'corumFs/list', { args: { path } })
+              return result as { ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }
+            },
+          },
         }),
       },
       EditorColumn,

@@ -14,7 +14,7 @@
  *     left column's foot).
  *   - The shell's OWN `corum.*` region slots (columns / bars / drawer /
  *     overlay / floating mount): `corum.sidebar`, `corum.editor`,
- *     `corum.explorer`, `corum.tabStrip`, `corum.panel`,
+ *     `corum.tabStrip`, `corum.panel`,
  *     `corum.floating`. The official `sidebar` slot is deliberately NOT
  *     re-declared — the shell's left column content lives in `corum.sidebar`
  *     (official ui-sidebar is disabled in IDE mode).
@@ -114,10 +114,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     // ── The shell's own region slots (corum.*) ──
     /** Left column: the session list (design.pen ① 会话列表, 280px). */
     'corum.sidebar': { kind: 'single'; scope: 'root'; owner: CorumSidebarOwnerProps }
-    /** Right column: the resident Monaco editor (design.pen ③ 编辑器区, 430px). */
+    /** Right column: the resident Monaco editor + embedded file tree (design.pen ③
+     *  编辑器区合并卡, 2026-09-03 改版：编辑器 main + 资源管理器 210 子面板同一张
+     *  玻璃卡，资源管理器不再是独立槽位）。 */
     'corum.editor': { kind: 'single'; scope: 'root' }
-    /** Rightmost column: the file tree (design.pen ④ 资源管理器, 210px). */
-    'corum.explorer': { kind: 'single'; scope: 'root' }
     /** Top bar over the conversation column: editor tab strip (0-height when empty). */
     'corum.tabStrip': { kind: 'list'; scope: 'root' }
     /** Bottom bar: terminal / todos / queue (design.pen ⑥ 底部面板, 150px; 0 = collapsed). */
@@ -218,7 +218,6 @@ export function apply(ctx: ClientContext): void {
         // The shell's own region slots.
         'corum.sidebar': { kind: 'single', scope: 'root' },
         'corum.editor': { kind: 'single', scope: 'root' },
-        'corum.explorer': { kind: 'single', scope: 'root' },
         'corum.tabStrip': { kind: 'list', scope: 'root' },
         'corum.panel': { kind: 'single', scope: 'root' },
         'corum.floating': { kind: 'single', scope: 'root' },

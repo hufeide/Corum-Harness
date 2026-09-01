@@ -22,7 +22,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   'corum-desktop/connection': { zhName: '桌面连接', zhDesc: '经 Electron IPC 把渲染端 RPC 桥接到 Host 进程。' },
   '@corum/corum-ide-ui': { zhName: 'IDE 界面壳', zhDesc: 'IDE 主界面：网格布局、顶部菜单栏、主题切换、插件中心入口。' },
   '@corum/corum-ide-sidebar-ui': { zhName: '会话列表', zhDesc: '左侧会话与项目导航栏。' },
-  '@corum/corum-ide-explorer-ui': { zhName: '资源管理器', zhDesc: '右侧文件树浏览与文件打开。' },
+  '@corum/corum-ide-explorer-ui': { zhName: '资源管理器', zhDesc: '（已并入编辑器合并卡）右侧文件树浏览与文件打开。' },
   '@corum/corum-ide-conversation-ui': { zhName: '对话区', zhDesc: '中间对话区：消息流、工具调用、输入框、运行控制。' },
   '@corum/corum-ide-panel-bottom-ui': { zhName: '底部面板', zhDesc: '底部终端 / 待办 / 队列面板。' },
   '@corum/corum-ui-settings-models': { zhName: '模型设置', zhDesc: '模型与服务商配置页（含图片输入开关）。' },

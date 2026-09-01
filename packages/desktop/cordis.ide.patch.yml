@@ -148,9 +148,12 @@
     # 创建向导 + 项目详情（管理段/团队段），数据 corumProject/* RPC + ctx.sessions。
     - id: ide-project
       name: '@corum/corum-ide-project-ui'
-    # 资源管理器：真实文件树（design.pen ④，host fs RPC 数据源）。
-    - id: ide-explorer
-      name: '@corum/corum-ide-explorer-ui'
+    # 资源管理器：2026-09-03 设计改版并入编辑器合并卡（corum.editor 槽内嵌
+    # ExplorerPane 子面板，corum-desktop client 直通 listDir/generation）——
+    # 原独立插件 @corum/corum-ide-explorer-ui 已解挂，代码保留备查，如需回退
+    # 独立区域形态重新挂载本行。
+    # - id: ide-explorer
+    #   name: '@corum/corum-ide-explorer-ui'
     # 对话区：B 方案 fork 基座——@corum/corum-ui-conversation（官方数据流骨架 fork）+
     # @corum/corum-ui-chat（消息节点渲染层 fork）。fork 版先按官方默认渲染跑通泳道，
     # 后续在 fork 内逐卡重构成 corum 重设计（见 PLAN-conversation-ui-redesign.md）。
