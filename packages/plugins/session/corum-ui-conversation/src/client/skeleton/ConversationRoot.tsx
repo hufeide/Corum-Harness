@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { Bot, Compass, History, Wand2 } from 'lucide-react'
+import { ArrowLeft, Bot, Compass, History, Wand2 } from 'lucide-react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConversationSlotProps, InputZone } from '../contract/slots.ts'
@@ -363,6 +363,12 @@ export function ConversationRoot({
   const hasSession = sessionId !== undefined
   /** 是否 task 泳道会话（corum-task-*）——这类会话 Agent 创建时绑定，session 内锁定。 */
   const isTaskLane = sessionId !== undefined && String(sessionId).startsWith('corum-task-')
+  /** 是否子 Agent 会话（origin=subagent）——由父 Agent 发起和管控，用户不可干涉：
+   *  隐藏 composer 输入框与工作区选择，底部改「返回父会话」撑满条（设计稿 q0T81 稿②）。 */
+  const sessionOrigin = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.origin)
+  const isSubagentSession = sessionOrigin === 'subagent'
+  /** 子 Agent 会话的父会话 id（session/list 行 parentId），供「返回父会话」寻址。 */
+  const parentSessionId = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.parentId)
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
@@ -386,7 +392,8 @@ export function ConversationRoot({
   // 「选择工作区」chip + workspace picker + 官方 agentPreset 选择器——整行不出现
   // （2026-08-31 用户走查：新会话界面顶部不该有「选择工作区」）。Agent 锁定
   // 标识挪进 composer 工具栏（见 inputBar 的 leftItems）。
-  const heroWorkspaceRow = isTaskLane
+  // 子 Agent 会话同样不渲染（① 用户定调：子 Agent 由父 Agent 管控，无工作区选择）。
+  const heroWorkspaceRow = isTaskLane || isSubagentSession
     ? null
     : (
       <div className={css.heroWorkspaceRow}>
@@ -549,8 +556,30 @@ export function ConversationRoot({
         />
       )}
       {hasSession && heroWorkspaceRow}
-      {zone !== undefined && renderSlot('conversation.input.dock', zone)}
-      {hasSession && inputBar}
+      {zone !== undefined && !isSubagentSession && renderSlot('conversation.input.dock', zone)}
+      {/* ② 子 Agent 会话：隐藏输入框，底部改「返回父会话」撑满条（子 Agent 由父
+          Agent 发起和管控，用户不可干涉；返回条宽度对齐原 composer 输入框宽度——
+          走 .subagentReturnBar 与 inputBar 同 max-width 约束）。 */}
+      {hasSession && !isSubagentSession && inputBar}
+      {hasSession && isSubagentSession && (
+        <div className={css.subagentReturnBar}>
+          <button
+            type="button"
+            className={css.subagentReturnBtn}
+            disabled={parentSessionId === undefined}
+            onClick={() => {
+              if (parentSessionId === undefined) return
+              // openTask 内部即 sessions.open（task 泳道跳转通道）；父会话是 task
+              // 泳道，可寻址。失败静默（返回条仍展示上下文）。
+              void emptyActions.openTask(String(parentSessionId)).catch(() => {})
+            }}
+          >
+            <ArrowLeft size={16} strokeWidth={2} className={css.subagentReturnIcon} />
+            <span className={css.subagentReturnLabel}>{t('subagent.backToParent')}</span>
+            <span className={css.subagentReturnHint}>{t('subagent.managedByParent')}</span>
+          </button>
+        </div>
+      )}
     </div>
   )
 

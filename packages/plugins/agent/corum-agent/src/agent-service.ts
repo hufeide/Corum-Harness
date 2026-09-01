@@ -1188,6 +1188,42 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * 按子会话 id 提取父 Agent 注入的提示词（子 Agent 卡「任务详情」展开区数据源）。
+   *
+   * prompt = 子会话首条 user/message 全文（子 Agent 由父 Agent 发起，首条 user
+   * 消息必是父注入的任务指令；后续 user 消息是子会话自己的 followup，不取）。
+   * 模型（modelSelection）与父会话 id（parentSessionId）由 client 侧 `session/list`
+   * 行投影直接提供，host 不重复读。
+   */
+  @Remote('getSubagentSessionMeta')
+  async getSubagentSessionMetaRemote(sessionId: string): Promise<{
+    meta?: { prompt?: string }
+  }> {
+    let stored: readonly SessionEvent[]
+    try {
+      const { events } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), 0)
+      stored = events
+    } catch {
+      return {}
+    }
+    for (const event of stored) {
+      if (event.type !== 'user/message') continue
+      const data = event.data as {
+        content?: Array<{ type: string; text?: string }>
+        message?: { content?: Array<{ type: string; text?: string }> }
+      }
+      const content = data.content ?? data.message?.content ?? []
+      const text = content
+        .filter(b => b.type === 'text')
+        .map(b => b.text ?? '')
+        .join('')
+        .trim()
+      if (text !== '') return { meta: { prompt: text } }
+    }
+    return {}
+  }
+
+  /**
    * 列出 task 模式会话（侧栏 task 列表数据源；可按 cwd 过滤）。
    * 合并存活表与持久化索引：附标题（首条 user 消息摘要）、cwd、sessionId、
    * 最后活动时间、是否存活。一个工作区可多个会话。

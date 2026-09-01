@@ -58,6 +58,27 @@
   text-overflow: ellipsis;
 }
 
+/* 模型行（meta 第三行，设计稿 model-chip 降级为纯 icon+文字，不占 head 主行）。 */
+.modelRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.modelIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.modelText {
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* run-chip：光边 active-border + pulse 点 + Running（纯状态，Step 在底部行）。 */
 .runChip {
   flex: none;
@@ -176,60 +197,42 @@
   text-overflow: ellipsis;
 }
 
-/* 展开态步骤清单（设计稿 O0J3e steps）：check 完成 / loader 进行中 / circle 待执行。 */
-.stepList {
+/* 任务详情（展开区，设计稿「任务详情」）：file-text 标题 + 父注入提示词全文。 */
+.detail {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 4px 0 0;
+  gap: 6px;
+  padding: 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
 }
 
-.stepListRow {
+.detailHead {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 3px 2px;
-  min-width: 0;
+  gap: 6px;
 }
 
-.stepListDone {
-  flex: none;
-  color: var(--dsw-alias-state-success-primary);
-}
-
-.stepListRunning {
+.detailIcon {
   flex: none;
   color: var(--dsw-alias-brand-text);
-  animation: subagentSpin 1s linear infinite;
 }
 
-.stepListTodo {
-  flex: none;
-  color: var(--dsw-alias-label-dimmed);
+.detailTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
 }
 
-.stepListText {
-  font-size: 15px;
+.detailBody {
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.stepListTextDone {
-  font-size: 15px;
-  color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.stepListTextDimmed {
-  font-size: 15px;
-  color: var(--dsw-alias-label-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 @keyframes subagentPulse {
