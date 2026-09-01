@@ -26,7 +26,7 @@ import {
   type OpenProjectArgs, type OpenProjectResult,
   type OpenProjectByPathArgs, type OpenProjectByPathResult,
   type CompleteSetupArgs, type CompleteSetupResult,
-} from '@corum/corum-agent-dev/contract'
+} from '@corum/corum-agent/contract'
 import {
   Bug, CalendarCheck, CalendarClock, ChevronDown, ChevronRight, Circle, CircleCheck,
   CircleDot, FileText, FlaskConical, Folder, FolderOpen, Heart, History, LayoutList,

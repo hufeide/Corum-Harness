@@ -7,7 +7,7 @@
  * 「项目」tab；付费版组合 = ide-sidebar（骨架+任务）+ 本插件，开源版不含本插件。
  *
  * 数据：项目/团队/计数走 host Typert RPC（corumProject / corumProjectData /
- * corumAgent / corumTeam，IDE combo 注入 @corum/corum-agent-dev 后可用）；团队段的
+ * corumAgent / corumTeam，IDE combo 注入 @corum/corum-agent 后可用）；团队段的
  * 泳道会话行走运行时对象层 `ctx.sessions.list`（uSES），点击会话经 `ctx.sessions.open`。
  */
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'

@@ -11,7 +11,6 @@
 #   ./scripts/combo.sh start <id> --no-build   跳过构建直接启动
 #
 # 例：
-#   ./scripts/combo.sh dev-agent      等价 scripts/dev-agent.sh restart（清残留+直编+PID 记录+启动）
 #   ./scripts/combo.sh coding         等价 scripts/dev-ide.sh restart（IDE/coding 同款维护脚本）
 set -euo pipefail
 
@@ -33,14 +32,7 @@ case "$CMD" in
   start)
     ID="${2:?缺少 combo id}"
     shift 2
-    # dev-agent / coding(IDE) 走带 PID 记录/自动清理/直编 .bin 的维护脚本。
-    if [[ "$ID" == "dev-agent" ]]; then
-      if [[ " $* " == *" --no-build "* ]]; then
-        exec "$SCRIPT_DIR/dev-agent.sh" start
-      else
-        exec "$SCRIPT_DIR/dev-agent.sh" restart
-      fi
-    fi
+    # coding(IDE) 走带 PID 记录/自动清理/直编 .bin 的维护脚本。
     if [[ "$ID" == "coding" ]]; then
       if [[ " $* " == *" --no-build "* ]]; then
         exec "$SCRIPT_DIR/dev-ide.sh" start
@@ -62,13 +54,6 @@ case "$CMD" in
     # 首参数不是子命令：当作 combo id，等价 start <id>。
     ID="$CMD"
     shift || true
-    if [[ "$ID" == "dev-agent" ]]; then
-      if [[ " $* " == *" --no-build "* ]]; then
-        exec "$SCRIPT_DIR/dev-agent.sh" start
-      else
-        exec "$SCRIPT_DIR/dev-agent.sh" restart
-      fi
-    fi
     if [[ "$ID" == "coding" ]]; then
       if [[ " $* " == *" --no-build "* ]]; then
         exec "$SCRIPT_DIR/dev-ide.sh" start

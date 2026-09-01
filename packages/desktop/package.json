@@ -30,14 +30,12 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./cordis.ide.patch.yml": "./cordis.ide.patch.yml",
-    "./cordis.dev-agent.patch.yml": "./cordis.dev-agent.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
-    "cordis.ide.patch.yml",
-    "cordis.dev-agent.patch.yml"
+    "cordis.ide.patch.yml"
   ],
   "scripts": {
     "build": "npm run build:lib && npm run bundle",
@@ -98,8 +96,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@corum/corum-agent-dev": "workspace:*",
-    "@corum/corum-agent-ui-dev": "workspace:*",
+    "@corum/corum-agent": "workspace:*",
     "@corum/corum-ide-conversation-ui": "workspace:*",
     "@corum/corum-ide-explorer-ui": "workspace:*",
     "@corum/corum-ide-panel-bottom-ui": "workspace:*",
@@ -111,11 +108,9 @@
     "@corum/corum-ide-test-sidebar-ui": "workspace:*",
     "@corum/corum-ide-test-statusbar-ui": "workspace:*",
     "@corum/corum-ide-ui": "workspace:*",
-    "@corum/corum-mcp-manager-dev": "workspace:*",
+    "@corum/corum-mcp-manager": "workspace:*",
     "@corum/corum-session-archive": "workspace:*",
-    "@corum/corum-skill-manager-dev": "workspace:*",
-    "@corum/corum-skill-manager-ui-dev": "workspace:*",
-    "@corum/corum-team-ui-dev": "workspace:*",
+    "@corum/corum-skill-manager": "workspace:*",
     "@corum/corum-ui-approval": "workspace:*",
     "@corum/corum-ui-base": "workspace:*",
     "@corum/corum-ui-chat": "workspace:*",

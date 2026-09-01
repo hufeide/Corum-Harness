@@ -5,7 +5,7 @@
  *   const { call, callRaw } = <include rpc-helper.js>
  *   const { projects } = await call('corumProject', 'listProjects', {})
  *
- * 服务端点一览（dev-agent combo 常用）：
+ * 服务端点一览（IDE/coding combo 常用）：
  *   corumProject/*  createProject / listProjects / listGroupMembers / addTeamToGroup
  *                   addMemberToGroup / removeGroupMember / listWorkTypes / addWorkType
  *   corumTeam/*     createTeam / listTeams / addMember / removeMember / deleteTeam

@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-ide-project-ui",
   "version": "0.1.0",
-  "description": "corum IDE 侧栏项目模式内容（付费版组合，design.pen L2 侧栏 ③/③b/④）：占 corum-ide-sidebar-ui 骨架声明的 corum.sidebar.project 子槽，提供打开项目分流（existing/wizard）、项目创建向导与项目详情（管理段/团队段）。数据源 corumProject/corumProjectData/corumAgent/corumTeam RPC（IDE combo 注入 @corum/corum-agent-dev 后可用）+ ctx.sessions（团队泳道会话）。",
+  "description": "corum IDE 侧栏项目模式内容（付费版组合，design.pen L2 侧栏 ③/③b/④）：占 corum-ide-sidebar-ui 骨架声明的 corum.sidebar.project 子槽，提供打开项目分流（existing/wizard）、项目创建向导与项目详情（管理段/团队段）。数据源 corumProject/corumProjectData/corumAgent/corumTeam RPC（IDE combo 注入 @corum/corum-agent 后可用）+ ctx.sessions（团队泳道会话）。",
   "private": true,
   "type": "module",
   "dsh": {
@@ -44,7 +44,7 @@
     "react": "^18.2.0"
   },
   "devDependencies": {
-    "@corum/corum-agent-dev": "workspace:*",
+    "@corum/corum-agent": "workspace:*",
     "@tsdown/css": "^0.22.14",
     "@types/react": "~18.3.31",
     "@types/react-dom": "^18.3.7",

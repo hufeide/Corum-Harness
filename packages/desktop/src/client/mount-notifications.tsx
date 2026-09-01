@@ -1,7 +1,7 @@
 /**
  * 通知宿主的挂载入口：为 NotificationHost 建一个独立 React root（createRoot）
  * 挂到 document.body 的专用容器 div。通知栈与任何 combo 的根布局/槽位系统
- * 解耦——无论当前是哪个 combo（IDE / dev-agent / 任意未来 combo），通知都
+ * 解耦——无论当前是哪个 combo（IDE / 任意未来 combo），通知都
  * 能在 body 右下角浮现。
  * @module corum-desktop/client/mount-notifications
  */

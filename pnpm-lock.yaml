@@ -10,12 +10,9 @@ importers:
 
   packages/desktop:
     dependencies:
-      '@corum/corum-agent-dev':
+      '@corum/corum-agent':
         specifier: workspace:*
-        version: link:../plugins/agent/corum-agent-dev
-      '@corum/corum-agent-ui-dev':
-        specifier: workspace:*
-        version: link:../plugins/ui/corum-agent-ui-dev
+        version: link:../plugins/agent/corum-agent
       '@corum/corum-ide-conversation-ui':
         specifier: workspace:*
         version: link:../plugins/ui/corum-ide-conversation-ui
@@ -49,21 +46,15 @@ importers:
       '@corum/corum-ide-ui':
         specifier: workspace:*
         version: link:../plugins/ui/corum-ide-ui
-      '@corum/corum-mcp-manager-dev':
+      '@corum/corum-mcp-manager':
         specifier: workspace:*
-        version: link:../plugins/agent/corum-mcp-manager-dev
+        version: link:../plugins/agent/corum-mcp-manager
       '@corum/corum-session-archive':
         specifier: workspace:*
         version: link:../plugins/session/corum-session-archive
-      '@corum/corum-skill-manager-dev':
+      '@corum/corum-skill-manager':
         specifier: workspace:*
-        version: link:../plugins/agent/corum-skill-manager-dev
-      '@corum/corum-skill-manager-ui-dev':
-        specifier: workspace:*
-        version: link:../plugins/ui/corum-skill-manager-ui-dev
-      '@corum/corum-team-ui-dev':
-        specifier: workspace:*
-        version: link:../plugins/ui/corum-team-ui-dev
+        version: link:../plugins/agent/corum-skill-manager
       '@corum/corum-ui-approval':
         specifier: workspace:*
         version: link:../plugins/session/corum-ui-approval
@@ -564,11 +555,11 @@ importers:
         specifier: ^0.1.4
         version: 0.1.5
 
-  packages/plugins/agent/corum-agent-dev:
+  packages/plugins/agent/corum-agent:
     dependencies:
-      '@corum/corum-mcp-manager-dev':
+      '@corum/corum-mcp-manager':
         specifier: workspace:*
-        version: link:../corum-mcp-manager-dev
+        version: link:../corum-mcp-manager
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
@@ -625,7 +616,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  packages/plugins/agent/corum-mcp-manager-dev:
+  packages/plugins/agent/corum-mcp-manager:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
@@ -650,7 +641,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  packages/plugins/agent/corum-skill-manager-dev:
+  packages/plugins/agent/corum-skill-manager:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
@@ -1026,9 +1017,9 @@ importers:
         specifier: ^18.2.0
         version: 18.2.0(react@18.2.0)
     devDependencies:
-      '@corum/corum-agent-dev':
+      '@corum/corum-agent':
         specifier: workspace:*
-        version: link:../../agent/corum-agent-dev
+        version: link:../../agent/corum-agent
       '@tsdown/css':
         specifier: ^0.22.14
         version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
@@ -1227,73 +1218,6 @@ importers:
       '@types/react':
         specifier: ~18.3.31
         version: 18.3.31
-      tsdown:
-        specifier: ^0.22.2
-        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
-  packages/plugins/ui/corum-agent-ui-dev:
-    dependencies:
-      '@corum/corum-rpc-client':
-        specifier: workspace:^
-        version: link:../corum-rpc-client
-      '@corum/corum-skill-manager-ui-dev':
-        specifier: workspace:^
-        version: link:../corum-skill-manager-ui-dev
-      '@corum/corum-team-ui-dev':
-        specifier: workspace:^
-        version: link:../corum-team-ui-dev
-      '@corum/corum-ui-base':
-        specifier: workspace:^
-        version: link:../corum-ui-base
-      '@deepseek-ai/cordis':
-        specifier: ^4.0.1
-        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
-      '@deepseek-ai/dsh-client-connection':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(25ee74fd6a7247b2b89b01dfce5327f4)
-      '@deepseek-ai/dsh-client-locale':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(ca324cd7a26bd77e98da35ca5ea59908)
-      '@deepseek-ai/dsh-client-ui-primitives':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
-      '@deepseek-ai/dsh-client-ui-renderer':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(react@18.2.0)
-      '@deepseek-ai/dsh-client-ui-slots':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
-      '@deepseek-ai/dsh-client-ui-theme':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(927a24dccbeecb752593463ea3a5878d)
-      lucide-react:
-        specifier: ^0.460.0
-        version: 0.460.0(react@18.2.0)
-      react:
-        specifier: ^18.2.0
-        version: 18.2.0
-      react-dom:
-        specifier: ^18.2.0
-        version: 18.2.0(react@18.2.0)
-    devDependencies:
-      '@corum/corum-agent-dev':
-        specifier: workspace:*
-        version: link:../../agent/corum-agent-dev
-      '@tsdown/css':
-        specifier: ^0.22.14
-        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
-      '@types/node':
-        specifier: ^22.20.0
-        version: 22.20.1
-      '@types/react':
-        specifier: ~18.3.31
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.7
-        version: 18.3.7(@types/react@18.3.31)
       tsdown:
         specifier: ^0.22.2
         version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
@@ -1512,9 +1436,9 @@ importers:
         specifier: ^18.2.0
         version: 18.2.0(react@18.2.0)
     devDependencies:
-      '@corum/corum-agent-dev':
+      '@corum/corum-agent':
         specifier: workspace:*
-        version: link:../../agent/corum-agent-dev
+        version: link:../../agent/corum-agent
       '@tsdown/css':
         specifier: ^0.22.14
         version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
@@ -1579,9 +1503,9 @@ importers:
         specifier: ^18.2.0
         version: 18.2.0(react@18.2.0)
     devDependencies:
-      '@corum/corum-agent-dev':
+      '@corum/corum-agent':
         specifier: workspace:*
-        version: link:../../agent/corum-agent-dev
+        version: link:../../agent/corum-agent
       '@tsdown/css':
         specifier: ^0.22.14
         version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
@@ -1798,119 +1722,6 @@ importers:
         specifier: ^0.1.2-alpha.1
         version: 0.1.2-alpha.1(25ee74fd6a7247b2b89b01dfce5327f4)
     devDependencies:
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
-  packages/plugins/ui/corum-skill-manager-ui-dev:
-    dependencies:
-      '@corum/corum-rpc-client':
-        specifier: workspace:^
-        version: link:../corum-rpc-client
-      '@corum/corum-ui-base':
-        specifier: workspace:^
-        version: link:../corum-ui-base
-      '@deepseek-ai/cordis':
-        specifier: ^4.0.1
-        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
-      '@deepseek-ai/dsh-client-connection':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(25ee74fd6a7247b2b89b01dfce5327f4)
-      '@deepseek-ai/dsh-client-locale':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(ca324cd7a26bd77e98da35ca5ea59908)
-      '@deepseek-ai/dsh-client-ui-renderer':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(react@18.2.0)
-      '@deepseek-ai/dsh-client-ui-slots':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
-      '@deepseek-ai/dsh-client-ui-theme':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(927a24dccbeecb752593463ea3a5878d)
-      lucide-react:
-        specifier: ^0.460.0
-        version: 0.460.0(react@18.2.0)
-      react:
-        specifier: ^18.2.0
-        version: 18.2.0
-      react-dom:
-        specifier: ^18.2.0
-        version: 18.2.0(react@18.2.0)
-    devDependencies:
-      '@tsdown/css':
-        specifier: ^0.22.14
-        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
-      '@types/node':
-        specifier: ^22.20.0
-        version: 22.20.1
-      '@types/react':
-        specifier: ~18.3.31
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.7
-        version: 18.3.7(@types/react@18.3.31)
-      tsdown:
-        specifier: ^0.22.2
-        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
-  packages/plugins/ui/corum-team-ui-dev:
-    dependencies:
-      '@corum/corum-rpc-client':
-        specifier: workspace:^
-        version: link:../corum-rpc-client
-      '@corum/corum-ui-base':
-        specifier: workspace:^
-        version: link:../corum-ui-base
-      '@deepseek-ai/cordis':
-        specifier: ^4.0.1
-        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
-      '@deepseek-ai/dsh-client-connection':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(25ee74fd6a7247b2b89b01dfce5327f4)
-      '@deepseek-ai/dsh-client-locale':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(ca324cd7a26bd77e98da35ca5ea59908)
-      '@deepseek-ai/dsh-client-ui-renderer':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(react@18.2.0)
-      '@deepseek-ai/dsh-client-ui-slots':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
-      '@deepseek-ai/dsh-client-ui-theme':
-        specifier: ^0.1.2-alpha.1
-        version: 0.1.2-alpha.1(927a24dccbeecb752593463ea3a5878d)
-      lucide-react:
-        specifier: ^0.460.0
-        version: 0.460.0(react@18.2.0)
-      react:
-        specifier: ^18.2.0
-        version: 18.2.0
-      react-dom:
-        specifier: ^18.2.0
-        version: 18.2.0(react@18.2.0)
-    devDependencies:
-      '@corum/corum-agent-dev':
-        specifier: workspace:*
-        version: link:../../agent/corum-agent-dev
-      '@tsdown/css':
-        specifier: ^0.22.14
-        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
-      '@types/node':
-        specifier: ^22.20.0
-        version: 22.20.1
-      '@types/react':
-        specifier: ~18.3.31
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.7
-        version: 18.3.7(@types/react@18.3.31)
-      tsdown:
-        specifier: ^0.22.2
-        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

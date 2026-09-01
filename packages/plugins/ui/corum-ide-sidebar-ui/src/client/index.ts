@@ -24,7 +24,7 @@ import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
   CORUM_AGENT_METHODS,
   type CreateTaskAgentArgs, type CreateTaskAgentResult,
-} from '@corum/corum-agent-dev/contract'
+} from '@corum/corum-agent/contract'
 import { SidebarSkeleton } from './SidebarSkeleton.tsx'
 import { SessionsPane } from './SessionsPane.tsx'
 import type { SessionsPaneInjected } from './SessionsPane.tsx'

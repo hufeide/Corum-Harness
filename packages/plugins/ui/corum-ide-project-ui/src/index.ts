@@ -13,5 +13,5 @@ export const inject: string[] = []
  */
 export function apply(_ctx: Context): void {
   // The project-pane contributions are browser-only; the corumProject/*
-  // RPCs live in @corum/corum-agent-dev (combo host plugins).
+  // RPCs live in @corum/corum-agent (combo host plugins).
 }

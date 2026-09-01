@@ -63,7 +63,6 @@ import { CorumFsService } from './corum-fs.ts'
 export function resolveDesktopMode(): DesktopMode {
   const value = process.env[DESKTOP_MODE_ENV]
   if (value === 'ide') return 'ide'
-  if (value === 'dev-agent') return 'dev-agent'
   return 'minimal'
 }
 
@@ -79,9 +78,6 @@ const DESKTOP_PATCH = fileURLToPath(new URL('../cordis.patch.yml', import.meta.u
 
 /** The IDE-mode overlay: applied only when the desktop mode resolves to `ide`. */
 const IDE_PATCH = fileURLToPath(new URL('../cordis.ide.patch.yml', import.meta.url))
-
-/** The dev-agent-mode overlay: applied only when the desktop mode resolves to `dev-agent`. */
-const DEV_AGENT_PATCH = fileURLToPath(new URL('../cordis.dev-agent.patch.yml', import.meta.url))
 
 /** The environment variable the shell injects per combo to select the desktop mode. */
 const DESKTOP_MODE_ENV = 'CORUM_DESKTOP_MODE'
@@ -114,7 +110,7 @@ function resolveComboOverlays(): { rows: PatchOptions[]; patches: PatchOptions[]
 }
 
 /** Desktop UI mode: `minimal` keeps the official three-column chat shell. */
-export type DesktopMode = 'minimal' | 'ide' | 'dev-agent'
+export type DesktopMode = 'minimal' | 'ide'
 
 /** The session-telemetry row id the DSH_TELEMETRY_DISABLED switch targets. */
 const TELEMETRY_ROW_ID = 'session-telemetry-otel'
@@ -331,14 +327,10 @@ export async function bootDesktop(): Promise<Context> {
 
   // Desktop UI mode: `ide` mounts the IDE-shell overlay (forked layout/theme/
   // workspace rows replacing the official three-column chat shell) as the
-  // highest patch layer; `dev-agent` mounts the dev-agent-shell overlay
-  // (Agent development verification UI); `minimal` (default) keeps the official
-  // surface byte-for-byte.
+  // highest patch layer; `minimal` (default) keeps the official surface
+  // byte-for-byte.
   const mode = resolveDesktopMode()
-  const modeOverlays =
-    mode === 'ide' ? loadOverlayPatches(NAME, IDE_PATCH) :
-    mode === 'dev-agent' ? loadOverlayPatches(NAME, DEV_AGENT_PATCH) :
-    []
+  const modeOverlays = mode === 'ide' ? loadOverlayPatches(NAME, IDE_PATCH) : []
   process.stderr.write(`[corum-desktop] desktop mode: ${mode}\n`)
 
   // Combo 覆盖规则：插件 insert 行与 patches 均作为最高层叠加（见
@@ -355,7 +347,7 @@ export async function bootDesktop(): Promise<Context> {
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
   // comboOverlays.rows（combo 的插件 insert 行）必须进入真正传给 boot() 的
-  // patch 层栈——否则 CORUM_COMBO_PLUGINS 注入的插件（如 @corum/corum-agent-dev）只
+  // patch 层栈——否则 CORUM_COMBO_PLUGINS 注入的插件（如 @corum/corum-agent）只
   // 被上面的 composeEntries 用于计算行索引，从未被插入 composition，插件
   // apply() 完全不会执行。顺序与上面 composeEntries 一致：modeOverlays 之后、
   // disabledPatches 之前。
