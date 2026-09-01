@@ -1,5 +1,8 @@
-/* Zero-height sticky slot, like the back-to-bottom control: the rail floats
-   over the transcript's right gutter without extending scrollHeight. */
+/* fork（corum）：轮次导航 gutter（设计稿 vESwF）——左 gutter 竖列圆点刻度。
+   刻度 = 8×8 圆点：淡点 $label-tertiary（tertiary），当前点 $brand-primary
+   （brand），垂直居中；hover/focus 预览卡翻到右侧（原右侧横线刻度已退役）。
+   Zero-height sticky slot, like the back-to-bottom control: the rail floats
+   over the transcript's left gutter without extending scrollHeight. */
 .slot {
   position: sticky;
   top: 0;
@@ -20,9 +23,9 @@
 
   position: absolute;
   top: calc(var(--turn-rail-band) / 2);
-  /* Flush with the scrollport edge: the slot sits inside the transcript's side
-     padding, so the rail gives that inset back and keeps 12px of its own. */
-  right: calc(12px - (var(--dsh-composer-side-clearance) + 16px));
+  /* 左 gutter（设计稿 vESwF 在 messages 左侧）：贴滚动容器左缘，8 宽刻度列
+     + 自身 12px 内边距（与右侧 composer side clearance 对称让位）。 */
+  left: calc(12px - (var(--dsh-composer-side-clearance) + 16px));
   width: 28px;
   /* Never taller than the band it centers in: a short window (a tall composer,
      a low viewport) shrinks the rail instead of pushing marks under the
@@ -55,13 +58,11 @@
 }
 
 /* The rail owns pointer input for the whole column, so a mark is a keyboard
-   destination that paints one tick — never a mouse target of its own. */
+   destination that paints one dot — never a mouse target of its own. */
 .mark {
   position: absolute;
-  /* As wide as the longest tick, right-aligned with it: the focus ring below
-     then wraps the tick instead of the rail's full pointer column. */
-  inset: 0 0 0 auto;
-  width: 20px;
+  /* 刻度列水平居中（设计稿 vESwF alignItems center）：28 宽 rail 内圆点居中。 */
+  inset: 0;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -73,37 +74,36 @@
 .mark::before {
   position: absolute;
   top: 50%;
-  right: 0;
-  width: 12px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--dsw-alias-border-l4);
+  left: 50%;
+  width: 8px; /* 设计稿 dot 8×8 圆点 */
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary); /* 淡点 $label-tertiary */
   content: '';
-  transform: translateY(-50%);
-  transition: width 140ms ease, background-color 140ms ease;
+  transform: translate(-50%, -50%);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
 }
 
 .markPreview::before {
-  width: 18px;
-  background: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-label-secondary); /* hover 预览：比淡点实一档 */
+  box-shadow: 0 0 0 3px var(--corum-glass-2, rgba(42, 24, 64, 0.55));
 }
 
 .markActive::before {
-  width: 20px;
-  background: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-brand-primary); /* 当前点 $brand-primary */
+  box-shadow: 0 0 0 3px var(--corum-glass-2, rgba(42, 24, 64, 0.55));
 }
 
-/* Keyboard focus outranks both resting states: the tick takes the brand color
-   the rest of the rail never uses, and a hairline ring keeps it legible
-   against a busy transcript. */
+/* Keyboard focus outranks both resting states: brand color + hairline ring. */
 .mark:focus-visible::before {
-  width: 20px;
-  background: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 3px var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
 }
 
 .mark:focus-visible {
-  outline: 1px solid var(--dsw-alias-state-business-primary);
+  outline: 1px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
+  border-radius: 50%;
 }
 
 .preview {
@@ -118,17 +118,20 @@
     ),
     calc(100% - var(--turn-preview-height))
   );
-  right: calc(100% + 10px);
+  /* 预览卡翻到右侧（gutter 在左，卡片向右展开进消息区上方）。 */
+  left: calc(100% + 10px);
   box-sizing: border-box;
   width: min(300px, calc(100cqw - 120px));
   max-height: var(--turn-preview-height);
   overflow: hidden;
   padding: 10px 12px;
-  border: 1px solid var(--dsw-alias-border-l2);
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 10px;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: var(--dsw-shadow-lv2);
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   animation: dsh-turn-preview-enter 120ms ease-out;
   transition: top 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -148,7 +151,7 @@
 
 .previewResponse {
   margin-top: 4px;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12);
   -webkit-line-clamp: 2;
 }
@@ -159,7 +162,7 @@
 }
 
 @keyframes dsh-turn-preview-enter {
-  from { opacity: 0; transform: translateX(4px); }
+  from { opacity: 0; transform: translateX(-4px); }
   to { opacity: 1; transform: translateX(0); }
 }
 
