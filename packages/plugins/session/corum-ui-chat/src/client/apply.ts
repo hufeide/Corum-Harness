@@ -4,7 +4,7 @@ import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { BoundActions, ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { resolveWorkspacePath } from '@deepseek-ai/dsh-util-workspace-path'
 // Type-only service and declaration merges used by the apply world.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -62,7 +62,11 @@ interface CorumChatRuntime {
   connection: ConnectionHandle | undefined
 }
 declare global {
-  interface Window { __corumChatRuntime?: CorumChatRuntime }
+  interface Window {
+    __corumChatRuntime?: CorumChatRuntime
+    /** 子 Agent 卡 act-goto 的跳子会话桥（apply.ts 挂载，官方 sessions.open 寻址）。 */
+    __corumOpenSession?: (id: string) => void
+  }
 }
 
 /** Services required by the Chat target and its presentation registrations. */
@@ -151,6 +155,14 @@ export function apply(ctx: Context): void {
         window.__corumChatRuntime = {
           sessionId: String(sessionId),
           connection: ctx.get('connection') as ConnectionHandle,
+        }
+        // 子 Agent 卡 act-goto 的跳子会话桥（官方 sessions.open 寻址，同步幂等）。
+        window.__corumOpenSession = (id: string) => {
+          try {
+            ctx.sessions.open(SessionId(id))
+          } catch {
+            // 子会话不可寻址（origin=subagent 或被过滤）时静默——卡片仍可展示进度。
+          }
         }
         return {
           review: reviewSource(binding),

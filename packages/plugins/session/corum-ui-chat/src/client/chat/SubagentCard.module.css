@@ -42,7 +42,7 @@
 }
 
 .name {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -51,14 +51,14 @@
 }
 
 .task {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* run-chip：光边 active-border + pulse 点 + Running。 */
+/* run-chip：光边 active-border + pulse 点 + Running（纯状态，Step 在底部行）。 */
 .runChip {
   flex: none;
   display: inline-flex;
@@ -68,7 +68,7 @@
   border: 1px solid var(--corum-glass-border-active, #01CDFE);
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
   white-space: nowrap;
@@ -93,10 +93,44 @@
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--dsw-alias-state-success-primary);
   white-space: nowrap;
+}
+
+/* act-expand / act-goto：24×24 玻璃方钮（设计稿 head 行尾两个操作位）。 */
+.actBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 7px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.actBtn:hover:not(:disabled) {
+  background: var(--corum-glass-3, rgba(55, 32, 80, 0.8));
+  border-color: var(--corum-glass-border-active, #01CDFE);
+}
+
+.actBtn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.actIconMuted {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.actIconBrand {
+  color: var(--dsw-alias-brand-text);
 }
 
 /* 进度条（设计稿 BetQ9 prog/bar）：4px 轨道 + brand 填充，宽度由 step 步数驱动。 */
@@ -135,8 +169,64 @@
 }
 
 .stepText {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 展开态步骤清单（设计稿 O0J3e steps）：check 完成 / loader 进行中 / circle 待执行。 */
+.stepList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 0;
+}
+
+.stepListRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 2px;
+  min-width: 0;
+}
+
+.stepListDone {
+  flex: none;
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.stepListRunning {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+  animation: subagentSpin 1s linear infinite;
+}
+
+.stepListTodo {
+  flex: none;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.stepListText {
+  font-size: 15px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stepListTextDone {
+  font-size: 15px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stepListTextDimmed {
+  font-size: 15px;
+  color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

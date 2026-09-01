@@ -1,9 +1,12 @@
 // fork（corum）：子 Agent 进度卡——主 Agent 召唤子 Agent（delegation）时在消息瀑布
-// 中流出的玻璃卡。avatar(bot) + 任务描述 + run-chip（Running/已完成）+ 进度条 +
-// Step n · currentAction 实时行。进度由 renderer 侧轮询子会话事件窗注入
-// （corumAgent/getChildSessionProgress），无 progress 时降级为「运行中 + prompt 摘要」。
+// 中流出的玻璃卡。对齐设计稿组件 bSZm5（subagent-card）/ O0J3e（expanded）：
+//   head = avatar(bot) + meta(name+task) + chip(纯状态 Running/Done) + act-expand + act-goto
+//   prog = 4px 进度条（step 驱动渐近；无 progress 时不确定动画）
+//   step = loader + 「Step n · currentAction」实时行（done 收起）
+//   steps（展开态）= 逐步清单（check 已完成 / loader 进行中 / circle 待执行）
+// 进度由卡片自闭环轮询子会话事件窗注入（corumAgent/getChildSessionProgress）。
 import { memo, useEffect, useState } from 'react'
-import { Bot, Check, Loader } from 'lucide-react'
+import { ArrowRight, Bot, Check, ChevronDown, ChevronUp, Circle, Loader } from 'lucide-react'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
 import css from './SubagentCard.module.css'
@@ -12,6 +15,10 @@ import css from './SubagentCard.module.css'
 interface CorumChatRuntime {
   sessionId: string | undefined
   connection: { rpc: { call: (channel: string, endpoint: string, payload: unknown) => Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }> } } | undefined
+}
+
+function runtime(): CorumChatRuntime | undefined {
+  return (window as { __corumChatRuntime?: CorumChatRuntime }).__corumChatRuntime
 }
 
 /** 子会话进度 RPC 返回形（与 host getChildSessionProgress 对齐）。 */
@@ -33,8 +40,7 @@ function useChildProgress(childSessionId: string | undefined): SubagentProgressS
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
-      const runtime = (window as { __corumChatRuntime?: CorumChatRuntime }).__corumChatRuntime
-      const connection = runtime?.connection
+      const connection = runtime()?.connection
       if (connection === undefined) {
         timer = setTimeout(poll, 2000)
         return
@@ -73,11 +79,10 @@ function useChildProgress(childSessionId: string | undefined): SubagentProgressS
 /** 进度条填充比例：以 step 步数为最小步进（无总步数，单调爬升渐近 100%）。 */
 function progressRatio(progress: SubagentProgressSnapshot): number {
   if (progress.done) return 1
-  // step 0 也给 10% 起步（视觉反馈「已启动」），每步 +18% 渐近 90%。
   return Math.min(0.1 + progress.step * 0.18, 0.9)
 }
 
-/** 运行中的 step 行文案：「Step n · action」/「Step n」/ prompt 摘要 / 默认 working。 */
+/** 底部 step 行文案：「Step n · action」/「Step n」/ prompt 摘要 / 默认 working。 */
 function runningStepText(
   progress: SubagentProgressSnapshot | undefined,
   prompt: string | undefined,
@@ -90,6 +95,23 @@ function runningStepText(
     : `${stepLabel} · ${progress.currentAction}`
 }
 
+/** 展开态步骤清单行（check 完成 / loader 进行中 / circle 待执行）。 */
+function StepListRow({ icon, text, dimmed, done }: {
+  icon: 'check' | 'loader' | 'circle'
+  text: string
+  dimmed?: boolean
+  done?: boolean
+}) {
+  return (
+    <div className={css.stepListRow}>
+      {icon === 'check' && <Check size={13} strokeWidth={2.5} className={css.stepListDone} />}
+      {icon === 'loader' && <Loader size={13} strokeWidth={2} className={css.stepListRunning} />}
+      {icon === 'circle' && <Circle size={13} strokeWidth={2} className={css.stepListTodo} />}
+      <span className={dimmed === true ? css.stepListTextDimmed : done === true ? css.stepListTextDone : css.stepListText}>{text}</span>
+    </div>
+  )
+}
+
 /** 一个 delegation 召唤的卡片（进度由子会话事件窗轮询注入）。 */
 function SubagentRow({
   description, prompt, childSessionId, t,
@@ -100,12 +122,43 @@ function SubagentRow({
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
   const progress = useChildProgress(childSessionId)
+  const [expanded, setExpanded] = useState(false)
   const done = progress?.done === true
   const running = !done
+
+  const openChild = () => {
+    if (childSessionId === undefined) return
+    // 跳转子会话详情：官方会话列表行（origin=subagent 不进侧栏任务列表，但
+    // sessions.open 可寻址）——经官方 ctx.sessions 的 open 通道（window runtime
+    // 未挂 sessions 时退化为无操作；跳转失败不阻塞卡片）。
+    const bridge = (window as { __corumOpenSession?: (id: string) => void }).__corumOpenSession
+    bridge?.(childSessionId)
+  }
+
+  // 展开态步骤清单：有 progress 时按 step 数推断「已完成 step-1 步 + 当前 step + 待执行」，
+  // 无逐步明细数据时以 currentAction 作当前行、prompt 摘要作占位（语义对齐设计稿降级）。
+  const stepRows = expanded && progress !== undefined
+    ? [
+      ...Array.from({ length: Math.max(0, progress.step - 1) }, (_, i) => ({
+        key: `done-${i}`,
+        icon: 'check' as const,
+        text: t('subagent.step', { n: i + 1 }),
+        done: true,
+      })),
+      ...(running
+        ? [{
+          key: 'current',
+          icon: 'loader' as const,
+          text: progress.currentAction ?? t('subagent.step', { n: progress.step }),
+        }]
+        : []),
+    ]
+    : []
+
   return (
     <div className={css.card}>
       <div className={css.head}>
-        <span className={css.avatar}><Bot size={12} strokeWidth={2} className={css.avatarIcon} /></span>
+        <span className={css.avatar}><Bot size={16} strokeWidth={2} className={css.avatarIcon} /></span>
         <span className={css.meta}>
           <span className={css.name}>{t('subagent.name')}</span>
           {description !== undefined && <span className={css.task}>{description}</span>}
@@ -115,6 +168,28 @@ function SubagentRow({
             ? <><span className={css.runDot} />{t('subagent.running')}</>
             : <><Check size={12} strokeWidth={2.5} />{t('subagent.done')}</>}
         </span>
+        <button
+          type="button"
+          className={css.actBtn}
+          title={expanded ? t('subagent.collapse') : t('subagent.expand')}
+          aria-label={expanded ? t('subagent.collapse') : t('subagent.expand')}
+          aria-expanded={expanded}
+          onClick={() => { setExpanded(open => !open) }}
+        >
+          {expanded
+            ? <ChevronUp size={17} strokeWidth={2} className={css.actIconMuted} />
+            : <ChevronDown size={17} strokeWidth={2} className={css.actIconMuted} />}
+        </button>
+        <button
+          type="button"
+          className={css.actBtn}
+          title={t('subagent.goto')}
+          aria-label={t('subagent.goto')}
+          disabled={childSessionId === undefined}
+          onClick={openChild}
+        >
+          <ArrowRight size={17} strokeWidth={2} className={css.actIconBrand} />
+        </button>
       </div>
       {running && (
         <>
@@ -124,11 +199,25 @@ function SubagentRow({
               style={progress === undefined ? undefined : { width: `${Math.round(progressRatio(progress) * 100)}%` }}
             />
           </div>
-          <div className={css.stepRow}>
-            <Loader size={13} strokeWidth={2} className={css.stepIcon} />
-            <span className={css.stepText}>{runningStepText(progress, prompt, t)}</span>
-          </div>
+          {!expanded && (
+            <div className={css.stepRow}>
+              <Loader size={15} strokeWidth={2} className={css.stepIcon} />
+              <span className={css.stepText}>{runningStepText(progress, prompt, t)}</span>
+            </div>
+          )}
         </>
+      )}
+      {expanded && (
+        <div className={css.stepList}>
+          {stepRows.length === 0
+            ? <StepListRow icon="circle" text={prompt ?? t('subagent.working')} dimmed />
+            : stepRows.map(row => (
+              <StepListRow key={row.key} icon={row.icon} text={row.text} done={'done' in row && row.done === true} />
+            ))}
+          {done && (
+            <StepListRow icon="check" text={t('subagent.done')} done />
+          )}
+        </div>
       )}
     </div>
   )
