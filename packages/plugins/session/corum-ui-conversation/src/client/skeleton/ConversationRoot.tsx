@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { Compass, History, Lock, Wand2 } from 'lucide-react'
+import { Bot, Compass, History, Wand2 } from 'lucide-react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConversationSlotProps, InputZone } from '../contract/slots.ts'
@@ -414,7 +414,7 @@ export function ConversationRoot({
       </div>
     )
 
-  // task 泳道会话的 Agent 显示名（副标语「由 X 执行」+ composer 锁定 chip 昵称）：
+  // task 泳道会话的 Agent 显示名（副标语「由 X 执行」+ composer Agent chip 昵称）：
   // 所有 task 泳道（blank 与正式会话）都查，发消息切换会话时也保持。
   const [agentName, setAgentName] = useState<string | undefined>(undefined)
   useEffect(() => {
@@ -422,9 +422,48 @@ export function ConversationRoot({
     let alive = true
     emptyActions.getTaskAgentName(String(sessionId))
       .then((name) => { if (alive) setAgentName(name) })
-      .catch(() => { /* 查询失败则不显示 Agent 名，锁定 chip 回退「已锁定」 */ })
+      .catch(() => { /* 查询失败则不显示 Agent 名，chip 回退默认项 */ })
     return () => { alive = false }
   }, [isTaskLane, sessionId, emptyActions])
+
+  // 可选 Agent chip（2026-09-02 用户定调）：task 泳道 composer 的 Agent 从只读
+  // 锁定 chip 改为可选下拉——blank 泳道可换 Agent（官方 agentPresets.select blank
+  // 限定；已开始会话 host 拒绝、catch 呈现）。profileId 经 listTaskAgents 拿；
+  // 下拉选项经 listAgents（listProfiles 投影）。
+  const [agentProfileId, setAgentProfileId] = useState('')
+  const [agentOptions, setAgentOptions] = useState<readonly { id: string; name: string }[]>([])
+  const [agentSwitchError, setAgentSwitchError] = useState('')
+  useEffect(() => {
+    if (!isTaskLane || sessionId === undefined) { setAgentProfileId(''); return }
+    let alive = true
+    // listTaskAgents 拿当前 profileId + listAgents 拿下拉选项（同 getTaskAgentName 通路）。
+    Promise.all([
+      emptyActions.listAgents(),
+      emptyActions.getTaskAgentProfileId(String(sessionId)),
+    ])
+      .then(([options, profileId]) => {
+        if (!alive) return
+        setAgentOptions(options.map((o) => ({ id: o.id, name: o.name })))
+        setAgentProfileId(profileId ?? options[0]?.id ?? '')
+      })
+      .catch(() => { /* 拉取失败：下拉留空，不可切换 */ })
+    return () => { alive = false }
+  }, [isTaskLane, sessionId, emptyActions])
+  const switchAgent = useCallback((profileId: string) => {
+    if (sessionId === undefined || profileId === agentProfileId) return
+    setAgentSwitchError('')
+    void emptyActions.selectTaskAgent(String(sessionId), profileId)
+      .then(() => {
+        setAgentProfileId(profileId)
+        const name = agentOptions.find((o) => o.id === profileId)?.name
+        if (name !== undefined) setAgentName(name)
+      })
+      .catch((e) => {
+        // 失败绝不静默吞（PROGRESS §4）：呈现原因，下拉回弹当前值。
+        console.error('[conversation] switch task agent failed', e)
+        setAgentSwitchError(e instanceof Error ? e.message : String(e))
+      })
+  }, [sessionId, agentProfileId, agentOptions, emptyActions])
 
   // The placeholder chip ("Choose workspace") and the Workspace-trigger input travel
   // together: no workspace picked yet (cold start, no session at all), or a
@@ -456,12 +495,24 @@ export function ConversationRoot({
     overlay: sessionId === undefined ? undefined : renderSlot('conversation.input.overlay', {}),
     leftItems: zone === undefined ? null : (
       <>
-        {/* Agent 锁定标识放进 composer 工具栏（2026-08-31 用户走查：应在 input
-            chat 内而非输入框上方）。task 泳道会话内不允许变更 Agent，只读显示。 */}
-        {isTaskLane && (
-          <span className={css.agentLockChip} title="Agent 已锁定，会话内不可变更">
-            <Lock size={12} />
-            <span>{agentName ?? '已锁定'}</span>
+        {/* Agent 选择放进 composer 工具栏（2026-09-02 用户定调）：task 泳道 composer
+            的 Agent 从只读锁定 chip 改为可选下拉——**只在 blank（未发首条消息）时
+            渲染**；一旦开始第一次对话（非 blank）整个隐藏，不允许用户更改
+            （官方 agentPresets.select blank 限定，非 blank host 必拒绝）。 */}
+        {isTaskLane && summaryBlank === true && (
+          <span className={css.agentLockChip} data-select>
+            <Bot size={12} />
+            <select
+              className={css.agentSelect}
+              value={agentProfileId}
+              disabled={agentOptions.length === 0}
+              title={agentSwitchError !== '' ? `切换失败：${agentSwitchError}` : '选择执行 Agent'}
+              aria-label="选择执行 Agent"
+              onChange={(e) => switchAgent(e.target.value)}
+            >
+              {agentOptions.length === 0 && <option value="">{agentName ?? '加载中…'}</option>}
+              {agentOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
           </span>
         )}
         {renderSlot('conversation.input.left', zone)}

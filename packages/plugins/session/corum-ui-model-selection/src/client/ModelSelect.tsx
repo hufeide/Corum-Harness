@@ -182,6 +182,10 @@ export function ModelSelect(
       close(true)
       return
     }
+    // 2026-09-02 用户定调：换模型前提示——可能导致效果变差，建议在新任务中更换。
+    // 确认后才执行；取消则留在菜单（用户可重新考虑或选回原模型）。
+    const confirmed = window.confirm('更换模型有可能导致效果变差。\n建议在新任务中更换模型。\n\n仍要更换吗？')
+    if (!confirmed) return
     lastActionRef.current = 'select'
     void select(selection).then(settleSelection)
   }

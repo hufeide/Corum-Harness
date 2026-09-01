@@ -247,6 +247,11 @@ export interface ConversationInjected {
     pickDirectory: () => Promise<string | null>
     /** task 泳道会话的 Agent 显示名（设计稿副标语「由 X 执行」）；非 task 会话/查询失败返回 undefined。 */
     getTaskAgentName: (sessionId: string) => Promise<string | undefined>
+    /** task 泳道会话当前绑定的 Agent profileId（composer 可选 Agent chip 的选中值）；非 task 会话/查询失败返回 undefined。 */
+    getTaskAgentProfileId: (sessionId: string) => Promise<string | undefined>
+    /** 切换 task 泳道的 Agent（新会话界面 composer 可选 Agent chip）。blank 限定：
+     *  泳道已开始（有 turn）时 host 拒绝（agent-preset/locked），调用方应 catch 呈现。 */
+    selectTaskAgent: (sessionId: string, profileId: string) => Promise<void>
     /** 已注册的工作区列表（官方 ctx.workspaces 快照）——新建任务在**已有列表里选**。 */
     listWorkspaces: () => Promise<readonly WorkspaceOption[]>
   }
@@ -272,6 +277,9 @@ export interface AgentOption {
   name: string
   /** 该 Agent 的默认模型（profile.model）——选定 Agent 后模型下拉默认选中它。 */
   defaultModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 目录来源（2026-09-02 并列展示）：'corum' = corum Agent；'official' = 官方
+   *  四模式（cordis/minimal/ptc/standard，模型跟随部署默认）。下拉按此分组标注。 */
+  source?: 'corum' | 'official'
 }
 
 /** 模型目录里的一个 provider（corumAgent.listModels 投影）。 */

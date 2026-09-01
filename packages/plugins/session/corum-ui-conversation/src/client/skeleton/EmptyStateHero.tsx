@@ -292,7 +292,20 @@ function NewTaskForm({ emptyActions, onClose }: {
             onChange={(e) => { setProfileId(e.target.value); modelTouched.current = false }}
           >
             {agents.length === 0 && <option value="">加载中…</option>}
-            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {/* 并列展示（2026-09-02 用户定调）：corum Agent 一组 + 官方四模式一组
+                （optgroup 分组标注「官方」）。官方项模型跟随部署默认。 */}
+            {agents.some((a) => a.source === 'official')
+              ? (
+                <>
+                  <optgroup label="用户">
+                    {agents.filter((a) => a.source !== 'official').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </optgroup>
+                  <optgroup label="官方模式">
+                    {agents.filter((a) => a.source === 'official').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </optgroup>
+                </>
+              )
+              : agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
       </div>

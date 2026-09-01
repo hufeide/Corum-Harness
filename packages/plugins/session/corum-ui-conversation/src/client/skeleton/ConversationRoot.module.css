@@ -545,7 +545,8 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* Agent 锁定 chip（设计稿：task 泳道会话内不允许变更 Agent）——只读标识。 */
+/* Agent chip（2026-09-02 用户定调：task 泳道 composer 可选 Agent）——玻璃 chip
+   内嵌无框下拉，hover 高亮提示可点。 */
 .agentLockChip {
   display: inline-flex;
   align-items: center;
@@ -558,4 +559,29 @@
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* chip 内的 Agent 下拉：透明无框、继承 chip 字号字重，只留文本 + 原生箭头。 */
+.agentSelect {
+  appearance: auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  outline: none;
+  max-width: 140px;
+}
+
+.agentSelect:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.agentSelect option {
+  /* 原生下拉面板在深色玻璃下需要实底保证可读。 */
+  background: var(--corum-glass-3, var(--dsw-alias-background-level-3));
+  color: var(--dsw-alias-label-primary);
 }

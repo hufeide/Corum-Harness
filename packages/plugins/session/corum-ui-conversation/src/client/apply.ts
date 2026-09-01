@@ -20,7 +20,7 @@ import {
   type OpenProjectArgs, type OpenProjectByPathArgs,
   type ListProfilesResult, type ListModelsResult, type ListPermissionPresetsResult,
   type ListTaskAgentsResult,
-} from '@corum/corum-agent-dev/contract'
+} from '@corum/corum-agent/contract'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 // C3a：侧栏模式写（openProject/newProject→project、openTask/newTask→task）收敛进
 // IDE 壳 cordis 服务 ctx.layout.setSidebarMode（跨 bundle 单例）——原 ui-base
@@ -346,6 +346,7 @@ export function apply(ctx: Context): void {
               id: p.id,
               name: p.nickname ?? p.title ?? p.id,
               ...(p.model === undefined ? {} : { defaultModel: p.model }),
+              ...(p.source === undefined ? {} : { source: p.source }),
             }))
           },
           listModels: async () => {
@@ -371,6 +372,17 @@ export function apply(ctx: Context): void {
             } catch {
               return undefined
             }
+          },
+          getTaskAgentProfileId: async (sessionId) => {
+            try {
+              const tasks = await call<ListTaskAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listTaskAgents, {})
+              return (tasks.tasks ?? []).find((x) => x.sessionId === sessionId)?.profileId
+            } catch {
+              return undefined
+            }
+          },
+          selectTaskAgent: async (sessionId, profileId) => {
+            await call('corumAgent', 'selectTaskAgentProfile', { sessionId, profileId })
           },
           pickDirectory: pickDir,
           listWorkspaces: async () => {
