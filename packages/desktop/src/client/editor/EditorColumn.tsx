@@ -84,7 +84,7 @@ export interface EditorColumnInjected {
   /** 点亮编辑器区域（打开文件时自动显示，取消默认隐藏）。 */
   showEditor: () => void
   /** 资源管理器子面板数据源 + generation 源（ExplorerPane 直通）。 */
-  explorer: Pick<ExplorerPaneInjected, 'listDir' | 'generation'>
+  explorer: Pick<ExplorerPaneInjected, 'listDir' | 'generation' | 'workspaceRoot'>
   /** 读文件内容（corumFs/read RPC）。 */
   readFile: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { content: string; language: string } }>
   /** 写文件内容（corumFs/write RPC，⌘S 保存；自动建父目录）。 */
@@ -197,6 +197,18 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
   const [expandedDirs, setExpandedDirs] = useState<string[]>(persisted.expandedDirs ?? [])
   // 文件树刷新生成号（watch / 新建 / 删除 / 重命名后 bump → ExplorerPane 重载受影响目录）。
   const [treeRefreshGen, setTreeRefreshGen] = useState(0)
+
+  // 工作区根变化（client/index.ts 同步 corumFs/setRoot 后广播）→ 整树刷新 +
+  // 清掉已展开的目录（旧根的展开态对新根无意义）。tab 保留：路径相对旧根的
+  // tab 在新根下打不开会显示加载错误（符合预期——用户切了项目）。
+  useEffect(() => {
+    const onRootChanged = () => {
+      setExpandedDirs([])
+      setTreeRefreshGen(g => g + 1)
+    }
+    window.addEventListener('corum:workspace-root-changed', onRootChanged)
+    return () => window.removeEventListener('corum:workspace-root-changed', onRootChanged)
+  }, [])
 
   // ── 持久化（tabs/activePath/explorerWidth/explorerCollapsed/expandedDirs） ──
   useEffect(() => {
@@ -954,6 +966,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
             <ExplorerPane
               listDir={explorer.listDir}
               generation={explorer.generation}
+              workspaceRoot={explorer.workspaceRoot}
               closeRegion={closeRegion}
               onToggleCollapsed={onToggleExplorerCollapsed}
               onOpenFile={openFile}

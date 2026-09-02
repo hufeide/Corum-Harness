@@ -57,6 +57,13 @@
 .tb:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
+.tb:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.tb:disabled:hover {
+  background: transparent;
+}
 .tbIcon {
   color: var(--dsw-alias-label-tertiary);
 }

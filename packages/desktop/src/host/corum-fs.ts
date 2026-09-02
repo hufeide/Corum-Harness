@@ -76,9 +76,44 @@ export class CorumFsService extends TypertRemoteService {
   private changeLog: { path: string; kind: 'rename' | 'change' }[] = []
   /** watcher 启动时的去抖定时器。 */
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
+  /** 当前项目根（默认 host 进程 cwd；client 经 setRoot 跟随当前会话/工作区切换）。 */
+  private root: string = resolve(process.cwd())
 
   constructor(ctx: Context) {
     super(ctx, 'corumFs')
+  }
+
+  /** 当前项目根（realpath 未解析；各端点使用时再 resolve+realpath 校验）。 */
+  private rootPath(): string {
+    return this.root
+  }
+
+  /**
+   * 切换项目根（client 跟随当前会话 cwd / 工作区 path 调用）。空串/未传 =
+   * 回退 host 进程 cwd。切换后 watcher 重启到新根，changeLog 清空。
+   * @param cwd - 新根的绝对路径（必须在磁盘上存在；不在校验时不切）。
+   */
+  @Remote('setRoot')
+  async setRoot(cwd?: string): Promise<{ root: string }> {
+    const next = cwd !== undefined && cwd !== '' ? resolve(cwd) : resolve(process.cwd())
+    // 新根必须真实存在（避免 client 传了还没建的目录把树打死）。
+    const real = await realpath(next).catch(() => null)
+    if (real === null) {
+      throw new Error(`setRoot: directory does not exist: ${next}`)
+    }
+    if (real === this.root) return { root: this.root }
+    this.root = real
+    // 换根 = 旧 watcher 无意义；停掉，等 client 下次 startWatch 重挂到新根。
+    if (this.watcher !== null) {
+      this.watcher.close()
+      this.watcher = null
+    }
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer)
+      this.debounceTimer = null
+    }
+    this.changeLog = []
+    return { root: real }
   }
 
   /**
@@ -89,7 +124,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('list')
   async list(path?: string): Promise<{ path: string; entries: CorumFsEntry[] }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const requested = path ?? '/'
     let target: string
     try {
@@ -127,7 +162,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('read')
   async read(path?: string): Promise<{ path: string; content: string; language: string }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const requested = path ?? '/'
     const normalized = requested === '/' || requested === '' ? '.' : requested.replace(/^\/+/, '')
     const target = resolve(root, normalized)
@@ -153,7 +188,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('absolutePath')
   async absolutePath(path: string): Promise<{ absolutePath: string }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
     if (target !== root && !target.startsWith(root + sep)) {
@@ -174,7 +209,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('reveal')
   async reveal(path: string): Promise<{ revealed: boolean }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
     if (target !== root && !target.startsWith(root + sep)) {
@@ -209,7 +244,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('write')
   async write(path: string, content: string): Promise<{ path: string }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
     if (target !== root && !target.startsWith(root + sep)) {
@@ -240,7 +275,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('mkdir')
   async mkdirp(path: string): Promise<{ path: string }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
     if (target !== root && !target.startsWith(root + sep)) {
@@ -260,7 +295,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('delete')
   async remove(path: string): Promise<{ path: string }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
     if (target === root || !target.startsWith(root + sep)) {
@@ -285,7 +320,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('rename')
   async renamePath(from: string, to: string): Promise<{ from: string; to: string }> {
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     const normFrom = from === '/' || from === '' ? '.' : from.replace(/^\/+/, '')
     const normTo = to === '/' || to === '' ? '.' : to.replace(/^\/+/, '')
     const targetFrom = resolve(root, normFrom)
@@ -317,7 +352,7 @@ export class CorumFsService extends TypertRemoteService {
   @Remote('watch')
   async startWatch(): Promise<{ watching: boolean }> {
     if (this.watcher !== null) return { watching: true }
-    const root = resolve(process.cwd())
+    const root = resolve(this.rootPath())
     try {
       this.watcher = watch(root, { recursive: true }, (eventType, filename) => {
         if (filename === null || filename === '') return
@@ -413,7 +448,7 @@ export class CorumFsService extends TypertRemoteService {
     const root = await realpath(resolve(rootOverride ?? process.cwd())).catch(() => resolve(rootOverride ?? process.cwd()))
     // root 钳制（P0）：有效根必须落在 host 进程 cwd 之内。泳道工作区（cwd 的子
     // 目录）不受影响；渲染层指定 cwd 之外/之上的 root 直接拒绝。
-    const allowedRoot = await realpath(resolve(process.cwd())).catch(() => resolve(process.cwd()))
+    const allowedRoot = await realpath(resolve(this.rootPath())).catch(() => resolve(this.rootPath()))
     if (root !== allowedRoot && !root.startsWith(allowedRoot + sep)) {
       throw new Error(`refusing to revert outside the host workspace: ${rootOverride ?? ''}`)
     }

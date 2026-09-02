@@ -49,6 +49,8 @@ export interface ExplorerPaneInjected {
   listDir: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }>
   /** 连接 generation 源（每次连接握手后发布；host.cwd basename = 工作区根名）。 */
   generation: ConnectionGenerationState
+  /** 当前工作区根只读快照（初始挂载读；事件可能先于挂载丢失，快照是可靠初始态）。 */
+  workspaceRoot: { get: () => { root: string | null; rootName: string | null } } | undefined
   /** 关闭整个编辑器区域（直通 ctx.layout.closeRegion('corum.editor')）。 */
   closeRegion: () => void
   /** 收起资源管理器子面板（design waRkJ：折叠 = 子面板完全消失）。 */
@@ -171,11 +173,10 @@ interface RenamingState {
 }
 
 /** The resource manager sub-pane (see module doc). */
-export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath, onCopyPath, getAbsolutePath, revealInFinder, onCompare, onAddToChat }: ExplorerPaneProps) {
+export function ExplorerPane({ listDir, generation, workspaceRoot, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath, onCopyPath, getAbsolutePath, revealInFinder, onCompare, onAddToChat }: ExplorerPaneProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
   useSyncExternalStore(generation.subscribe, generation.getSnapshot)
-  const rootName = rootNameFromGeneration(generation)
   /** Path → children entries cache (lazy; undefined key = not loaded). */
   const [dirCache, setDirCache] = useState<Record<string, FsEntry[] | undefined>>({})
   /** 展开集合（受控 prop 的本地 Set 镜像，便于 O(1) 查询）。 */
@@ -201,6 +202,32 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
   /** 「选择以进行比较」的已选文件（VS Code 语义：右键 A 选择以进行比较 →
    *  右键 B 出现「与已选项目比较」）。 */
   const [compareSource, setCompareSource] = useState<string | null>(null)
+  /** 当前工作区根名（corum:workspace-root-changed 事件同步；初始读 workspaceRoot
+   *  快照——事件可能先于挂载丢失）。 */
+  const [workspaceRootName, setWorkspaceRootName] = useState<string | null>(() => workspaceRoot?.get().rootName ?? null)
+  /** 空态标记：未打开项目/无会话时 root=null（不渲染树，显示空态提示）。 */
+  const [noWorkspace, setNoWorkspace] = useState(() => workspaceRoot?.get().root === null)
+  useEffect(() => {
+    const onRootChanged = (e: Event) => {
+      const root = (e as CustomEvent<{ root?: string | null }>).detail?.root
+      if (root === null) {
+        // 未打开项目 → 空态
+        setNoWorkspace(true)
+        setWorkspaceRootName(null)
+        return
+      }
+      if (typeof root === 'string' && root !== '') {
+        setNoWorkspace(false)
+        const base = root.split(/[\\/]/).filter(Boolean).pop()
+        if (base !== undefined && base !== '') setWorkspaceRootName(base)
+      }
+    }
+    window.addEventListener('corum:workspace-root-changed', onRootChanged)
+    return () => window.removeEventListener('corum:workspace-root-changed', onRootChanged)
+  }, [])
+
+  /** 树头根名：工作区同步的根名优先，回退 generation host cwd basename。 */
+  const rootName = workspaceRootName ?? rootNameFromGeneration(generation)
 
   const loadDir = useCallback((path: string): void => {
     setLoading((prev) => new Set(prev).add(path))
@@ -229,10 +256,11 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
     loadDir('/')
   }, [loadDir])
 
-  // Load the project root once.
+  // Load the project root once（空态跳过——未打开项目时根目录无意义）。
   useEffect(() => {
+    if (noWorkspace) return
     loadRoot()
-  }, [loadRoot])
+  }, [loadRoot, noWorkspace])
 
   // refreshGen bump → 重载根 + 所有已展开目录（局部刷新）。
   const refreshGenRef = useRef(refreshGen)
@@ -725,20 +753,20 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
       {/* WbdhK — tree-header（chevron + 根名 + 4 个 20×20 工具钮）。 */}
       <div className={css.treeHeader}>
         <ChevronDown size={17} strokeWidth={2} className={css.headerChev} />
-        <span className={css.headerRoot}>{rootName}</span>
-        <button type="button" className={css.tb} title="新建文件" onClick={() => startCreate('file', selectedDirForCreate())}>
+        <span className={css.headerRoot}>{noWorkspace ? '（未打开项目）' : rootName}</span>
+        <button type="button" className={css.tb} title="新建文件" disabled={noWorkspace} onClick={() => startCreate('file', selectedDirForCreate())}>
           <FilePlus size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
-        <button type="button" className={css.tb} title="新建文件夹" onClick={() => startCreate('dir', selectedDirForCreate())}>
+        <button type="button" className={css.tb} title="新建文件夹" disabled={noWorkspace} onClick={() => startCreate('dir', selectedDirForCreate())}>
           <FolderPlus size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
-        <button type="button" className={`${css.tb}${showFilter ? ` ${css.tbActive}` : ''}`} title="搜索文件" onClick={() => { setShowFilter(v => !v); if (showFilter) setFilterText('') }}>
+        <button type="button" className={`${css.tb}${showFilter ? ` ${css.tbActive}` : ''}`} title="搜索文件" disabled={noWorkspace} onClick={() => { setShowFilter(v => !v); if (showFilter) setFilterText('') }}>
           <Search size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
-        <button type="button" className={css.tb} title="刷新" onClick={loadRoot}>
+        <button type="button" className={css.tb} title="刷新" disabled={noWorkspace} onClick={loadRoot}>
           <RotateCw size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
-        <button type="button" className={css.tb} title="折叠全部" onClick={collapseAll}>
+        <button type="button" className={css.tb} title="折叠全部" disabled={noWorkspace} onClick={collapseAll}>
           <ListCollapse size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
       </div>
@@ -774,8 +802,14 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
           setContextMenu({ x: e.clientX, y: e.clientY, path: '/', isDir: true, blank: true })
         }}
       >
-        {rootError !== null && <div className={css.error}>{rootError}</div>}
-        {rootEntries === null && rootError === null && <div className={css.emptyDir}>加载中…</div>}
+        {noWorkspace && (
+          <div className={css.emptyDir} style={{ padding: '24px 16px', textAlign: 'center', lineHeight: 1.6 }}>
+            未打开项目<br />
+            <span style={{ fontSize: 12, opacity: 0.7 }}>在侧栏打开项目或开始任务后，这里显示对应工作区的文件</span>
+          </div>
+        )}
+        {!noWorkspace && rootError !== null && <div className={css.error}>{rootError}</div>}
+        {!noWorkspace && rootEntries === null && rootError === null && <div className={css.emptyDir}>加载中…</div>}
         {/* 根目录新建行（在根下创建时插入首位） */}
         {creating !== null && creating.parentDir === '/' && (
           <div className={css.renameRow} style={{ paddingLeft: 6 }}>
@@ -798,7 +832,7 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
             />
           </div>
         )}
-        {rootEntries?.map(entry => renderNode(joinPath('/', entry.name), entry, 0))}
+        {!noWorkspace && rootEntries?.map(entry => renderNode(joinPath('/', entry.name), entry, 0))}
       </div>
       {/* 右键菜单（自绘玻璃菜单，fixed 定位，挂在组件根；边缘翻转——
           靠近右/下边缘时菜单向左/上开，VS Code 语义）。 */}

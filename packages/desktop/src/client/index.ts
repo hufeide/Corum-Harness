@@ -58,8 +58,64 @@ export function apply(ctx: Context): void {
   // inject 面 closeRegion 直通 ctx.layout.closeRegion（原 CLOSE_REGION_EVENT
   // 窗口事件桥已退役）；explorer 面（listDir + generation）内嵌资源管理器
   // 子面板的数据源——原独立插件 @corum/corum-ide-explorer-ui 已并入本卡。
-  ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation'], (editorCtx) => {
+  ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation', 'workspaces'], (editorCtx) => {
     const connection = editorCtx.get('connection') as ConnectionHandle
+
+    // ── 资源管理器根目录跟随当前工作区/会话（2026-09-04 用户定调：空态不该
+    // 默认打开 host cwd /Users/kukucai/dsh——树/编辑器必须关联当前项目/任务
+    // 的工作区）。优先级：当前会话 cwd > 首个工作区 path；**都没有（未打开
+    // 项目/无会话）→ 广播空态**（资源管理器显示「未打开项目」提示，不开
+    // host cwd）。
+    const sessionsSvc = editorCtx.get('sessions') as {
+      list: { subscribe: (fn: () => void) => () => void; getSnapshot: () => { current?: string; byId: Record<string, { cwd?: string }> } }
+    } | undefined
+    const workspacesSvc = editorCtx.get('workspaces') as {
+      list: { subscribe: (fn: () => void) => () => void; getSnapshot: () => { items: { path: string }[] } }
+    } | undefined
+    let lastRoot: string | null = null
+    /** 当前工作区根的只读快照（ExplorerPane 初始挂载时读——事件可能先于
+     *  组件挂载发出而丢失，快照是最可靠的初始态）。 */
+    const workspaceRootSnapshot = {
+      get: (): { root: string | null; rootName: string | null } => {
+        if (lastRoot === null || lastRoot === '') return { root: null, rootName: null }
+        const base = lastRoot.split(/[\\/]/).filter(Boolean).pop() ?? null
+        return { root: lastRoot, rootName: base }
+      },
+    }
+    const syncRoot = (): void => {
+      const snap = sessionsSvc?.list.getSnapshot()
+      const currentCwd = snap?.current !== undefined && snap.current !== '' ? snap.byId[snap.current]?.cwd : undefined
+      const target = (currentCwd !== undefined && currentCwd !== '')
+        ? currentCwd
+        : workspacesSvc?.list.getSnapshot().items[0]?.path
+      if (target === undefined || target === '') {
+        // 未打开项目：广播空态（ExplorerPane 显示提示，不渲染 dsh 树）。
+        if (lastRoot !== '') {
+          lastRoot = ''
+          window.dispatchEvent(new CustomEvent('corum:workspace-root-changed', { detail: { root: null } }))
+        }
+        return
+      }
+      if (target === lastRoot) return
+      lastRoot = target
+      void connection.rpc.call('/api', 'corumFs/setRoot', { args: { cwd: target } }).then(() => {
+        // 换根后重启 watch + 通知 EditorColumn 刷新树（cordis 红线：同 bundle
+        // 内 CustomEvent 是合法的一次性信号，非共享可变状态）。
+        void connection.rpc.call('/api', 'corumFs/watch', { args: {} })
+        window.dispatchEvent(new CustomEvent('corum:workspace-root-changed', { detail: { root: target } }))
+      }).catch((err: unknown) => {
+        console.warn('[corum-desktop] corumFs/setRoot failed', err)
+      })
+    }
+    // 启动时 + 会话/工作区列表变化时各同步一次。
+    syncRoot()
+    const unsubSessions = sessionsSvc?.list.subscribe(syncRoot)
+    const unsubWorkspaces = workspacesSvc?.list.subscribe(syncRoot)
+    editorCtx.effect(() => () => {
+      unsubSessions?.()
+      unsubWorkspaces?.()
+    }, 'corum-desktop: workspace root tracking')
+
     const dispose = editorCtx.slots.inject('corum.editor', () => editorCtx.slots.register(
       {
         name: 'corum.editor',
@@ -68,6 +124,7 @@ export function apply(ctx: Context): void {
           showEditor: () => { editorCtx.layout.setRegionHidden('corum.editor', false) },
           explorer: {
             generation: connection.generation,
+            workspaceRoot: workspaceRootSnapshot,
             listDir: async (path) => {
               const result = await connection.rpc.call('/api', 'corumFs/list', { args: { path } })
               return result as { ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }
