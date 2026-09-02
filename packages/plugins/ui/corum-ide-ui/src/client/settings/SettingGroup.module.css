@@ -6,6 +6,10 @@
 .group {
   /* 设计稿: fill_container width */
   width: 100%;
+  /* 在 .body 滚动容器里不被压缩：flex 子项默认 shrink:1，总高超 body 时卡片会被
+   * 压矮、内部 overflow:hidden 把内容（如版本历史多行）裁掉。flex:none 保持
+   * 内容固有高度，超高交由 .body 整体滚动，而非压缩单卡。 */
+  flex: none;
   /* 设计稿: glass-1 fill */
   background: var(--corum-glass-1);
   /* 设计稿: cornerRadius 16 */
