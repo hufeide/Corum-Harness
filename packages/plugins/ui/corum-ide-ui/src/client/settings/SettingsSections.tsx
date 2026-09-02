@@ -1252,21 +1252,37 @@ function SkillDetailView({ name, info, profiles, rpc, onBack, onChanged }: {
         )}
       </SettingGroup>
 
-      {/* 版本历史（下拉选中即生效） */}
+      {/* 版本历史：item 列表照旧展示，生效版本用下拉切换 */}
       <SettingGroup title={`版本历史（${versions.length}）`}>
         {versions.length === 0 && <p className={css.hintText}>暂无版本记录。</p>}
+        {versions.map(v => {
+          const active = v.id === pinned
+          return (
+            <div key={v.id} className={active ? css.versionRowActive : css.versionRow}>
+              <span className={active ? css.radioOn : css.radioOff} />
+              <div className={css.versionMeta}>
+                <span className={css.versionId}>{v.id}</span>
+                <span className={css.versionLabel}>{v.label}</span>
+              </div>
+              {active && <span className={css.currentTag}>当前使用</span>}
+            </div>
+          )
+        })}
         {versions.length > 0 && (
-          <>
+          <div className={css.versionSwitchRow}>
+            <span className={css.fieldLabel}>生效版本</span>
             <SelectField
               value={pinned ?? versions[versions.length - 1].id}
               options={versions.map(v => ({ id: v.id, label: `${v.id} · ${v.label}` }))}
               onChange={id => void switchVersion(id)}
               disabled={busy}
             />
-            <p className={css.hintText}>
-              {busy ? '切换中…' : `当前生效版本：${pinned ?? versions[versions.length - 1].id}。选择后该版本立即生效；Agent 仍按各自 pin 的版本引用。`}
-            </p>
-          </>
+          </div>
+        )}
+        {versions.length > 0 && (
+          <p className={css.hintText}>
+            {busy ? '切换中…' : '选择生效版本后立即生效；Agent 仍按各自 pin 的版本引用。'}
+          </p>
         )}
       </SettingGroup>
 

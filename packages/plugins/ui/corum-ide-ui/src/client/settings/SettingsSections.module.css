@@ -1160,17 +1160,23 @@
   border: none;
   border-radius: 10px;
   background: none;
-  cursor: pointer;
   text-align: left;
-}
-
-.versionRow:hover {
-  background: var(--corum-glass-2);
+  box-sizing: border-box;
 }
 
 .versionRowActive {
   background: var(--corum-glass-2);
   box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
+}
+
+/* 生效版本切换行（item 列表下方：label + 下拉） */
+.versionSwitchRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--corum-glass-border);
 }
 
 .radioOn,
