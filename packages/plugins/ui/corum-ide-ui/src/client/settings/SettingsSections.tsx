@@ -8,7 +8,7 @@
  *
  * 数据为设计稿静态文案占位，功能后续接入。
  */
-import { useState, useEffect, useContext, createContext, type ReactNode } from 'react'
+import { useState, useEffect, useRef, useContext, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
@@ -1131,6 +1131,92 @@ function SkillsSection() {
   )
 }
 
+/* ── 版本选择下拉（触发按钮 + portal 面板，面板内每个版本用 item 富形态）────── */
+
+function VersionSelect({ versions, pinned, onSelect, disabled }: {
+  versions: SkillVersion[]
+  pinned: string | undefined
+  onSelect: (versionId: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+
+  const current = versions.find(v => v.id === pinned) ?? versions[versions.length - 1]
+
+  useEffect(() => {
+    if (!open) return
+    const btn = btnRef.current
+    if (btn) {
+      const r = btn.getBoundingClientRect()
+      setPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (btnRef.current?.contains(t)) return
+      if (panelRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [open])
+
+  return (
+    <div className={css.versionSelectWrap}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={css.versionSelectBtn}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className={css.radioOn} />
+        <span className={css.versionMeta}>
+          <span className={css.versionId}>{current.id}</span>
+          <span className={css.versionLabel}>{current.label}</span>
+        </span>
+        <ChevronDown size={16} className={css.versionSelectChevron} />
+      </button>
+      {open && !disabled && pos && createPortal(
+        <div
+          ref={panelRef}
+          className={css.versionPanel}
+          role="listbox"
+          style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: pos.width }}
+        >
+          {versions.map(v => {
+            const active = v.id === current.id
+            return (
+              <button
+                key={v.id}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={active ? css.versionRowActive : css.versionRow}
+                onClick={() => { onSelect(v.id); setOpen(false) }}
+              >
+                <span className={active ? css.radioOn : css.radioOff} />
+                <div className={css.versionMeta}>
+                  <span className={css.versionId}>{v.id}</span>
+                  <span className={css.versionLabel}>{v.label}</span>
+                </div>
+                {active && <span className={css.currentTag}>当前使用</span>}
+              </button>
+            )
+          })}
+        </div>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
 /* ── 技能详情视图（基本信息 / SKILL.md 内容 / 版本历史 / 绑定关系）────────── */
 
 function SkillDetailView({ name, info, profiles, rpc, onBack, onChanged }: {
@@ -1252,37 +1338,16 @@ function SkillDetailView({ name, info, profiles, rpc, onBack, onChanged }: {
         )}
       </SettingGroup>
 
-      {/* 版本历史：item 列表照旧展示，生效版本用下拉切换 */}
+      {/* 版本历史：下拉选择（不 list 平铺），面板内版本项用 item 富形态，选中即生效 */}
       <SettingGroup title={`版本历史（${versions.length}）`}>
         {versions.length === 0 && <p className={css.hintText}>暂无版本记录。</p>}
-        {versions.map(v => {
-          const active = v.id === pinned
-          return (
-            <div key={v.id} className={active ? css.versionRowActive : css.versionRow}>
-              <span className={active ? css.radioOn : css.radioOff} />
-              <div className={css.versionMeta}>
-                <span className={css.versionId}>{v.id}</span>
-                <span className={css.versionLabel}>{v.label}</span>
-              </div>
-              {active && <span className={css.currentTag}>当前使用</span>}
-            </div>
-          )
-        })}
         {versions.length > 0 && (
-          <div className={css.versionSwitchRow}>
-            <span className={css.fieldLabel}>生效版本</span>
-            <SelectField
-              value={pinned ?? versions[versions.length - 1].id}
-              options={versions.map(v => ({ id: v.id, label: `${v.id} · ${v.label}` }))}
-              onChange={id => void switchVersion(id)}
-              disabled={busy}
-            />
-          </div>
-        )}
-        {versions.length > 0 && (
-          <p className={css.hintText}>
-            {busy ? '切换中…' : '选择生效版本后立即生效；Agent 仍按各自 pin 的版本引用。'}
-          </p>
+          <VersionSelect
+            versions={versions}
+            pinned={pinned}
+            onSelect={id => void switchVersion(id)}
+            disabled={busy}
+          />
         )}
       </SettingGroup>
 
