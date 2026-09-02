@@ -86,6 +86,10 @@ export interface EditorColumnInjected {
   deletePath: (path: string) => Promise<{ ok: boolean; error?: { message?: string } }>
   /** 重命名/移动（corumFs/rename RPC）。 */
   renamePath: (from: string, to: string) => Promise<{ ok: boolean; error?: { message?: string } }>
+  /** 取真实绝对路径（corumFs/absolutePath RPC；「复制路径」数据源）。 */
+  absolutePath: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { absolutePath: string } }>
+  /** 在系统文件管理器中显示（corumFs/reveal RPC；macOS open -R）。 */
+  revealPath: (path: string) => Promise<{ ok: boolean; error?: { message?: string } }>
   /** 启动项目根递归 watch（幂等）。 */
   startWatch: () => Promise<{ ok: boolean; error?: { message?: string } }>
   /** 取走累积的变更事件（client 2s 轮询）。 */
@@ -142,7 +146,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writeFile, mkdirp, deletePath, renamePath, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   const persisted = useMemo(loadPersisted, [])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
@@ -541,6 +545,46 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     await movePath(from, to)
   }, [renamePath])
 
+  /** 复制文件/文件夹（VS Code「复制」+「粘贴」：同目录自动加「 副本」后缀，
+   *  冲突再递增「 副本 2」…）。实现 = read + write（文本级复制；目录暂不支持
+   *  递归复制——host 侧无 cp RPC，目录粘贴走 rename 分支不适用）。 */
+  const onCopyPath = useCallback(async (from: string, toDir: string) => {
+    const name = from.split('/').pop() ?? ''
+    const dot = name.lastIndexOf('.')
+    const stem = dot > 0 ? name.slice(0, dot) : name
+    const ext = dot > 0 ? name.slice(dot) : ''
+    const fromDir = from.slice(0, from.lastIndexOf('/')) || '/'
+    const join = (n: string) => toDir === '/' ? `/${n}` : `${toDir}/${n}`
+    // 同目录 → 「 副本」；跨目录 → 原名
+    const candidate = toDir === fromDir ? join(`${stem} 副本${ext}`) : join(name)
+    const readResult = await readFile(from)
+    if (!readResult.ok || readResult.value === undefined) {
+      window.alert(`复制失败：无法读取源文件（${readResult.error?.message ?? '未知错误'}）`)
+      return
+    }
+    const result = await writeFile(candidate, readResult.value.content)
+    if (result.ok) {
+      setTreeRefreshGen(g => g + 1)
+    } else {
+      window.alert(`复制失败：${result.error?.message ?? '未知错误'}`)
+    }
+  }, [readFile, writeFile])
+
+  /** 「复制路径」数据源：corumFs/absolutePath RPC 取真实绝对路径。 */
+  const getAbsolutePath = useCallback(async (path: string): Promise<string | null> => {
+    const result = await absolutePath(path)
+    if (result.ok && result.value !== undefined) return result.value.absolutePath
+    window.alert(`无法获取绝对路径：${result.error?.message ?? '未知错误'}`)
+    return null
+  }, [absolutePath])
+
+  /** 「在 Finder 中显示」：corumFs/reveal RPC（host 侧 macOS `open -R`）。 */
+  const revealInFinder = useCallback((path: string) => {
+    void revealPath(path).then((result) => {
+      if (!result.ok) window.alert(`无法在 Finder 中显示：${result.error?.message ?? '未知错误'}`)
+    })
+  }, [revealPath])
+
   /** 移动路径（跨目录拖拽 / 同目录重命名共用）。to = 完整目标路径。 */
   const movePath = useCallback(async (from: string, to: string) => {
     if (to === from) return
@@ -854,6 +898,9 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
               onDeletePath={onDeletePath}
               onRenamePath={onRenamePath}
               onMovePath={movePath}
+              onCopyPath={onCopyPath}
+              getAbsolutePath={getAbsolutePath}
+              revealInFinder={revealInFinder}
             />
           </div>
         </>

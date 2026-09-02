@@ -93,6 +93,14 @@ export function apply(ctx: Context): void {
             const result = await connection.rpc.call('/api', 'corumFs/rename', { args: { from, to } })
             return result as { ok: boolean; error?: { message?: string } }
           },
+          absolutePath: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumFs/absolutePath', { args: { path } })
+            return result as { ok: boolean; error?: { message?: string }; value?: { absolutePath: string } }
+          },
+          revealPath: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumFs/reveal', { args: { path } })
+            return result as { ok: boolean; error?: { message?: string } }
+          },
           startWatch: async () => {
             const result = await connection.rpc.call('/api', 'corumFs/watch', { args: {} })
             return result as { ok: boolean; error?: { message?: string } }

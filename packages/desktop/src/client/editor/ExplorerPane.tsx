@@ -72,9 +72,37 @@ export interface ExplorerPaneInjected {
   onRenamePath: (from: string, newName: string) => void
   /** 移动路径（跨目录拖拽；to = 完整目标路径）。 */
   onMovePath: (from: string, to: string) => void
+  /** 复制文件/目录（VS Code「复制」+「粘贴」语义：同目录自动加「 副本」后缀）。 */
+  onCopyPath: (from: string, toDir: string) => void
+  /** 取绝对路径（「复制路径」菜单项；内部写剪贴板）。 */
+  getAbsolutePath: (path: string) => Promise<string | null>
+  /** 在系统文件管理器中显示（macOS Finder -R 揭示）。 */
+  revealInFinder: (path: string) => void
 }
 
 export type ExplorerPaneProps = ExplorerPaneInjected
+
+/** 写系统剪贴板（降级链：navigator.clipboard → execCommand 兜底）。 */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // Electron renderer 无焦点时 clipboard API 可能拒——execCommand 兜底。
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    let ok = false
+    try {
+      ok = document.execCommand('copy')
+    } catch { /* ignore */ }
+    document.body.removeChild(ta)
+    return ok
+  }
+}
 
 /** 工作区根名：generation host facts 里 cwd 的 basename，取不到时回退设计默认。 */
 function rootNameFromGeneration(generationState: ConnectionGenerationState): string {
@@ -121,12 +149,14 @@ function FileTypeIcon({ name }: { name: string }) {
   }
 }
 
-/** 右键菜单状态。 */
+/** 右键菜单状态。blank=true 表示空白区（tree-body）菜单，无 path。 */
 interface ContextMenuState {
   x: number
   y: number
   path: string
   isDir: boolean
+  /** 空白区菜单（新建/粘贴/刷新/折叠全部）。 */
+  blank?: boolean
 }
 
 /** 行内重命名状态。 */
@@ -136,7 +166,7 @@ interface RenamingState {
 }
 
 /** The resource manager sub-pane (see module doc). */
-export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath }: ExplorerPaneProps) {
+export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath, onCopyPath, getAbsolutePath, revealInFinder }: ExplorerPaneProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
   useSyncExternalStore(generation.subscribe, generation.getSnapshot)
@@ -161,6 +191,8 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
   /** 拖拽移动中的路径。 */
   const [dragPath, setDragPath] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  /** 剪贴板（VS Code 复制/剪切 + 粘贴语义；仅本面板内有效）。 */
+  const [clipboard, setClipboard] = useState<{ path: string; cut: boolean } | null>(null)
 
   const loadDir = useCallback((path: string): void => {
     setLoading((prev) => new Set(prev).add(path))
@@ -263,15 +295,55 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
     setRenaming(null)
   }, [renaming, onRenamePath])
 
-  /** tree-header 新建钮：在选中目录（或根）下创建。 */
+  /** tree-header 新建钮：VS Code 语义——优先树选中项（目录→其内；文件→所在
+   *  目录），无选中回退激活文件父目录，最后根目录。
+   *  （第十六~二十二轮的 activeFilePath 版有 bug：选中目录后新建仍落到
+   *  激活文件的目录，与选中预期不符。） */
   const selectedDirForCreate = useCallback((): string => {
+    // 1. 树选中项（最后选中 = 焦点）
+    if (selection.size > 0) {
+      const focusPath = Array.from(selection)[selection.size - 1]
+      if (focusPath === '/') return '/'
+      // 选中目录 → 其内；选中文件 → 所在目录。目录判定：expanded 集合或
+      // dirCache 命中的都是目录（文件不会进这两个结构）。
+      if (expanded.has(focusPath) || dirCache[focusPath] !== undefined) return focusPath
+      const idx = focusPath.lastIndexOf('/')
+      return idx <= 0 ? '/' : focusPath.slice(0, idx)
+    }
+    // 2. 激活文件的父目录
     if (activeFilePath !== null) {
-      // 激活文件的父目录
       const idx = activeFilePath.lastIndexOf('/')
       return idx <= 0 ? '/' : activeFilePath.slice(0, idx)
     }
     return '/'
-  }, [activeFilePath])
+  }, [selection, expanded, dirCache, activeFilePath])
+
+  /** 粘贴（VS Code：目标目录下粘贴；复制=cp，剪切=mv）。 */
+  const pasteInto = useCallback((destDir: string) => {
+    if (clipboard === null) return
+    const name = clipboard.path.split('/').pop() ?? ''
+    if (name === '') return
+    // 目标 = 源自身或源的子孙 → 拒绝（不能粘贴到自己里面）
+    if (destDir === clipboard.path || destDir.startsWith(`${clipboard.path}/`)) return
+    if (clipboard.cut) {
+      const to = destDir === '/' ? `/${name}` : `${destDir}/${name}`
+      if (to !== clipboard.path) onMovePath(clipboard.path, to)
+      setClipboard(null)
+    } else {
+      onCopyPath(clipboard.path, destDir)
+    }
+  }, [clipboard, onMovePath, onCopyPath])
+
+  /** 复制路径/相对路径到剪贴板。 */
+  const copyPathText = useCallback((path: string, absolute: boolean) => {
+    if (absolute) {
+      void getAbsolutePath(path).then((abs) => {
+        if (abs !== null) void copyTextToClipboard(abs)
+      })
+    } else {
+      void copyTextToClipboard(path)
+    }
+  }, [getAbsolutePath])
 
   // ── 新建行内输入（VS Code 语义：在目标目录下插一个 input 行；window.prompt
   // 在 Electron renderer 被禁用「prompt() is not supported」，不可用）。 ──
@@ -352,8 +424,29 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
     return out
   }, [rootEntries, dirCache, expanded])
 
-  /** 键盘导航（↑↓ 移动 / → 展开或进子 / ← 折叠或回父 / Enter 打开 / F2 重命名 / Delete 删除）。 */
+  /** 键盘导航（↑↓ 移动 / → 展开或进子 / ← 折叠或回父 / Enter 打开 / F2 重命名 /
+   *  Delete 删除 / ⌘C ⌘X ⌘V 复制剪切粘贴——VS Code 树快捷键）。 */
   const onTreeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // ⌘ 系快捷键（复制/剪切/粘贴）——不依赖可见列表，先处理。
+    if (e.metaKey || e.ctrlKey) {
+      const key = e.key.toLowerCase()
+      if (key === 'c' || key === 'x') {
+        if (selection.size > 0) {
+          e.preventDefault()
+          const focusPath = Array.from(selection)[selection.size - 1]
+          if (focusPath !== '/') setClipboard({ path: focusPath, cut: key === 'x' })
+        }
+        return
+      }
+      if (key === 'v') {
+        if (clipboard !== null) {
+          e.preventDefault()
+          pasteInto(selectedDirForCreate())
+        }
+        return
+      }
+      return
+    }
     const visible = flattenVisible()
     if (visible.length === 0) return
     // 焦点 = 多选集合的最后一项；无焦点 → 第一个
@@ -419,7 +512,7 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         break
       }
     }
-  }, [flattenVisible, selection, expanded, toggle, onOpenFile, onDeletePath])
+  }, [flattenVisible, selection, expanded, toggle, onOpenFile, onDeletePath, clipboard, pasteInto, selectedDirForCreate])
 
   /** 多选点击（⌘ 切换 / ⇧ 范围 / 普通单选）。 */
   const onNodeClick = useCallback((e: React.MouseEvent, path: string, isDir: boolean) => {
@@ -536,6 +629,13 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
             }}
             onContextMenu={(e) => {
               e.preventDefault()
+              e.stopPropagation()
+              // VS Code 语义：右键未选中的节点 → 先把它单选（菜单作用于
+              // 所见节点；也修「右键后新建落在别处」的体感错位）。
+              if (!selection.has(path)) {
+                setSelection(new Set([path]))
+                anchorRef.current = path
+              }
               setContextMenu({ x: e.clientX, y: e.clientY, path, isDir })
             }}
             title={entry.name}
@@ -659,6 +759,12 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         tabIndex={0}
         onKeyDown={onTreeKeyDown}
         data-tree-body=""
+        onContextMenu={(e) => {
+          // 空白区右键（未命中任何节点——节点自身 stopPropagation）：
+          // VS Code 根菜单（新建/粘贴/刷新/折叠全部）。
+          e.preventDefault()
+          setContextMenu({ x: e.clientX, y: e.clientY, path: '/', isDir: true, blank: true })
+        }}
       >
         {rootError !== null && <div className={css.error}>{rootError}</div>}
         {rootEntries === null && rootError === null && <div className={css.emptyDir}>加载中…</div>}
@@ -690,19 +796,54 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
           靠近右/下边缘时菜单向左/上开，VS Code 语义）。 */}
       {contextMenu !== null && (
         <ContextMenuView state={contextMenu} onClose={() => setContextMenu(null)}>
-          {contextMenu.isDir ? (
+          {contextMenu.blank === true ? (
+            <>
+              <button type="button" className={css.contextMenuItem} onClick={() => { startCreate('file', '/'); setContextMenu(null) }}>新建文件</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { startCreate('dir', '/'); setContextMenu(null) }}>新建文件夹</button>
+              <div className={css.contextMenuDivider} />
+              {clipboard !== null && (
+                <>
+                  <button type="button" className={css.contextMenuItem} onClick={() => { pasteInto('/'); setContextMenu(null) }}>粘贴</button>
+                  <div className={css.contextMenuDivider} />
+                </>
+              )}
+              <button type="button" className={css.contextMenuItem} onClick={() => { loadRoot(); setContextMenu(null) }}>刷新</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { collapseAll(); setContextMenu(null) }}>折叠全部</button>
+            </>
+          ) : contextMenu.isDir ? (
             <>
               <button type="button" className={css.contextMenuItem} onClick={() => { startCreate('file', contextMenu.path); setContextMenu(null) }}>新建文件</button>
               <button type="button" className={css.contextMenuItem} onClick={() => { startCreate('dir', contextMenu.path); setContextMenu(null) }}>新建文件夹</button>
               <div className={css.contextMenuDivider} />
+              <button type="button" className={css.contextMenuItem} onClick={() => { setClipboard({ path: contextMenu.path, cut: false }); setContextMenu(null) }}>复制</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { setClipboard({ path: contextMenu.path, cut: true }); setContextMenu(null) }}>剪切</button>
+              {clipboard !== null && (
+                <button type="button" className={css.contextMenuItem} onClick={() => { pasteInto(contextMenu.path); setContextMenu(null) }}>粘贴</button>
+              )}
+              <div className={css.contextMenuDivider} />
+              <button type="button" className={css.contextMenuItem} onClick={() => { copyPathText(contextMenu.path, true); setContextMenu(null) }}>复制路径</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { copyPathText(contextMenu.path, false); setContextMenu(null) }}>复制相对路径</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { revealInFinder(contextMenu.path); setContextMenu(null) }}>在 Finder 中显示</button>
+              <div className={css.contextMenuDivider} />
               <button type="button" className={css.contextMenuItem} onClick={() => { setRenaming({ path: contextMenu.path, draft: contextMenu.path.split('/').pop() ?? '' }); setContextMenu(null) }}>重命名</button>
               <button type="button" className={css.contextMenuItem} onClick={() => { loadDir(contextMenu.path); setContextMenu(null) }}>刷新</button>
-              <div className={css.contextMenuDivider} />
               <button type="button" className={`${css.contextMenuItem} ${css.contextMenuDanger}`} onClick={() => { onDeletePath(contextMenu.path, true); setContextMenu(null) }}>删除</button>
             </>
           ) : (
             <>
               <button type="button" className={css.contextMenuItem} onClick={() => { onOpenFile(contextMenu.path); setContextMenu(null) }}>打开</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { onOpenFile(contextMenu.path, { preview: false, pin: true }); setContextMenu(null) }}>固定打开</button>
+              <div className={css.contextMenuDivider} />
+              {/* VS Code 语义：文件右键的新建落在文件所在目录 */}
+              <button type="button" className={css.contextMenuItem} onClick={() => { const dir = contextMenu.path.slice(0, contextMenu.path.lastIndexOf('/')) || '/'; startCreate('file', dir); setContextMenu(null) }}>新建文件</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { const dir = contextMenu.path.slice(0, contextMenu.path.lastIndexOf('/')) || '/'; startCreate('dir', dir); setContextMenu(null) }}>新建文件夹</button>
+              <div className={css.contextMenuDivider} />
+              <button type="button" className={css.contextMenuItem} onClick={() => { setClipboard({ path: contextMenu.path, cut: false }); setContextMenu(null) }}>复制</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { setClipboard({ path: contextMenu.path, cut: true }); setContextMenu(null) }}>剪切</button>
+              <div className={css.contextMenuDivider} />
+              <button type="button" className={css.contextMenuItem} onClick={() => { copyPathText(contextMenu.path, true); setContextMenu(null) }}>复制路径</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { copyPathText(contextMenu.path, false); setContextMenu(null) }}>复制相对路径</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { revealInFinder(contextMenu.path); setContextMenu(null) }}>在 Finder 中显示</button>
               <div className={css.contextMenuDivider} />
               <button type="button" className={css.contextMenuItem} onClick={() => { setRenaming({ path: contextMenu.path, draft: contextMenu.path.split('/').pop() ?? '' }); setContextMenu(null) }}>重命名</button>
               <button type="button" className={`${css.contextMenuItem} ${css.contextMenuDanger}`} onClick={() => { onDeletePath(contextMenu.path, false); setContextMenu(null) }}>删除</button>

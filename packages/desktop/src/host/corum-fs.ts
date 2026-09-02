@@ -19,6 +19,7 @@
 
 import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { watch, type FSWatcher } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { dirname, isAbsolute, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
@@ -143,6 +144,61 @@ export class CorumFsService extends TypertRemoteService {
     } catch (error) {
       throw new Error(`cannot read file ${requested}: ${String(error)}`)
     }
+  }
+
+  /**
+   * 取相对路径的真实绝对路径（资源管理器「复制路径」的数据源）。
+   * 与 read 同一 realpath 防穿越校验；返回 realpath 解析后的绝对路径。
+   * @param path - 相对根的路径。
+   */
+  @Remote('absolutePath')
+  async absolutePath(path: string): Promise<{ absolutePath: string }> {
+    const root = resolve(process.cwd())
+    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${path}`)
+    }
+    const real = await realpath(target)
+    if (real !== root && !real.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${path}`)
+    }
+    return { absolutePath: real }
+  }
+
+  /**
+   * 在系统文件管理器中显示（资源管理器右键「在 Finder 中显示」）。
+   * macOS：`open -R <abs>`（揭示并选中）；其它平台退化为打开所在目录。
+   * 与 absolutePath 同一 realpath 防穿越校验。
+   * @param path - 相对根的路径。
+   */
+  @Remote('reveal')
+  async reveal(path: string): Promise<{ revealed: boolean }> {
+    const root = resolve(process.cwd())
+    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${path}`)
+    }
+    const real = await realpath(target)
+    if (real !== root && !real.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${path}`)
+    }
+    // macOS open -R 揭示选中；Linux xdg-open 所在目录；Windows explorer /select。
+    const isWin = process.platform === 'win32'
+    const cmd = process.platform === 'darwin' ? 'open' : isWin ? 'explorer' : 'xdg-open'
+    const args = process.platform === 'darwin' ? ['-R', real]
+      : isWin ? ['/select,', real]
+      : [dirname(real)]
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      const child = spawn(cmd, args, { stdio: 'ignore' })
+      child.on('error', rejectPromise)
+      child.on('exit', (code) => {
+        if (code === 0) resolvePromise()
+        else rejectPromise(new Error(`${cmd} exited with code ${code}`))
+      })
+    })
+    return { revealed: true }
   }
 
   /**
