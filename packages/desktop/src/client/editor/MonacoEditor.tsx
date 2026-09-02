@@ -25,30 +25,19 @@
  */
 
 import { useEffect, useRef } from 'react'
-import { editor } from 'monaco-editor/editor/editor.api'
+// Monaco 全量主入口（`monaco-editor` 裸 specifier → esm/vs/index.js）：
+//   - editor.api（editor/languages/Uri/KeyCode 等命名导出）；
+//   - basic-languages 全部语种 monarch tokenizer（语法高亮着色——tsx/jsx/css/
+//     html/json/md/py/yaml/sh/xml/sql/rs/go/java/cpp/ini 等 60+ 语种）；
+//   - editor contrib 全家（find/multicursor/bracketMatching/folding/suggest/
+//     gotoSymbol/semanticTokens/caretOperations/dropOrPaste 等）。
+// 为什么不用 editor.api 子集 + 按需 import：basic-languages/contribution 的
+// side-effect import specifier 会被 bundler 原样保留为运行时 require——dsh
+// 模块表没有这些 seed（「missed the module table」白屏）。主入口是模块表
+// seed（monaco-editor 裸名），其内部依赖全部内联，不产生运行时 require。
+import { editor } from 'monaco-editor'
 import type { editor as MonacoEditorApi } from 'monaco-editor'
 import { installMonacoWorkerEnvironment } from './worker.ts'
-
-// Side-effect language registrations: the tokenizers/features these contribute
-// are what make TS/JSON/CSS/HTML files highlight and parse. Kept to the four
-// the desktop shell's code surface actually opens; more can be added on demand.
-// The `./*` exports subpath maps these to esm/vs/language/*/monaco.contribution.js,
-// which carries no CSS (that lives in the full `monaco-editor` index), so the
-// client bundle stays free of Monaco's stylesheet stack.
-import 'monaco-editor/language/typescript/monaco.contribution.js'
-import 'monaco-editor/language/json/monaco.contribution.js'
-import 'monaco-editor/language/css/monaco.contribution.js'
-import 'monaco-editor/language/html/monaco.contribution.js'
-
-// Editor feature contributions（VS Code 体验对齐）：find/undo/multicursor 等是
-// 懒加载 contribution，editor.api 子集不含，需显式 import 注册。
-// 路径走 monaco exports map `./*` → `./esm/vs/*.js`（与 language contribution
-// 同一模式：不写 `esm/vs/` 前缀，让 bundler 与模块表解析一致）。
-import 'monaco-editor/editor/contrib/find/browser/findController.js'
-import 'monaco-editor/editor/contrib/multicursor/browser/multicursor.js'
-import 'monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching.js'
-import 'monaco-editor/editor/contrib/folding/browser/folding.js'
-import 'monaco-editor/editor/contrib/suggest/browser/suggestController.js'
 
 /** One code file shown in the editor. */
 export interface MonacoFileModel {
