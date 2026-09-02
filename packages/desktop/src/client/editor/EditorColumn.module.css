@@ -382,12 +382,12 @@
    英文（Cut/Copy/Paste/Command Palette——VS Code 官方中文化也是语言包插件，
    不在本轮范围）。 */
 :global(.monaco-menu .monaco-action-bar.vertical) {
-  background: var(--corum-glass-2) !important;
-  border: 1px solid var(--corum-glass-border) !important;
+  /* 背景/blur 上移到 .context-view 容器层（真实绘制背景的元素），这里保持透明，
+     避免在实色背景上做无效 blur。 */
+  background: transparent !important;
+  border: none !important;
   border-radius: 10px !important;
-  backdrop-filter: blur(20px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  box-shadow: none !important;
   padding: 4px !important;
 }
 :global(.monaco-menu .monaco-action-bar.vertical .action-menu-item) {
@@ -420,9 +420,12 @@
    容器本身有 box-shadow/border-radius/overflow，背景来自 --vscode-menu-background
    token（未覆盖时是原生深色）。覆盖容器 + token 为 corum 玻璃语言。 */
 :global(.context-view.monaco-menu-container) {
+  background: var(--corum-glass-2) !important;
   border: 1px solid var(--corum-glass-border) !important;
   border-radius: 10px !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  backdrop-filter: blur(20px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
   overflow: hidden;
 }
 /* monaco 菜单 token → corum 玻璃值（容器/菜单项/分隔线/hover 全链） */

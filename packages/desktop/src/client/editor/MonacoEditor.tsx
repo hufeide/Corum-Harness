@@ -288,6 +288,10 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         theme: dark ? 'corum-dark' : 'corum-light',
         scrollBeyondLastLine: false,
         fixedOverflowWidgets: true,
+        // 关键：关掉 shadow DOM（0.56 默认 true）。否则右键菜单等 overflow
+        // widget 渲染进 .shadow-root-host 的 shadow root，document 级玻璃拟态
+        // CSS 与 --vscode-menu-* token 覆盖全部失效，菜单退化为暗色原生块。
+        useShadowDOM: false,
         // 括号/缩进/折叠/空白字符（VS Code 默认体验对齐）。
         matchBrackets: 'always',
         bracketPairColorization: { enabled: true },
