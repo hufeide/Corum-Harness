@@ -6,8 +6,17 @@
  *
  * 真实文件读写（2026-09-04）：EditorColumn 管理已打开文件 tab 列表 + 活跃 tab
  * 的 Monaco 编辑器。文件内容经 corumFs/read RPC 加载、⌘S 经 corumFs/write
- * 保存。dirty 跟踪 = Monaco onChange 后内容与原始内容比对。状态栏显示真实
- * 行/列/编码/语言/dirty。
+ * 保存。状态栏显示真实行/列/编码/语言/dirty。
+ *
+ * P0 稳定性（2026-09-04 第十五轮）：
+ * - dirty 追踪以「磁盘基线 savedContent」为准——onContentChange 与基线比对，
+ *   改回原文即恢复干净；编辑期间外部重载只动基线、不覆盖在编辑内容。
+ * - Monaco 模型按路径缓存（见 MonacoEditor.tsx），tab 切换保留撤销栈/光标/
+ *   滚动；关闭 tab 经 disposePaths 释放模型。
+ * - 保存反馈：状态栏「保存中…/已保存 ✓/保存失败」；RPC 失败绝不静默吞
+ *   （console.error + 状态栏红字）。
+ * - 关闭 dirty tab 经 window.confirm 确认（保存并关闭/直接关闭/取消）。
+ * - 空态（无打开文件）隐藏 crumb 与状态栏，不再留白占位。
  *
  * 卡内结构：editor-main（Tabs → crumb → Code → Status）+ sash + divider +
  * 资源管理器子面板（ExplorerPane）。折叠态资源管理器完全消失，编辑器占满。
@@ -20,7 +29,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { PanelRightOpen, X } from 'lucide-react'
 import type {} from '@corum/corum-ide-ui/client'
 import { MonacoEditor, languageFromPath } from './MonacoEditor.tsx'
-import { ExplorerPane, type ExplorerPaneInjected, type FsEntry } from './ExplorerPane.tsx'
+import { ExplorerPane, type ExplorerPaneInjected } from './ExplorerPane.tsx'
 import css from './EditorColumn.module.css'
 
 /** One open file tab. */
@@ -29,15 +38,22 @@ interface EditorTab {
   readonly path: string
   /** Display title (basename). */
   readonly title: string
-  /** File content as loaded from disk. */
+  /** Current in-editor content (may differ from savedContent while dirty). */
   content: string
+  /** Baseline content as last loaded from / saved to disk. dirty = content !== savedContent. */
+  savedContent: string
   /** Language id for Monaco. */
   language: string
-  /** Whether the user has unsaved edits (content differs from last saved). */
-  dirty: boolean
   /** Load error (file not found / permission etc.). */
   error: string | null
 }
+
+/** 保存反馈（状态栏右侧短暂显示；失败常驻直到下次保存/编辑）。 */
+type SaveFeedback =
+  | { kind: 'saving' }
+  | { kind: 'saved' }
+  | { kind: 'failed'; message: string }
+  | null
 
 /** 本插件的注入面（见 client/index.ts apply）。 */
 export interface EditorColumnInjected {
@@ -90,6 +106,27 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
   const [activePath, setActivePath] = useState<string | null>(null)
   const activeTab = useMemo(() => tabs.find(t => t.path === activePath) ?? null, [tabs, activePath])
   const [cursorPos, setCursorPos] = useState({ line: 1, column: 1 })
+  /** Models of closed tabs to dispose (consumed once by MonacoEditor). */
+  const [disposePaths, setDisposePaths] = useState<string[]>([])
+  /** 保存反馈（每次保存动作重置；「已保存」1.6s 后自动消失）。 */
+  const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>(null)
+  const saveFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flashSaveFeedback = useCallback((next: SaveFeedback, autoClearMs?: number) => {
+    if (saveFeedbackTimer.current !== null) {
+      clearTimeout(saveFeedbackTimer.current)
+      saveFeedbackTimer.current = null
+    }
+    setSaveFeedback(next)
+    if (autoClearMs !== undefined) {
+      saveFeedbackTimer.current = setTimeout(() => {
+        setSaveFeedback(null)
+        saveFeedbackTimer.current = null
+      }, autoClearMs)
+    }
+  }, [])
+  useEffect(() => () => {
+    if (saveFeedbackTimer.current !== null) clearTimeout(saveFeedbackTimer.current)
+  }, [])
 
   /** Open a file tab (or switch to it if already open). Called by ExplorerPane click. */
   const openFile = useCallback(async (path: string) => {
@@ -107,8 +144,8 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
       path,
       title,
       content: '',
+      savedContent: '',
       language: languageFromPath(path, 'plaintext'),
-      dirty: false,
       error: null,
     }
     setTabs(prev => [...prev, newTab])
@@ -117,7 +154,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
       const result = await readFile(path)
       if (result.ok && result.value !== undefined) {
         setTabs(prev => prev.map(t => t.path === path
-          ? { ...t, content: result.value!.content, language: result.value!.language || t.language }
+          ? { ...t, content: result.value!.content, savedContent: result.value!.content, language: result.value!.language || t.language }
           : t,
         ))
       } else {
@@ -127,10 +164,16 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     } catch (err) {
       setTabs(prev => prev.map(t => t.path === path ? { ...t, error: String(err) } : t))
     }
-  }, [tabs, readFile])
+  }, [tabs, readFile, showEditor])
 
-  /** Close a tab. If it was active, activate the previous tab (or none). */
+  /** Close a tab. If dirty, confirm first (save / discard / cancel). */
   const closeTab = useCallback((path: string) => {
+    const tab = tabs.find(t => t.path === path)
+    if (tab === undefined) return
+    if (tab.content !== tab.savedContent) {
+      const ok = window.confirm(`「${tab.title}」有未保存的修改，关闭将丢弃这些修改。`)
+      if (!ok) return
+    }
     setTabs(prev => {
       const idx = prev.findIndex(t => t.path === path)
       if (idx < 0) return prev
@@ -142,35 +185,43 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
       }
       return next
     })
-  }, [activePath])
+    // Release the Monaco model for the closed tab (undo stack is dropped with it).
+    setDisposePaths([path])
+  }, [tabs, activePath])
 
-  /** Update content when the user types in Monaco (dirty tracking). */
+  /** Update content when the user types in Monaco (dirty = differs from disk baseline). */
   const onContentChange = useCallback((newContent: string) => {
     if (activePath === null) return
     setTabs(prev => prev.map(t => {
       if (t.path !== activePath) return t
-      // dirty = content differs from the last-saved snapshot.
-      // On first load, content === t.content, so dirty stays false until the user edits.
-      // We compare against the content that was loaded (before any local edits).
-      // Since we set t.content to the loaded value, any deviation = dirty.
-      return { ...t, content: newContent, dirty: true }
+      if (t.content === newContent) return t
+      return { ...t, content: newContent }
     }))
   }, [activePath])
 
   /** Save the active file (⌘S). */
   const saveActive = useCallback(async () => {
-    if (activeTab === null || activeTab.dirty === false) return
+    if (activeTab === null) return
+    if (activeTab.content === activeTab.savedContent) {
+      flashSaveFeedback({ kind: 'saved' }, 1600)
+      return
+    }
+    flashSaveFeedback({ kind: 'saving' })
     try {
       const result = await writeFile(activeTab.path, activeTab.content)
       if (result.ok) {
-        setTabs(prev => prev.map(t => t.path === activeTab.path ? { ...t, dirty: false } : t))
+        setTabs(prev => prev.map(t => t.path === activeTab.path ? { ...t, savedContent: t.content } : t))
+        flashSaveFeedback({ kind: 'saved' }, 1600)
       } else {
-        console.error('[editor] 保存失败', result.error?.message)
+        const msg = result.error?.message ?? '未知错误'
+        console.error('[editor] 保存失败', activeTab.path, msg)
+        flashSaveFeedback({ kind: 'failed', message: msg })
       }
     } catch (err) {
-      console.error('[editor] 保存异常', err)
+      console.error('[editor] 保存异常', activeTab.path, err)
+      flashSaveFeedback({ kind: 'failed', message: String(err) })
     }
-  }, [activeTab, writeFile])
+  }, [activeTab, writeFile, flashSaveFeedback])
 
   // ⌘S keyboard shortcut for save.
   useEffect(() => {
@@ -221,30 +272,42 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     }
   }, [activeTab])
 
+  const activeDirty = activeTab !== null && activeTab.content !== activeTab.savedContent
+
   return (
     <div className={css.column} data-code-editor-column="">
       <div className={css.editorMain}>
         {/* Editor Tabs */}
         <div className={css.tabs}>
-          {tabs.map((tab) => (
-            <div
-              key={tab.path}
-              className={`${css.tab}${tab.path === activePath ? ` ${css.tabActive}` : ''}`}
-              data-tab-active={tab.path === activePath || undefined}
-              onClick={() => setActivePath(tab.path)}
-            >
-              {tab.dirty && <span className={css.tabDirty} />}
-              <span className={css.tabTitle}>{tab.title}</span>
-              <button
-                type="button"
-                className={css.tabCloseBtn}
-                title="关闭"
-                onClick={(e) => { e.stopPropagation(); closeTab(tab.path) }}
+          {tabs.map((tab) => {
+            const dirty = tab.content !== tab.savedContent
+            return (
+              <div
+                key={tab.path}
+                className={`${css.tab}${tab.path === activePath ? ` ${css.tabActive}` : ''}`}
+                data-tab-active={tab.path === activePath || undefined}
+                onClick={() => setActivePath(tab.path)}
+                onAuxClick={(e) => {
+                  // Middle-click closes the tab (VS Code semantics).
+                  if (e.button === 1) {
+                    e.preventDefault()
+                    closeTab(tab.path)
+                  }
+                }}
               >
-                <X size={13} strokeWidth={2} />
-              </button>
-            </div>
-          ))}
+                {dirty && <span className={css.tabDirty} />}
+                <span className={css.tabTitle}>{tab.title}</span>
+                <button
+                  type="button"
+                  className={css.tabCloseBtn}
+                  title="关闭"
+                  onClick={(e) => { e.stopPropagation(); closeTab(tab.path) }}
+                >
+                  <X size={13} strokeWidth={2} />
+                </button>
+              </div>
+            )
+          })}
           <div className={css.spacer} />
           {explorerCollapsed && (
             <button
@@ -268,10 +331,12 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
           )}
         </div>
 
-        {/* crumb */}
-        <div className={css.crumb}>
-          {activeTab !== null ? activeTab.path.replace(/^\//, '').replace(/\//g, ' › ') : ''}
-        </div>
+        {/* crumb（空态隐藏，不留占位） */}
+        {activeTab !== null && (
+          <div className={css.crumb}>
+            {activeTab.path.replace(/^\//, '').replace(/\//g, ' › ')}
+          </div>
+        )}
 
         {/* Code */}
         <div className={css.code}>
@@ -284,6 +349,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
                 editable
                 onContentChange={onContentChange}
                 onCursorChange={setCursorPos}
+                disposePaths={disposePaths}
               />
             )
             : (
@@ -294,23 +360,26 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
           <div className={css.loadError}>加载失败：{activeTab.error}</div>
         )}
 
-        {/* Editor Status */}
-        <div className={css.status}>
-          {activeTab !== null && (
-            <>
-              <span>行 {cursorPos.line}, 列 {cursorPos.column}</span>
-              <span>UTF-8</span>
-              <span>{activeTab.language}</span>
-              <div className={css.statusSpacer} />
-              {activeTab.dirty && (
-                <>
-                  <span className={css.dirtyDot} />
-                  <span className={css.dirtyText}>未保存</span>
-                </>
-              )}
-            </>
-          )}
-        </div>
+        {/* Editor Status（空态隐藏） */}
+        {activeTab !== null && (
+          <div className={css.status}>
+            <span>行 {cursorPos.line}, 列 {cursorPos.column}</span>
+            <span>UTF-8</span>
+            <span>{activeTab.language}</span>
+            <div className={css.statusSpacer} />
+            {saveFeedback?.kind === 'saving' && <span className={css.savingText}>保存中…</span>}
+            {saveFeedback?.kind === 'saved' && !activeDirty && <span className={css.savedText}>已保存</span>}
+            {saveFeedback?.kind === 'failed' && (
+              <span className={css.saveFailedText} title={saveFeedback.message}>保存失败：{saveFeedback.message}</span>
+            )}
+            {activeDirty && (
+              <>
+                <span className={css.dirtyDot} />
+                <span className={css.dirtyText}>未保存</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sash + divider + explorer (hidden when collapsed). */}

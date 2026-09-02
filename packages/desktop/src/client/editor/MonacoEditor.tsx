@@ -7,6 +7,14 @@
  * driven by props. Phase 2 adds editable mode + content/cursor change callbacks
  * for dirty tracking and status bar.
  *
+ * Model caching (2026-09-04 P0): models are keyed by file path in a module-
+ * level cache and REUSED across tab switches — undo/redo stacks, cursor
+ * position and scroll state survive switching away and back. External content
+ * updates (file reloaded from disk / saved) reuse the model when the in-editor
+ * text already matches (no-op), or apply a full-range edit so the undo stack
+ * is preserved. Models are disposed only when their tab closes (the parent
+ * passes the closed path list via `disposePaths`).
+ *
  * Language contributions are imported for their side effects (registering
  * tokenizers/features) via the `monaco.contribution.js` subpath of each
  * language. The editor API itself comes from
@@ -55,6 +63,8 @@ export interface MonacoEditorProps {
   onContentChange?: (value: string) => void
   /** Fired when the cursor moves (status bar line/column). */
   onCursorChange?: (pos: { line: number; column: number }) => void
+  /** Paths whose models should be disposed (closed tabs). */
+  disposePaths?: readonly string[]
 }
 
 /**
@@ -132,15 +142,59 @@ export function languageFromPath(path: string, fallback: string): string {
   }
 }
 
+// ── Per-path model cache ────────────────────────────────────────────────────
+// Models are created once per file path and reused across tab switches, so
+// undo/redo history, cursor and scroll state survive. A model is disposed
+// only when its tab closes (EditorColumn passes the closed paths through the
+// `disposePaths` prop). Language changes re-create the model (rare: only when
+// the host's language detection disagrees with the initial extension guess).
+const modelCache = new Map<string, MonacoEditorApi.ITextModel>()
+
+function acquireModel(file: MonacoFileModel): MonacoEditorApi.ITextModel {
+  const cached = modelCache.get(file.path)
+  if (cached !== undefined && !cached.isDisposed()) {
+    if (cached.getLanguageId() !== file.language) {
+      // Language re-detected (host override): re-create, undo history is lost
+      // but this only happens once right after load.
+      cached.dispose()
+      const fresh = editor.createModel(file.value, file.language)
+      modelCache.set(file.path, fresh)
+      return fresh
+    }
+    if (cached.getValue() !== file.value) {
+      // External content update (reload from disk / save normalization):
+      // apply as a full-range edit so the undo stack is preserved.
+      cached.pushEditOperations(
+        [],
+        [{ range: cached.getFullModelRange(), text: file.value }],
+        () => null,
+      )
+    }
+    return cached
+  }
+  const model = editor.createModel(file.value, file.language)
+  modelCache.set(file.path, model)
+  return model
+}
+
+function disposeModels(paths: readonly string[]): void {
+  for (const path of paths) {
+    const model = modelCache.get(path)
+    if (model !== undefined) {
+      if (!model.isDisposed()) model.dispose()
+      modelCache.delete(path)
+    }
+  }
+}
+
 /**
  * Render a Monaco editor bound to one file model.
  * @param props - see {@link MonacoEditorProps}.
  * @returns the host div Monaco mounts into.
  */
-export function MonacoEditor({ file, dark = true, className, editable = false, onContentChange, onCursorChange }: MonacoEditorProps): React.ReactElement {
+export function MonacoEditor({ file, dark = true, className, editable = false, onContentChange, onCursorChange, disposePaths }: MonacoEditorProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null)
-  const modelRef = useRef<MonacoEditorApi.ITextModel | null>(null)
   // Stable refs to callbacks so the editor is not recreated on every parent render.
   const onContentChangeRef = useRef(onContentChange)
   onContentChangeRef.current = onContentChange
@@ -152,12 +206,12 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     installMonacoWorkerEnvironment()
   }, [])
 
-  // Create the editor once, on the host node.
+  // Create the editor once, on the host node. Theme switches call setTheme on
+  // the live instance instead of recreating it (preserves view state).
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
     defineCorumThemes()
-    const corumTheme = dark ? 'corum-dark' : 'corum-light'
     try {
       const instance = editor.create(host, {
         value: '',
@@ -165,7 +219,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         readOnly: !editable,
         automaticLayout: true,
         minimap: { enabled: false },
-        theme: corumTheme,
+        theme: dark ? 'corum-dark' : 'corum-light',
         scrollBeyondLastLine: false,
         fixedOverflowWidgets: true,
       })
@@ -185,21 +239,30 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
       editorRef.current?.dispose()
       editorRef.current = null
     }
-  }, [dark, editable])
+    // editable is a create-time option; a change recreates the editor (never
+    // happens in practice — the editor column is always editable).
+  }, [editable])
 
-  // Replace the model/content when the file changes.
+  // Theme switch on the live editor (no recreation → cursor/scroll survive).
+  useEffect(() => {
+    defineCorumThemes()
+    editor.setTheme(dark ? 'corum-dark' : 'corum-light')
+  }, [dark])
+
+  // Bind the cached per-path model to the editor (tab switch = setModel).
   useEffect(() => {
     const instance = editorRef.current
     if (instance === null) return
-    const model = editor.createModel(file.value, file.language)
-    instance.setModel(model)
-    const previous = modelRef.current
-    modelRef.current = model
-    if (previous !== null) previous.dispose()
-    return () => {
-      // Model is disposed on the next swap; nothing to do per-file here.
+    const model = acquireModel(file)
+    if (instance.getModel() !== model) {
+      instance.setModel(model)
     }
   }, [file.path, file.value, file.language])
+
+  // Dispose models of closed tabs.
+  useEffect(() => {
+    if (disposePaths !== undefined && disposePaths.length > 0) disposeModels(disposePaths)
+  }, [disposePaths])
 
   return (
     <div

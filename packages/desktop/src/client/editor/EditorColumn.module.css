@@ -223,6 +223,23 @@
   font-family: 'Inter', system-ui, sans-serif;
   color: var(--dsw-alias-state-warn-primary);
 }
+/* 保存反馈（状态栏右侧）：保存中/已保存/失败。 */
+.savingText {
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--dsw-alias-label-tertiary);
+}
+.savedText {
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--dsw-alias-state-success-primary);
+}
+.saveFailedText {
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--dsw-alias-state-error-primary);
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 空态（无打开文件时的 Code 区域占位）。 */
 .emptyCode {
