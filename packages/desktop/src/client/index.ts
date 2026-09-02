@@ -81,6 +81,26 @@ export function apply(ctx: Context): void {
             const result = await connection.rpc.call('/api', 'corumFs/write', { args: { path, content } })
             return result as { ok: boolean; error?: { message?: string } }
           },
+          mkdirp: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumFs/mkdir', { args: { path } })
+            return result as { ok: boolean; error?: { message?: string } }
+          },
+          deletePath: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumFs/delete', { args: { path } })
+            return result as { ok: boolean; error?: { message?: string } }
+          },
+          renamePath: async (from, to) => {
+            const result = await connection.rpc.call('/api', 'corumFs/rename', { args: { from, to } })
+            return result as { ok: boolean; error?: { message?: string } }
+          },
+          startWatch: async () => {
+            const result = await connection.rpc.call('/api', 'corumFs/watch', { args: {} })
+            return result as { ok: boolean; error?: { message?: string } }
+          },
+          pollChanges: async () => {
+            const result = await connection.rpc.call('/api', 'corumFs/pollChanges', { args: {} })
+            return result as { ok: boolean; error?: { message?: string }; value?: { changes: { path: string; kind: 'rename' | 'change' }[] } }
+          },
         }),
       },
       EditorColumn,

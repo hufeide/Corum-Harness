@@ -258,3 +258,10 @@
   font-size: 12px;
   color: var(--dsw-alias-state-error-primary);
 }
+
+/* 磁盘外部变更警告（watch 检测到已打开 tab 被外部修改且本地 dirty）。 */
+.externalChangedText {
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--dsw-alias-state-warn-primary);
+  font-size: 10px;
+}

@@ -15,11 +15,20 @@
  * cwd) via the official connection.rpc; the tree-header root name rides the
  * connection generation's host facts (host cwd basename, when published).
  *
+ * 第十六轮（2026-09-04）：
+ * - expandedPaths 受控（EditorColumn 持有 + 持久化）；tab 激活自动展开父级。
+ * - activeFilePath → 树选中同步 + scrollIntoView；树选中清空 → 通知 EditorColumn。
+ * - refreshGen bump → 局部刷新所有已展开目录（watch/新建/删除/重命名触发）。
+ * - 右键菜单（自绘玻璃菜单，design 无稿按 corum 菜单语言）：文件（打开/重命名/
+ *   删除）；目录（新建文件/新建文件夹/重命名/删除/刷新）。重命名行内 input；
+ *   删除由 EditorColumn confirm。
+ * - tree-header 新建文件/文件夹钮接通（在选中目录下创建，未选中在根）。
+ *
  * 折叠态（design waRkJ）由 EditorColumn 处理：折叠时不渲染本组件（无 32px
  * 竖条），展开/关闭按钮移入 Editor Tabs 行尾。本组件只负责展开态渲染。
  * @module corum-desktop/client/editor/ExplorerPane
  */
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ConnectionGenerationState } from '@deepseek-ai/dsh-client-connection/client'
 import {
   Braces, ChevronDown, ChevronRight, FileCode, FileCog, FilePlus, FileText,
@@ -45,16 +54,28 @@ export interface ExplorerPaneInjected {
   onToggleCollapsed: () => void
   /** 点击文件 → 编辑器打开 tab（核心联动）。 */
   onOpenFile: (path: string) => void
+  /** 编辑器当前激活文件路径（树选中同步 + scrollIntoView）。 */
+  activeFilePath: string | null
+  /** 展开的目录路径（受控，EditorColumn 持久化）。 */
+  expandedPaths: readonly string[]
+  /** 展开态变化（用户 chevron 点击）。 */
+  onExpandedChange: (paths: string[]) => void
+  /** 刷新生成号（watch/新建/删除/重命名 bump → 局部重载已展开目录）。 */
+  refreshGen: number
+  /** 新建文件（父目录 + 文件名）。 */
+  onCreateFile: (parentDir: string, name: string) => void
+  /** 新建文件夹（父目录 + 文件夹名）。 */
+  onCreateFolder: (parentDir: string, name: string) => void
+  /** 删除路径（EditorColumn confirm + tab 联动）。 */
+  onDeletePath: (path: string, isDir: boolean) => void
+  /** 重命名路径（EditorColumn RPC + tab 路径同步）。 */
+  onRenamePath: (from: string, newName: string) => void
 }
 
 export type ExplorerPaneProps = ExplorerPaneInjected
 
 /** 工作区根名：generation host facts 里 cwd 的 basename，取不到时回退设计默认。 */
 function rootNameFromGeneration(generationState: ConnectionGenerationState): string {
-  // 0.1.2 的 ConnectionHostInfo 只稳定携带 {home}（host 账户 home，供路径缩写
-  // 显示），不再携带旧 hostDescription 的 cwd。仍按未知 shape 防御式读取：
-  // 若未来 host facts 重新带上 cwd 即取之 basename；否则回退设计默认 'dsh'
-  // （不用 home 的 basename——它不是项目根名，显示有误导性）。
   const generation = generationState.getSnapshot()
   const host = generation?.host as { home?: unknown; cwd?: unknown } | undefined
   const cwd = host?.cwd
@@ -98,112 +119,227 @@ function FileTypeIcon({ name }: { name: string }) {
   }
 }
 
+/** 右键菜单状态。 */
+interface ContextMenuState {
+  x: number
+  y: number
+  path: string
+  isDir: boolean
+}
+
+/** 行内重命名状态。 */
+interface RenamingState {
+  path: string
+  draft: string
+}
+
 /** The resource manager sub-pane (see module doc). */
-export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile }: ExplorerPaneProps) {
+export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath }: ExplorerPaneProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
-  // 订阅 generation 源（连接建立/替换/丢失时触发重算根名）。
   useSyncExternalStore(generation.subscribe, generation.getSnapshot)
-  // 根名 = host facts 里 cwd 的 basename；连接前回退设计默认。
   const rootName = rootNameFromGeneration(generation)
   /** Path → children entries cache (lazy; undefined key = not loaded). */
   const [dirCache, setDirCache] = useState<Record<string, FsEntry[] | undefined>>({})
-  /** Currently expanded directory paths. */
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  /** 展开集合（受控 prop 的本地 Set 镜像，便于 O(1) 查询）。 */
+  const expanded = new Set(expandedPaths)
   /** Paths with an in-flight load (avoid duplicate fetches). */
   const [loading, setLoading] = useState<Set<string>>(() => new Set())
-  /** The selected node path (VS Code single-selection; '' = none). */
-  const [selected, setSelected] = useState<string>('')
+  /** 右键菜单。 */
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  /** 行内重命名。 */
+  const [renaming, setRenaming] = useState<RenamingState | null>(null)
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
+  /** 树容器（scrollIntoView 作用域）。 */
+  const treeBodyRef = useRef<HTMLDivElement | null>(null)
 
-  const loadRoot = useCallback((): void => {
-    listDir('/').then((result) => {
-      if (result.ok && result.value !== undefined) {
-        setRootEntries(result.value.entries)
-        setRootError(null)
-      } else {
-        setRootError(result.error?.message ?? '无法读取项目根目录')
-        setRootEntries(null)
+  const loadDir = useCallback((path: string): void => {
+    setLoading((prev) => new Set(prev).add(path))
+    listDir(path).then((result) => {
+      setDirCache((c) => ({ ...c, [path]: result.ok ? result.value?.entries : undefined }))
+      if (path === '/') {
+        if (result.ok && result.value !== undefined) {
+          setRootEntries(result.value.entries)
+          setRootError(null)
+        } else {
+          setRootError(result.error?.message ?? '无法读取项目根目录')
+        }
       }
-    }).catch((error: unknown) => {
-      setRootError(String(error))
+    }).catch(() => {
+      setDirCache((c) => ({ ...c, [path]: undefined }))
+    }).finally(() => {
+      setLoading((prev) => {
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
     })
   }, [listDir])
+
+  const loadRoot = useCallback((): void => {
+    loadDir('/')
+  }, [loadDir])
 
   // Load the project root once.
   useEffect(() => {
     loadRoot()
   }, [loadRoot])
 
+  // refreshGen bump → 重载根 + 所有已展开目录（局部刷新）。
+  const refreshGenRef = useRef(refreshGen)
+  useEffect(() => {
+    if (refreshGen === refreshGenRef.current) return
+    refreshGenRef.current = refreshGen
+    loadDir('/')
+    for (const p of expandedPaths) {
+      loadDir(p)
+    }
+  }, [refreshGen, expandedPaths, loadDir])
+
   const toggle = useCallback((path: string): void => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(path)) {
-        next.delete(path)
-      } else {
-        next.add(path)
-        setDirCache((cache) => {
-          if (cache[path] !== undefined) return cache
-          setLoading((loadingSet) => new Set(loadingSet).add(path))
-          listDir(path).then((result) => {
-            setDirCache((c) => ({ ...c, [path]: result.ok ? result.value?.entries : undefined }))
-          }).catch(() => {
-            setDirCache((c) => ({ ...c, [path]: undefined }))
-          }).finally(() => {
-            setLoading((loadingSet) => {
-              const nextLoading = new Set(loadingSet)
-              nextLoading.delete(path)
-              return nextLoading
-            })
-          })
-          return cache
-        })
+    const next = new Set(expandedPaths)
+    if (next.has(path)) {
+      next.delete(path)
+    } else {
+      next.add(path)
+      // 未缓存才加载
+      if (dirCache[path] === undefined) {
+        loadDir(path)
       }
-      return next
-    })
-  }, [listDir])
+    }
+    onExpandedChange(Array.from(next))
+  }, [expandedPaths, dirCache, loadDir, onExpandedChange])
 
   const collapseAll = useCallback((): void => {
-    setExpanded(new Set())
-  }, [])
+    onExpandedChange([])
+  }, [onExpandedChange])
+
+  // tab 激活 → 树选中 scrollIntoView（选中态由 activeFilePath 直接驱动渲染）。
+  useEffect(() => {
+    if (activeFilePath === null || treeBodyRef.current === null) return
+    const el = treeBodyRef.current.querySelector(`[data-tree-path="${CSS.escape(activeFilePath)}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [activeFilePath])
+
+  // 右键菜单：全局点击/Escape 关闭。
+  useEffect(() => {
+    if (contextMenu === null) return
+    const onDown = () => setContextMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setContextMenu(null) }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('blur', onDown)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('blur', onDown)
+    }
+  }, [contextMenu])
+
+  // 重命名 input 自动 focus + 选中主名（不含扩展名）。
+  useEffect(() => {
+    if (renaming === null || renameInputRef.current === null) return
+    const input = renameInputRef.current
+    input.focus()
+    const dot = renaming.draft.lastIndexOf('.')
+    input.setSelectionRange(0, dot > 0 ? dot : renaming.draft.length)
+  }, [renaming])
+
+  const commitRename = useCallback(() => {
+    if (renaming === null) return
+    const name = renaming.draft.trim()
+    if (name !== '' && name !== renaming.path.split('/').pop()) {
+      onRenamePath(renaming.path, name)
+    }
+    setRenaming(null)
+  }, [renaming, onRenamePath])
+
+  /** tree-header 新建钮：在选中目录（或根）下创建。 */
+  const selectedDirForCreate = useCallback((): string => {
+    if (activeFilePath !== null) {
+      // 激活文件的父目录
+      const idx = activeFilePath.lastIndexOf('/')
+      return idx <= 0 ? '/' : activeFilePath.slice(0, idx)
+    }
+    return '/'
+  }, [activeFilePath])
+
+  const promptCreateFile = useCallback((parentDir: string) => {
+    const name = window.prompt(`在 ${parentDir === '/' ? '根目录' : parentDir} 下新建文件：`, 'untitled.ts')
+    if (name !== null && name.trim() !== '') onCreateFile(parentDir, name.trim())
+  }, [onCreateFile])
+
+  const promptCreateFolder = useCallback((parentDir: string) => {
+    const name = window.prompt(`在 ${parentDir === '/' ? '根目录' : parentDir} 下新建文件夹：`, 'new-folder')
+    if (name !== null && name.trim() !== '') onCreateFolder(parentDir, name.trim())
+  }, [onCreateFolder])
 
   const renderNode = (path: string, entry: FsEntry, depth: number) => {
     const isDir = entry.type === 'dir'
     const isExpanded = expanded.has(path)
-    const isSelected = selected === path
+    const isSelected = activeFilePath === path
     const children = isDir ? dirCache[path] : undefined
     const isLoading = loading.has(path)
+    const isRenaming = renaming?.path === path
     return (
       <div key={path}>
-        <button
-          type="button"
-          className={`${css.node}${isSelected ? ` ${css.nodeSelected}` : ''}`}
-          style={{ paddingLeft: 6 + depth * 14 }}
-          onClick={() => {
-            setSelected(path)
-            if (isDir) {
-              toggle(path)
-            } else {
-              // 文件 → 编辑器打开 tab（单击预览语义：激活 tab，不关闭其他）。
-              onOpenFile(path)
-            }
-          }}
-          title={entry.name}
-        >
-          {isDir
-            ? (
-              <span className={css.caret}>
-                {isExpanded ? <ChevronDown size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
-              </span>
-            )
-            : <span className={css.caretSpacer} />}
-          {isDir
-            ? (isExpanded
-              ? <FolderOpen size={18} strokeWidth={2} className={css.dirIcon} />
-              : <Folder size={18} strokeWidth={2} className={css.dirIcon} />)
-            : <FileTypeIcon name={entry.name} />}
-          <span className={`${css.name}${isSelected ? ` ${css.nameSelected}` : ''}`}>{entry.name}</span>
-          {isLoading && <span className={css.loading}>…</span>}
-        </button>
+        {isRenaming ? (
+          <div className={css.renameRow} style={{ paddingLeft: 6 + depth * 14 }}>
+            <span className={css.caretSpacer} />
+            {isDir
+              ? <Folder size={18} strokeWidth={2} className={css.dirIcon} />
+              : <FileTypeIcon name={entry.name} />}
+            <input
+              ref={renameInputRef}
+              className={css.renameInput}
+              value={renaming.draft}
+              onChange={(e) => setRenaming({ path: renaming.path, draft: e.target.value })}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                if (e.key === 'Escape') setRenaming(null)
+                // IME composition（中文输入 Enter 确认候选不误提交）
+                if (e.key === 'Enter' && e.nativeEvent.isComposing) return
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            className={`${css.node}${isSelected ? ` ${css.nodeSelected}` : ''}`}
+            style={{ paddingLeft: 6 + depth * 14 }}
+            data-tree-path={path}
+            onClick={() => {
+              if (isDir) {
+                toggle(path)
+              } else {
+                // 文件 → 编辑器打开 tab
+                onOpenFile(path)
+              }
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setContextMenu({ x: e.clientX, y: e.clientY, path, isDir })
+            }}
+            title={entry.name}
+          >
+            {isDir
+              ? (
+                <span className={css.caret}>
+                  {isExpanded ? <ChevronDown size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
+                </span>
+              )
+              : <span className={css.caretSpacer} />}
+            {isDir
+              ? (isExpanded
+                ? <FolderOpen size={18} strokeWidth={2} className={css.dirIcon} />
+                : <Folder size={18} strokeWidth={2} className={css.dirIcon} />)
+              : <FileTypeIcon name={entry.name} />}
+            <span className={`${css.name}${isSelected ? ` ${css.nameSelected}` : ''}`}>{entry.name}</span>
+            {isLoading && <span className={css.loading}>…</span>}
+          </button>
+        )}
         {isDir && isExpanded && children !== undefined && (
           <div>
             {children.map(child => renderNode(joinPath(path, child.name), child, depth + 1))}
@@ -244,10 +380,10 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
       <div className={css.treeHeader}>
         <ChevronDown size={17} strokeWidth={2} className={css.headerChev} />
         <span className={css.headerRoot}>{rootName}</span>
-        <button type="button" className={css.tb} title="新建文件">
+        <button type="button" className={css.tb} title="新建文件" onClick={() => promptCreateFile(selectedDirForCreate())}>
           <FilePlus size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
-        <button type="button" className={css.tb} title="新建文件夹">
+        <button type="button" className={css.tb} title="新建文件夹" onClick={() => promptCreateFolder(selectedDirForCreate())}>
           <FolderPlus size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
         <button type="button" className={css.tb} title="刷新" onClick={loadRoot}>
@@ -258,11 +394,38 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         </button>
       </div>
       {/* QdSbb — tree-body。 */}
-      <div className={css.treeBody}>
+      <div className={css.treeBody} ref={treeBodyRef}>
         {rootError !== null && <div className={css.error}>{rootError}</div>}
         {rootEntries === null && rootError === null && <div className={css.emptyDir}>加载中…</div>}
         {rootEntries?.map(entry => renderNode(joinPath('/', entry.name), entry, 0))}
       </div>
+      {/* 右键菜单（自绘玻璃菜单，fixed 定位，挂在组件根）。 */}
+      {contextMenu !== null && (
+        <div
+          className={css.contextMenu}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {contextMenu.isDir ? (
+            <>
+              <button type="button" className={css.contextMenuItem} onClick={() => { promptCreateFile(contextMenu.path); setContextMenu(null) }}>新建文件</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { promptCreateFolder(contextMenu.path); setContextMenu(null) }}>新建文件夹</button>
+              <div className={css.contextMenuDivider} />
+              <button type="button" className={css.contextMenuItem} onClick={() => { setRenaming({ path: contextMenu.path, draft: contextMenu.path.split('/').pop() ?? '' }); setContextMenu(null) }}>重命名</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { loadDir(contextMenu.path); setContextMenu(null) }}>刷新</button>
+              <div className={css.contextMenuDivider} />
+              <button type="button" className={`${css.contextMenuItem} ${css.contextMenuDanger}`} onClick={() => { onDeletePath(contextMenu.path, true); setContextMenu(null) }}>删除</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className={css.contextMenuItem} onClick={() => { onOpenFile(contextMenu.path); setContextMenu(null) }}>打开</button>
+              <div className={css.contextMenuDivider} />
+              <button type="button" className={css.contextMenuItem} onClick={() => { setRenaming({ path: contextMenu.path, draft: contextMenu.path.split('/').pop() ?? '' }); setContextMenu(null) }}>重命名</button>
+              <button type="button" className={`${css.contextMenuItem} ${css.contextMenuDanger}`} onClick={() => { onDeletePath(contextMenu.path, false); setContextMenu(null) }}>删除</button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -17,8 +17,9 @@
  * @module corum-desktop/corum-fs
  */
 
-import { readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
-import { isAbsolute, resolve, sep } from 'node:path'
+import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { watch, type FSWatcher } from 'node:fs'
+import { dirname, isAbsolute, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 
@@ -41,13 +42,22 @@ function languageFromPath(path: string): string {
   switch (ext) {
     case 'ts': case 'tsx': case 'mts': case 'cts': return 'typescript'
     case 'js': case 'jsx': case 'mjs': case 'cjs': return 'javascript'
-    case 'json': case 'jsonc': return 'json'
+    case 'json': case 'jsonc': case 'json5': return 'json'
     case 'css': case 'scss': case 'less': return 'css'
-    case 'html': case 'htm': case 'xhtml': return 'html'
+    case 'html': case 'htm': case 'xhtml': case 'vue': case 'svelte': return 'html'
     case 'md': case 'markdown': return 'markdown'
-    case 'py': return 'python'
+    case 'py': case 'pyi': return 'python'
     case 'yaml': case 'yml': return 'yaml'
-    case 'sh': case 'bash': return 'shell'
+    case 'sh': case 'bash': case 'zsh': return 'shell'
+    case 'rs': return 'rust'
+    case 'go': return 'go'
+    case 'java': case 'kt': case 'kts': return 'java'
+    case 'c': case 'h': return 'c'
+    case 'cpp': case 'cc': case 'cxx': case 'hpp': case 'hh': return 'cpp'
+    case 'toml': case 'ini': case 'conf': return 'ini'
+    case 'xml': case 'svg': case 'plist': return 'xml'
+    case 'sql': return 'sql'
+    case 'lock': return 'plaintext'
     default: return 'plaintext'
   }
 }
@@ -59,6 +69,13 @@ function languageFromPath(path: string): string {
  * 挂载，与 CorumPluginManager 同一模式），无依赖服务。
  */
 export class CorumFsService extends TypertRemoteService {
+  /** 当前活跃的根 watcher（host cwd 递归）。 */
+  private watcher: FSWatcher | null = null
+  /** 累积的变更事件（client 经 pollChanges 取走后清空）。 */
+  private changeLog: { path: string; kind: 'rename' | 'change' }[] = []
+  /** watcher 启动时的去抖定时器。 */
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null
+
   constructor(ctx: Context) {
     super(ctx, 'corumFs')
   }
@@ -130,6 +147,7 @@ export class CorumFsService extends TypertRemoteService {
 
   /**
    * 写文件内容（编辑器保存 ⌘S 的数据源）。与 list/read 同一 realpath 防穿越校验。
+   * 新文件自动创建父目录（recursive mkdir）。
    * @param path - 相对根的路径。
    * @param content - 文件新内容（UTF-8）。
    */
@@ -151,11 +169,128 @@ export class CorumFsService extends TypertRemoteService {
       }
     }
     try {
+      // 新文件自动补父目录（mkdir recursive 已存在不报错）。
+      await mkdir(dirname(target), { recursive: true })
       await writeFile(target, content, 'utf8')
       return { path }
     } catch (error) {
       throw new Error(`cannot write file ${path}: ${String(error)}`)
     }
+  }
+
+  /**
+   * 新建目录（资源管理器「新建文件夹」）。recursive（已存在不报错）。
+   * @param path - 相对根的路径。
+   */
+  @Remote('mkdir')
+  async mkdirp(path: string): Promise<{ path: string }> {
+    const root = resolve(process.cwd())
+    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${path}`)
+    }
+    try {
+      await mkdir(target, { recursive: true })
+      return { path }
+    } catch (error) {
+      throw new Error(`cannot mkdir ${path}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 删除文件或目录（资源管理器右键「删除」）。目录递归删除。
+   * @param path - 相对根的路径。
+   */
+  @Remote('delete')
+  async remove(path: string): Promise<{ path: string }> {
+    const root = resolve(process.cwd())
+    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target === root || !target.startsWith(root + sep)) {
+      throw new Error(`refusing to delete the project root or outside path: ${path}`)
+    }
+    const real = await realpath(target)
+    if (real === root || !real.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${path}`)
+    }
+    try {
+      await rm(real, { recursive: true, force: true })
+      return { path }
+    } catch (error) {
+      throw new Error(`cannot delete ${path}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 重命名/移动（资源管理器右键「重命名」、拖拽移动）。
+   * @param from - 源相对路径。
+   * @param to - 目标相对路径。
+   */
+  @Remote('rename')
+  async renamePath(from: string, to: string): Promise<{ from: string; to: string }> {
+    const root = resolve(process.cwd())
+    const normFrom = from === '/' || from === '' ? '.' : from.replace(/^\/+/, '')
+    const normTo = to === '/' || to === '' ? '.' : to.replace(/^\/+/, '')
+    const targetFrom = resolve(root, normFrom)
+    const targetTo = resolve(root, normTo)
+    if (targetFrom === root || !targetFrom.startsWith(root + sep)) {
+      throw new Error(`refusing to rename the project root or outside path: ${from}`)
+    }
+    if (targetTo !== root && !targetTo.startsWith(root + sep)) {
+      throw new Error(`destination escapes the project root: ${to}`)
+    }
+    const realFrom = await realpath(targetFrom)
+    if (realFrom === root || !realFrom.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${from}`)
+    }
+    try {
+      await mkdir(dirname(targetTo), { recursive: true })
+      await rename(realFrom, targetTo)
+      return { from, to }
+    } catch (error) {
+      throw new Error(`cannot rename ${from} → ${to}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 启动项目根递归 watch（幂等）。变更事件累积进 changeLog，client 经
+   * `pollChanges` 取走。过滤 .git / node_modules / 点开头的隐藏项（与 list 同
+   * 规则）。500ms 去抖（编辑器保存一顿连写只报一次）。
+   */
+  @Remote('watch')
+  async startWatch(): Promise<{ watching: boolean }> {
+    if (this.watcher !== null) return { watching: true }
+    const root = resolve(process.cwd())
+    try {
+      this.watcher = watch(root, { recursive: true }, (eventType, filename) => {
+        if (filename === null || filename === '') return
+        const parts = filename.split(sep)
+        // 与 list 同规则：过滤 .git / node_modules / 点开头的隐藏段。
+        if (parts.some(p => p === '.git' || p === 'node_modules' || p.startsWith('.'))) return
+        if (this.debounceTimer !== null) clearTimeout(this.debounceTimer)
+        this.debounceTimer = setTimeout(() => {
+          this.changeLog.push({ path: `/${filename.split(sep).join('/')}`, kind: eventType === 'rename' ? 'rename' : 'change' })
+          this.debounceTimer = null
+        }, 500)
+      })
+      this.watcher.on('error', (err) => {
+        console.error('[corum-fs] watcher error', err)
+      })
+      return { watching: true }
+    } catch (error) {
+      throw new Error(`cannot watch project root: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 取走累积的变更事件（client 轮询）。返回后清空 changeLog。
+   */
+  @Remote('pollChanges')
+  async pollChanges(): Promise<{ changes: { path: string; kind: 'rename' | 'change' }[] }> {
+    const changes = this.changeLog
+    this.changeLog = []
+    return { changes }
   }
 
   /**

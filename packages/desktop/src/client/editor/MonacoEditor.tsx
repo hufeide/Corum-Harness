@@ -131,13 +131,22 @@ export function languageFromPath(path: string, fallback: string): string {
   switch (ext) {
     case 'ts': case 'tsx': case 'mts': case 'cts': return 'typescript'
     case 'js': case 'jsx': case 'mjs': case 'cjs': return 'javascript'
-    case 'json': case 'jsonc': return 'json'
+    case 'json': case 'jsonc': case 'json5': return 'json'
     case 'css': case 'scss': case 'less': return 'css'
-    case 'html': case 'htm': case 'xhtml': return 'html'
+    case 'html': case 'htm': case 'xhtml': case 'vue': case 'svelte': return 'html'
     case 'md': case 'markdown': return 'markdown'
-    case 'py': return 'python'
+    case 'py': case 'pyi': return 'python'
     case 'yaml': case 'yml': return 'yaml'
-    case 'sh': case 'bash': return 'shell'
+    case 'sh': case 'bash': case 'zsh': return 'shell'
+    case 'rs': return 'rust'
+    case 'go': return 'go'
+    case 'java': case 'kt': case 'kts': return 'java'
+    case 'c': case 'h': return 'c'
+    case 'cpp': case 'cc': case 'cxx': case 'hpp': case 'hh': return 'cpp'
+    case 'toml': case 'ini': case 'conf': return 'ini'
+    case 'xml': case 'svg': case 'plist': return 'xml'
+    case 'sql': return 'sql'
+    case 'lock': return 'plaintext'
     default: return fallback
   }
 }
