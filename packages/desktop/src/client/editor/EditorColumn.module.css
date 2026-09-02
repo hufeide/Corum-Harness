@@ -415,3 +415,25 @@
   padding: 0 !important;
   height: 1px !important;
 }
+
+/* ── Monaco 菜单外层容器 corum 化（.context-view.monaco-menu-container） ──
+   容器本身有 box-shadow/border-radius/overflow，背景来自 --vscode-menu-background
+   token（未覆盖时是原生深色）。覆盖容器 + token 为 corum 玻璃语言。 */
+:global(.context-view.monaco-menu-container) {
+  border: 1px solid var(--corum-glass-border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  overflow: hidden;
+}
+/* monaco 菜单 token → corum 玻璃值（容器/菜单项/分隔线/hover 全链） */
+:global(.monaco-menu-container),
+:global(.context-view) {
+  --vscode-menu-background: var(--corum-glass-2) !important;
+  --vscode-menu-foreground: var(--dsw-alias-label-primary) !important;
+  --vscode-menu-border: var(--corum-glass-border) !important;
+  --vscode-menu-selectionBackground: var(--corum-glass-3) !important;
+  --vscode-menu-selectionForeground: var(--dsw-alias-label-primary) !important;
+  --vscode-menu-separatorBackground: var(--corum-glass-border) !important;
+  --vscode-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  --vscode-cornerRadius-large: 10px !important;
+}
