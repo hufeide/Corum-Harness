@@ -793,7 +793,7 @@ function AddMcpServerDialog({ onClose, onAdd }: {
                 <button
                   key={t}
                   type="button"
-                  className={t === transport ? css.transportPillActive : css.transportPill}
+                  className={`${css.transportPill}${t === transport ? ' ' + css.transportPillActive : ''}`}
                   onClick={() => setTransport(t)}
                 >{t}</button>
               ))}
