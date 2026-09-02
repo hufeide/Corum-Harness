@@ -19,7 +19,9 @@
  */
 
 import { createInterface } from 'node:readline'
-import { join } from 'node:path'
+import { dirname, join, normalize, resolve, sep } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { bootDesktop, resolveDesktopHome } from './boot.ts'
 import { CorumSessionArchive } from './session-archive.ts'
 
@@ -78,6 +80,40 @@ async function main(): Promise<void> {
   })
   const webUrl = `http://${LOOPBACK_HOST}:${String(port)}`
   const authenticatedUrl = connection.authenticatedUrl(webUrl)
+
+  // Register Monaco worker files on the loopback webserver so the renderer
+  // (loaded from http://127.0.0.1:<port>) can construct Workers from the
+  // same origin. The corumapp:// protocol can't serve cross-origin Workers.
+  const workersDir = join(dirname(fileURLToPath(import.meta.url)), 'workers')
+  const webServer = ctx.webServer
+  if (webServer !== undefined && typeof webServer.register === 'function') {
+    webServer.register({
+      kind: 'prefix',
+      path: '/monaco',
+      handler: async (req, res) => {
+        const url = new URL(req.url ?? '', webUrl)
+        const name = url.pathname.slice('/monaco/'.length)
+        // Path traversal guard
+        const safe = resolve(normalize(join(workersDir, name)))
+        if (!safe.startsWith(workersDir + sep) && safe !== workersDir) {
+          res.statusCode = 403
+          res.end('forbidden')
+          return
+        }
+        try {
+          const body = await readFile(safe)
+          res.setHeader('content-type', 'text/javascript; charset=utf-8')
+          res.setHeader('cache-control', 'no-cache')
+          res.end(body)
+        } catch {
+          res.statusCode = 404
+          res.end('not found')
+        }
+      },
+    })
+    process.stderr.write('[corum-desktop] monaco workers served at /monaco/\n')
+  }
+
   send({ type: 'ready', authenticatedUrl })
 
   const readline = createInterface({ input: process.stdin })

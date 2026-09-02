@@ -80,6 +80,7 @@ export function registerProtocols(
           headers: {
             'content-type': 'text/javascript; charset=utf-8',
             'cache-control': 'no-cache',
+            'access-control-allow-origin': '*',
           },
         })
       } catch {

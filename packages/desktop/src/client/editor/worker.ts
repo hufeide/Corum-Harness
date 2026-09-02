@@ -1,22 +1,21 @@
 /**
  * Monaco language-worker dispatch for the desktop renderer.
  *
- * Monaco loads its editor core and per-language analysis in web workers. Each
- * worker is a self-contained script the desktop shell stages into its frontend
- * dist (build/dist/monaco/*.worker.js) and serves over the existing
- * `corumapp://` custom protocol — no new protocol path, and no bundler "new URL"
- * rewriting. `MonacoEnvironment.getWorker` is assigned once, before any editor
- * is created, and answers each worker label with a Worker constructed against
- * that protocol URL.
+ * Workers are served from the loopback webserver at `/monaco/<name>.worker.js`
+ * (registered in bridge.ts). Since the page is loaded from the same origin
+ * (http://127.0.0.1:<port>), `new Worker(url)` succeeds without cross-origin
+ * issues. The worker script text is fetched once and cached as a blob URL.
  *
  * Worker labels are Monaco's own vocabulary: `editorWorkerService` is the
- * editor core (text model sync, diff, etc.); `typescript`, `json`, `css`, and
- * `html` are the language services that opt into their dedicated workers.
+ * editor core; `typescript`, `json`, `css`, `html` are language services.
  * @module corum-desktop/client/editor/worker
  */
 
-/** Protocol base the dist index loads under (see protocol.ts). */
-const MONACO_WORKER_BASE = 'corumapp://app/monaco'
+/** HTTP base workers are served from (same origin as the page). */
+function monacoWorkerBase(): string {
+  const { origin } = globalThis.location ?? { origin: 'http://127.0.0.1:0' }
+  return `${origin}/monaco`
+}
 
 /** The language labels Monaco dispatches to a dedicated worker script. */
 const WORKER_SCRIPTS: Readonly<Record<string, string>> = {
@@ -32,35 +31,57 @@ const WORKER_SCRIPTS: Readonly<Record<string, string>> = {
   razor: 'html.worker.js',
 }
 
-/** Worker labels that reuse Monaco's core editor worker (no dedicated script). */
-const CORE_WORKER_LABELS = new Set(['editorWorkerService'])
+/** Cache of blob URLs so we don't re-fetch the same worker script. */
+const blobUrlCache = new Map<string, string>()
 
-/** The sameWorker-shared worker kinds Monaco reuses across some languages. */
-const SHARED_WORKER_LABELS = new Set([
-  'handlebars', 'razor', 'less', 'scss', 'html', 'json', 'css',
-])
+/** Pending fetch promises (the first time a script is requested). */
+const pending = new Map<string, Promise<string>>()
 
 /**
- * The one Monaco environment hook: answer every worker request with a Worker
- * pointed at the staged worker script over `corumapp://`.
+ * Fetch a worker script from `corumapp://` and create a same-origin blob URL.
+ * The blob: URL inherits the page's origin (http://127.0.0.1:<port>), so
+ * `new Worker(blobUrl)` succeeds without cross-origin SecurityError.
+ */
+async function fetchWorkerBlob(scriptName: string): Promise<string> {
+  const cached = blobUrlCache.get(scriptName)
+  if (cached !== undefined) return cached
+  const url = `${monacoWorkerBase()}/${scriptName}`
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`failed to fetch worker ${scriptName}: ${String(response.status)}`)
+  const text = await response.text()
+  const blob = new Blob([text], { type: 'application/javascript' })
+  const blobUrl = URL.createObjectURL(blob)
+  blobUrlCache.set(scriptName, blobUrl)
+  return blobUrl
+}
+
+/**
+ * The one Monaco environment hook: answer every worker request with a Worker.
+ * Because blob fetching is async and Monaco's `getWorker` is sync, we kick off
+ * the fetch on the first call and return undefined — Monaco retries, and the
+ * cached blob URL is ready by then (workers are requested lazily, well after
+ * page load, so the first undefined return doesn't block rendering).
  * @param workerId - `workerMain.js` (Monaco's fixed worker entry id).
  * @param label - the worker descriptor label (see {@link WORKER_SCRIPTS}).
- * @returns a Worker for the label, or undefined when the label needs no worker.
+ * @returns a Worker for the label, or undefined when the fetch is still pending.
  */
 export function getWorker(workerId: string, label: string): Worker | undefined {
-  // Core editor service always gets the core worker.
-  if (label === 'editorWorkerService') {
-    return new Worker(`${MONACO_WORKER_BASE}/${WORKER_SCRIPTS.editorWorkerService}`, {
-      type: 'classic',
-      name: 'monaco-editor-worker',
-    })
+  const script = WORKER_SCRIPTS[label] ?? WORKER_SCRIPTS.editorWorkerService
+  // If the blob URL is already cached, create the Worker immediately.
+  const cached = blobUrlCache.get(script)
+  if (cached !== undefined) {
+    return new Worker(cached, { type: 'classic', name: `monaco-${label}` })
   }
-  const script = WORKER_SCRIPTS[label]
-  if (script === undefined) return undefined
-  return new Worker(`${MONACO_WORKER_BASE}/${script}`, {
-    type: 'classic',
-    name: `monaco-${label}-worker`,
-  })
+  // Kick off the fetch (idempotent — same script won't be fetched twice).
+  if (!pending.has(script)) {
+    pending.set(script, fetchWorkerBlob(script).catch((err) => {
+      console.error('[corum-desktop] monaco worker fetch failed:', script, err)
+      pending.delete(script)
+      throw err
+    }))
+  }
+  // Return undefined — Monaco will call getWorker again after a microtask.
+  return undefined
 }
 
 /**
@@ -68,9 +89,6 @@ export function getWorker(workerId: string, label: string): Worker | undefined {
  * first editor model is created.
  */
 export function installMonacoWorkerEnvironment(): void {
-  // Monaco reads the environment from its own module-scoped singleton; the
-  // editor.api re-exports `Environment` only on some bundles, so assign the
-  // global hook monaco expects. This is the documented standalone contract.
   const existing = (globalThis as unknown as { MonacoEnvironment?: unknown }).MonacoEnvironment
   if (existing !== undefined) return
   ;(globalThis as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
