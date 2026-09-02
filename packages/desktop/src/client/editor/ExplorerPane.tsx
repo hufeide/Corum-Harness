@@ -262,6 +262,18 @@ export function ExplorerPane({ listDir, generation, workspaceRoot, closeRegion, 
     loadRoot()
   }, [loadRoot, noWorkspace])
 
+  // 「展开但未缓存」的目录一律补 loadDir（声明式，非 mount 一次性——
+  // 关浮窗/区域重挂载后 expandedPaths 持久化含展开目录、dirCache 空，且
+  // EditorColumn 的 expandedDirs 从 localStorage 恢复有先后，mount 时可能
+  // 还是空；渲染期每次检查，展开目录缺缓存即补，children===undefined 不再
+  // 滞留成「加载失败」）。
+  useEffect(() => {
+    if (noWorkspace) return
+    for (const p of expandedPaths) {
+      if (dirCache[p] === undefined && !loading.has(p)) loadDir(p)
+    }
+  }, [expandedPaths, dirCache, loading, noWorkspace, loadDir])
+
   // refreshGen bump → 重载根 + 所有已展开目录（局部刷新）。
   const refreshGenRef = useRef(refreshGen)
   useEffect(() => {
@@ -721,7 +733,7 @@ export function ExplorerPane({ listDir, generation, workspaceRoot, closeRegion, 
           </div>
         )}
         {isDir && isExpanded && children === undefined && !isLoading && (
-          <div className={css.emptyDir}>加载失败</div>
+          <button type="button" className={css.emptyDir} style={{ cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left' }} onClick={() => loadDir(path)} title="点击重试">加载失败（点击重试）</button>
         )}
       </div>
     )
@@ -808,7 +820,9 @@ export function ExplorerPane({ listDir, generation, workspaceRoot, closeRegion, 
             <span style={{ fontSize: 12, opacity: 0.7 }}>在侧栏打开项目或开始任务后，这里显示对应工作区的文件</span>
           </div>
         )}
-        {!noWorkspace && rootError !== null && <div className={css.error}>{rootError}</div>}
+        {!noWorkspace && rootError !== null && (
+          <button type="button" className={css.error} style={{ cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left' }} onClick={loadRoot} title="点击重试">{rootError}（点击重试）</button>
+        )}
         {!noWorkspace && rootEntries === null && rootError === null && <div className={css.emptyDir}>加载中…</div>}
         {/* 根目录新建行（在根下创建时插入首位） */}
         {creating !== null && creating.parentDir === '/' && (

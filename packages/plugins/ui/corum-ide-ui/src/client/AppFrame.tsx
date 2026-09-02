@@ -1044,6 +1044,13 @@ export function IdeAppFrame({
   // 未接线会抛「grid actions not wired」把整个 slot entry 打崩（浮窗纯黑）。
   // 浮窗语义：closeRegion = 关浮窗回主窗（窗口自身关闭即 notifyFloating(false)
   // 恢复主窗列）；其余区域操作在浮窗无意义，no-op 兜底。
+  //
+  // **同步接线（渲染期，非 useEffect）**：slot occupant 的 effect（EditorColumn
+  // 的 showEditor/restore tabs）与 AppFrame 的 effect 同批 flush，子组件 effect
+  // 先于父组件跑——useEffect 接线太晚，occupant 的 #requireGrid 已在子 effect
+  // 里抛错。渲染期同步 attach 保证 occupant 任何 effect 到达前已就位。
+  // attachGridActions 是 LayoutController 的纯赋值（非 React setState），渲染期
+  // 调用无副作用；useMemo 保证 floatingGridActions 引用稳定，幂等。
   const floatingGridActions = useMemo<GridActions>(() => ({
     setRegionHidden: (_slot: string, _hidden: boolean) => {},
     closeRegion: (_slot: string) => { window.close() },
@@ -1056,9 +1063,9 @@ export function IdeAppFrame({
     hiddenSlotsSnapshot: () => [],
     onGridChange: (_listener: () => void) => () => {},
   }), [])
-  useEffect(() => {
-    if (floatKey !== null) attachGridActions(floatingGridActions)
-  }, [floatKey, attachGridActions, floatingGridActions])
+  if (floatKey !== null) {
+    attachGridActions(floatingGridActions)
+  }
   if (floatKey !== null) {
     const mountable = FLOATABLE_SLOTS.has(floatKey)
     return (
