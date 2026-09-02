@@ -686,13 +686,10 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         )}
         {rootEntries?.map(entry => renderNode(joinPath('/', entry.name), entry, 0))}
       </div>
-      {/* 右键菜单（自绘玻璃菜单，fixed 定位，挂在组件根）。 */}
+      {/* 右键菜单（自绘玻璃菜单，fixed 定位，挂在组件根；边缘翻转——
+          靠近右/下边缘时菜单向左/上开，VS Code 语义）。 */}
       {contextMenu !== null && (
-        <div
-          className={css.contextMenu}
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
+        <ContextMenuView state={contextMenu} onClose={() => setContextMenu(null)}>
           {contextMenu.isDir ? (
             <>
               <button type="button" className={css.contextMenuItem} onClick={() => { startCreate('file', contextMenu.path); setContextMenu(null) }}>新建文件</button>
@@ -711,8 +708,38 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
               <button type="button" className={`${css.contextMenuItem} ${css.contextMenuDanger}`} onClick={() => { onDeletePath(contextMenu.path, false); setContextMenu(null) }}>删除</button>
             </>
           )}
-        </div>
+        </ContextMenuView>
       )}
+    </div>
+  )
+}
+
+/** 右键菜单容器（边缘翻转：靠近右/下边缘时向左/上开，VS Code 语义）。
+ *  挂载后测实际宽高再定位（避免首次渲染飞屏）。 */
+function ContextMenuView({ state, onClose, children }: { state: ContextMenuState; onClose: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    const rect = el.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    // 右边缘溢出 → 向左开；下边缘溢出 → 向上开；钳制在视口内（8px 边距）。
+    let left = state.x
+    let top = state.y
+    if (left + rect.width > vw - 8) left = Math.max(8, state.x - rect.width)
+    if (top + rect.height > vh - 8) top = Math.max(8, state.y - rect.height)
+    setPos({ left, top })
+  }, [state])
+  return (
+    <div
+      ref={ref}
+      className={css.contextMenu}
+      style={pos !== null ? { left: pos.left, top: pos.top } : { left: state.x, top: state.y, visibility: 'hidden' }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {children}
     </div>
   )
 }

@@ -346,3 +346,31 @@
 .crumbCurrent {
   color: var(--dsw-alias-label-secondary);
 }
+
+/* ── find widget 修复（编辑器列窄时按钮不挤没） ──
+   monaco find widget 默认相对编辑器右缘定位，编辑器列约 420px 时 widget
+   被压到 170px，匹配模式钮与导航钮全挤没。强制最小宽度加向左延伸
+   （覆盖代码区上方，VS Code 窄栏行为）。 */
+:global(.monaco-editor .find-widget) {
+  min-width: 500px !important;
+  /* 让它能向左伸出编辑器右缘（不被 minimap/右缘钳制） */
+  max-width: calc(100vw - 40px) !important;
+}
+
+/* find widget 内部 input 区撑宽（匹配模式钮 Aa/ab 与正则钮不被挤没） */
+:global(.monaco-editor .find-widget .monaco-inputbox) {
+  min-width: 280px !important;
+}
+
+/* find widget 窄栏档覆盖：monaco 按 editorWidth 判 narrow/collapsed 类隐藏
+   匹配模式钮——CSS 强制恢复显示（widget 已被 MutationObserver 撑到 500px，
+   布局空间足够）。 */
+:global(.monaco-editor .find-widget.collapsed-find-widget > .find-part .monaco-findInput .controls),
+:global(.monaco-editor .find-widget.narrow-find-widget > .find-part .monaco-findInput .controls) {
+  display: flex !important;
+}
+:global(.monaco-editor .find-widget.collapsed-find-widget .button.next),
+:global(.monaco-editor .find-widget.collapsed-find-widget .button.replace),
+:global(.monaco-editor .find-widget.collapsed-find-widget .button.replace-all) {
+  display: inline-flex !important;
+}

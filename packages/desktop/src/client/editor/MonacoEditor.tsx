@@ -260,6 +260,22 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     const host = hostRef.current
     if (host === null) return
     defineCorumThemes()
+    // find widget 窄栏修复：monaco findWidget.js 按 editorWidth 算三档（reduced/
+    // narrow/collapsed）——编辑器列 ~420px 时命中 narrowFindWidget（419+28+minimap
+    // -69 >= 420），匹配模式钮（Aa/ab/正则）被 findInput.layout 隐藏。且
+    // style.maxWidth 硬算 = editorWidth - 28 - minimap - 15（≈170px）挤没全部钮。
+    // inline style 优先级最高，CSS !important 打不过——MutationObserver 监听
+    // find-widget 出现，强制覆盖 maxWidth:none + minWidth 500px（>438 退出
+    // narrow 档，匹配模式钮恢复显示；widget 溢出编辑器右缘，VS Code 窄栏行为）。
+    const findWidgetFix = new MutationObserver(() => {
+      const fw = host.querySelector('.find-widget')
+      if (fw instanceof HTMLElement && fw.style.maxWidth !== 'none') {
+        fw.style.maxWidth = 'none'
+        fw.style.minWidth = '500px'
+        fw.style.width = '500px'
+      }
+    })
+    findWidgetFix.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
     try {
       const instance = editor.create(host, {
         value: '',
@@ -332,6 +348,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
       throw error
     }
     return () => {
+      findWidgetFix.disconnect()
       editorRef.current?.dispose()
       editorRef.current = null
     }
