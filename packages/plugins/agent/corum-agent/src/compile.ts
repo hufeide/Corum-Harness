@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
-import type { AgentProfile } from './profile.ts'
+import type { AgentProfile, BaseMode } from './profile.ts'
 
 /**
  * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
@@ -199,16 +199,47 @@ function standardRows(): CordisRow[] {
  * - 其余 standard 行原样保留（agent-instructions/tool-fs/tool-fs-search/tool-jobs/
  *   goal/plan/compaction/subagent/workflow/todo/web）。
  *
+/**
+ * dsh 四种预设模式的基础 persona 文本。
+ * 来源：shipped-presets/official/<mode>/agent.cordis.yml 中的 persona config.text。
+ * compilePreset 用基础模式 persona + 用户自定义提示词拼接为最终 persona。
+ */
+const BASE_MODE_PERSONA: Record<BaseMode, string> = {
+  standard: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
+  ptc: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
+  minimal: 'You are a helpful software engineer assistant.',
+  cordis: 'You are a coding agent powered by the {{model}} model, running on the DeepSeek Harness. Your working directory is {{cwd}}.\n\nYou can read and modify the harness you run on. Its composition is Cordis: every capability is a plugin row in a `cordis.yml`, and an agent preset is one such file mounted for a single session.',
+}
+
+/** 极简模式的特殊 flag（complete + suppressRuntimeContext）。 */
+const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
+
+/**
+ * 编译 AgentProfile 为 preset 目录的两份文件。
+ *
+ * persona 拼接逻辑：基础模式 persona + "\n\n" + 用户自定义提示词。
+ * 极简模式特殊：persona complete=true，自定义提示词追加在 complete persona 之后
+ * （complete 模式下 system-prompt 只渲染 persona section，所以拼接后仍有效）。
+ *
  * @param profile - AgentProfile。
  * @returns 两份文件文本（agent.cordis.yml + preset.yml）。
  */
 export function compilePreset(profile: AgentProfile): CompiledPreset {
-  // persona 在最前（身份节），随后 standard 全量 + corum 覆盖/增量。
+  // persona：基础模式 persona + 用户自定义提示词叠加
+  const basePersona = BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard
+  const isComplete = BASE_MODE_COMPLETE.has(profile.baseMode)
+  const personaText = profile.prompt.trim().length > 0
+    ? `${basePersona}\n\n${profile.prompt}`
+    : basePersona
+
   const rows: CordisRow[] = [
     {
       id: 'persona',
       name: '@deepseek-ai/dsh-persona',
-      config: { text: profile.prompt },
+      config: {
+        text: personaText,
+        ...(isComplete ? { complete: true, includeRuntimeContext: false } : {}),
+      },
     },
     ...standardRows(),
   ]

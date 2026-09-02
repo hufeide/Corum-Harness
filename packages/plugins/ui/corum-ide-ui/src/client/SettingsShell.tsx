@@ -51,7 +51,7 @@ function navIcon(id: string): ReactNode {
     notifications: <Bell className={cls} size={14} />,
     shortcuts: <Command className={cls} size={14} />,
     models: <Cpu className={cls} size={14} />,
-    'agent-presets-page': <Layers className={cls} size={14} />,
+    'agent-presets': <Layers className={cls} size={14} />,
     permissions: <Lock className={cls} size={14} />,
     rules: <BookOpen className={cls} size={14} />,
     memory: <Brain className={cls} size={14} />,

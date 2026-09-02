@@ -1,14 +1,13 @@
 /**
  * SelectField — 下拉选择控件（1:1 复刻 design.pen Bf3cS ref）。
  *
- * 设计稿 select-field (Bf3cS reusable)：
- * - width: 180, fill: $glass-2, cornerRadius: 10, stroke: $glass-border 1px
- * - gap: 8, padding: [7,10], alignItems: center
- * - children: value text(Inter 16px normal) + chevron-down icon(18×18, label-tertiary)
+ * 下拉列表经 createPortal 挂到 document.body，避免被 body overflow:auto 裁切。
+ * 定位用 getBoundingClientRect 动态计算，跟随滚动。
  *
  * @module corum-ide-ui/client/settings/SelectField
  */
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import css from './SelectField.module.css'
 
@@ -29,18 +28,64 @@ interface SelectFieldProps {
 }
 
 /**
- * Render a glass-style select dropdown.
+ * Render a glass-style select dropdown with portal-based floating list.
  * @param props - value, options, onChange, disabled.
  * @returns the select field element.
  */
 export function SelectField({ value, options, onChange, disabled }: SelectFieldProps) {
   const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const dropdownStyle = useRef<CSSStyleDeclaration | null>(null)
+  const [, forceUpdate] = useState(0)
+
   const selected = options.find(o => o.id === value)
   const displayLabel = selected?.label ?? value
+
+  const updatePosition = useCallback(() => {
+    const btn = buttonRef.current
+    if (!btn) return
+    const rect = btn.getBoundingClientRect()
+    const el = document.getElementById('__select-dropdown')
+    if (el) {
+      el.style.top = `${rect.bottom + 4}px`
+      el.style.right = `${window.innerWidth - rect.right}px`
+      el.style.minWidth = `${rect.width}px`
+    }
+    dropdownStyle.current = null
+    forceUpdate(n => n + 1)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    updatePosition()
+    const onScroll = () => updatePosition()
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [open, updatePosition])
+
+  // 点击外部关闭
+  useLayoutEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      const btn = buttonRef.current
+      const dd = document.getElementById('__select-dropdown')
+      if (btn?.contains(target)) return
+      if (dd?.contains(target)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => { document.removeEventListener('mousedown', onDown) }
+  }, [open])
 
   return (
     <div className={css.wrapper}>
       <button
+        ref={buttonRef}
         type="button"
         className={css.select}
         disabled={disabled}
@@ -51,8 +96,8 @@ export function SelectField({ value, options, onChange, disabled }: SelectFieldP
         <span className={css.value}>{displayLabel}</span>
         <ChevronDown className={css.chevron} size={18} />
       </button>
-      {open && !disabled && (
-        <div className={css.dropdown} role="listbox">
+      {open && !disabled && createPortal(
+        <div id="__select-dropdown" className={css.dropdown} role="listbox" style={{ position: 'fixed' }}>
           {options.map(opt => (
             <button
               key={opt.id}
@@ -68,7 +113,8 @@ export function SelectField({ value, options, onChange, disabled }: SelectFieldP
               {opt.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

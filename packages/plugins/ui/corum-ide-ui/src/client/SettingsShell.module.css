@@ -113,6 +113,12 @@
   width: 200px;
   padding: 12px 10px 8px 10px;
   box-sizing: border-box;
+  /* nav 内容超出时允许纵向滚动（panel clip 会裁切，需要 overflow:auto） */
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 滚动条使用 glass 层级 token */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 /* nav 搜索框（glass-2, cornerRadius 9, gap 6, padding [6,9]）*/

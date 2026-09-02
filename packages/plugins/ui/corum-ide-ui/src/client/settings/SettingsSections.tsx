@@ -8,8 +8,9 @@
  *
  * 数据为设计稿静态文案占位，功能后续接入。
  */
-import type { ReactNode } from 'react'
-import { Trash2, Star, Plug, Puzzle, Server, Plus } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Trash2, Star, Plug, Puzzle, Server, Plus, X } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { SettingRow } from './SettingRow.tsx'
 import { SelectField } from './SelectField.tsx'
@@ -21,9 +22,9 @@ import css from './SettingsSections.module.css'
 
 /* ── 通用玻璃按钮（设计稿 btn: glass-2, radius 13, padding [9,16]）────── */
 
-function GlassButton({ children, variant = 'default' }: { children: ReactNode; variant?: 'default' | 'primary' | 'danger' }) {
+function GlassButton({ children, variant = 'default', onClick }: { children: ReactNode; variant?: 'default' | 'primary' | 'danger'; onClick?: () => void }) {
   return (
-    <button type="button" className={variant === 'primary' ? css.btnPrimary : variant === 'danger' ? css.btnDanger : css.btnDefault}>
+    <button type="button" className={variant === 'primary' ? css.btnPrimary : variant === 'danger' ? css.btnDanger : css.btnDefault} onClick={onClick}>
       {children}
     </button>
   )
@@ -31,11 +32,11 @@ function GlassButton({ children, variant = 'default' }: { children: ReactNode; v
 
 /* ── 通用卡片（设计稿 card: glass-1, radius 16, padding 14）────────────── */
 
-function InfoCard({ title, desc, chips, actions, isDefault }: {
-  title: string; desc: string; chips?: string[]; actions?: ReactNode; isDefault?: boolean
+function InfoCard({ title, desc, chips, actions, isDefault, onClick }: {
+  title: string; desc: string; chips?: string[]; actions?: ReactNode; isDefault?: boolean; onClick?: () => void
 }) {
   return (
-    <div className={css.card}>
+    <div className={css.card} onClick={onClick} role={onClick ? 'button' : undefined}>
       <div className={css.cardInfo}>
         <div className={css.cardTitleRow}>
           <span className={css.cardTitle}>{title}</span>
@@ -48,7 +49,7 @@ function InfoCard({ title, desc, chips, actions, isDefault }: {
           </div>
         )}
       </div>
-      {actions && <div className={css.cardActions}>{actions}</div>}
+      {actions && <div className={css.cardActions} onClick={e => e.stopPropagation()}>{actions}</div>}
     </div>
   )
 }
@@ -350,17 +351,135 @@ function HooksSection() {
 
 /* ── Agent 预设 ────────────────────────────────────────────────────── */
 
+interface PresetData {
+  id: string
+  title: string
+  desc: string
+  chips: string[]
+}
+
+const INITIAL_PRESETS: PresetData[] = [
+  { id: 'standard', title: 'standard', desc: '通用编码助手，适合大多数开发任务。', chips: ['deepseek-v4', 'skills ×3', 'mcp ×2', 'workspace-write'] },
+  { id: 'reviewer', title: 'reviewer', desc: '代码审查专用，挂载 review 技能与只读权限。', chips: ['deepseek-v4', 'skills ×1', 'read-only'] },
+  { id: 'researcher', title: 'researcher', desc: '调研分析助手，联网检索 + 长上下文。', chips: ['deepseek-r1', 'skills ×2', 'mcp ×1', 'read-only'] },
+]
+
 function AgentPresetsSection() {
+  const [presets, setPresets] = useState<PresetData[]>(INITIAL_PRESETS)
+  const [defaultId, setDefaultId] = useState('standard')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [showCreate, setShowCreate] = useState(false)
+
+  const handleSetDefault = (id: string) => { setDefaultId(id) }
+
+  const handleDelete = (id: string) => {
+    setPresets(prev => prev.filter(p => p.id !== id))
+    if (defaultId === id && presets.length > 1) {
+      setDefaultId(presets.find(p => p.id !== id)?.id ?? '')
+    }
+    setDeleteConfirmId(null)
+  }
+
+  const handleCreate = (data: { name: string; desc: string; model: string; permission: string }) => {
+    const id = data.name.toLowerCase().replace(/\s+/g, '-')
+    const newPreset: PresetData = {
+      id,
+      title: id,
+      desc: data.desc || '自定义预设',
+      chips: [data.model, 'read-only'],
+    }
+    setPresets(prev => [...prev, newPreset])
+    setShowCreate(false)
+  }
+
   return (
     <>
       <div className={css.topRow}>
         <span className={css.topHint}>预设决定 Agent 的模型、技能与工具组合，新建会话时默认使用。</span>
-        <GlassButton variant="primary">+ 新建预设</GlassButton>
+        <GlassButton variant="primary" onClick={() => setShowCreate(true)}>+ 新建预设</GlassButton>
       </div>
-      <InfoCard title="standard" desc="通用编码助手，适合大多数开发任务。" chips={['DeepSeek V3','工作区读写','code-review']} isDefault actions={<Trash2 size={14} className={css.memDel} />} />
-      <InfoCard title="reviewer" desc="代码审查专用，挂载 review 技能与只读权限。" chips={['DeepSeek V3','只读','review']} actions={<><GlassButton>设为默认</GlassButton><Trash2 size={14} className={css.memDel} /></>} />
-      <InfoCard title="researcher" desc="调研分析助手，联网检索 + 长上下文。" chips={['DeepSeek R1','完全访问','web-research']} actions={<><GlassButton>设为默认</GlassButton><Trash2 size={14} className={css.memDel} /></>} />
+      {presets.map(p => (
+        <InfoCard
+          key={p.id}
+          title={p.title}
+          desc={p.desc}
+          chips={p.chips}
+          isDefault={p.id === defaultId}
+          actions={
+            p.id !== defaultId ? (
+              <>
+                <GlassButton onClick={() => handleSetDefault(p.id)}>设为默认</GlassButton>
+                <Trash2 size={14} className={css.memDel} onClick={() => setDeleteConfirmId(p.id)} />
+              </>
+            ) : (
+              <Trash2 size={14} className={css.memDel} onClick={() => setDeleteConfirmId(p.id)} />
+            )
+          }
+        />
+      ))}
+
+      {/* 删除确认弹窗 */}
+      {deleteConfirmId !== null && createPortal(
+        <div className={css.confirmOverlay} onClick={() => setDeleteConfirmId(null)}>
+          <div className={css.confirmDialog} onClick={e => e.stopPropagation()}>
+            <span className={css.confirmTitle}>删除预设</span>
+            <p className={css.confirmDesc}>确定要删除预设「{presets.find(p => p.id === deleteConfirmId)?.title}」吗？此操作不可撤销。</p>
+            <div className={css.confirmActions}>
+              <GlassButton onClick={() => setDeleteConfirmId(null)}>取消</GlassButton>
+              <GlassButton variant="danger" onClick={() => handleDelete(deleteConfirmId)}>删除</GlassButton>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* 新建预设弹窗 */}
+      {showCreate && createPortal(
+        <CreatePresetDialog onCreate={handleCreate} onClose={() => setShowCreate(false)} />,
+        document.body,
+      )}
     </>
+  )
+}
+
+/* ── 新建预设弹窗 ──────────────────────────────────────────────────── */
+
+function CreatePresetDialog({ onCreate, onClose }: {
+  onCreate: (data: { name: string; desc: string; model: string; permission: string }) => void
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [desc, setDesc] = useState('')
+  const [model, setModel] = useState('deepseek-v4')
+  const [permission, setPermission] = useState('workspace-write')
+
+  return (
+    <div className={css.modalOverlay} onClick={onClose}>
+      <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
+        <div className={css.modalHeader}>
+          <span className={css.modalTitle}>新建预设</span>
+          <button type="button" className={css.modalClose} onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className={css.modalBody}>
+          <label className={css.fieldLabel}>预设名称</label>
+          <input className={css.fieldInput} value={name} onChange={e => setName(e.target.value)} placeholder="my-preset" />
+          <label className={css.fieldLabel}>描述</label>
+          <input className={css.fieldInput} value={desc} onChange={e => setDesc(e.target.value)} placeholder="自定义编码助手" />
+          <label className={css.fieldLabel}>模型</label>
+          <div className={css.fieldRow}>
+            <SelectField value={model} options={[{id:'deepseek-v4',label:'deepseek-v4'},{id:'deepseek-r1',label:'deepseek-r1'}]} onChange={setModel} />
+          </div>
+          <label className={css.fieldLabel}>权限</label>
+          <div className={css.fieldRow}>
+            <SelectField value={permission} options={[{id:'read-only',label:'只读'},{id:'workspace-write',label:'工作区读写'},{id:'full',label:'完全访问'}]} onChange={setPermission} />
+          </div>
+        </div>
+        <div className={css.modalFooter}>
+          <GlassButton onClick={onClose}>取消</GlassButton>
+          <GlassButton variant="primary" onClick={() => onCreate({ name: name || 'new-preset', desc, model, permission })}>创建</GlassButton>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -606,7 +725,7 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'terminal', order: 80, label: '终端', Component: TerminalSection },
   { id: 'hooks', order: 90, label: 'Hooks 与自动化', Component: HooksSection },
   { id: 'agent-loop', order: 100, label: '高级 Agent Loop', Component: AgentLoopSection },
-  { id: 'agent-presets-page', order: 110, label: 'Agent 预设', Component: AgentPresetsSection },
+  { id: 'agent-presets', order: 110, label: 'Agent 预设', Component: AgentPresetsSection },
   { id: 'account', order: 120, label: '账户与用量', Component: AccountSection },
   { id: 'privacy', order: 130, label: '隐私', Component: PrivacySection },
   { id: 'data', order: 140, label: '数据管理', Component: DataSection },
