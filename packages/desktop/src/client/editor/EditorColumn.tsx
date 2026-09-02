@@ -364,6 +364,42 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     return () => window.removeEventListener('keydown', onKey, true)
   }, [saveActive])
 
+  // 编辑器快捷键兜底：Monaco keybinding service 只在编辑器 focus 时响应。
+  // 编辑器未 focus（文件树/侧栏聚焦）时，常用编辑快捷键（⌘F 查找 / ⌘Z 撤销 /
+  // ⌘⇧Z 重做）应自动 focus 编辑器再放行（VS Code 行为：这些命令全局可用）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // 编辑器已 focus → Monaco 自己处理，不干预。
+      const monacoHost = document.querySelector('[data-monaco-editor]')
+      if (monacoHost !== null && monacoHost.contains(document.activeElement)) return
+      const isEditorCmd = (e.metaKey || e.ctrlKey) && !e.altKey && (
+        e.key === 'f' ||           // ⌘F 查找
+        (e.key === 'z' && !e.shiftKey) ||  // ⌘Z 撤销
+        (e.key === 'z' && e.shiftKey) ||   // ⌘⇧Z 重做
+        e.key === 'a'              // ⌘A 全选
+      )
+      if (!isEditorCmd) return
+      // 有打开的文件才兜底（空态无编辑器实例）。
+      if (activeTabRef.current === null) return
+      e.preventDefault()
+      // focus 编辑器 + 直接触发 Monaco command（keydown 已派发完，Monaco 接不到
+      // 同一事件；用 editor.trigger 走 command 层，语义与 keybinding 一致）。
+      const editContext = monacoHost?.querySelector('.native-edit-context, textarea.inputarea') as HTMLElement | null
+      editContext?.focus()
+      const monacoGlobal = (window as unknown as { __corumMonacoEditor?: { trigger: (source: string, handlerId: string) => void } }).__corumMonacoEditor
+      if (monacoGlobal !== undefined) {
+        const cmd = e.key === 'f' ? 'actions.find' : e.key === 'z' && !e.shiftKey ? 'undo' : e.key === 'z' && e.shiftKey ? 'redo' : 'editor.action.selectAll'
+        monacoGlobal.trigger('keyboard', cmd)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // activeTab ref（快捷键兜底判空态用，避免闭包捕获陈旧值）
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
+
   // ── fs watch：启动 + 2s 轮询；变更 → 树刷新 + tab 外部变更检测 ──
   // tabsRef 避免 setInterval 闭包捕获陈旧 tabs
   const tabsRef = useRef(tabs)

@@ -336,9 +336,18 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         formatOnType: false,
       })
       editorRef.current = instance
+      // 编辑器实例挂 window（EditorColumn 快捷键兜底走 editor.trigger 调
+      // command——keydown 已派发完 Monaco 接不到，focus 后直接 trigger command
+      // 语义与 keybinding 一致）。合法 window 挂载：written once read-only。
+      ;(window as unknown as { __corumMonacoEditor?: typeof instance }).__corumMonacoEditor = instance
       instance.onDidChangeModelContent(() => {
         const model = instance.getModel()
-        if (model !== null) onContentChangeRef.current?.(model.getValue())
+        if (model !== null) {
+          // 标记「正在输入」：最新内容写进 typingContentRef，useEffect 里据此
+          // 跳过模型回写（防 React 批处理 race 导致的全量替换光标跳末尾）。
+          typingContentRef.current = model.getValue()
+          onContentChangeRef.current?.(model.getValue())
+        }
       })
       instance.onDidChangeCursorPosition((e) => {
         onCursorChangeRef.current?.({ line: e.position.lineNumber, column: e.position.column })
@@ -349,6 +358,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     }
     return () => {
       findWidgetFix.disconnect()
+      ;(window as unknown as { __corumMonacoEditor?: unknown }).__corumMonacoEditor = undefined
       editorRef.current?.dispose()
       editorRef.current = null
     }
@@ -363,9 +373,21 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
   }, [dark])
 
   // Bind the cached per-path model to the editor (tab switch = setModel).
+  // 「正在输入」标记：onContentChange 触发时把最新内容写进 ref，useEffect
+  // 里比对 file.value 与 ref——一致说明这个 value 变化就是用户输入引起的
+  // （模型已是该内容），跳过 acquireModel 的回写（否则 React 18 批处理 race：
+  // state 未 flush 时 acquireModel 拿旧 file.value 判不等 → pushEditOperations
+  // 全量替换 → 光标跳末尾，即「编辑文本的时候光标乱跑」根因）。
+  const typingContentRef = useRef<string | null>(null)
   useEffect(() => {
     const instance = editorRef.current
     if (instance === null) return
+    // 用户输入引起的 value 变化（typingContentRef 已是新内容）→ 不回写模型。
+    if (typingContentRef.current === file.value && instance.getModel()?.getValue() === file.value) {
+      return
+    }
+    // 外部变更（watch 重载/保存/切换 tab）——清掉 typing 标记并回写模型。
+    typingContentRef.current = null
     const model = acquireModel(file)
     if (instance.getModel() !== model) {
       instance.setModel(model)
