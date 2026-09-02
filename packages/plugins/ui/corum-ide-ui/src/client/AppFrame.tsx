@@ -1039,6 +1039,26 @@ export function IdeAppFrame({
 
   // ── Floating-window mode ──
   const floatKey = floatingSlotKey()
+  // 浮窗也必须接 grid actions——slot occupant（EditorColumn 等）挂载时经
+  // ctx.layout 调 closeRegion/setRegionHidden，LayoutController.#requireGrid
+  // 未接线会抛「grid actions not wired」把整个 slot entry 打崩（浮窗纯黑）。
+  // 浮窗语义：closeRegion = 关浮窗回主窗（窗口自身关闭即 notifyFloating(false)
+  // 恢复主窗列）；其余区域操作在浮窗无意义，no-op 兜底。
+  const floatingGridActions = useMemo<GridActions>(() => ({
+    setRegionHidden: (_slot: string, _hidden: boolean) => {},
+    closeRegion: (_slot: string) => { window.close() },
+    resetLayout: () => {},
+    toggleSidebar: () => {},
+    openNewTaskForm: () => {},
+    onOpenNewTaskForm: (_listener: () => void) => () => {},
+    consumePendingNewTaskForm: () => false,
+    isInGrid: (_slot: string) => false,
+    hiddenSlotsSnapshot: () => [],
+    onGridChange: (_listener: () => void) => () => {},
+  }), [])
+  useEffect(() => {
+    if (floatKey !== null) attachGridActions(floatingGridActions)
+  }, [floatKey, attachGridActions, floatingGridActions])
   if (floatKey !== null) {
     const mountable = FLOATABLE_SLOTS.has(floatKey)
     return (
