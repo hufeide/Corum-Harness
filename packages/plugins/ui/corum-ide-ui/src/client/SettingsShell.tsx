@@ -187,15 +187,6 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, t }: Pan
                 : t('title')}
             </span>
             <div className={css.headerRight}>
-              {/* scope-switch（设计稿 U9AfS4: 全局 / 本项目）*/}
-              <div className={css.scopeSwitch}>
-                <button type="button" className={clsx(css.scopeSeg, css.scopeSegActive)}>
-                  <span>{t('scope.global')}</span>
-                </button>
-                <button type="button" className={css.scopeSeg}>
-                  <span>{t('scope.project')}</span>
-                </button>
-              </div>
               {/* close */}
               <button
                 ref={closeButton}

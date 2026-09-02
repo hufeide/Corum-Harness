@@ -371,7 +371,6 @@ export function apply(ctx: ClientContext): void {
       order: 0,
       label: () => t('general.nav'),
       locale: NS,
-      children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
     }, GeneralSection))
 
     // ── 批量注册设计稿 section（外观/通知/快捷键/权限/.../配置档案）──

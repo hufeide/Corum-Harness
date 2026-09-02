@@ -338,21 +338,10 @@
   overflow-y: auto;
 }
 
-/* ── 设置组卡片（group: glass-1, cornerRadius 16, glass-border stroke 1）── */
+/* ── 设置组卡片 ────────────────────────────────────────────────── */
 
-/* group 卡片样式：设计稿每个 section 是一个 group 卡片。
- * slot 渲染器输出 [data-slot="settings.section"] 包装器（display:contents），
- * 内部第一个子 div 是实际 section 容器。glass 样式应用到该容器。 */
-.body > :global([data-slot='settings.section']) > :first-child {
-  background: var(--corum-glass-1);
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 16px;
-  /* 设计稿: padding [6,16,10,16] */
-  padding: 6px 16px 10px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
+/* section 内容由 SettingGroup / SettingsSections 自带 glass-card 样式，
+ * SettingsShell 不再覆盖 section 内容样式。 */
 
 /* Visually-hidden text seat */
 .hiddenLabel {
