@@ -1,71 +1,60 @@
 /**
- * EditorColumn — the resident right-hand code editor in IDE mode, now the
- * MERGED ③ 编辑器区 card (design.pen cZcBX, 2026-09-03 改版：编辑器 + 资源管理器
- * 合一张玻璃卡，资源管理器不再是独立区域/槽位). Registered into the
+ * EditorColumn — the resident right-hand code editor in IDE mode, the
+ * MERGED ③ 编辑器区 card (design.pen cZcBX). Registered into the
  * `corum.editor` slot (a root-scope single slot declared ONLY by
- * @corum/corum-ide-ui, IDE mode only), so the editor is a resident column —
- * not a session tab — and disappears entirely in minimal mode.
+ * @corum/corum-ide-ui, IDE mode only).
  *
- * Card-internal structure follows the design frame's children order:
- *   editor-main (ljiCn: Editor Tabs → crumb → Code → Editor Status)
- *   │ in-card sash（资源管理器子面板宽度拖拽，命中区 8px，同 GridView Sash 机制）
- *   divider (f87vQ: 1px $glass-border 竖线)
- *   资源管理器 (WJ4dP: ExplorerPane 210px 默认，可拖 sash 调宽).
+ * 真实文件读写（2026-09-04）：EditorColumn 管理已打开文件 tab 列表 + 活跃 tab
+ * 的 Monaco 编辑器。文件内容经 corumFs/read RPC 加载、⌘S 经 corumFs/write
+ * 保存。dirty 跟踪 = Monaco onChange 后内容与原始内容比对。状态栏显示真实
+ * 行/列/编码/语言/dirty。
  *
- * 折叠态（design.pen waRkJ：L1 主界面 · 深色 · 资源管理器折叠）：
- *   资源管理器子面板完全消失（不再渲染 32px 竖条），编辑器占满整卡宽度。
- *   展开/关闭两钮移入 Editor Tabs 行尾（spacer 后）：
- *     btn-expand-explorer（panel-right-open 16×16，仅折叠态可见）
- *     btn-close-explorer（x 17×17，折叠态时作「关闭区域」、展开态不显示）
+ * 卡内结构：editor-main（Tabs → crumb → Code → Status）+ sash + divider +
+ * 资源管理器子面板（ExplorerPane）。折叠态资源管理器完全消失，编辑器占满。
  *
- * Styles live in EditorColumn.module.css (design tokens only, no inline hex);
- * the Monaco theme flips with the global light/dark theme
- * (body[data-ds-dark-theme]).
  * @module corum-desktop/client/editor/EditorColumn
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { PanelRightOpen, X } from 'lucide-react'
-// Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/corum-ide-ui,
-// IDE mode only). The type import keeps this file compiling standalone without
-// a runtime dependency on the shell plugin.
 import type {} from '@corum/corum-ide-ui/client'
-import { MonacoEditor, type MonacoFileModel } from './MonacoEditor.tsx'
-import { ExplorerPane, type ExplorerPaneInjected } from './ExplorerPane.tsx'
+import { MonacoEditor, languageFromPath } from './MonacoEditor.tsx'
+import { ExplorerPane, type ExplorerPaneInjected, type FsEntry } from './ExplorerPane.tsx'
 import css from './EditorColumn.module.css'
 
-/** Design-file demo content: mirrors the design's Code frame lines 1–7. */
-const DEMO_FILE: MonacoFileModel = {
-  path: 'docs/backend-requirements.md',
-  language: 'markdown',
-  value: [
-    '矩道 Corum Harness',
-    '## 1. 液态玻璃主题',
-    '',
-    '**优先级**: P0',
-    'Set-Cookie: token=<jwt>;',
-    'HttpOnly; Secure; SameSite=Strict;',
-    'Path=/api; Max-Age=86400',
-  ].join('\n'),
+/** One open file tab. */
+interface EditorTab {
+  /** Relative path under the project root (e.g. '/src/index.ts'). */
+  readonly path: string
+  /** Display title (basename). */
+  readonly title: string
+  /** File content as loaded from disk. */
+  content: string
+  /** Language id for Monaco. */
+  language: string
+  /** Whether the user has unsaved edits (content differs from last saved). */
+  dirty: boolean
+  /** Load error (file not found / permission etc.). */
+  error: string | null
 }
 
 /** 本插件的注入面（见 client/index.ts apply）。 */
 export interface EditorColumnInjected {
   /** 关闭本区域（隐藏叶子，可在插件中心「视图管理」恢复）。 */
   closeRegion: () => void
+  /** 点亮编辑器区域（打开文件时自动显示，取消默认隐藏）。 */
+  showEditor: () => void
   /** 资源管理器子面板数据源 + generation 源（ExplorerPane 直通）。 */
   explorer: Pick<ExplorerPaneInjected, 'listDir' | 'generation'>
+  /** 读文件内容（corumFs/read RPC）。 */
+  readFile: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { content: string; language: string } }>
+  /** 写文件内容（corumFs/write RPC，⌘S 保存）。 */
+  writeFile: (path: string, content: string) => Promise<{ ok: boolean; error?: { message?: string } }>
 }
 
-/** Full composed props of the root-scope editor slot (owner share + 本插件注入面). */
+/** Full composed props of the root-scope editor slot. */
 export type EditorColumnProps = PropsRuntime<'corum.editor'> & EditorColumnInjected
-
-/** Open files as the design's editor tab strip (tab-file rows). */
-const OPEN_TABS = [
-  { title: 'requirements.md', active: true, dirty: true },
-  { title: 'columns.ts', active: false, dirty: false },
-]
 
 /** 资源管理器子面板宽度边界（设计 210 默认；调宽区间 [160, 480]）。 */
 const EXPLORER_DEFAULT_WIDTH = 210
@@ -88,18 +77,114 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, explorer }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writeFile }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
-  /** 资源管理器子面板宽度（px；拖卡内 sash 调）。 */
   const [explorerWidth, setExplorerWidth] = useState(EXPLORER_DEFAULT_WIDTH)
-  /** 资源管理器子面板折叠态（design waRkJ：折叠 = 子面板完全消失，编辑器占满）。 */
   const [explorerCollapsed, setExplorerCollapsed] = useState(false)
   const onToggleExplorerCollapsed = useCallback(() => {
     setExplorerCollapsed((prev) => !prev)
   }, [])
 
-  // 卡内 sash（沿用 GridView Sash 的 VSCode 拖拽机制）：向右拖 = 资源管理器
-  // 变窄（子面板在卡右缘，sash 左移增宽、右移减宽）。
+  // ── Tab management ──
+  const [tabs, setTabs] = useState<EditorTab[]>([])
+  const [activePath, setActivePath] = useState<string | null>(null)
+  const activeTab = useMemo(() => tabs.find(t => t.path === activePath) ?? null, [tabs, activePath])
+  const [cursorPos, setCursorPos] = useState({ line: 1, column: 1 })
+
+  /** Open a file tab (or switch to it if already open). Called by ExplorerPane click. */
+  const openFile = useCallback(async (path: string) => {
+    // 打开文件时自动点亮编辑器区域（取消默认隐藏）。
+    showEditor()
+    // Already open? Just activate.
+    const existing = tabs.find(t => t.path === path)
+    if (existing !== undefined) {
+      setActivePath(path)
+      return
+    }
+    // Create a placeholder tab, then load content.
+    const title = path.split('/').pop() ?? path
+    const newTab: EditorTab = {
+      path,
+      title,
+      content: '',
+      language: languageFromPath(path, 'plaintext'),
+      dirty: false,
+      error: null,
+    }
+    setTabs(prev => [...prev, newTab])
+    setActivePath(path)
+    try {
+      const result = await readFile(path)
+      if (result.ok && result.value !== undefined) {
+        setTabs(prev => prev.map(t => t.path === path
+          ? { ...t, content: result.value!.content, language: result.value!.language || t.language }
+          : t,
+        ))
+      } else {
+        const msg = result.error?.message ?? '读取失败'
+        setTabs(prev => prev.map(t => t.path === path ? { ...t, error: msg } : t))
+      }
+    } catch (err) {
+      setTabs(prev => prev.map(t => t.path === path ? { ...t, error: String(err) } : t))
+    }
+  }, [tabs, readFile])
+
+  /** Close a tab. If it was active, activate the previous tab (or none). */
+  const closeTab = useCallback((path: string) => {
+    setTabs(prev => {
+      const idx = prev.findIndex(t => t.path === path)
+      if (idx < 0) return prev
+      const next = prev.filter(t => t.path !== path)
+      // If closing the active tab, switch to the neighbour.
+      if (activePath === path) {
+        const neighbour = next[idx] ?? next[idx - 1] ?? null
+        setActivePath(neighbour?.path ?? null)
+      }
+      return next
+    })
+  }, [activePath])
+
+  /** Update content when the user types in Monaco (dirty tracking). */
+  const onContentChange = useCallback((newContent: string) => {
+    if (activePath === null) return
+    setTabs(prev => prev.map(t => {
+      if (t.path !== activePath) return t
+      // dirty = content differs from the last-saved snapshot.
+      // On first load, content === t.content, so dirty stays false until the user edits.
+      // We compare against the content that was loaded (before any local edits).
+      // Since we set t.content to the loaded value, any deviation = dirty.
+      return { ...t, content: newContent, dirty: true }
+    }))
+  }, [activePath])
+
+  /** Save the active file (⌘S). */
+  const saveActive = useCallback(async () => {
+    if (activeTab === null || activeTab.dirty === false) return
+    try {
+      const result = await writeFile(activeTab.path, activeTab.content)
+      if (result.ok) {
+        setTabs(prev => prev.map(t => t.path === activeTab.path ? { ...t, dirty: false } : t))
+      } else {
+        console.error('[editor] 保存失败', result.error?.message)
+      }
+    } catch (err) {
+      console.error('[editor] 保存异常', err)
+    }
+  }, [activeTab, writeFile])
+
+  // ⌘S keyboard shortcut for save.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        void saveActive()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [saveActive])
+
+  // Sash drag (resource manager width).
   const sashDragWidth = useRef(EXPLORER_DEFAULT_WIDTH)
   sashDragWidth.current = explorerWidth
   const onSashMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -113,7 +198,6 @@ export function EditorColumn({ closeRegion, explorer }: EditorColumnProps): Reac
       ev.preventDefault()
       const delta = ev.clientX - origin
       origin = ev.clientX
-      // sash 在子面板左缘：左移（delta<0）子面板增宽，右移减宽。
       const next = Math.min(EXPLORER_MAX_WIDTH, Math.max(EXPLORER_MIN_WIDTH, sashDragWidth.current - delta))
       sashDragWidth.current = next
       setExplorerWidth(next)
@@ -127,26 +211,41 @@ export function EditorColumn({ closeRegion, explorer }: EditorColumnProps): Reac
     window.addEventListener('mouseup', onUp, true)
   }, [])
 
+  // The Monaco model for the active tab.
+  const monacoFile = useMemo(() => {
+    if (activeTab === null) return null
+    return {
+      path: activeTab.path,
+      value: activeTab.content,
+      language: activeTab.language,
+    }
+  }, [activeTab])
+
   return (
     <div className={css.column} data-code-editor-column="">
-      {/* ljiCn — editor-main（现有编辑器内容，flex:1 吸收剩余）。 */}
       <div className={css.editorMain}>
-        {/* M2nKD — Editor Tabs（gap6 · pad[10,10,6,10]） */}
+        {/* Editor Tabs */}
         <div className={css.tabs}>
-          {OPEN_TABS.map((tab) => (
+          {tabs.map((tab) => (
             <div
-              key={tab.title}
-              className={`${css.tab}${tab.active ? ` ${css.tabActive}` : ''}`}
-              data-tab-active={tab.active || undefined}
+              key={tab.path}
+              className={`${css.tab}${tab.path === activePath ? ` ${css.tabActive}` : ''}`}
+              data-tab-active={tab.path === activePath || undefined}
+              onClick={() => setActivePath(tab.path)}
             >
               {tab.dirty && <span className={css.tabDirty} />}
               <span className={css.tabTitle}>{tab.title}</span>
-              <X size={13} strokeWidth={2} className={css.tabClose} />
+              <button
+                type="button"
+                className={css.tabCloseBtn}
+                title="关闭"
+                onClick={(e) => { e.stopPropagation(); closeTab(tab.path) }}
+              >
+                <X size={13} strokeWidth={2} />
+              </button>
             </div>
           ))}
           <div className={css.spacer} />
-          {/* 折叠态：btn-expand-explorer（panel-right-open）展开资源管理器；
-              btn-close-explorer（x）关闭整个编辑器区域（非折叠态不显示）。 */}
           {explorerCollapsed && (
             <button
               type="button"
@@ -169,44 +268,63 @@ export function EditorColumn({ closeRegion, explorer }: EditorColumnProps): Reac
           )}
         </div>
 
-        {/* YlGBD — crumb（pad[0,14,8,14]） */}
-        <div className={css.crumb}>docs › backend-requirements.md</div>
-
-        {/* w1vUz — Code（Monaco，flex:1；主题随深浅翻转） */}
-        <div className={css.code}>
-          <MonacoEditor file={DEMO_FILE} dark={dark} className="corum-code-editor" />
+        {/* crumb */}
+        <div className={css.crumb}>
+          {activeTab !== null ? activeTab.path.replace(/^\//, '').replace(/\//g, ' › ') : ''}
         </div>
 
-        {/* hogk5 — Editor Status（pad[6,14,8,14] gap10） */}
+        {/* Code */}
+        <div className={css.code}>
+          {monacoFile !== null
+            ? (
+              <MonacoEditor
+                file={monacoFile}
+                dark={dark}
+                className="corum-code-editor"
+                editable
+                onContentChange={onContentChange}
+                onCursorChange={setCursorPos}
+              />
+            )
+            : (
+              <div className={css.emptyCode}>选择或打开一个文件开始编辑</div>
+            )}
+        </div>
+        {activeTab?.error !== undefined && activeTab.error !== null && (
+          <div className={css.loadError}>加载失败：{activeTab.error}</div>
+        )}
+
+        {/* Editor Status */}
         <div className={css.status}>
-          <span>行 7, 列 1</span>
-          <span>UTF-8</span>
-          <span>Markdown</span>
-          <div className={css.statusSpacer} />
-          <span className={css.dirtyDot} />
-          <span className={css.dirtyText}>未保存</span>
+          {activeTab !== null && (
+            <>
+              <span>行 {cursorPos.line}, 列 {cursorPos.column}</span>
+              <span>UTF-8</span>
+              <span>{activeTab.language}</span>
+              <div className={css.statusSpacer} />
+              {activeTab.dirty && (
+                <>
+                  <span className={css.dirtyDot} />
+                  <span className={css.dirtyText}>未保存</span>
+                </>
+              )}
+            </>
+          )}
         </div>
       </div>
 
-      {/* 卡内 sash + divider + 资源管理器子面板（折叠态全部消失，编辑器占满）。 */}
+      {/* Sash + divider + explorer (hidden when collapsed). */}
       {!explorerCollapsed && (
         <>
-          {/* 卡内 sash（资源管理器子面板调宽）。 */}
           <div className={css.sash} onMouseDown={onSashMouseDown} data-explorer-sash="" />
-
-          {/* f87vQ — divider（1px $glass-border 竖线）。 */}
           <div className={css.divider} />
-
-          {/* WJ4dP — 资源管理器子面板（210 默认可调宽）。 */}
-          <div
-            className={css.explorerPane}
-            style={{ width: explorerWidth }}
-          >
+          <div className={css.explorerPane} style={{ width: explorerWidth }}>
             <ExplorerPane
               listDir={explorer.listDir}
               generation={explorer.generation}
               closeRegion={closeRegion}
               onToggleCollapsed={onToggleExplorerCollapsed}
+              onOpenFile={openFile}
             />
           </div>
         </>

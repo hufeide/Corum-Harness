@@ -65,12 +65,21 @@ export function apply(ctx: Context): void {
         name: 'corum.editor',
         inject: (): EditorColumnInjected => ({
           closeRegion: () => { editorCtx.layout.closeRegion('corum.editor') },
+          showEditor: () => { editorCtx.layout.setRegionHidden('corum.editor', false) },
           explorer: {
             generation: connection.generation,
             listDir: async (path) => {
               const result = await connection.rpc.call('/api', 'corumFs/list', { args: { path } })
               return result as { ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }
             },
+          },
+          readFile: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumFs/read', { args: { path } })
+            return result as { ok: boolean; error?: { message?: string }; value?: { content: string; language: string } }
+          },
+          writeFile: async (path, content) => {
+            const result = await connection.rpc.call('/api', 'corumFs/write', { args: { path, content } })
+            return result as { ok: boolean; error?: { message?: string } }
           },
         }),
       },

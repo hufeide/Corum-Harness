@@ -4,7 +4,8 @@
  * A thin React wrapper around the Monaco standalone editor, tuned for the
  * desktop shell: the worker environment is installed once (see ./worker.ts),
  * the editor is created on mount against a DOM node, and the model/theme are
- * driven by props. Phase 1 is read-only; edit + save + approval land in Phase 2.
+ * driven by props. Phase 2 adds editable mode + content/cursor change callbacks
+ * for dirty tracking and status bar.
  *
  * Language contributions are imported for their side effects (registering
  * tokenizers/features) via the `monaco.contribution.js` subpath of each
@@ -35,7 +36,7 @@ import 'monaco-editor/language/html/monaco.contribution.js'
 export interface MonacoFileModel {
   /** Stable identity used to key the model across content swaps. */
   readonly path: string
-  /** File contents (read-only in Phase 1). */
+  /** File contents. */
   readonly value: string
   /** Language id Monaco uses (typescript/json/css/html/…). */
   readonly language: string
@@ -48,6 +49,12 @@ export interface MonacoEditorProps {
   dark?: boolean
   /** Extra class on the host element (layout/positioning). */
   className?: string
+  /** Whether the editor is editable (Phase 2: true). */
+  editable?: boolean
+  /** Fired when the user edits content (dirty tracking). */
+  onContentChange?: (value: string) => void
+  /** Fired when the cursor moves (status bar line/column). */
+  onCursorChange?: (pos: { line: number; column: number }) => void
 }
 
 /**
@@ -130,10 +137,15 @@ export function languageFromPath(path: string, fallback: string): string {
  * @param props - see {@link MonacoEditorProps}.
  * @returns the host div Monaco mounts into.
  */
-export function MonacoEditor({ file, dark = true, className }: MonacoEditorProps): React.ReactElement {
+export function MonacoEditor({ file, dark = true, className, editable = false, onContentChange, onCursorChange }: MonacoEditorProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null)
   const modelRef = useRef<MonacoEditorApi.ITextModel | null>(null)
+  // Stable refs to callbacks so the editor is not recreated on every parent render.
+  const onContentChangeRef = useRef(onContentChange)
+  onContentChangeRef.current = onContentChange
+  const onCursorChangeRef = useRef(onCursorChange)
+  onCursorChangeRef.current = onCursorChange
 
   // One-time: install the worker environment before the first editor exists.
   useEffect(() => {
@@ -145,14 +157,12 @@ export function MonacoEditor({ file, dark = true, className }: MonacoEditorProps
     const host = hostRef.current
     if (host === null) return
     defineCorumThemes()
-    // dark prop is the light/dark preference; map it onto the corum glass
-    // theme so the surface stays liquid-glass.
     const corumTheme = dark ? 'corum-dark' : 'corum-light'
     try {
       const instance = editor.create(host, {
         value: '',
         language: 'plaintext',
-        readOnly: true,
+        readOnly: !editable,
         automaticLayout: true,
         minimap: { enabled: false },
         theme: corumTheme,
@@ -160,6 +170,13 @@ export function MonacoEditor({ file, dark = true, className }: MonacoEditorProps
         fixedOverflowWidgets: true,
       })
       editorRef.current = instance
+      instance.onDidChangeModelContent(() => {
+        const model = instance.getModel()
+        if (model !== null) onContentChangeRef.current?.(model.getValue())
+      })
+      instance.onDidChangeCursorPosition((e) => {
+        onCursorChangeRef.current?.({ line: e.position.lineNumber, column: e.position.column })
+      })
     } catch (error) {
       console.error('[corum-desktop] monaco editor.create failed:', error)
       throw error
@@ -168,7 +185,7 @@ export function MonacoEditor({ file, dark = true, className }: MonacoEditorProps
       editorRef.current?.dispose()
       editorRef.current = null
     }
-  }, [dark])
+  }, [dark, editable])
 
   // Replace the model/content when the file changes.
   useEffect(() => {

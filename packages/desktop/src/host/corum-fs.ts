@@ -35,6 +35,23 @@ export interface CorumFsEntry {
   type: 'dir' | 'file'
 }
 
+/** 文件扩展名 → Monaco 语言 id（与 client 端 languageFromPath 对齐）。 */
+function languageFromPath(path: string): string {
+  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  switch (ext) {
+    case 'ts': case 'tsx': case 'mts': case 'cts': return 'typescript'
+    case 'js': case 'jsx': case 'mjs': case 'cjs': return 'javascript'
+    case 'json': case 'jsonc': return 'json'
+    case 'css': case 'scss': case 'less': return 'css'
+    case 'html': case 'htm': case 'xhtml': return 'html'
+    case 'md': case 'markdown': return 'markdown'
+    case 'py': return 'python'
+    case 'yaml': case 'yml': return 'yaml'
+    case 'sh': case 'bash': return 'shell'
+    default: return 'plaintext'
+  }
+}
+
 /**
  * 桌面文件系统 Remote：以 host 进程 cwd 为项目根的只读目录浏览。
  *
@@ -82,6 +99,62 @@ export class CorumFsService extends TypertRemoteService {
       return { path: requested, entries: items }
     } catch (error) {
       throw new Error(`cannot read ${requested}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 读文件内容（编辑器打开文件的数据源）。与 list 同一 realpath 防穿越校验。
+   * @param path - 相对根的路径（'/' 或 '' = 根；前导斜杠会被剥掉）。
+   * @returns 文件内容（UTF-8）+ 推断的语言 id（供 Monaco 直接用）。
+   */
+  @Remote('read')
+  async read(path?: string): Promise<{ path: string; content: string; language: string }> {
+    const root = resolve(process.cwd())
+    const requested = path ?? '/'
+    const normalized = requested === '/' || requested === '' ? '.' : requested.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${requested}`)
+    }
+    const real = await realpath(target)
+    if (real !== root && !real.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${requested}`)
+    }
+    try {
+      const content = await readFile(real, 'utf8')
+      return { path: requested, content, language: languageFromPath(requested) }
+    } catch (error) {
+      throw new Error(`cannot read file ${requested}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 写文件内容（编辑器保存 ⌘S 的数据源）。与 list/read 同一 realpath 防穿越校验。
+   * @param path - 相对根的路径。
+   * @param content - 文件新内容（UTF-8）。
+   */
+  @Remote('write')
+  async write(path: string, content: string): Promise<{ path: string }> {
+    const root = resolve(process.cwd())
+    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${path}`)
+    }
+    const real = await realpath(target).catch(() => {
+      // 新文件 realpath 失败——校验父目录
+      return null
+    })
+    if (real !== null) {
+      if (real !== root && !real.startsWith(root + sep)) {
+        throw new Error(`path escapes the project root via symlink: ${path}`)
+      }
+    }
+    try {
+      await writeFile(target, content, 'utf8')
+      return { path }
+    } catch (error) {
+      throw new Error(`cannot write file ${path}: ${String(error)}`)
     }
   }
 

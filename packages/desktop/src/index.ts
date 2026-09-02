@@ -13,6 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { addHarnessSourceSection } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-shell-env'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 
 /** Stable Cordis plugin name. */
 export const name = 'corum-desktop-app'

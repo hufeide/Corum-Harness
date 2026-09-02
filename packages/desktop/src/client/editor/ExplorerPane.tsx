@@ -43,6 +43,8 @@ export interface ExplorerPaneInjected {
   closeRegion: () => void
   /** 收起资源管理器子面板（design waRkJ：折叠 = 子面板完全消失）。 */
   onToggleCollapsed: () => void
+  /** 点击文件 → 编辑器打开 tab（核心联动）。 */
+  onOpenFile: (path: string) => void
 }
 
 export type ExplorerPaneProps = ExplorerPaneInjected
@@ -97,7 +99,7 @@ function FileTypeIcon({ name }: { name: string }) {
 }
 
 /** The resource manager sub-pane (see module doc). */
-export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed }: ExplorerPaneProps) {
+export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile }: ExplorerPaneProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
   // 订阅 generation 源（连接建立/替换/丢失时触发重算根名）。
@@ -178,7 +180,12 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
           style={{ paddingLeft: 6 + depth * 14 }}
           onClick={() => {
             setSelected(path)
-            if (isDir) toggle(path)
+            if (isDir) {
+              toggle(path)
+            } else {
+              // 文件 → 编辑器打开 tab（单击预览语义：激活 tab，不关闭其他）。
+              onOpenFile(path)
+            }
           }}
           title={entry.name}
         >
