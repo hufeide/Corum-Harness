@@ -56,6 +56,9 @@ interface EditorTab {
   error: string | null
   /** 磁盘上已被外部修改（watch 检测到）；仅在 dirty 时有意义（未 dirty 已自动重载）。 */
   externalChanged: boolean
+  /** 预览 tab（VS Code 语义：单击文件打开的临时 tab，斜体显示；双击/编辑/双击 tab 后固定）。
+   *  新打开预览 tab 会替换掉已有预览 tab（VS Code 单预览位）。 */
+  preview: boolean
 }
 
 /** 保存反馈（状态栏右侧短暂显示；失败常驻直到下次保存/编辑）。 */
@@ -203,7 +206,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     restoredRef.current = true
     const paths = persisted.tabs ?? []
     if (paths.length === 0) return
-    // 并发恢复所有 tab（内容 readFile 重载）
+    // 并发恢复所有 tab（内容 readFile 重载）；恢复的 tab 都是固定（非预览）。
     for (const path of paths) {
       const title = path.split('/').pop() ?? path
       const placeholder: EditorTab = {
@@ -214,6 +217,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
         language: languageFromPath(path, 'plaintext'),
         error: null,
         externalChanged: false,
+        preview: false,
       }
       setTabs(prev => prev.some(t => t.path === path) ? prev : [...prev, placeholder])
       readFile(path).then((result) => {
@@ -234,14 +238,19 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     showEditor()
   }, [persisted.tabs, readFile, showEditor])
 
-  /** Open a file tab (or switch to it if already open). Called by ExplorerPane click. */
-  const openFile = useCallback(async (path: string) => {
+  /** Open a file tab (or switch to it if already open). Called by ExplorerPane click.
+   *  `preview: true` = VS Code 预览语义（斜体临时 tab，替换已有预览位；编辑/双击 tab 固定）。 */
+  const openFile = useCallback(async (path: string, opts?: { preview?: boolean; pin?: boolean }) => {
+    const wantPreview = opts?.preview ?? false
     // 打开文件时自动点亮编辑器区域（取消默认隐藏）。
     showEditor()
-    // Already open? Just activate.
+    // Already open? Just activate；pin=true 同时取消预览态（双击树文件）。
     const existing = tabs.find(t => t.path === path)
     if (existing !== undefined) {
       setActivePath(path)
+      if (opts?.pin === true && existing.preview) {
+        setTabs(prev => prev.map(t => t.path === path ? { ...t, preview: false } : t))
+      }
       return
     }
     // Create a placeholder tab, then load content.
@@ -254,8 +263,13 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
       language: languageFromPath(path, 'plaintext'),
       error: null,
       externalChanged: false,
+      preview: wantPreview,
     }
-    setTabs(prev => [...prev, newTab])
+    setTabs(prev => {
+      // 预览 tab 替换已有预览位（VS Code 单预览语义）。
+      const base = wantPreview ? prev.filter(t => !t.preview) : prev
+      return [...base, newTab]
+    })
     setActivePath(path)
     try {
       const result = await readFile(path)
@@ -272,6 +286,11 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
       setTabs(prev => prev.map(t => t.path === path ? { ...t, error: String(err) } : t))
     }
   }, [tabs, readFile, showEditor])
+
+  /** 固定预览 tab（双击 tab / 编辑后 / 双击树文件）。 */
+  const pinTab = useCallback((path: string) => {
+    setTabs(prev => prev.map(t => t.path === path && t.preview ? { ...t, preview: false } : t))
+  }, [])
 
   /** Close a tab. If dirty, confirm first (save / discard / cancel). */
   const closeTab = useCallback((path: string) => {
@@ -296,13 +315,14 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     setDisposePaths([path])
   }, [tabs, activePath])
 
-  /** Update content when the user types in Monaco (dirty = differs from disk baseline). */
+  /** Update content when the user types in Monaco (dirty = differs from disk baseline).
+   *  编辑预览 tab → 自动固定（VS Code 语义）。 */
   const onContentChange = useCallback((newContent: string) => {
     if (activePath === null) return
     setTabs(prev => prev.map(t => {
       if (t.path !== activePath) return t
       if (t.content === newContent) return t
-      return { ...t, content: newContent, externalChanged: false }
+      return { ...t, content: newContent, externalChanged: false, preview: false }
     }))
   }, [activePath])
 
@@ -330,7 +350,9 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     }
   }, [activeTab, writeFile, flashSaveFeedback])
 
-  // ⌘S keyboard shortcut for save.
+  // ⌘S keyboard shortcut for save. Monaco 编辑器内由 Monaco keybinding service
+  // 处理（MonacoEditor 注册 addCommand）；编辑器外（文件树聚焦等）由本 window
+  // 监听兜底。capture 阶段拦 ⌘S 不影响 Monaco 的其他 ⌘ 组合键（只 match 's'）。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -475,18 +497,25 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     }
   }, [deletePath, activePath])
 
-  /** 重命名文件/文件夹。已打开 tab 路径同步更新。 */
+  /** 重命名文件/文件夹（newName = 新文件名，同目录改名）。已打开 tab 路径同步更新。 */
   const onRenamePath = useCallback(async (from: string, newName: string) => {
     const parent = from.slice(0, from.lastIndexOf('/'))
     const to = parent === '' ? `/${newName}` : `${parent}/${newName}`
     if (to === from) return
+    await movePath(from, to)
+  }, [renamePath])
+
+  /** 移动路径（跨目录拖拽 / 同目录重命名共用）。to = 完整目标路径。 */
+  const movePath = useCallback(async (from: string, to: string) => {
+    if (to === from) return
     const result = await renamePath(from, to)
     if (result.ok) {
       setTreeRefreshGen(g => g + 1)
+      const newTitle = to.split('/').pop() ?? to
       // 已打开 tab 路径同步（含目录下所有文件）
       setTabs(prev => prev.map(t => {
         if (t.path === from) {
-          return { ...t, path: to, title: newName }
+          return { ...t, path: to, title: newTitle }
         }
         if (t.path.startsWith(`${from}/`)) {
           const newPath = to + t.path.slice(from.length)
@@ -500,8 +529,8 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
         return prev
       })
     } else {
-      console.error('[explorer] 重命名失败', from, result.error?.message)
-      window.alert(`重命名失败：${result.error?.message ?? '未知错误'}`)
+      console.error('[explorer] 移动失败', from, '→', to, result.error?.message)
+      window.alert(`移动失败：${result.error?.message ?? '未知错误'}`)
     }
   }, [renamePath])
 
@@ -520,25 +549,117 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     })
   }, [activePath])
 
+  // ── tab 拖拽排序 + 右键菜单 ──
+  const [dragTabPath, setDragTabPath] = useState<string | null>(null)
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; path: string } | null>(null)
+  // 右键菜单全局关闭
+  useEffect(() => {
+    if (tabMenu === null) return
+    const onDown = () => setTabMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTabMenu(null) }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('blur', onDown)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('blur', onDown)
+    }
+  }, [tabMenu])
+
+  /** 关闭其他 tab（保留指定 path + activePath）。 */
+  const closeOtherTabs = useCallback((keepPath: string) => {
+    setTabs(prev => {
+      const closing = prev.filter(t => t.path !== keepPath && !(t.content !== t.savedContent))
+      // dirty tab 不自动关（避免丢修改）——只关干净的
+      if (closing.length > 0) setDisposePaths(closing.map(t => t.path))
+      return prev.filter(t => t.path === keepPath || t.content !== t.savedContent)
+    })
+  }, [])
+
+  /** 关闭右侧所有干净 tab。 */
+  const closeTabsToRight = useCallback((path: string) => {
+    setTabs(prev => {
+      const idx = prev.findIndex(t => t.path === path)
+      if (idx < 0) return prev
+      const right = prev.slice(idx + 1).filter(t => !(t.content !== t.savedContent))
+      if (right.length > 0) setDisposePaths(right.map(t => t.path))
+      return prev.filter((t, i) => i <= idx || t.content !== t.savedContent)
+    })
+    if (activePath !== null) {
+      // active 在右侧被关 → 激活当前 path
+      setActivePath(prev => {
+        const stillThere = tabs.find(t => t.path === prev)
+        if (stillThere === undefined) return prev
+        return prev
+      })
+    }
+  }, [tabs, activePath])
+
+  /** 关闭所有干净 tab。 */
+  const closeAllTabs = useCallback(() => {
+    setTabs(prev => {
+      const closing = prev.filter(t => !(t.content !== t.savedContent))
+      if (closing.length > 0) setDisposePaths(closing.map(t => t.path))
+      const remaining = prev.filter(t => t.content !== t.savedContent)
+      if (activePath !== null && !remaining.some(t => t.path === activePath)) {
+        setActivePath(remaining[remaining.length - 1]?.path ?? null)
+      }
+      return remaining
+    })
+  }, [activePath])
+
   return (
     <div className={css.column} data-code-editor-column="">
       <div className={css.editorMain}>
-        {/* Editor Tabs */}
+        {/* Editor Tabs（溢出横向滚动；tab 可拖拽排序；预览 tab 斜体） */}
         <div className={css.tabs}>
           {tabs.map((tab) => {
             const dirty = tab.content !== tab.savedContent
             return (
               <div
                 key={tab.path}
-                className={`${css.tab}${tab.path === activePath ? ` ${css.tabActive}` : ''}`}
+                className={`${css.tab}${tab.path === activePath ? ` ${css.tabActive}` : ''}${tab.preview ? ` ${css.tabPreview}` : ''}${dragTabPath === tab.path ? ` ${css.tabDragging}` : ''}`}
                 data-tab-active={tab.path === activePath || undefined}
+                draggable
+                onDragStart={(e) => {
+                  setDragTabPath(tab.path)
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', tab.path)
+                }}
+                onDragEnd={() => setDragTabPath(null)}
+                onDragOver={(e) => {
+                  if (dragTabPath !== null && dragTabPath !== tab.path) {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  if (dragTabPath === null || dragTabPath === tab.path) return
+                  setTabs(prev => {
+                    const fromIdx = prev.findIndex(t => t.path === dragTabPath)
+                    const toIdx = prev.findIndex(t => t.path === tab.path)
+                    if (fromIdx < 0 || toIdx < 0) return prev
+                    const next = [...prev]
+                    const [moved] = next.splice(fromIdx, 1)
+                    next.splice(toIdx, 0, moved)
+                    return next
+                  })
+                  setDragTabPath(null)
+                }}
                 onClick={() => setActivePath(tab.path)}
+                onDoubleClick={() => pinTab(tab.path)}
                 onAuxClick={(e) => {
                   // Middle-click closes the tab (VS Code semantics).
                   if (e.button === 1) {
                     e.preventDefault()
                     closeTab(tab.path)
                   }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setTabMenu({ x: e.clientX, y: e.clientY, path: tab.path })
                 }}
               >
                 {dirty && <span className={css.tabDirty} />}
@@ -576,11 +697,56 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
             </button>
           )}
         </div>
+        {/* tab 右键菜单（自绘玻璃菜单，fixed 定位） */}
+        {tabMenu !== null && (
+          <div className={css.tabContextMenu} style={{ left: tabMenu.x, top: tabMenu.y }} onMouseDown={(e) => e.stopPropagation()}>
+            <button type="button" className={css.tabMenuItem} onClick={() => { closeTab(tabMenu.path); setTabMenu(null) }}>关闭</button>
+            <button type="button" className={css.tabMenuItem} onClick={() => { closeOtherTabs(tabMenu.path); setTabMenu(null) }}>关闭其他</button>
+            <button type="button" className={css.tabMenuItem} onClick={() => { closeTabsToRight(tabMenu.path); setTabMenu(null) }}>关闭右侧所有</button>
+            <div className={css.tabMenuDivider} />
+            <button type="button" className={css.tabMenuItem} onClick={() => { closeAllTabs(); setTabMenu(null) }}>全部关闭</button>
+          </div>
+        )}
 
-        {/* crumb（空态隐藏，不留占位） */}
+        {/* crumb（空态隐藏；父级段可点击 → 树中定位高亮该目录） */}
         {activeTab !== null && (
           <div className={css.crumb}>
-            {activeTab.path.replace(/^\//, '').replace(/\//g, ' › ')}
+            {(() => {
+              const parts = activeTab.path.split('/').filter(Boolean)
+              return parts.map((part, i) => {
+                const isLast = i === parts.length - 1
+                const segPath = '/' + parts.slice(0, i + 1).join('/')
+                return (
+                  <span key={segPath}>
+                    {i > 0 && <span className={css.crumbSep}> › </span>}
+                    {isLast
+                      ? <span className={css.crumbCurrent}>{part}</span>
+                      : (
+                        <button
+                          type="button"
+                          className={css.crumbLink}
+                          onClick={() => {
+                            // 父级目录 → 树中定位（展开 + 高亮 + scrollIntoView）
+                            setExpandedDirs(prev => {
+                              const parents: string[] = []
+                              for (let j = 1; j <= i; j++) parents.push('/' + parts.slice(0, j).join('/'))
+                              const missing = parents.filter(p => !prev.includes(p))
+                              return missing.length > 0 ? [...prev, ...missing] : prev
+                            })
+                            // 高亮定位（临时把 activeFilePath 指到该目录——树选中态由 activeFilePath 驱动）
+                            // 目录不能打开为 tab，所以用 scrollIntoView 直接定位
+                            requestAnimationFrame(() => {
+                              document.querySelector(`[data-tree-path="${CSS.escape(segPath)}"]`)?.scrollIntoView({ block: 'nearest' })
+                            })
+                          }}
+                        >
+                          {part}
+                        </button>
+                      )}
+                  </span>
+                )
+              })
+            })()}
           </div>
         )}
 
@@ -651,6 +817,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
               onCreateFolder={onCreateFolder}
               onDeletePath={onDeletePath}
               onRenamePath={onRenamePath}
+              onMovePath={movePath}
             />
           </div>
         </>

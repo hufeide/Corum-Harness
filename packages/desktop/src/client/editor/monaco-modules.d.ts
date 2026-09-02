@@ -23,3 +23,11 @@ declare module 'monaco-editor/language/typescript/monaco.contribution.js' {}
 declare module 'monaco-editor/language/json/monaco.contribution.js' {}
 declare module 'monaco-editor/language/css/monaco.contribution.js' {}
 declare module 'monaco-editor/language/html/monaco.contribution.js' {}
+
+// Editor feature contributions（VS Code 体验对齐的懒加载模块，type-only shim；
+// 路径同 language contribution——不写 `esm/vs/` 前缀）。
+declare module 'monaco-editor/editor/contrib/find/browser/findController.js' {}
+declare module 'monaco-editor/editor/contrib/multicursor/browser/multicursor.js' {}
+declare module 'monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching.js' {}
+declare module 'monaco-editor/editor/contrib/folding/browser/folding.js' {}
+declare module 'monaco-editor/editor/contrib/suggest/browser/suggestController.js' {}

@@ -262,3 +262,17 @@
   outline: none;
   box-sizing: border-box;
 }
+
+/* ── 拖拽移动目标高亮 ── */
+.nodeDropTarget {
+  background: var(--corum-glass-2) !important;
+  border-color: var(--dsw-alias-brand-primary) !important;
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
+}
+/* tree-body 键盘导航 focus 态（去掉 outline，选中态已由 nodeSelected 表达） */
+.treeBody:focus {
+  outline: none;
+}
+.treeBody:focus .nodeSelected {
+  border-color: var(--dsw-alias-brand-primary);
+}

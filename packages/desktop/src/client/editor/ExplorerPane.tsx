@@ -52,8 +52,8 @@ export interface ExplorerPaneInjected {
   closeRegion: () => void
   /** 收起资源管理器子面板（design waRkJ：折叠 = 子面板完全消失）。 */
   onToggleCollapsed: () => void
-  /** 点击文件 → 编辑器打开 tab（核心联动）。 */
-  onOpenFile: (path: string) => void
+  /** 点击文件 → 编辑器打开 tab（核心联动）。preview=斜体临时 tab；pin=固定已有预览。 */
+  onOpenFile: (path: string, opts?: { preview?: boolean; pin?: boolean }) => void
   /** 编辑器当前激活文件路径（树选中同步 + scrollIntoView）。 */
   activeFilePath: string | null
   /** 展开的目录路径（受控，EditorColumn 持久化）。 */
@@ -70,6 +70,8 @@ export interface ExplorerPaneInjected {
   onDeletePath: (path: string, isDir: boolean) => void
   /** 重命名路径（EditorColumn RPC + tab 路径同步）。 */
   onRenamePath: (from: string, newName: string) => void
+  /** 移动路径（跨目录拖拽；to = 完整目标路径）。 */
+  onMovePath: (from: string, to: string) => void
 }
 
 export type ExplorerPaneProps = ExplorerPaneInjected
@@ -134,7 +136,7 @@ interface RenamingState {
 }
 
 /** The resource manager sub-pane (see module doc). */
-export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath }: ExplorerPaneProps) {
+export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath }: ExplorerPaneProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
   useSyncExternalStore(generation.subscribe, generation.getSnapshot)
@@ -150,8 +152,15 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
   /** 行内重命名。 */
   const [renaming, setRenaming] = useState<RenamingState | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
-  /** 树容器（scrollIntoView 作用域）。 */
+  /** 树容器（scrollIntoView 作用域 + 键盘导航 focus）。 */
   const treeBodyRef = useRef<HTMLDivElement | null>(null)
+  /** 多选集合（⌘Click 切换 / ⇧Click 范围选；键盘导航的「焦点」= 最后选中项）。 */
+  const [selection, setSelection] = useState<Set<string>>(() => new Set())
+  /** 范围选锚点（⇧Click 的起点）。 */
+  const anchorRef = useRef<string | null>(null)
+  /** 拖拽移动中的路径。 */
+  const [dragPath, setDragPath] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
 
   const loadDir = useCallback((path: string): void => {
     setLoading((prev) => new Set(prev).add(path))
@@ -274,13 +283,149 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
     if (name !== null && name.trim() !== '') onCreateFolder(parentDir, name.trim())
   }, [onCreateFolder])
 
+  /** 可见节点扁平化（键盘导航 ↑↓ 用；按渲染序）。 */
+  const flattenVisible = useCallback((): { path: string; isDir: boolean }[] => {
+    const out: { path: string; isDir: boolean }[] = []
+    const walk = (parentPath: string, entries: FsEntry[]) => {
+      for (const e of entries) {
+        const p = joinPath(parentPath, e.name)
+        out.push({ path: p, isDir: e.type === 'dir' })
+        if (e.type === 'dir' && expanded.has(p)) {
+          const children = dirCache[p]
+          if (children !== undefined) walk(p, children)
+        }
+      }
+    }
+    if (rootEntries !== null) walk('/', rootEntries)
+    return out
+  }, [rootEntries, dirCache, expanded])
+
+  /** 键盘导航（↑↓ 移动 / → 展开或进子 / ← 折叠或回父 / Enter 打开 / F2 重命名 / Delete 删除）。 */
+  const onTreeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const visible = flattenVisible()
+    if (visible.length === 0) return
+    // 焦点 = 多选集合的最后一项；无焦点 → 第一个
+    const focusPath = selection.size > 0 ? Array.from(selection)[selection.size - 1] : visible[0].path
+    const idx = visible.findIndex(v => v.path === focusPath)
+    const cur = idx >= 0 ? visible[idx] : visible[0]
+    const curIdx = idx >= 0 ? idx : 0
+    const moveFocus = (next: string) => {
+      setSelection(new Set([next]))
+      anchorRef.current = next
+      treeBodyRef.current?.querySelector(`[data-tree-path="${CSS.escape(next)}"]`)?.scrollIntoView({ block: 'nearest' })
+    }
+    switch (e.key) {
+      case 'ArrowDown': {
+        e.preventDefault()
+        const next = visible[Math.min(curIdx + 1, visible.length - 1)]
+        moveFocus(next.path)
+        break
+      }
+      case 'ArrowUp': {
+        e.preventDefault()
+        const next = visible[Math.max(curIdx - 1, 0)]
+        moveFocus(next.path)
+        break
+      }
+      case 'ArrowRight': {
+        e.preventDefault()
+        if (cur.isDir && !expanded.has(cur.path)) {
+          toggle(cur.path)
+        } else if (cur.isDir) {
+          // 已展开 → 进第一个子
+          const next = visible[curIdx + 1]
+          if (next !== undefined && next.path.startsWith(`${cur.path}/`)) moveFocus(next.path)
+        }
+        break
+      }
+      case 'ArrowLeft': {
+        e.preventDefault()
+        if (cur.isDir && expanded.has(cur.path)) {
+          toggle(cur.path)
+        } else {
+          // 回父目录
+          const parent = cur.path.slice(0, cur.path.lastIndexOf('/'))
+          if (parent !== '' && parent !== cur.path) moveFocus(parent === '' ? '/' : parent)
+        }
+        break
+      }
+      case 'Enter': {
+        e.preventDefault()
+        if (cur.isDir) toggle(cur.path)
+        else onOpenFile(cur.path, { preview: false, pin: true })
+        break
+      }
+      case 'F2': {
+        e.preventDefault()
+        setRenaming({ path: cur.path, draft: cur.path.split('/').pop() ?? '' })
+        break
+      }
+      case 'Delete':
+      case 'Backspace': {
+        e.preventDefault()
+        onDeletePath(cur.path, cur.isDir)
+        break
+      }
+    }
+  }, [flattenVisible, selection, expanded, toggle, onOpenFile, onDeletePath])
+
+  /** 多选点击（⌘ 切换 / ⇧ 范围 / 普通单选）。 */
+  const onNodeClick = useCallback((e: React.MouseEvent, path: string, isDir: boolean) => {
+    if (e.metaKey || e.ctrlKey) {
+      // ⌘Click 切换选中
+      setSelection(prev => {
+        const next = new Set(prev)
+        if (next.has(path)) next.delete(path)
+        else next.add(path)
+        return next
+      })
+      anchorRef.current = path
+      return
+    }
+    if (e.shiftKey && anchorRef.current !== null) {
+      // ⇧Click 范围选（按可见序）
+      const visible = flattenVisible()
+      const a = visible.findIndex(v => v.path === anchorRef.current)
+      const b = visible.findIndex(v => v.path === path)
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a < b ? [a, b] : [b, a]
+        setSelection(new Set(visible.slice(lo, hi + 1).map(v => v.path)))
+        return
+      }
+    }
+    // 普通单击：单选 + 行为（目录 toggle / 文件预览）
+    setSelection(new Set([path]))
+    anchorRef.current = path
+    if (isDir) {
+      toggle(path)
+    } else {
+      onOpenFile(path, { preview: true })
+    }
+  }, [flattenVisible, toggle, onOpenFile])
+
+  /** 拖拽移动（拖到目录上 = 移入；拖到文件上 = 移到文件所在目录）。 */
+  const onNodeDrop = useCallback((e: React.DragEvent, targetPath: string, targetIsDir: boolean) => {
+    e.preventDefault()
+    setDropTarget(null)
+    if (dragPath === null || dragPath === targetPath) return
+    // 不能拖到自己的子孙里
+    if (targetPath.startsWith(`${dragPath}/`)) return
+    const destDir = targetIsDir ? targetPath : targetPath.slice(0, targetPath.lastIndexOf('/'))
+    const name = dragPath.split('/').pop() ?? ''
+    const destPath = (destDir === '' || destDir === '/') ? `/${name}` : `${destDir}/${name}`
+    if (destPath === dragPath) return
+    onMovePath(dragPath, destPath)
+    setDragPath(null)
+  }, [dragPath, onMovePath])
+
   const renderNode = (path: string, entry: FsEntry, depth: number) => {
     const isDir = entry.type === 'dir'
     const isExpanded = expanded.has(path)
-    const isSelected = activeFilePath === path
+    const isSelected = activeFilePath === path || selection.has(path)
     const children = isDir ? dirCache[path] : undefined
     const isLoading = loading.has(path)
     const isRenaming = renaming?.path === path
+    const isDropTarget = dropTarget === path
     return (
       <div key={path}>
         {isRenaming ? (
@@ -307,15 +452,30 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         ) : (
           <button
             type="button"
-            className={`${css.node}${isSelected ? ` ${css.nodeSelected}` : ''}`}
+            className={`${css.node}${isSelected ? ` ${css.nodeSelected}` : ''}${isDropTarget ? ` ${css.nodeDropTarget}` : ''}`}
             style={{ paddingLeft: 6 + depth * 14 }}
             data-tree-path={path}
-            onClick={() => {
-              if (isDir) {
-                toggle(path)
-              } else {
-                // 文件 → 编辑器打开 tab
-                onOpenFile(path)
+            draggable
+            onDragStart={(e) => {
+              setDragPath(path)
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', path)
+            }}
+            onDragEnd={() => { setDragPath(null); setDropTarget(null) }}
+            onDragOver={(e) => {
+              if (dragPath !== null && dragPath !== path && !path.startsWith(`${dragPath}/`)) {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+                setDropTarget(path)
+              }
+            }}
+            onDragLeave={() => { if (dropTarget === path) setDropTarget(null) }}
+            onDrop={(e) => onNodeDrop(e, path, isDir)}
+            onClick={(e) => onNodeClick(e, path, isDir)}
+            onDoubleClick={() => {
+              if (!isDir) {
+                // 文件双击 → 固定 tab（取消预览态）
+                onOpenFile(path, { preview: false, pin: true })
               }
             }}
             onContextMenu={(e) => {
@@ -394,7 +554,13 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         </button>
       </div>
       {/* QdSbb — tree-body。 */}
-      <div className={css.treeBody} ref={treeBodyRef}>
+      <div
+        className={css.treeBody}
+        ref={treeBodyRef}
+        tabIndex={0}
+        onKeyDown={onTreeKeyDown}
+        data-tree-body=""
+      >
         {rootError !== null && <div className={css.error}>{rootError}</div>}
         {rootEntries === null && rootError === null && <div className={css.emptyDir}>加载中…</div>}
         {rootEntries?.map(entry => renderNode(joinPath('/', entry.name), entry, 0))}

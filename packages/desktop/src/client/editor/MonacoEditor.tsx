@@ -40,6 +40,16 @@ import 'monaco-editor/language/json/monaco.contribution.js'
 import 'monaco-editor/language/css/monaco.contribution.js'
 import 'monaco-editor/language/html/monaco.contribution.js'
 
+// Editor feature contributions（VS Code 体验对齐）：find/undo/multicursor 等是
+// 懒加载 contribution，editor.api 子集不含，需显式 import 注册。
+// 路径走 monaco exports map `./*` → `./esm/vs/*.js`（与 language contribution
+// 同一模式：不写 `esm/vs/` 前缀，让 bundler 与模块表解析一致）。
+import 'monaco-editor/editor/contrib/find/browser/findController.js'
+import 'monaco-editor/editor/contrib/multicursor/browser/multicursor.js'
+import 'monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching.js'
+import 'monaco-editor/editor/contrib/folding/browser/folding.js'
+import 'monaco-editor/editor/contrib/suggest/browser/suggestController.js'
+
 /** One code file shown in the editor. */
 export interface MonacoFileModel {
   /** Stable identity used to key the model across content swaps. */
@@ -93,6 +103,22 @@ const CORUM_THEMES: Record<'corum-light' | 'corum-dark', MonacoEditorApi.IStanda
       'editorWidget.border': '#FFFFFF',
       'scrollbarSlider.background': '#8B8BA333',
       'scrollbarSlider.hoverBackground': '#8B8BA355',
+      'minimap.background': '#00000000',
+      'minimapSlider.background': '#8B8BA322',
+      'minimapSlider.hoverBackground': '#8B8BA333',
+      'minimapSlider.activeBackground': '#8B8BA344',
+      'editorIndentGuide.background1': '#8B8BA326',
+      'editorIndentGuide.activeBackground1': '#8B8BA355',
+      'editorBracketMatch.background': '#5B21F522',
+      'editorBracketMatch.border': '#5B21F566',
+      'editor.foldBackground': '#0E0E1C06',
+      'editorGutter.foldingControlForeground': '#8B8BA3',
+      'editor.findMatchBackground': '#5B21F544',
+      'editor.findMatchHighlightBackground': '#5B21F522',
+      'editor.findMatchBorder': '#5B21F5',
+      'editor.selectionBackground': '#5B21F533',
+      'editor.selectionHighlightBackground': '#5B21F522',
+      'editorGhostText.foreground': '#8B8BA388',
     },
   },
   'corum-dark': {
@@ -112,6 +138,30 @@ const CORUM_THEMES: Record<'corum-light' | 'corum-dark', MonacoEditorApi.IStanda
       'editorWidget.border': '#B98CFF2E',
       'scrollbarSlider.background': '#7E719E33',
       'scrollbarSlider.hoverBackground': '#7E719E55',
+      // minimap / 缩进参考线 / 括号匹配 / 折叠（corum 玻璃暗色对齐）。
+      'minimap.background': '#00000000',
+      'minimapSlider.background': '#7E719E22',
+      'minimapSlider.hoverBackground': '#7E719E33',
+      'minimapSlider.activeBackground': '#7E719E44',
+      'editorIndentGuide.background1': '#7E719E26',
+      'editorIndentGuide.activeBackground1': '#7E719E55',
+      'editorBracketMatch.background': '#01CDFE22',
+      'editorBracketMatch.border': '#01CDFE66',
+      'editorBracketHighlight.foreground1': '#01CDFE',
+      'editorBracketHighlight.foreground2': '#B98CFF',
+      'editorBracketHighlight.foreground3': '#01FEA5',
+      'editorBracketHighlight.unexpectedBracket.foreground': '#FF5B5B',
+      'editor.foldBackground': '#F3ECFF08',
+      'editorGutter.foldingControlForeground': '#7E719E',
+      // 查找高亮。
+      'editor.findMatchBackground': '#01CDFE44',
+      'editor.findMatchHighlightBackground': '#01CDFE22',
+      'editor.findMatchBorder': '#01CDFE',
+      // 选区。
+      'editor.selectionBackground': '#5B21F533',
+      'editor.selectionHighlightBackground': '#5B21F522',
+      // 幽灵文本（补全）。
+      'editorGhostText.foreground': '#7E719E88',
     },
   },
 }
@@ -227,10 +277,58 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         language: 'plaintext',
         readOnly: !editable,
         automaticLayout: true,
-        minimap: { enabled: false },
+        // minimap：VS Code 标志性代码缩略图（slider 模式滑块常驻）。
+        minimap: { enabled: true, showSlider: 'always', renderCharacters: false, maxColumn: 80 },
         theme: dark ? 'corum-dark' : 'corum-light',
         scrollBeyondLastLine: false,
         fixedOverflowWidgets: true,
+        // 括号/缩进/折叠/空白字符（VS Code 默认体验对齐）。
+        matchBrackets: 'always',
+        bracketPairColorization: { enabled: true },
+        autoClosingBrackets: 'languageDefined',
+        autoClosingQuotes: 'languageDefined',
+        autoIndent: 'full',
+        guides: { bracketPairs: true, indentation: true },
+        folding: true,
+        foldingHighlight: true,
+        showFoldingControls: 'always',
+        renderWhitespace: 'selection',
+        renderControlCharacters: true,
+        // 多光标（⌥Click + ⌘⌥↑↓）。
+        multiCursorModifier: 'alt',
+        multiCursorMergeOverlapping: true,
+        // 查找（⌘F widget 自带，无需额外配置）。
+        find: { addExtraSpaceOnTop: false, seedSearchStringFromSelection: 'selection' },
+        // 选择/滚动体验。
+        selectOnLineNumbers: true,
+        roundedSelection: false,
+        cursorBlinking: 'smooth',
+        cursorSmoothCaretAnimation: 'on',
+        smoothScrolling: true,
+        // 字体/行高（对齐设计 token；JetBrains Mono 优先）。
+        fontFamily: "'JetBrains Mono', 'SFMono-Regular', Menlo, monospace",
+        fontSize: 13,
+        lineHeight: 20,
+        letterSpacing: 0,
+        // 行号/装饰。
+        lineNumbers: 'on',
+        lineNumbersMinChars: 3,
+        glyphMargin: false,
+        lineDecorationsWidth: 8,
+        // 滚动条（细滑块对齐玻璃风格）。
+        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
+        // 粘贴/拖拽。
+        dragAndDrop: true,
+        pasteAs: { enabled: true },
+        // 快速建议（输入即补全；VS Code 默认 on）。
+        quickSuggestions: { other: true, comments: false, strings: false },
+        suggestOnTriggerCharacters: true,
+        acceptSuggestionOnEnter: 'on',
+        tabCompletion: 'off',
+        wordBasedSuggestions: 'currentDocument',
+        // 格式化（⌥⇧F 自带，register 由 language contribution 提供）。
+        formatOnPaste: false,
+        formatOnType: false,
       })
       editorRef.current = instance
       instance.onDidChangeModelContent(() => {
