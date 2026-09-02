@@ -747,10 +747,21 @@ const INITIAL_MCP_SERVERS: McpServerData[] = [
 
 const TRANSPORT_OPTIONS: McpTransport[] = ['stdio', 'SSE / HTTP', 'WebSocket']
 
-const MCP_JSON_PLACEHOLDER = `{
+/* 不同传输方式对应不同的配置示例 */
+const MCP_JSON_PLACEHOLDERS: Record<McpTransport, string> = {
+  'stdio': `{
   "command": "npx",
   "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-}`
+}`,
+  'SSE / HTTP': `{
+  "url": "https://mcp.example.com/sse",
+  "headers": { "Authorization": "Bearer <token>" }
+}`,
+  'WebSocket': `{
+  "url": "ws://127.0.0.1:7788/mcp",
+  "protocols": ["mcp.v1"]
+}`,
+}
 
 /* 添加 MCP 服务器对话框（设计稿 sIDC1） */
 function AddMcpServerDialog({ onClose, onAdd }: {
@@ -794,7 +805,7 @@ function AddMcpServerDialog({ onClose, onAdd }: {
               className={css.jsonTextarea}
               value={configJson}
               onChange={e => setConfigJson(e.target.value)}
-              placeholder={MCP_JSON_PLACEHOLDER}
+              placeholder={MCP_JSON_PLACEHOLDERS[transport]}
             />
           </div>
           <div className={css.formGroup}>
