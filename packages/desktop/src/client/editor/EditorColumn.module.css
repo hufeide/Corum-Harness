@@ -376,11 +376,10 @@
 }
 
 /* ── Monaco 编辑器右键菜单 corum 玻璃化 ──
-   Monaco contextmenu 是原生深色矩形（--vscode-menu-* token 默认值），与 corum
-   玻璃设计系统不符。覆盖 token + 容器为 corum 玻璃语言（glass-2 底 + 光边 +
-   backdrop-blur + 圆角 + 菜单项 hover glass-3）。菜单项文本为 Monaco 硬编码
-   英文（Cut/Copy/Paste/Command Palette——VS Code 官方中文化也是语言包插件，
-   不在本轮范围）。 */
+   前提：editor.create() 已传 useShadowDOM: false（0.56 默认 true，会把菜单渲进
+   .shadow-root-host 的 shadow root，document 级 CSS 与 token 覆盖全部失效——
+   见 docs/ide-formal/LESSONS-monaco-context-menu-styling.md）。菜单文本已通过
+   monaco-editor/nls/lang/zh-cn.js 中文化（须先于 monaco 主入口 import）。 */
 :global(.monaco-menu .monaco-action-bar.vertical) {
   /* 背景/blur 上移到 .context-view 容器层（真实绘制背景的元素），这里保持透明，
      避免在实色背景上做无效 blur。 */
