@@ -49,6 +49,8 @@ import type {
 } from './shell-contract.ts'
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
 import { GeneralSection } from './SettingsGeneralSection.tsx'
+import { SECTION_DEFS } from './settings/SettingsSections.tsx'
+import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
   SettingsGeneralItemOwnerProps, SettingsHeaderOwnerProps,
@@ -372,7 +374,22 @@ export function apply(ctx: ClientContext): void {
       children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
     }, GeneralSection))
 
+    // ── 批量注册设计稿 section（外观/通知/快捷键/权限/.../配置档案）──
+    // 每个 section 用 SettingsSections.tsx 中的组件渲染，静态占位文案。
+    const disposeSections = SECTION_DEFS.map(def =>
+      ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section',
+        id: def.id,
+        order: def.order,
+        label: def.label,
+        locale: NS,
+      }, (props: SettingsSectionOwnerProps) => (
+        <SettingsSectionHost {...props} render={def.Component} />
+      ))),
+    )
+
     return () => {
+      for (const dispose of disposeSections) dispose()
       disposeGeneral()
       disposeClose()
       disposeHeader()

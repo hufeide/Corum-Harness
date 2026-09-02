@@ -1,0 +1,414 @@
+/* SettingsSections — 各 section 页面专属样式
+ * 复用 SettingGroup/SettingRow 的 glass 风格，补充 section 特有的元素样式
+ */
+
+/* ── 通用玻璃按钮 ──────────────────────────────────────────────────── */
+
+.btnDefault {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 16px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 13px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+.btnDefault:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.btnPrimary {
+  composes: btnDefault;
+  border: none;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-weight: 600;
+}
+
+.btnDanger {
+  composes: btnDefault;
+  border: none;
+  background: var(--dsw-alias-state-error-primary);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+/* ── 文本输入框（终端页工作目录）──────────────────────────────────── */
+
+.textInput {
+  width: 220px;
+  padding: 10px 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 13px;
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+}
+
+.textInput:focus {
+  border-color: var(--corum-glass-border-active);
+}
+
+/* ── 快捷键页搜索框 ────────────────────────────────────────────────── */
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+
+.searchPlaceholder {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 重置按钮容器 ──────────────────────────────────────────────────── */
+
+.resetWrap {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* ── 规则页命令区域 ────────────────────────────────────────────────── */
+
+.cmdArea {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+  margin: 4px 0;
+}
+
+.cmdLine {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.6;
+}
+
+/* ── 操作按钮行 ────────────────────────────────────────────────────── */
+
+.actionsRow {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 2px;
+}
+
+/* ── 记忆行 ────────────────────────────────────────────────────────── */
+
+.memRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+}
+
+.memDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-text);
+}
+
+.memTxt {
+  flex: 1;
+  min-width: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.memDel {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.memDel:hover {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.memDivider {
+  width: 100%;
+  height: 1px;
+  background: var(--corum-glass-border);
+  opacity: 0.5;
+}
+
+/* ── 尺寸标签 ──────────────────────────────────────────────────────── */
+
+.sizeLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  margin-right: 8px;
+}
+
+/* ── 提示文本 ──────────────────────────────────────────────────────── */
+
+.hintText {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ── 顶部行（hint + 按钮）────────────────────────────────────────── */
+
+.topRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.topHint {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.topActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── InfoCard（Agent 预设）─────────────────────────────────────────── */
+
+.card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-1);
+  box-sizing: border-box;
+}
+
+.cardInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cardTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+
+.defaultBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.currentBadge {
+  composes: defaultBadge;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.cardDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.cardChips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.cardChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.cardActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── MCP 服务器卡片 ────────────────────────────────────────────────── */
+
+.serverCard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-1);
+  box-sizing: border-box;
+}
+
+.serverLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.serverDotOn {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.serverDotOff {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-dimmed);
+}
+
+.serverMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.serverName {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.serverDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.serverRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.serverTools {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+/* ── 技能行 ────────────────────────────────────────────────────────── */
+
+.skillRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+}
+
+.skillIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+}
+
+.skillMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skillLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.skillDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.skillChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+/* ── 配置档案卡片 ──────────────────────────────────────────────────── */
+
+.profileCard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-1);
+  box-sizing: border-box;
+}

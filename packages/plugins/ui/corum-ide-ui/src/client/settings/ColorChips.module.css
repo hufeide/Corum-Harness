@@ -1,0 +1,31 @@
+/* ColorChips — 1:1 复刻 design.pen chips row
+ * gap 8, alignItems center, each chip 18×18 ellipse
+ * selected: stroke glass-border-active 2px
+ */
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.chip,
+.chipActive {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: box-shadow 0.15s ease;
+}
+
+.chipActive {
+  box-shadow: 0 0 0 2px var(--corum-glass-border-active);
+}
+
+.chip:hover {
+  box-shadow: 0 0 0 1px var(--corum-glass-border);
+}

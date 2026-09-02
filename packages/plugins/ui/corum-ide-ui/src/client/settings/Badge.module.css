@@ -1,0 +1,29 @@
+/* Badge — 1:1 复刻 design.pen p2zJab (modified) / e8idQ (restart)
+ * glass-2 fill, cornerRadius 6, padding [2,7], Inter 14px 600
+ */
+
+.modified,
+.restart {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--corum-glass-2);
+}
+
+/* modified: stroke glass-border-active, fill brand-text */
+.modified {
+  border: 1px solid var(--corum-glass-border-active);
+  color: var(--dsw-alias-brand-text);
+}
+
+/* restart: stroke state-warn, fill state-warn */
+.restart {
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-alias-state-warn-primary);
+}
