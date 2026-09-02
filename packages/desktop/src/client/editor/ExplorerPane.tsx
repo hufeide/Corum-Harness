@@ -33,7 +33,7 @@ import type { ConnectionGenerationState } from '@deepseek-ai/dsh-client-connecti
 import {
   Braces, ChevronDown, ChevronRight, FileCode, FileCog, FilePlus, FileText,
   Folder, FolderOpen, FolderPlus, ListCollapse, Lock, PanelRightClose,
-  RotateCw, X,
+  RotateCw, Search, X,
 } from 'lucide-react'
 import css from './ExplorerPane.module.css'
 
@@ -273,15 +273,67 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
     return '/'
   }, [activeFilePath])
 
-  const promptCreateFile = useCallback((parentDir: string) => {
-    const name = window.prompt(`在 ${parentDir === '/' ? '根目录' : parentDir} 下新建文件：`, 'untitled.ts')
-    if (name !== null && name.trim() !== '') onCreateFile(parentDir, name.trim())
-  }, [onCreateFile])
+  // ── 新建行内输入（VS Code 语义：在目标目录下插一个 input 行；window.prompt
+  // 在 Electron renderer 被禁用「prompt() is not supported」，不可用）。 ──
+  const [creating, setCreating] = useState<{ parentDir: string; kind: 'file' | 'dir'; draft: string } | null>(null)
+  const createInputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    if (creating === null || createInputRef.current === null) return
+    createInputRef.current.focus()
+  }, [creating])
+  const startCreate = useCallback((kind: 'file' | 'dir', parentDir: string) => {
+    // 确保父目录展开（新建行要显示在其子级首位）
+    if (parentDir !== '/' && !expanded.has(parentDir)) {
+      onExpandedChange([...expandedPaths, parentDir])
+    }
+    setCreating({ parentDir, kind, draft: '' })
+  }, [expanded, expandedPaths, onExpandedChange])
+  const commitCreate = useCallback(() => {
+    if (creating === null) return
+    const name = creating.draft.trim()
+    if (name !== '') {
+      if (creating.kind === 'file') onCreateFile(creating.parentDir, name)
+      else onCreateFolder(creating.parentDir, name)
+    }
+    setCreating(null)
+  }, [creating, onCreateFile, onCreateFolder])
 
-  const promptCreateFolder = useCallback((parentDir: string) => {
-    const name = window.prompt(`在 ${parentDir === '/' ? '根目录' : parentDir} 下新建文件夹：`, 'new-folder')
-    if (name !== null && name.trim() !== '') onCreateFolder(parentDir, name.trim())
-  }, [onCreateFolder])
+  // ── 树内搜索（VS Code filter：tree-header 下方搜索框，匹配名过滤可见节点）。 ──
+  const [filterText, setFilterText] = useState('')
+  const [showFilter, setShowFilter] = useState(false)
+  const filterInputRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    if (showFilter && filterInputRef.current !== null) filterInputRef.current.focus()
+  }, [showFilter])
+  /** 过滤：空串 = 全显；非空 = 名称含子串（大小写不敏感）的节点 + 其所有祖先。 */
+  const filterMatch = useCallback((name: string): boolean => {
+    if (filterText === '') return true
+    return name.toLowerCase().includes(filterText.toLowerCase())
+  }, [filterText])
+  /** 收集过滤态下的可见节点（匹配节点 + 其祖先目录全展开）。 */
+  const filteredVisible = useCallback((): Set<string> | null => {
+    if (filterText === '') return null
+    const visible = new Set<string>()
+    const walk = (parentPath: string, entries: FsEntry[]): boolean => {
+      let anyChildMatch = false
+      for (const e of entries) {
+        const p = joinPath(parentPath, e.name)
+        const selfMatch = filterMatch(e.name)
+        let childMatch = false
+        if (e.type === 'dir') {
+          const children = dirCache[p]
+          if (children !== undefined) childMatch = walk(p, children)
+        }
+        if (selfMatch || childMatch) {
+          visible.add(p)
+          anyChildMatch = true
+        }
+      }
+      return anyChildMatch
+    }
+    if (rootEntries !== null) walk('/', rootEntries)
+    return visible
+  }, [filterText, rootEntries, dirCache, filterMatch])
 
   /** 可见节点扁平化（键盘导航 ↑↓ 用；按渲染序）。 */
   const flattenVisible = useCallback((): { path: string; isDir: boolean }[] => {
@@ -418,9 +470,13 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
     setDragPath(null)
   }, [dragPath, onMovePath])
 
+  const filtered = filteredVisible()
   const renderNode = (path: string, entry: FsEntry, depth: number) => {
+    // 过滤态：不在 filtered 集合内的节点不渲染
+    if (filtered !== null && !filtered.has(path)) return null
     const isDir = entry.type === 'dir'
-    const isExpanded = expanded.has(path)
+    // 过滤态强制展开（匹配项的祖先链全显）
+    const isExpanded = filtered !== null ? true : expanded.has(path)
     const isSelected = activeFilePath === path || selection.has(path)
     const children = isDir ? dirCache[path] : undefined
     const isLoading = loading.has(path)
@@ -502,8 +558,30 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         )}
         {isDir && isExpanded && children !== undefined && (
           <div>
+            {/* 新建行（在本目录下创建时插入子级首位） */}
+            {creating !== null && creating.parentDir === path && (
+              <div className={css.renameRow} style={{ paddingLeft: 6 + (depth + 1) * 14 }}>
+                <span className={css.caretSpacer} />
+                {creating.kind === 'dir'
+                  ? <Folder size={18} strokeWidth={2} className={css.dirIcon} />
+                  : <FileCode size={18} strokeWidth={2} className={css.fileIcon} data-tone="code" />}
+                <input
+                  ref={createInputRef}
+                  className={css.renameInput}
+                  placeholder={creating.kind === 'dir' ? '文件夹名' : '文件名'}
+                  value={creating.draft}
+                  onChange={(e) => setCreating({ ...creating, draft: e.target.value })}
+                  onBlur={commitCreate}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitCreate()
+                    if (e.key === 'Escape') setCreating(null)
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+            )}
             {children.map(child => renderNode(joinPath(path, child.name), child, depth + 1))}
-            {children.length === 0 && <div className={css.emptyDir}>空目录</div>}
+            {children.length === 0 && creating?.parentDir !== path && <div className={css.emptyDir}>空目录</div>}
           </div>
         )}
         {isDir && isExpanded && children === undefined && !isLoading && (
@@ -540,11 +618,14 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
       <div className={css.treeHeader}>
         <ChevronDown size={17} strokeWidth={2} className={css.headerChev} />
         <span className={css.headerRoot}>{rootName}</span>
-        <button type="button" className={css.tb} title="新建文件" onClick={() => promptCreateFile(selectedDirForCreate())}>
+        <button type="button" className={css.tb} title="新建文件" onClick={() => startCreate('file', selectedDirForCreate())}>
           <FilePlus size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
-        <button type="button" className={css.tb} title="新建文件夹" onClick={() => promptCreateFolder(selectedDirForCreate())}>
+        <button type="button" className={css.tb} title="新建文件夹" onClick={() => startCreate('dir', selectedDirForCreate())}>
           <FolderPlus size={17} strokeWidth={2} className={css.tbIcon} />
+        </button>
+        <button type="button" className={`${css.tb}${showFilter ? ` ${css.tbActive}` : ''}`} title="搜索文件" onClick={() => { setShowFilter(v => !v); if (showFilter) setFilterText('') }}>
+          <Search size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
         <button type="button" className={css.tb} title="刷新" onClick={loadRoot}>
           <RotateCw size={17} strokeWidth={2} className={css.tbIcon} />
@@ -553,6 +634,24 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
           <ListCollapse size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
       </div>
+      {/* 树内搜索框（VS Code filter：点击搜索钮展开/收起；Escape 清空并收起）。 */}
+      {showFilter && (
+        <div className={css.filterRow}>
+          <input
+            ref={filterInputRef}
+            className={css.filterInput}
+            placeholder="搜索文件名…"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setFilterText('')
+                setShowFilter(false)
+              }
+            }}
+          />
+        </div>
+      )}
       {/* QdSbb — tree-body。 */}
       <div
         className={css.treeBody}
@@ -563,6 +662,28 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
       >
         {rootError !== null && <div className={css.error}>{rootError}</div>}
         {rootEntries === null && rootError === null && <div className={css.emptyDir}>加载中…</div>}
+        {/* 根目录新建行（在根下创建时插入首位） */}
+        {creating !== null && creating.parentDir === '/' && (
+          <div className={css.renameRow} style={{ paddingLeft: 6 }}>
+            <span className={css.caretSpacer} />
+            {creating.kind === 'dir'
+              ? <Folder size={18} strokeWidth={2} className={css.dirIcon} />
+              : <FileCode size={18} strokeWidth={2} className={css.fileIcon} data-tone="code" />}
+            <input
+              ref={createInputRef}
+              className={css.renameInput}
+              placeholder={creating.kind === 'dir' ? '文件夹名' : '文件名'}
+              value={creating.draft}
+              onChange={(e) => setCreating({ ...creating, draft: e.target.value })}
+              onBlur={commitCreate}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitCreate()
+                if (e.key === 'Escape') setCreating(null)
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
         {rootEntries?.map(entry => renderNode(joinPath('/', entry.name), entry, 0))}
       </div>
       {/* 右键菜单（自绘玻璃菜单，fixed 定位，挂在组件根）。 */}
@@ -574,8 +695,8 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
         >
           {contextMenu.isDir ? (
             <>
-              <button type="button" className={css.contextMenuItem} onClick={() => { promptCreateFile(contextMenu.path); setContextMenu(null) }}>新建文件</button>
-              <button type="button" className={css.contextMenuItem} onClick={() => { promptCreateFolder(contextMenu.path); setContextMenu(null) }}>新建文件夹</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { startCreate('file', contextMenu.path); setContextMenu(null) }}>新建文件</button>
+              <button type="button" className={css.contextMenuItem} onClick={() => { startCreate('dir', contextMenu.path); setContextMenu(null) }}>新建文件夹</button>
               <div className={css.contextMenuDivider} />
               <button type="button" className={css.contextMenuItem} onClick={() => { setRenaming({ path: contextMenu.path, draft: contextMenu.path.split('/').pop() ?? '' }); setContextMenu(null) }}>重命名</button>
               <button type="button" className={css.contextMenuItem} onClick={() => { loadDir(contextMenu.path); setContextMenu(null) }}>刷新</button>

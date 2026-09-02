@@ -276,3 +276,35 @@
 .treeBody:focus .nodeSelected {
   border-color: var(--dsw-alias-brand-primary);
 }
+
+/* ── 树内搜索框（tree-header 下方，VS Code filter 语义） ── */
+.filterRow {
+  flex: none;
+  padding: 0 4px 8px;
+  box-sizing: border-box;
+}
+.filterInput {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+.filterInput:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.filterInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+/* 搜索钮激活态（filter 展开时高亮） */
+.tbActive {
+  background: var(--corum-glass-2);
+}
+.tbActive .tbIcon {
+  color: var(--dsw-alias-brand-primary);
+}
