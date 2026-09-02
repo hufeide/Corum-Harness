@@ -10,3 +10,6 @@
  * imported as modules).
  * @module corum-desktop/client/editor/monaco-modules
  */
+
+// zh-cn 语言包（纯副作用，设置 globalThis._VSCODE_NLS_MESSAGES）。
+declare module 'monaco-editor/nls/lang/zh-cn.js' {}

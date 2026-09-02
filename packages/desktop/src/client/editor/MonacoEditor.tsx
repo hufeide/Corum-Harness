@@ -25,6 +25,12 @@
  */
 
 import { useEffect, useRef } from 'react'
+// 中文化（2026-09-04 第二十二轮）：Monaco 的 nls 在加载时读
+// `globalThis._VSCODE_NLS_MESSAGES`——必须在 monaco 主入口**之前** import
+// zh-cn 语言包（否则 nls 已初始化为英文，后 import 不生效）。zh-cn.js 是
+// 纯副作用（设置 globalThis._VSCODE_NLS_MESSAGES/_VSCODE_NLS_LANGUAGE），
+// 会被 bundler 内联（有全局赋值副作用，tree-shake 不掉）。
+import 'monaco-editor/nls/lang/zh-cn.js'
 // Monaco 全量主入口（`monaco-editor` 裸 specifier → esm/vs/index.js）：
 //   - editor.api（editor/languages/Uri/KeyCode 等命名导出）；
 //   - basic-languages 全部语种 monarch tokenizer（语法高亮着色——tsx/jsx/css/
@@ -209,15 +215,10 @@ function acquireModel(file: MonacoFileModel): MonacoEditorApi.ITextModel {
       modelCache.set(file.path, fresh)
       return fresh
     }
-    if (cached.getValue() !== file.value) {
-      // External content update (reload from disk / save normalization):
-      // apply as a full-range edit so the undo stack is preserved.
-      cached.pushEditOperations(
-        [],
-        [{ range: cached.getFullModelRange(), text: file.value }],
-        () => null,
-      )
-    }
+    // 单向数据流（第二十二轮）：模型是唯一事实源，**绝不在这里回写内容**——
+    // 外部变更由 useEffect 的 ② 分支显式 pushEditOperations（唯一回写点）。
+    // 在这里回写会在切换 tab 时把落后的 file.value（React 批处理）灌进模型
+    // 污染撤销栈。
     return cached
   }
   const model = editor.createModel(file.value, file.language)
@@ -343,9 +344,12 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
       instance.onDidChangeModelContent(() => {
         const model = instance.getModel()
         if (model !== null) {
-          // 标记「正在输入」：最新内容写进 typingContentRef，useEffect 里据此
-          // 跳过模型回写（防 React 批处理 race 导致的全量替换光标跳末尾）。
-          typingContentRef.current = model.getValue()
+          // 程序化变更（setValue/pushEditOperations 重置/外部回写）不同步——
+          // 否则会覆盖 readFile 完成后的真实内容（① 的 setValue('') 触发
+          // onContentChange('') 把真实内容覆盖回 '' 的根因）。
+          if (suppressContentSyncRef.current) return
+          // 单向数据流：模型变化（输入/撤销/重做）只同步只读投影
+          // （dirty 标记/状态栏），绝不回写模型（防 React 批处理 race 污染撤销栈）。
           onContentChangeRef.current?.(model.getValue())
         }
       })
@@ -373,25 +377,67 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
   }, [dark])
 
   // Bind the cached per-path model to the editor (tab switch = setModel).
-  // 「正在输入」标记：onContentChange 触发时把最新内容写进 ref，useEffect
-  // 里比对 file.value 与 ref——一致说明这个 value 变化就是用户输入引起的
-  // （模型已是该内容），跳过 acquireModel 的回写（否则 React 18 批处理 race：
-  // state 未 flush 时 acquireModel 拿旧 file.value 判不等 → pushEditOperations
-  // 全量替换 → 光标跳末尾，即「编辑文本的时候光标乱跑」根因）。
-  const typingContentRef = useRef<string | null>(null)
+  // 单向数据流（2026-09-04 第二十二轮重构，根治「连续 ⌘Z 内容被清空」）：
+  // 模型是唯一事实源，React state（file.value）只是只读投影（dirty 标记/状态
+  // 栏），**绝不回写模型**——除了两种情况：① 切换 tab（file.path 变）绑定另一
+  // 个模型；② 外部变更（file.path 相同但磁盘内容变了，EditorColumn 经 watch
+  // 检测到后 bump file.value 触发本 effect）。用户输入/撤销/重做都是模型自己
+  // 产生的变化，onDidChangeModelContent 只同步只读投影，不回写——否则 React
+  // 18 批处理 race 把中间态 file.value 回写进模型污染撤销栈（连续 ⌘Z 时模型
+  // 被回退到任意中间撤销态，内容被清空/错乱）。
+  const lastExternalValueRef = useRef<{ path: string; value: string } | null>(null)
+  // 程序化模型变更抑制标记：setValue/pushEditOperations 会触发
+  // onDidChangeModelContent → onContentChange 把 React state 覆盖成程序化值
+  // （readFile 完成后的真实内容被① 的 setValue('') 覆盖回 '' 的根因）。程序
+  // 化变更期间置 true，onContentChange 跳过同步。
+  const suppressContentSyncRef = useRef(false)
   useEffect(() => {
     const instance = editorRef.current
     if (instance === null) return
-    // 用户输入引起的 value 变化（typingContentRef 已是新内容）→ 不回写模型。
-    if (typingContentRef.current === file.value && instance.getModel()?.getValue() === file.value) {
+    const currentModel = instance.getModel()
+    // ① 切换 tab（path 变）→ 绑定该 path 的缓存模型（不存在则创建）。
+    if (currentModel === null || lastExternalValueRef.current?.path !== file.path) {
+      const model = acquireModel({ path: file.path, value: file.value, language: file.language })
+      // 脏模型重置（第二十二轮）：缓存模型内容与磁盘 file.value 不一致（上次
+      // 会话残留的未保存编辑 / HMR 热更新跨模型缓存）→ setValue 清撤销栈重置
+      // 为磁盘内容（文件以磁盘为准，undo 历史从干净开始）。否则 ⌘Z 会撤到
+      // 「打开前」的脏状态（连续 ⌘Z 把内容清空的根因之一）。
+      if (model.getValue() !== file.value) {
+        suppressContentSyncRef.current = true
+        model.setValue(file.value)
+        suppressContentSyncRef.current = false
+      }
+      lastExternalValueRef.current = { path: file.path, value: file.value }
+      if (instance.getModel() !== model) {
+        instance.setModel(model)
+      }
       return
     }
-    // 外部变更（watch 重载/保存/切换 tab）——清掉 typing 标记并回写模型。
-    typingContentRef.current = null
-    const model = acquireModel(file)
-    if (instance.getModel() !== model) {
-      instance.setModel(model)
+    // ② 同 path 外部变更（watch 重载 / placeholder 加载完成：file.value 与
+    // 上次外部值不同）→ 回写模型。区分两种：
+    //   - placeholder 加载完成（模型与上次外部值都是空串）→ setValue 清撤销栈
+    //     （undo 历史从加载完成的内容开始，撤不回空 placeholder——连续 ⌘Z 把
+    //     内容清空的根因：placeholder 空状态被 pushEditOperations 留在 undo 栈）；
+    //   - watch 外部变更（模型有真实内容）→ pushEditOperations 保留撤销栈
+    //     （外部新版作为一次新编辑，可撤销回用户之前的编辑）。
+    if (lastExternalValueRef.current.value !== file.value && currentModel.getValue() !== file.value) {
+      const isPlaceholderLoad = lastExternalValueRef.current.value === '' && currentModel.getValue() === ''
+      lastExternalValueRef.current = { path: file.path, value: file.value }
+      suppressContentSyncRef.current = true
+      if (isPlaceholderLoad) {
+        currentModel.setValue(file.value)
+      } else {
+        currentModel.pushEditOperations(
+          [],
+          [{ range: currentModel.getFullModelRange(), text: file.value }],
+          () => null,
+        )
+      }
+      suppressContentSyncRef.current = false
     }
+    // 用户输入/撤销/重做引起的 file.value 变化（currentModel.getValue() ===
+    // file.value 或 lastExternalValueRef.current.value === file.value 的同步
+    // 投影）→ 不回写，模型已是正确内容。
   }, [file.path, file.value, file.language])
 
   // Dispose models of closed tabs.
