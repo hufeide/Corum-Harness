@@ -29,6 +29,7 @@
  * @module corum-desktop/client/editor/ExplorerPane
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import type { ConnectionGenerationState } from '@deepseek-ai/dsh-client-connection/client'
 import {
   Braces, ChevronDown, ChevronRight, FileCode, FileCog, FilePlus, FileText,
@@ -856,7 +857,12 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
 }
 
 /** 右键菜单容器（边缘翻转：靠近右/下边缘时向左/上开，VS Code 语义）。
- *  挂载后测实际宽高再定位（避免首次渲染飞屏）。 */
+ *  挂载后测实际宽高再定位（避免首次渲染飞屏）。
+ *
+ *  关键：必须 createPortal 到 document.body。dsh 布局叶子（.lw7wFG_leaf）带
+ *  `will-change: transform`，会创建合成层 containing block——菜单若留在
+ *  组件树内，`position: fixed` 相对该叶子而非视口定位，直接飞出屏幕右侧
+ *  （实机 x=2023 vs 视口 1596；inlineStyle left 1327 被叶子的 696 偏移推走）。 */
 function ContextMenuView({ state, onClose, children }: { state: ContextMenuState; onClose: () => void; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
@@ -873,7 +879,7 @@ function ContextMenuView({ state, onClose, children }: { state: ContextMenuState
     if (top + rect.height > vh - 8) top = Math.max(8, state.y - rect.height)
     setPos({ left, top })
   }, [state])
-  return (
+  return createPortal(
     <div
       ref={ref}
       className={css.contextMenu}
@@ -881,6 +887,7 @@ function ContextMenuView({ state, onClose, children }: { state: ContextMenuState
       onMouseDown={(e) => e.stopPropagation()}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   )
 }
