@@ -745,8 +745,11 @@ export function IdeAppFrame({
   // （面板/终端切换）才显示**，后续显示规则再定义）。userShown 记录用户
   // 手动点亮的区域（显示态），默认空 = 两区域全隐藏。
   // 2026-09-03 设计改版：资源管理器并入编辑器卡（子面板），不再是独立区域。
-  // 编辑器区域默认显示（2026-09-04：用户可编辑/浏览文件）；终端默认隐藏。
-  const DEFAULT_HIDDEN = ['corum.panel'] as const
+  // 2026-09-04 用户确认：启动后编辑器+资源管理器区域默认**不显示**（回到
+  // 2026-08-30 定调）——DEFAULT_HIDDEN 含 corum.editor + corum.panel；
+  // 点左上角「面板切换」快捷按钮（onTogglePanels → toggleRegionVisibility）
+  // 点亮编辑器，「终端」钮点亮终端。
+  const DEFAULT_HIDDEN = ['corum.editor', 'corum.panel'] as const
   const [userShown, setUserShown] = useState<ReadonlySet<string>>(new Set())
   // 快捷按钮显示某区域：移出 userShown 隐藏集（显示）+ 保证树里 hidden=false。
   const showRegion = useCallback((slots: readonly GridSlot[]) => {
