@@ -58,7 +58,7 @@ export function apply(ctx: Context): void {
   // inject 面 closeRegion 直通 ctx.layout.closeRegion（原 CLOSE_REGION_EVENT
   // 窗口事件桥已退役）；explorer 面（listDir + generation）内嵌资源管理器
   // 子面板的数据源——原独立插件 @corum/corum-ide-explorer-ui 已并入本卡。
-  ctx.inject(['slots', 'layout', 'connection'], (editorCtx) => {
+  ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation'], (editorCtx) => {
     const connection = editorCtx.get('connection') as ConnectionHandle
     const dispose = editorCtx.slots.inject('corum.editor', () => editorCtx.slots.register(
       {
@@ -108,6 +108,31 @@ export function apply(ctx: Context): void {
           pollChanges: async () => {
             const result = await connection.rpc.call('/api', 'corumFs/pollChanges', { args: {} })
             return result as { ok: boolean; error?: { message?: string }; value?: { changes: { path: string; kind: 'rename' | 'change' }[] } }
+          },
+          addToConversation: (path: string) => {
+            // 方案 A（子代理调查结论）：@path 追加进当前会话草稿，与手打
+            // @-mention 完全同构（发送时发路径文本，agent 侧工具自行读文件）。
+            // conversation 是 cordis service（root 单例），sessions.scope 寻址
+            // 当前会话——不碰红线（inject 获取，非 window 全局）。
+            const sessionsSvc = editorCtx.get('sessions') as {
+              scope: (id: string) => Context
+              list: { getSnapshot: () => { current?: string } }
+            } | undefined
+            const currentId = sessionsSvc?.list.getSnapshot().current
+            if (sessionsSvc === undefined || currentId === undefined || currentId === '') {
+              return { ok: false as const, error: '当前没有打开的会话' }
+            }
+            const scoped = sessionsSvc.scope(currentId)
+            const conversation = scoped.get('conversation') as {
+              input: { for: (actx: Context) => { setDraft: (t: string) => void; state: { getSnapshot: () => { draft: string } } } }
+            } | undefined
+            if (conversation === undefined) {
+              return { ok: false as const, error: '会话服务未就绪' }
+            }
+            const input = conversation.input.for(scoped)
+            const draft = input.state.getSnapshot().draft
+            input.setDraft(draft + (draft.endsWith(' ') || draft === '' ? '' : ' ') + `@${path} `)
+            return { ok: true as const }
           },
         }),
       },

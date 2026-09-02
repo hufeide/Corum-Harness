@@ -38,13 +38,14 @@ import { PanelRightOpen, X } from 'lucide-react'
 import type {} from '@corum/corum-ide-ui/client'
 import { MonacoEditor, languageFromPath } from './MonacoEditor.tsx'
 import { ExplorerPane, type ExplorerPaneInjected } from './ExplorerPane.tsx'
+import { DiffViewer } from './DiffViewer.tsx'
 import css from './EditorColumn.module.css'
 
 /** One open file tab. */
 interface EditorTab {
-  /** Relative path under the project root (e.g. '/src/index.ts'). */
+  /** Relative path under the project root (e.g. '/src/index.ts'). diff tab 用合成键 'diff://A::B'。 */
   readonly path: string
-  /** Display title (basename). */
+  /** Display title (basename；diff tab 用 'A ↔ B')。 */
   readonly title: string
   /** Current in-editor content (may differ from savedContent while dirty). */
   content: string
@@ -59,6 +60,14 @@ interface EditorTab {
   /** 预览 tab（VS Code 语义：单击文件打开的临时 tab，斜体显示；双击/编辑/双击 tab 后固定）。
    *  新打开预览 tab 会替换掉已有预览 tab（VS Code 单预览位）。 */
   preview: boolean
+  /** diff tab（VS Code「选择以进行比较」+「与已选项目比较」）：只读双侧 diff 视图。 */
+  diff?: { original: string; modified: string }
+}
+
+/** diff tab 合成 path 前缀（避免与真实文件路径冲突；不持久化）。 */
+const DIFF_PATH_PREFIX = 'diff://'
+function diffTabPath(a: string, b: string): string {
+  return `${DIFF_PATH_PREFIX}${a}::${b}`
 }
 
 /** 保存反馈（状态栏右侧短暂显示；失败常驻直到下次保存/编辑）。 */
@@ -90,6 +99,8 @@ export interface EditorColumnInjected {
   absolutePath: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { absolutePath: string } }>
   /** 在系统文件管理器中显示（corumFs/reveal RPC；macOS open -R）。 */
   revealPath: (path: string) => Promise<{ ok: boolean; error?: { message?: string } }>
+  /** 把文件 @引用加入当前会话草稿（conversation cordis service；见 client/index.ts）。 */
+  addToConversation: (path: string) => { ok: boolean; error?: string }
   /** 启动项目根递归 watch（幂等）。 */
   startWatch: () => Promise<{ ok: boolean; error?: { message?: string } }>
   /** 取走累积的变更事件（client 2s 轮询）。 */
@@ -146,7 +157,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   const persisted = useMemo(loadPersisted, [])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
@@ -208,7 +219,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
   useEffect(() => {
     if (restoredRef.current) return
     restoredRef.current = true
-    const paths = persisted.tabs ?? []
+    const paths = (persisted.tabs ?? []).filter(p => !p.startsWith(DIFF_PATH_PREFIX))
     if (paths.length === 0) return
     // 并发恢复所有 tab（内容 readFile 重载）；恢复的 tab 都是固定（非预览）。
     for (const path of paths) {
@@ -296,6 +307,42 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     setTabs(prev => prev.map(t => t.path === path && t.preview ? { ...t, preview: false } : t))
   }, [])
 
+  /** 打开 diff tab（VS Code「与已选项目比较」）：只读双侧 diff，内容立即从
+   *  磁盘读取。已存在同对 tab 则激活。 */
+  const openDiffTab = useCallback(async (original: string, modified: string) => {
+    showEditor()
+    const path = diffTabPath(original, modified)
+    if (tabs.some(t => t.path === path)) {
+      setActivePath(path)
+      return
+    }
+    const nameA = original.split('/').pop() ?? original
+    const nameB = modified.split('/').pop() ?? modified
+    const newTab: EditorTab = {
+      path,
+      title: `${nameA} ↔ ${nameB}`,
+      content: '',
+      savedContent: '',
+      language: languageFromPath(modified, 'plaintext'),
+      error: null,
+      externalChanged: false,
+      preview: false,
+      diff: { original, modified },
+    }
+    setTabs(prev => [...prev, newTab])
+    setActivePath(path)
+    // 读两侧内容（原文=original，新文=modified）。失败标 error。
+    try {
+      const [ra, rb] = await Promise.all([readFile(original), readFile(modified)])
+      if (!ra.ok || ra.value === undefined) throw new Error(`无法读取 ${original}：${ra.error?.message ?? '未知'}`)
+      if (!rb.ok || rb.value === undefined) throw new Error(`无法读取 ${modified}：${rb.error?.message ?? '未知'}`)
+      // diff tab 内容不由 content 字段驱动（DiffViewer 直接 readFile），此处仅占位语言。
+      setTabs(prev => prev.map(t => t.path === path ? { ...t, language: rb.value!.language || t.language } : t))
+    } catch (err) {
+      setTabs(prev => prev.map(t => t.path === path ? { ...t, error: String(err) } : t))
+    }
+  }, [tabs, readFile, showEditor])
+
   /** Close a tab. If dirty, confirm first (save / discard / cancel). */
   const closeTab = useCallback((path: string) => {
     const tab = tabs.find(t => t.path === path)
@@ -332,7 +379,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
 
   /** Save the active file (⌘S). */
   const saveActive = useCallback(async () => {
-    if (activeTab === null) return
+    if (activeTab === null || activeTab.diff !== undefined) return
     if (activeTab.content === activeTab.savedContent) {
       flashSaveFeedback({ kind: 'saved' }, 1600)
       return
@@ -585,6 +632,15 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     })
   }, [revealPath])
 
+  /** 「添加到对话」：把文件以 @引用 形式加入当前会话草稿（conversation
+   *  cordis service 注入面直通；与手打 @-mention 同构，agent 侧读文件）。 */
+  const onAddToChat = useCallback((path: string) => {
+    const result = addToConversation(path)
+    if (!result.ok) {
+      window.alert(`添加到对话失败：${result.error ?? '未知错误'}`)
+    }
+  }, [addToConversation])
+
   /** 移动路径（跨目录拖拽 / 同目录重命名共用）。to = 完整目标路径。 */
   const movePath = useCallback(async (from: string, to: string) => {
     if (to === from) return
@@ -830,9 +886,20 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
           </div>
         )}
 
-        {/* Code */}
+        {/* Code（diff tab → DiffViewer 只读双侧对比；普通 tab → MonacoEditor） */}
         <div className={css.code}>
-          {monacoFile !== null
+          {activeTab?.diff !== undefined
+            ? (
+              <DiffViewer
+                key={activeTab.path}
+                original={activeTab.diff.original}
+                modified={activeTab.diff.modified}
+                language={activeTab.language}
+                readFile={readFile}
+                dark={dark}
+              />
+            )
+            : monacoFile !== null
             ? (
               <MonacoEditor
                 file={monacoFile}
@@ -852,12 +919,13 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
           <div className={css.loadError}>加载失败：{activeTab.error}</div>
         )}
 
-        {/* Editor Status（空态隐藏） */}
+        {/* Editor Status（空态隐藏；diff tab 只读无保存态） */}
         {activeTab !== null && (
           <div className={css.status}>
             <span>行 {cursorPos.line}, 列 {cursorPos.column}</span>
             <span>UTF-8</span>
             <span>{activeTab.language}</span>
+            {activeTab.diff !== undefined && <span className={css.savedText}>只读对比</span>}
             {activeTab.externalChanged && activeDirty && (
               <span className={css.externalChangedText} title="磁盘上的文件已被外部修改；保存将覆盖磁盘版本">⚠ 磁盘已更改</span>
             )}
@@ -901,6 +969,8 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
               onCopyPath={onCopyPath}
               getAbsolutePath={getAbsolutePath}
               revealInFinder={revealInFinder}
+              onCompare={openDiffTab}
+              onAddToChat={onAddToChat}
             />
           </div>
         </>

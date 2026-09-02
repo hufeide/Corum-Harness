@@ -79,6 +79,10 @@ export interface ExplorerPaneInjected {
   getAbsolutePath: (path: string) => Promise<string | null>
   /** 在系统文件管理器中显示（macOS Finder -R 揭示）。 */
   revealInFinder: (path: string) => void
+  /** 打开 diff 对比 tab（VS Code「与已选项目比较」；original=先选，modified=后选）。 */
+  onCompare: (original: string, modified: string) => void
+  /** 把文件加入当前对话上下文（cordis 事件桥；会话插件消费）。 */
+  onAddToChat: (path: string) => void
 }
 
 export type ExplorerPaneProps = ExplorerPaneInjected
@@ -167,7 +171,7 @@ interface RenamingState {
 }
 
 /** The resource manager sub-pane (see module doc). */
-export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath, onCopyPath, getAbsolutePath, revealInFinder }: ExplorerPaneProps) {
+export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath, onCopyPath, getAbsolutePath, revealInFinder, onCompare, onAddToChat }: ExplorerPaneProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
   useSyncExternalStore(generation.subscribe, generation.getSnapshot)
@@ -194,6 +198,9 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   /** 剪贴板（VS Code 复制/剪切 + 粘贴语义；仅本面板内有效）。 */
   const [clipboard, setClipboard] = useState<{ path: string; cut: boolean } | null>(null)
+  /** 「选择以进行比较」的已选文件（VS Code 语义：右键 A 选择以进行比较 →
+   *  右键 B 出现「与已选项目比较」）。 */
+  const [compareSource, setCompareSource] = useState<string | null>(null)
 
   const loadDir = useCallback((path: string): void => {
     setLoading((prev) => new Set(prev).add(path))
@@ -826,6 +833,8 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
               <button type="button" className={css.contextMenuItem} onClick={() => { copyPathText(contextMenu.path, false); setContextMenu(null) }}>复制相对路径</button>
               <button type="button" className={css.contextMenuItem} onClick={() => { revealInFinder(contextMenu.path); setContextMenu(null) }}>在 Finder 中显示</button>
               <div className={css.contextMenuDivider} />
+              <button type="button" className={css.contextMenuItem} onClick={() => { onAddToChat(contextMenu.path); setContextMenu(null) }}>添加到对话</button>
+              <div className={css.contextMenuDivider} />
               <button type="button" className={css.contextMenuItem} onClick={() => { setRenaming({ path: contextMenu.path, draft: contextMenu.path.split('/').pop() ?? '' }); setContextMenu(null) }}>重命名</button>
               <button type="button" className={css.contextMenuItem} onClick={() => { loadDir(contextMenu.path); setContextMenu(null) }}>刷新</button>
               <button type="button" className={`${css.contextMenuItem} ${css.contextMenuDanger}`} onClick={() => { onDeletePath(contextMenu.path, true); setContextMenu(null) }}>删除</button>
@@ -845,6 +854,13 @@ export function ExplorerPane({ listDir, generation, closeRegion, onToggleCollaps
               <button type="button" className={css.contextMenuItem} onClick={() => { copyPathText(contextMenu.path, true); setContextMenu(null) }}>复制路径</button>
               <button type="button" className={css.contextMenuItem} onClick={() => { copyPathText(contextMenu.path, false); setContextMenu(null) }}>复制相对路径</button>
               <button type="button" className={css.contextMenuItem} onClick={() => { revealInFinder(contextMenu.path); setContextMenu(null) }}>在 Finder 中显示</button>
+              <div className={css.contextMenuDivider} />
+              {/* VS Code：选择以进行比较 → 与已选项目比较；添加到对话 */}
+              <button type="button" className={css.contextMenuItem} onClick={() => { setCompareSource(contextMenu.path); setContextMenu(null) }}>选择以进行比较</button>
+              {compareSource !== null && compareSource !== contextMenu.path && (
+                <button type="button" className={css.contextMenuItem} onClick={() => { onCompare(compareSource, contextMenu.path); setCompareSource(null); setContextMenu(null) }}>与已选项目比较</button>
+              )}
+              <button type="button" className={css.contextMenuItem} onClick={() => { onAddToChat(contextMenu.path); setContextMenu(null) }}>添加到对话</button>
               <div className={css.contextMenuDivider} />
               <button type="button" className={css.contextMenuItem} onClick={() => { setRenaming({ path: contextMenu.path, draft: contextMenu.path.split('/').pop() ?? '' }); setContextMenu(null) }}>重命名</button>
               <button type="button" className={`${css.contextMenuItem} ${css.contextMenuDanger}`} onClick={() => { onDeletePath(contextMenu.path, false); setContextMenu(null) }}>删除</button>
