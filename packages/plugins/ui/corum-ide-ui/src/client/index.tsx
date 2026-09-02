@@ -294,6 +294,7 @@ export function apply(ctx: ClientContext): void {
     let onboardingVersion = -1
     let onboardingSteps: readonly SettingsOnboardingStep[] = []
     const shellInjected = (): SettingsRootInjected => ({
+      t: t as (key: string) => string,
       hooks: {
         sections: {
           getSnapshot: () => {

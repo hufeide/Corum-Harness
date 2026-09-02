@@ -27,6 +27,7 @@ export interface SettingsOnboardingStep {
  * Registrant-private injected share of the settings shell (assembled in
  * apply): the ledger's nav-row projection as a hooks-compartment source —
  * the shell reads no locale state and subscribes through the bound hook.
+ * The `t` binding is the settings-namespace locale binder (search/scope labels).
  */
 export type SettingsRootInjected = {
   hooks: {
@@ -35,6 +36,8 @@ export type SettingsRootInjected = {
     /** settings.onboarding ledger projected into coordinator order. */
     onboardingSteps: HostObservable<readonly SettingsOnboardingStep[]>
   }
+  /** Locale binder for the settings namespace (search/scope/close labels). */
+  t: (key: string) => string
 }
 
 /**
