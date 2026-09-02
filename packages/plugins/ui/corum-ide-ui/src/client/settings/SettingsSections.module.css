@@ -579,8 +579,473 @@
 
 .modalFooter {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 8px;
-  padding: 12px 24px 20px;
+  padding: 10px 20px 14px;
   border-top: 1px solid var(--corum-glass-border);
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footerRight {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.trustLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.trustBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* ── 表单分区 ── */
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formGroupTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.avatarRow {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.avatarCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  flex: none;
+}
+
+.avatarBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  cursor: pointer;
+}
+
+.avatarIcon {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.avatarActions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.btnUpload {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.btnUpload:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.btnAiGen {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 7px;
+  background: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--corum-label-on-brand);
+}
+
+.btnAiGen:hover {
+  opacity: 0.9;
+}
+
+.formCols {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.formCol {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.selectStack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.promptArea {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.promptTextarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.promptTextarea:focus {
+  border-color: var(--corum-glass-border-active);
+}
+
+.promptTextarea::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.promptActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btnPolish {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.btnPolish:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+/* 技能/MCP 列表行 */
+.listRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 2px;
+}
+
+.listIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+}
+
+.listDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.listName {
+  flex: 1;
+  min-width: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.listDel {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.listDel:hover {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.btnAdd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.btnAdd:hover {
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* ── MCP 对话框（添加服务器 sIDC1 / 服务器详情 fw8aK）────────────────── */
+
+/* 可点击的服务器卡片（McpSection 列表项作为按钮） */
+.serverCardBtn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-1);
+  box-sizing: border-box;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease;
+}
+
+.serverCardBtn:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+/* 传输方式三选一 pills */
+.transportPills {
+  display: flex;
+  gap: 8px;
+}
+
+.transportPill {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.transportPill:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.transportPillActive {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-weight: 600;
+}
+
+/* JSON 配置 mono textarea */
+.jsonTextarea {
+  width: 100%;
+  min-height: 132px;
+  padding: 10px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  resize: vertical;
+  box-sizing: border-box;
+  white-space: pre;
+}
+
+.jsonTextarea:focus {
+  border-color: var(--corum-glass-border-active);
+}
+
+/* MCP 市场链接行 */
+.marketRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 0 2px;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.marketLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+}
+
+.marketLink:hover {
+  text-decoration: underline;
+}
+
+/* 详情对话框 header 内的状态点 + 名称 */
+.detailHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detailDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.detailDotOff {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-dimmed);
+}
+
+.detailName {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+
+.detailChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 6px;
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 详情：键值行（工作目录 / 已注册工具） */
+.kvRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.kvLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.kvValue {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 详情：工具列表行 */
+.toolRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+}
+
+.toolName {
+  flex: 1;
+  min-width: 0;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 展开全部工具链接 */
+.expandRow {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 2px;
+}
+
+.expandLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.expandLink:hover {
+  color: var(--dsw-alias-label-secondary);
 }

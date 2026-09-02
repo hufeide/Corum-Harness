@@ -10,7 +10,7 @@
  */
 import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Star, Plug, Puzzle, Server, Plus, X } from 'lucide-react'
+import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { SettingRow } from './SettingRow.tsx'
 import { SelectField } from './SelectField.tsx'
@@ -358,6 +358,22 @@ interface PresetData {
   chips: string[]
 }
 
+interface PresetFormData {
+  name: string
+  nickname: string
+  title: string
+  baseMode: string
+  prompt: string
+  provider: string
+  model: string
+  subagentModel: { provider: string; model: string } | undefined
+  permission: string
+  terminal: string
+  memory: string
+  skills: string[]
+  mcpServers: string[]
+}
+
 const INITIAL_PRESETS: PresetData[] = [
   { id: 'standard', title: 'standard', desc: '通用编码助手，适合大多数开发任务。', chips: ['deepseek-v4', 'skills ×3', 'mcp ×2', 'workspace-write'] },
   { id: 'reviewer', title: 'reviewer', desc: '代码审查专用，挂载 review 技能与只读权限。', chips: ['deepseek-v4', 'skills ×1', 'read-only'] },
@@ -368,6 +384,7 @@ function AgentPresetsSection() {
   const [presets, setPresets] = useState<PresetData[]>(INITIAL_PRESETS)
   const [defaultId, setDefaultId] = useState('standard')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [editPreset, setEditPreset] = useState<PresetData | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
   const handleSetDefault = (id: string) => { setDefaultId(id) }
@@ -380,16 +397,27 @@ function AgentPresetsSection() {
     setDeleteConfirmId(null)
   }
 
-  const handleCreate = (data: { name: string; desc: string; model: string; permission: string }) => {
+  const handleSave = (data: PresetFormData) => {
     const id = data.name.toLowerCase().replace(/\s+/g, '-')
+    const chips = [
+      data.model,
+      ...(data.skills.length > 0 ? [`skills ×${data.skills.length}`] : []),
+      ...(data.mcpServers.length > 0 ? [`mcp ×${data.mcpServers.length}`] : []),
+      data.permission,
+    ]
     const newPreset: PresetData = {
       id,
-      title: id,
-      desc: data.desc || '自定义预设',
-      chips: [data.model, 'read-only'],
+      title: data.nickname || id,
+      desc: data.prompt.split('\n')[0] || '自定义预设',
+      chips,
     }
-    setPresets(prev => [...prev, newPreset])
+    if (editPreset) {
+      setPresets(prev => prev.map(p => p.id === editPreset.id ? newPreset : p))
+    } else {
+      setPresets(prev => [...prev, newPreset])
+    }
     setShowCreate(false)
+    setEditPreset(null)
   }
 
   return (
@@ -405,6 +433,7 @@ function AgentPresetsSection() {
           desc={p.desc}
           chips={p.chips}
           isDefault={p.id === defaultId}
+          onClick={() => { setEditPreset(p) }}
           actions={
             p.id !== defaultId ? (
               <>
@@ -433,50 +462,206 @@ function AgentPresetsSection() {
         document.body,
       )}
 
-      {/* 新建预设弹窗 */}
-      {showCreate && createPortal(
-        <CreatePresetDialog onCreate={handleCreate} onClose={() => setShowCreate(false)} />,
+      {/* 编辑/新建预设弹窗 */}
+      {(showCreate || editPreset !== null) && createPortal(
+        <EditPresetDialog
+          preset={editPreset ?? undefined}
+          onSave={handleSave}
+          onClose={() => { setShowCreate(false); setEditPreset(null) }}
+        />,
         document.body,
       )}
     </>
   )
 }
 
-/* ── 新建预设弹窗 ──────────────────────────────────────────────────── */
+/* ── 编辑/新建预设弹窗（按设计稿 M5E2n 落码）────────────────────── */
 
-function CreatePresetDialog({ onCreate, onClose }: {
-  onCreate: (data: { name: string; desc: string; model: string; permission: string }) => void
+const BASE_MODE_OPTIONS = [
+  { id: 'standard', label: '标准模式 — 功能完整的编码 Agent，支持文件编辑/Shell/检索/Skills' },
+  { id: 'ptc', label: 'PTC 模式 — 标准模式 + Code Mode SDK 多步操作' },
+  { id: 'minimal', label: '极简模式 — 仅持久 bash + 编辑器的双工具 Agent' },
+  { id: 'cordis', label: '创造模式 — 用于创建自定义 Agent preset' },
+]
+
+const PROVIDER_OPTIONS = [
+  { id: 'deepseek-official', label: 'deepseek-official' },
+  { id: 'pi-ai', label: 'pi-ai' },
+]
+
+const MODEL_OPTIONS = [
+  { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
+  { id: 'deepseek-v4', label: 'deepseek-v4' },
+  { id: 'deepseek-r1', label: 'deepseek-r1' },
+]
+
+const PERMISSION_OPTIONS = [
+  { id: 'read-only', label: '只读' },
+  { id: 'workspace-write', label: '工作区读写' },
+  { id: 'full', label: '完全访问' },
+]
+
+const TERMINAL_OPTIONS = [
+  { id: 'sandbox', label: 'sandbox' },
+  { id: 'host', label: 'host' },
+]
+
+const MEMORY_OPTIONS = [
+  { id: 'agent', label: 'agent' },
+]
+
+function EditPresetDialog({ preset, onSave, onClose }: {
+  preset?: PresetData | undefined
+  onSave: (data: PresetFormData) => void
   onClose: () => void
 }) {
-  const [name, setName] = useState('')
-  const [desc, setDesc] = useState('')
-  const [model, setModel] = useState('deepseek-v4')
+  const [name, setName] = useState(preset?.id ?? '')
+  const [nickname, setNickname] = useState(preset?.title ?? '')
+  const [title, setTitle] = useState('')
+  const [baseMode, setBaseMode] = useState('standard')
+  const [prompt, setPrompt] = useState('')
+  const [provider, setProvider] = useState('deepseek-official')
+  const [model, setModel] = useState('deepseek-v4-flash')
+  const [subProvider, setSubProvider] = useState('deepseek-official')
+  const [subModel, setSubModel] = useState('deepseek-v4-flash')
+  const [subEnabled, setSubEnabled] = useState(false)
   const [permission, setPermission] = useState('workspace-write')
+  const [terminal, setTerminal] = useState('sandbox')
+  const [memory, setMemory] = useState('agent')
+  const [skills, setSkills] = useState<string[]>(['code-review', 'web-research'])
+  const [mcpServers, setMcpServers] = useState<string[]>(['filesystem', 'web-search'])
 
   return (
     <div className={css.modalOverlay} onClick={onClose}>
       <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
+        {/* HEADER */}
         <div className={css.modalHeader}>
-          <span className={css.modalTitle}>新建预设</span>
-          <button type="button" className={css.modalClose} onClick={onClose}><X size={18} /></button>
+          <span className={css.modalTitle}>{preset ? '编辑 Agent 预设' : '新建 Agent 预设'}</span>
+          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
         </div>
+
+        {/* BODY */}
         <div className={css.modalBody}>
-          <label className={css.fieldLabel}>预设名称</label>
-          <input className={css.fieldInput} value={name} onChange={e => setName(e.target.value)} placeholder="my-preset" />
-          <label className={css.fieldLabel}>描述</label>
-          <input className={css.fieldInput} value={desc} onChange={e => setDesc(e.target.value)} placeholder="自定义编码助手" />
-          <label className={css.fieldLabel}>模型</label>
-          <div className={css.fieldRow}>
-            <SelectField value={model} options={[{id:'deepseek-v4',label:'deepseek-v4'},{id:'deepseek-r1',label:'deepseek-r1'}]} onChange={setModel} />
+          {/* 1. 基本信息 */}
+          <div className={css.formGroup}>
+            <div className={css.formGroupTitle}>基本信息</div>
+            <div className={css.avatarRow}>
+              {/* 头像 */}
+              <div className={css.avatarCol}>
+                <div className={css.avatarBox}><Upload size={22} className={css.avatarIcon} /></div>
+                <div className={css.avatarActions}>
+                  <button type="button" className={css.btnUpload}><Upload size={11} />上传</button>
+                  <button type="button" className={css.btnAiGen}><Sparkles size={11} />AI 生成</button>
+                </div>
+              </div>
+              {/* ID + 昵称 */}
+              <div className={css.formCols}>
+                <div className={css.formCol}>
+                  <label className={css.fieldLabel}>预设 ID</label>
+                  <input className={css.fieldInput} value={name} onChange={e => setName(e.target.value)} placeholder="my-agent" />
+                </div>
+                <div className={css.formCol}>
+                  <label className={css.fieldLabel}>昵称</label>
+                  <input className={css.fieldInput} value={nickname} onChange={e => setNickname(e.target.value)} placeholder="我的 Agent" />
+                </div>
+              </div>
+            </div>
+            <label className={css.fieldLabel}>岗位 / 职位</label>
+            <input className={css.fieldInput} value={title} onChange={e => setTitle(e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
           </div>
-          <label className={css.fieldLabel}>权限</label>
-          <div className={css.fieldRow}>
-            <SelectField value={permission} options={[{id:'read-only',label:'只读'},{id:'workspace-write',label:'工作区读写'},{id:'full',label:'完全访问'}]} onChange={setPermission} />
+
+          {/* 2. 提示词 */}
+          <div className={css.formGroup}>
+            <div className={css.formGroupTitle}>提示词</div>
+            <label className={css.fieldLabel}>基础模式（继承 dsh 系统提示词）</label>
+            <div className={css.fieldRow}><SelectField value={baseMode} options={BASE_MODE_OPTIONS} onChange={setBaseMode} /></div>
+            <label className={css.fieldLabel}>自定义提示词（叠加在基础模式之上，非替代）</label>
+            <div className={css.promptArea}>
+              <textarea className={css.promptTextarea} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
+              <div className={css.promptActions}>
+                <button type="button" className={css.btnPolish}><Sparkles size={11} />AI 润色</button>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. 模型 */}
+          <div className={css.formGroup}>
+            <div className={css.formGroupTitle}>模型</div>
+            <div className={css.formCols}>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>主 Agent</label>
+                <div className={css.selectStack}>
+                  <SelectField value={provider} options={PROVIDER_OPTIONS} onChange={setProvider} />
+                  <SelectField value={model} options={MODEL_OPTIONS} onChange={setModel} />
+                </div>
+              </div>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>子 Agent（可选，缺省同主）</label>
+                <div className={css.selectStack}>
+                  <SelectField value={subEnabled ? subProvider : ''} options={PROVIDER_OPTIONS} onChange={v => { setSubEnabled(true); setSubProvider(v) }} disabled={false} />
+                  <SelectField value={subEnabled ? subModel : ''} options={MODEL_OPTIONS} onChange={v => { setSubEnabled(true); setSubModel(v) }} disabled={false} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. 技能 + MCP */}
+          <div className={css.formGroup}>
+            <div className={css.formCols}>
+              <div className={css.formCol}>
+                <div className={css.formGroupTitle}>技能</div>
+                {skills.map((s, i) => (
+                  <div key={i} className={css.listRow}>
+                    <Star size={12} className={css.listIcon} />
+                    <span className={css.listName}>{s}</span>
+                    <Trash2 size={12} className={css.listDel} onClick={() => setSkills(prev => prev.filter((_, idx) => idx !== i))} />
+                  </div>
+                ))}
+                <button type="button" className={css.btnAdd}><Plus size={12} />添加技能</button>
+              </div>
+              <div className={css.formCol}>
+                <div className={css.formGroupTitle}>MCP 服务</div>
+                {mcpServers.map((s, i) => (
+                  <div key={i} className={css.listRow}>
+                    <span className={css.listDot} />
+                    <span className={css.listName}>{s}</span>
+                    <Trash2 size={12} className={css.listDel} onClick={() => setMcpServers(prev => prev.filter((_, idx) => idx !== i))} />
+                  </div>
+                ))}
+                <button type="button" className={css.btnAdd}><Plus size={12} />添加 MCP</button>
+              </div>
+            </div>
+          </div>
+
+          {/* 5. 终端 + 记忆 */}
+          <div className={css.formGroup}>
+            <div className={css.formCols}>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>终端模式</label>
+                <SelectField value={terminal} options={TERMINAL_OPTIONS} onChange={setTerminal} />
+              </div>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>记忆作用域</label>
+                <SelectField value={memory} options={MEMORY_OPTIONS} onChange={setMemory} />
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* FOOTER */}
         <div className={css.modalFooter}>
-          <GlassButton onClick={onClose}>取消</GlassButton>
-          <GlassButton variant="primary" onClick={() => onCreate({ name: name || 'new-preset', desc, model, permission })}>创建</GlassButton>
+          <div className={css.footerLeft}>
+            <span className={css.trustLabel}>信任级</span>
+            <span className={css.trustBadge}>user</span>
+          </div>
+          <div className={css.footerRight}>
+            <GlassButton onClick={onClose}>取消</GlassButton>
+            <GlassButton variant="primary" onClick={() => onSave({
+              name: name || 'new-preset', nickname, title, baseMode, prompt,
+              provider, model, subagentModel: subEnabled ? { provider: subProvider, model: subModel } : undefined,
+              permission, terminal, memory, skills, mcpServers,
+            })}>{preset ? '保存' : '创建'}</GlassButton>
+          </div>
         </div>
       </div>
     </div>
@@ -510,55 +695,298 @@ function AccountSection() {
 
 /* ── MCP 与集成 ────────────────────────────────────────────────────── */
 
+type McpTransport = 'stdio' | 'SSE / HTTP' | 'WebSocket'
+
+interface McpTool {
+  name: string
+  enabled: boolean
+}
+
+interface McpServerData {
+  id: string
+  name: string
+  transport: McpTransport
+  desc: string
+  workdir: string
+  tools: McpTool[]
+  enabled: boolean
+}
+
+const FILESYSTEM_TOOLS: McpTool[] = [
+  'read_file', 'write_file', 'list_directory', 'search_files', 'move_file',
+  'create_directory', 'delete_file', 'get_file_info', 'read_multiple', 'edit_file',
+  'copy_file', 'rename_file', 'stat_directory', 'watch_directory',
+].map(name => ({ name, enabled: true }))
+
+const WEB_SEARCH_TOOLS: McpTool[] = [
+  'search', 'fetch_page', 'extract_text', 'summarize', 'crawl_site', 'query_news',
+].map(name => ({ name, enabled: true }))
+
+const DB_INSPECTOR_TOOLS: McpTool[] = [
+  'list_tables', 'describe_table', 'run_query', 'run_select', 'explain_plan',
+  'list_indexes', 'table_stats', 'export_csv', 'inspect_schema',
+].map(name => ({ name, enabled: true }))
+
+const INITIAL_MCP_SERVERS: McpServerData[] = [
+  {
+    id: 'filesystem', name: 'filesystem', transport: 'stdio',
+    desc: '本地文件系统读写', workdir: '/Users/kukucai/work',
+    tools: FILESYSTEM_TOOLS, enabled: true,
+  },
+  {
+    id: 'web-search', name: 'web-search', transport: 'SSE / HTTP',
+    desc: '联网搜索', workdir: 'https://mcp.corum.dev/search',
+    tools: WEB_SEARCH_TOOLS, enabled: true,
+  },
+  {
+    id: 'db-inspector', name: 'db-inspector', transport: 'WebSocket',
+    desc: '数据库结构检查', workdir: 'ws://127.0.0.1:7788/inspect',
+    tools: DB_INSPECTOR_TOOLS, enabled: false,
+  },
+]
+
+const TRANSPORT_OPTIONS: McpTransport[] = ['stdio', 'SSE / HTTP', 'WebSocket']
+
+const MCP_JSON_PLACEHOLDER = `{
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+}`
+
+/* 添加 MCP 服务器对话框（设计稿 sIDC1） */
+function AddMcpServerDialog({ onClose, onAdd }: {
+  onClose: () => void
+  onAdd: (server: McpServerData) => void
+}) {
+  const [name, setName] = useState('')
+  const [transport, setTransport] = useState<McpTransport>('stdio')
+  const [configJson, setConfigJson] = useState('')
+  const [startTimeout, setStartTimeout] = useState('60000')
+  const [runTimeout, setRunTimeout] = useState('60000')
+
+  return createPortal(
+    <div className={css.modalOverlay} onClick={onClose}>
+      <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
+        <div className={css.modalHeader}>
+          <span className={css.modalTitle}>添加 MCP 服务器</span>
+          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className={css.modalBody}>
+          <div className={css.formGroup}>
+            <label className={css.fieldLabel}>服务器名称</label>
+            <input className={css.fieldInput} value={name} onChange={e => setName(e.target.value)} placeholder="my-mcp-server" />
+          </div>
+          <div className={css.formGroup}>
+            <label className={css.fieldLabel}>传输方式</label>
+            <div className={css.transportPills}>
+              {TRANSPORT_OPTIONS.map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  className={t === transport ? css.transportPillActive : css.transportPill}
+                  onClick={() => setTransport(t)}
+                >{t}</button>
+              ))}
+            </div>
+          </div>
+          <div className={css.formGroup}>
+            <label className={css.fieldLabel}>配置（JSON）</label>
+            <textarea
+              className={css.jsonTextarea}
+              value={configJson}
+              onChange={e => setConfigJson(e.target.value)}
+              placeholder={MCP_JSON_PLACEHOLDER}
+            />
+          </div>
+          <div className={css.formGroup}>
+            <div className={css.formCols}>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>启动超时（ms）</label>
+                <input className={css.fieldInput} value={startTimeout} onChange={e => setStartTimeout(e.target.value)} />
+              </div>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>运行超时（ms）</label>
+                <input className={css.fieldInput} value={runTimeout} onChange={e => setRunTimeout(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <div className={css.marketRow}>
+            <Package size={14} />
+            <span>或从 MCP 市场一键安装</span>
+            <button type="button" className={css.marketLink}>浏览市场 →</button>
+          </div>
+        </div>
+        <div className={css.modalFooter}>
+          <div className={css.footerLeft} />
+          <div className={css.footerRight}>
+            <GlassButton onClick={onClose}>取消</GlassButton>
+            <GlassButton variant="primary" onClick={() => onAdd({
+              id: name || 'my-mcp-server',
+              name: name || 'my-mcp-server',
+              transport,
+              desc: '',
+              workdir: '',
+              tools: [],
+              enabled: true,
+            })}>添加</GlassButton>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/* MCP 服务器详情对话框（设计稿 fw8aK） */
+function McpServerDetailDialog({ server, onClose, onSave, onDelete }: {
+  server: McpServerData
+  onClose: () => void
+  onSave: (server: McpServerData) => void
+  onDelete: (id: string) => void
+}) {
+  const [draft, setDraft] = useState<McpServerData>(() => JSON.parse(JSON.stringify(server)) as McpServerData)
+  const [expanded, setExpanded] = useState(false)
+
+  const visibleTools = expanded ? draft.tools : draft.tools.slice(0, 5)
+  const hiddenCount = draft.tools.length - visibleTools.length
+
+  return createPortal(
+    <div className={css.modalOverlay} onClick={onClose}>
+      <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
+        <div className={css.modalHeader}>
+          <div className={css.detailHead}>
+            <span className={draft.enabled ? css.detailDot : css.detailDotOff} />
+            <span className={css.detailName}>{draft.name}</span>
+            <span className={css.detailChip}>{draft.transport}</span>
+          </div>
+          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className={css.modalBody}>
+          <div className={css.formGroup}>
+            <div className={css.formGroupTitle}>基本信息</div>
+            <label className={css.fieldLabel}>描述</label>
+            <input
+              className={css.fieldInput}
+              value={draft.desc}
+              onChange={e => setDraft(prev => ({ ...prev, desc: e.target.value }))}
+              placeholder="服务器用途说明"
+            />
+            <div className={css.kvRow}>
+              <span className={css.kvLabel}>工作目录</span>
+              <span className={css.kvValue}>{draft.workdir || '—'}</span>
+            </div>
+            <div className={css.kvRow}>
+              <span className={css.kvLabel}>已注册工具</span>
+              <span className={css.kvValue}>{draft.tools.length} 个</span>
+            </div>
+          </div>
+          <div className={css.formGroup}>
+            <div className={css.formGroupTitle}>工具列表</div>
+            {visibleTools.map((tool, i) => (
+              <div key={tool.name} className={css.toolRow}>
+                <span className={css.toolName}>{tool.name}</span>
+                <Switch
+                  checked={tool.enabled}
+                  onChange={v => setDraft(prev => {
+                    const tools = prev.tools.slice()
+                    tools[i] = { ...tools[i], enabled: v }
+                    return { ...prev, tools }
+                  })}
+                />
+              </div>
+            ))}
+            {hiddenCount > 0 && (
+              <div className={css.expandRow}>
+                <button type="button" className={css.expandLink} onClick={() => setExpanded(true)}>
+                  <ChevronDown size={13} />展开全部 {draft.tools.length} 个工具
+                </button>
+              </div>
+            )}
+            {expanded && draft.tools.length > 5 && (
+              <div className={css.expandRow}>
+                <button type="button" className={css.expandLink} onClick={() => setExpanded(false)}>
+                  <ChevronUp size={13} />收起
+                </button>
+              </div>
+            )}
+          </div>
+          <div className={css.kvRow}>
+            <span className={css.kvLabel}>启用此服务器</span>
+            <Switch checked={draft.enabled} onChange={v => setDraft(prev => ({ ...prev, enabled: v }))} />
+          </div>
+        </div>
+        <div className={css.modalFooter}>
+          <div className={css.footerLeft}>
+            <GlassButton variant="danger" onClick={() => onDelete(server.id)}>删除</GlassButton>
+          </div>
+          <div className={css.footerRight}>
+            <GlassButton onClick={onClose}>取消</GlassButton>
+            <GlassButton variant="primary" onClick={() => onSave(draft)}>保存</GlassButton>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function McpSection() {
+  const [servers, setServers] = useState<McpServerData[]>(INITIAL_MCP_SERVERS)
+  const [addOpen, setAddOpen] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const selected = servers.find(s => s.id === selectedId) ?? null
+
   return (
     <>
       <div className={css.topRow}>
         <span className={css.topHint}>连接外部 MCP 服务器，为 Agent 提供工具与数据源。</span>
-        <GlassButton variant="primary">+ 添加服务器</GlassButton>
+        <GlassButton variant="primary" onClick={() => setAddOpen(true)}>+ 添加服务器</GlassButton>
       </div>
-      <div className={css.serverCard}>
-        <div className={css.serverLeft}>
-          <span className={css.serverDotOn} />
-          <div className={css.serverMeta}>
-            <span className={css.serverName}>filesystem</span>
-            <span className={css.serverDesc}>本地文件系统读写</span>
+      {servers.map(s => (
+        <button key={s.id} type="button" className={css.serverCardBtn} onClick={() => setSelectedId(s.id)}>
+          <div className={css.serverLeft}>
+            <span className={s.enabled ? css.serverDotOn : css.serverDotOff} />
+            <div className={css.serverMeta}>
+              <span className={css.serverName}>{s.name}</span>
+              <span className={css.serverDesc}>{s.desc || s.transport}</span>
+            </div>
           </div>
-        </div>
-        <div className={css.serverRight}>
-          <span className={css.serverTools}>14 个工具</span>
-          <Switch checked={true} onChange={() => {}} />
-          <Trash2 size={15} className={css.memDel} />
-        </div>
-      </div>
-      <div className={css.serverCard}>
-        <div className={css.serverLeft}>
-          <span className={css.serverDotOn} />
-          <div className={css.serverMeta}>
-            <span className={css.serverName}>web-search</span>
-            <span className={css.serverDesc}>联网搜索</span>
+          <div className={css.serverRight}>
+            <span className={css.serverTools}>{s.tools.length} 个工具</span>
+            <span onClick={e => e.stopPropagation()}>
+              <Switch
+                checked={s.enabled}
+                onChange={v => setServers(prev => prev.map(x => x.id === s.id ? { ...x, enabled: v } : x))}
+              />
+            </span>
+            <Trash2
+              size={15}
+              className={css.memDel}
+              onClick={e => { e.stopPropagation(); setServers(prev => prev.filter(x => x.id !== s.id)) }}
+            />
           </div>
-        </div>
-        <div className={css.serverRight}>
-          <span className={css.serverTools}>6 个工具</span>
-          <Switch checked={true} onChange={() => {}} />
-          <Trash2 size={15} className={css.memDel} />
-        </div>
-      </div>
-      <div className={css.serverCard}>
-        <div className={css.serverLeft}>
-          <span className={css.serverDotOff} />
-          <div className={css.serverMeta}>
-            <span className={css.serverName}>db-inspector</span>
-            <span className={css.serverDesc}>数据库结构检查</span>
-          </div>
-        </div>
-        <div className={css.serverRight}>
-          <span className={css.serverTools}>9 个工具</span>
-          <Switch checked={false} onChange={() => {}} />
-          <Trash2 size={15} className={css.memDel} />
-        </div>
-      </div>
+        </button>
+      ))}
+      {addOpen && (
+        <AddMcpServerDialog
+          onClose={() => setAddOpen(false)}
+          onAdd={server => { setServers(prev => [...prev, server]); setAddOpen(false) }}
+        />
+      )}
+      {selected && (
+        <McpServerDetailDialog
+          server={selected}
+          onClose={() => setSelectedId(null)}
+          onSave={updated => {
+            setServers(prev => prev.map(x => x.id === updated.id ? updated : x))
+            setSelectedId(null)
+          }}
+          onDelete={id => {
+            setServers(prev => prev.filter(x => x.id !== id))
+            setSelectedId(null)
+          }}
+        />
+      )}
     </>
   )
 }
