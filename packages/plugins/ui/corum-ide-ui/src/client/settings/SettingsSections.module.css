@@ -1049,3 +1049,280 @@
 .expandLink:hover {
   color: var(--dsw-alias-label-secondary);
 }
+
+/* ── 技能交互（列表可点击行 / 详情 / 版本 radio / 绑定 / 删除确认 / 导入）── */
+
+/* 列表行：整行可点击进详情 */
+.skillRowBtn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 2px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 8px;
+}
+
+.skillRowBtn:hover {
+  background: var(--corum-glass-2);
+}
+
+/* 详情页头部返回行 */
+.detailHeadRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.backBtn:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+/* 详情：名称标题行 */
+.skillTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+}
+
+.skillTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* SKILL.md 只读预览 */
+.skillViewer {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* SKILL.md 编辑器 / 文本粘贴 */
+.skillEditor {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-primary);
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.skillEditor:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+/* 版本历史行（radio 点选即生效） */
+.versionRow,
+.versionRowActive {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.versionRow:hover {
+  background: var(--corum-glass-2);
+}
+
+.versionRowActive {
+  background: var(--corum-glass-2);
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
+}
+
+.radioOn,
+.radioOff {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radioOff {
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-1);
+}
+
+.radioOn {
+  border: 2px solid var(--dsw-alias-brand-primary);
+  background: var(--corum-glass-1);
+}
+
+.radioOn::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+
+.versionMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.versionId {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.versionLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.currentTag {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: var(--dsw-alias-brand-primary);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--corum-label-on-brand);
+}
+
+/* 绑定关系行 */
+.bindRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 2px;
+}
+
+.bindAvatar {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.bindName {
+  flex: 1;
+  min-width: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 删除确认对话框文案 */
+.confirmMsg {
+  margin: 0 0 8px;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.confirmWarn {
+  margin: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-state-danger-primary, #d64545);
+}
+
+/* 导入·扫描目录结果行 */
+.scanRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.scanRow:hover {
+  background: var(--corum-glass-2);
+}
+
+.scanName {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.scanNameDim {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.scanDesc {
+  flex: 1;
+  min-width: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.scanExists {
+  flex: none;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-dimmed);
+}

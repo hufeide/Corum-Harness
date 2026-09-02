@@ -43,13 +43,15 @@ import { GLASS_TOKENS } from './theme-layer.ts'
 import { TestModule } from './TestModule.tsx'
 import { registerSlot, getSlotMeta, drainPendingSlots } from '@corum/corum-ui-base/client'
 import type { SlotMeta, SlotRegistryFace } from '@corum/corum-ui-base/client'
+import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { SettingsShell } from './SettingsShell.tsx'
 import type {
   SettingsOnboardingStep, SettingsRootInjected, SettingsSectionRow,
 } from './shell-contract.ts'
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
 import { GeneralSection } from './SettingsGeneralSection.tsx'
-import { SECTION_DEFS } from './settings/SettingsSections.tsx'
+import { SECTION_DEFS, CorumRpcContext } from './settings/SettingsSections.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
@@ -180,7 +182,7 @@ export interface CorumSidebarOwnerProps {
 
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
-export const inject = ['slots', 'theme', 'locale']
+export const inject = ['slots', 'theme', 'locale', 'connection']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -374,7 +376,11 @@ export function apply(ctx: ClientContext): void {
     }, GeneralSection))
 
     // ── 批量注册设计稿 section（外观/通知/快捷键/权限/.../配置档案）──
-    // 每个 section 用 SettingsSections.tsx 中的组件渲染，静态占位文案。
+    // 每个 section 用 SettingsSections.tsx 中的组件渲染。业务 section（技能等）
+    // 需调 host RPC：这里构造全局 caller 并经 CorumRpcContext 下发（官方
+    // connection.rpc.call 通道，与 makeCorumRpcCall 同契约；不用 ctx.remote——
+    // 见 PROGRESS §4 「ctx.remote 命名空间代理」坑）。
+    const corumRpc = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
     const disposeSections = SECTION_DEFS.map(def =>
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
@@ -383,7 +389,9 @@ export function apply(ctx: ClientContext): void {
         label: def.label,
         locale: NS,
       }, (props: SettingsSectionOwnerProps) => (
-        <SettingsSectionHost {...props} render={def.Component} />
+        <CorumRpcContext.Provider value={corumRpc}>
+          <SettingsSectionHost {...props} render={def.Component} />
+        </CorumRpcContext.Provider>
       ))),
     )
 
