@@ -625,8 +625,14 @@ export function serializeGrid(node: GridNode): string {
   return JSON.stringify(strip(node))
 }
 
-/** 反序列化（重新发 id，结构非法时返回 null，由调用方回退到自己的默认布局）。 */
-export function deserializeGrid(json: string): GridNode | null {
+/** 反序列化（重新发 id，结构非法时返回 null，由调用方回退到自己的默认布局）。
+ *  `topLevelRow` 可选：传子壳默认布局的顶层 row 拓扑签名（叶子=槽名、
+ *  分支='*'）——持久化的顶层 row 与默认签名不同（如旧版把 conversation
+ *  嵌进了 right-col 内部）时**整树废弃回退默认**，不沿用旧拓扑。否则旧
+ *  布局（对话区被裹进 right-col 分支）会被 root leafTopOffset 按「非叶子
+ *  格 offset=0」整支抬顶，撞破只压左列的标题栏浮层（2026-09-04：编辑器/
+ *  资源管理器没有顶在窗口最上面、反而压在会话区标题栏下方的根因）。 */
+export function deserializeGrid(json: string, topLevelRow?: readonly string[]): GridNode | null {
   try {
     const build = (raw: unknown): GridNode | null => {
       if (typeof raw !== 'object' || raw === null) return null
@@ -646,6 +652,16 @@ export function deserializeGrid(json: string): GridNode | null {
     }
     const tree = build(JSON.parse(json))
     if (tree === null) return null
+    // 顶层 row 拓扑守卫：与默认布局的顶层槽序不一致即废弃（见上注释）。
+    if (topLevelRow !== undefined) {
+      if (tree.type !== 'branch' || tree.direction !== 'row') return null
+      // 顶层格的拓扑签名：叶子=槽名、分支='*'（分支位置可变——right-col 等
+      // 分支格允许存在，但叶子槽序必须与默认一致；旧布局把叶子嵌进分支
+      // 内部时槽序对不上即废弃）。分支格内的结构（嵌套/权重）不校验——
+      // 用户拖拽重组自由，只保证顶层叶子仍直接挂在 root row 下。
+      const sig = tree.children.map((c) => (c.type === 'leaf' ? c.slot : '*'))
+      if (sig.length !== topLevelRow.length || sig.some((s, i) => s !== topLevelRow[i])) return null
+    }
     // 对齐 weights/children 长度并剪枝（含 slot 校验丢弃叶子后的塌陷）。
     const pruned = prune(tree)
     // 整树被剪空（如只剩一个未注册 slot 的叶子）时回退默认布局。
@@ -664,7 +680,15 @@ export function loadGrid(fallback: () => GridNode, key: string = DEFAULT_GRID_ST
   if (typeof localStorage === 'undefined') return fallback()
   const raw = localStorage.getItem(key)
   if (raw === null) return fallback()
-  return deserializeGrid(raw) ?? fallback()
+  // 从子壳默认布局提取顶层 row 的拓扑签名（叶子=槽名、分支='*'）作为守卫
+  // 基准——默认布局本身是子壳特化（如 ide-layout 的 [sidebar, conversation,
+  // right-col(分支)]），本包不硬编码业务槽名。默认布局顶层不是 row 时不施加
+  // 守卫。
+  const def = fallback()
+  const topLevelRow = def.type === 'branch' && def.direction === 'row'
+    ? def.children.map((c) => (c.type === 'leaf' ? c.slot : '*'))
+    : undefined
+  return deserializeGrid(raw, topLevelRow) ?? fallback()
 }
 
 /** 写持久化布局。key 缺省 DEFAULT_GRID_STORAGE_KEY。 */
