@@ -1,682 +1,680 @@
-/* Models settings section, in the settings-panel design language: 14/22 body,
- * 12/18 caption, capsule controls (h36 r18; h28 r14 where a row is dense),
- * 32px fields, and `border-l2` hairlines — the vocabulary GeneralSection and
- * the Button/Input primitives already use.
+/* corum 模型页（跳页四态）样式 —— 全部消费 --corum-glass-* / --dsw-alias-*
+ * 设计 token，零硬编码 hex。数值来自 design.pen 模型页复刻基准稿提取表。
  *
- * Every color resolves through a `--dsw-alias-*` token. Bare `--border` /
- * `--surface` / `--text-*` names, which nothing in this app defines, would
- * render the light-mode literals written as their fallbacks and stay light
- * under the dark theme. */
+ * token 对照（pencil-to-corum-ide §2.3）：
+ *   $glass-1/2/3 → --corum-glass-1/2/3；$glass-border(-active) → --corum-glass-border(-active)
+ *   $brand-primary → --corum-state-running；$brand-text → --corum-brand-accent
+ *   $label-on-brand → --corum-label-on-brand；$label-* → --dsw-alias-label-*
+ *   $state-success → --dsw-alias-state-success-primary
+ */
+
+* { box-sizing: border-box; }
 
 .section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-width: 720px;
+  gap: 14px;
   color: var(--dsw-alias-label-primary);
 }
 
-.title {
-  margin: 0;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-primary);
-}
+/* ── 页首 ── */
 
-.intro {
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  width: fit-content;
+}
+.back:hover { color: var(--dsw-alias-label-primary); }
+
+.hint {
   margin: 0;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 12px;
+  line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-.notice {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-warn-label);
-}
+/* ── provider / 模型卡（glass-1 r16 pad[14,16]） ── */
 
-.savedNotice {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-success-primary);
-}
-
-.rows {
-  list-style: none;
-  /* Extra air between the title/intro block and the first provider card. */
-  margin: 12px 0 0;
-  padding: 0;
+.card {
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-/* A configured provider: outlined on the panel fill, so the filled editor
-   card it expands into reads as the nested object. */
-.rowCard {
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 12px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.rowHead {
-  display: flex;
-  align-items: center;
   gap: 10px;
 }
 
-.rowIdentity {
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cardHeadLeft {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
-
-.rowName {
+.cardHeadTitle {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.cardName {
   font-size: 14px;
-  line-height: 22px;
-  font-weight: 500;
+  line-height: 20px;
+  font-weight: 700;
   color: var(--dsw-alias-label-primary);
 }
-
-/* Reads as an annotation on the name, not as a second name: caption size and
-   the secondary label tone, so it never competes with the row's own title. It
-   sits inside `rowIdentity` with the credential dot, which is what keeps it
-   beside the name rather than drifting toward the actions. */
-.rowTag {
-  flex: none;
-  padding: 1px 6px;
-  border: 1px solid var(--dsw-alias-border-l3);
-  border-radius: 4px;
+.cardDesc {
   font-size: 11px;
   line-height: 16px;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-tertiary);
 }
-
-.credentialDot {
-  box-sizing: border-box;
-  display: inline-block;
+.cardHeadRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
 }
 
-.credentialDotConfigured {
-  background: var(--dsw-alias-state-success-primary);
-}
-
-.credentialDotMissing {
-  background: var(--dsw-alias-state-error-primary);
-}
-
-.rowActions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-
-/* `box-sizing` on every control here: the app has no global border-box reset,
-   so without it the outlined variants stand 2px taller than the filled ones
-   they sit beside (Cancel next to Apply, Edit next to Delete). */
-.primaryButton,
-.secondaryButton,
-.addButton {
-  box-sizing: border-box;
+/* 图标盒 34×34 r9 glass-2 */
+.iconBox {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  height: 36px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 18px;
-  font: inherit;
-  font-size: 14px;
-  line-height: 22px;
-  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  color: var(--corum-brand-accent, var(--dsw-alias-brand-primary));
 }
 
-.primaryButton {
-  background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-label-primary-foreground);
-}
-
-.primaryButton:hover:not(:disabled) {
-  background: var(--dsw-alias-button-primary-hover);
-}
-
-.secondaryButton,
-.addButton {
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-}
-
-.secondaryButton:hover:not(:disabled),
-.addButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.secondaryButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
-}
-
-.dangerButton {
-  box-sizing: border-box;
+/* ── 状态胶囊（r6 pad[3,9]） ── */
+.statusPill {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  height: 36px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 18px;
-  background: transparent;
-  color: var(--dsw-alias-state-error-primary);
-  font: inherit;
-  font-size: 14px;
-  line-height: 22px;
-  cursor: pointer;
-}
-
-.dangerButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-danger);
-}
-
-/* Provider-row controls take the dense capsule (Button `.sm`). */
-.rowActions .secondaryButton,
-.rowActions .dangerButton {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 14px;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.primaryButton:disabled,
-.secondaryButton:disabled,
-.dangerButton:disabled,
-.addButton:disabled,
-.linkButton:disabled,
-.addModelButton:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.primaryButton:focus-visible,
-.secondaryButton:focus-visible,
-.dangerButton:focus-visible,
-.addButton:focus-visible,
-.linkButton:focus-visible,
-.addModelButton:focus-visible,
-.iconButton:focus-visible,
-.customizedSummary:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--dsw-alias-border-l3);
-}
-
-/* Editing surface: a filled module on the panel, matching the settings
-   selector fill rather than adding another outline inside the row. */
-.editor {
-  border-radius: 12px;
-  background: var(--dsw-alias-bg-module-platform);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.editorHeader {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.editorTitle {
-  font-size: 14px;
-  line-height: 22px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-primary);
-}
-
-.editorRoute {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.fieldLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.linkButton {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 14px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font: inherit;
-  font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
-}
-
-.linkButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-secondary);
-}
-
-.advancedHint {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.editorActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.addBlock {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* The two ways to gain a provider, as equal siblings spanning the same width
-   as the rows above. Wraps rather than shrinking below a legible label. */
-.addActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.addButton {
-  /* Overrides the shared button base above: these two are not pills sitting in
-     a footer but the last slot of the provider list, so they split the row
-     evenly and repeat the row cards' corner. Dashed, like every other "nothing
-     here yet" affordance on this page, to read as a place rather than a
-     command. */
-  flex: 1 1 0;
-  min-width: 180px;
-  gap: 6px;
-  height: 44px;
-  border: 1px dashed var(--dsw-alias-border-l3);
-  border-radius: 12px;
-}
-
-.addCard,
-.setupCard {
-  border-radius: 12px;
-  background: var(--dsw-alias-bg-module-platform);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  list-style: none;
-}
-
-/* Nested in a card that already carries the module chrome. */
-.addCard .editor,
-.setupCard .editor {
-  background: none;
-  padding: 0;
-}
-
-.customized {
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  padding-top: 10px;
-}
-
-/* Native disclosure marker replaced by a rotating chevron: the built-in
-   triangle differs per engine and cannot take the label color. */
-.customizedSummary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  padding: 2px 4px;
-  margin-left: -4px;
+  gap: 5px;
+  padding: 3px 9px;
+  background: var(--corum-glass-2);
   border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 500;
+}
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.statusDot_success { background: var(--dsw-alias-state-success-primary); }
+.statusDot_dim { background: var(--dsw-alias-label-dimmed); }
+.statusDot_error { background: var(--dsw-alias-state-error-primary); }
+.statusText {
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
   color: var(--dsw-alias-label-secondary);
-  list-style: none;
 }
 
-.customizedSummary::-webkit-details-marker {
-  display: none;
+/* ── 行内小图标钮（✏️🗑 26×26 r7） ── */
+.rowActions { display: inline-flex; align-items: center; gap: 2px; }
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
 }
-
-.customizedSummary::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentcolor;
-  border-bottom: 1.5px solid currentcolor;
-  transform: rotate(-45deg) translate(-1px, -1px);
-  transition: transform 120ms ease;
-}
-
-.customized[open] > .customizedSummary::before {
-  transform: rotate(45deg) translate(-1px, -1px);
-}
-
-.customizedSummary:hover {
+.iconBtn:hover:not(:disabled) {
+  background: var(--corum-glass-2);
   color: var(--dsw-alias-label-primary);
 }
-
-.customizedBody {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
+.iconBtnActive {
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border-active);
+  color: var(--corum-brand-accent, var(--dsw-alias-brand-primary));
 }
+.iconBtnDanger:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary); }
+.iconBtn:disabled { opacity: 0.4; cursor: default; }
 
-/* Model catalog: a table, not a stack of cards. The column captions are
-   written once above the rows, so a row is one line of fields plus its
-   delete control; each field still carries the indexed `aria-label` that
-   names it, and the caption strip is hidden from assistive tech to keep
-   that name from being announced twice. */
-.modelCatalog {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--dsw-alias-border-l2);
+/* ── chips 行 ── */
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  font: inherit;
+  cursor: pointer;
 }
+.chipText { font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-secondary); }
+.chipGo { display: inline-flex; color: var(--dsw-alias-label-dimmed); }
+.chip:hover .chipText { color: var(--dsw-alias-label-primary); }
+.chipAdd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.chipAdd:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+.chipAdd button {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.chipInput {
+  width: 72px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 10px;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+}
+.chipInput::placeholder { color: var(--dsw-alias-label-dimmed); }
 
-.modelCatalogHeading {
+/* ── ＋添加提供方大卡（透明底 r16 stroke 居中） ── */
+.addCard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: transparent;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.addCard:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-1); }
+
+/* ── 设置分组卡（glass-1 r16 pad[6,16,10,16]） ── */
+.settingGroup {
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  padding: 6px 16px 10px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-
-.modelCatalogTitle {
+.settingGroupTitle {
   font-size: 12px;
   line-height: 18px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--dsw-alias-label-secondary);
+  padding-top: 4px;
 }
-
-.modelCatalogMeta,
-.modelEmpty {
-  margin: 0;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-/* Model list, shared with the pi-ai provider form: one bordered
-   entry per model, id and display name on the row, capacities behind the
-   row's own disclosure. The rules use this stylesheet's token vocabulary —
-   `--dsw-alias-border-subtle`, `--dsw-alias-text-tertiary`, and
-   `--dsw-alias-text-primary` are undefined here and would resolve to their
-   light-mode literals. */
-.modelList {
+.settingRow {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.modelListHead {
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 10px 2px;
 }
+.settingControl { flex: none; display: inline-flex; align-items: center; gap: 8px; max-width: 60%; flex-wrap: wrap; justify-content: flex-end; }
+.settingRowStacked { flex-direction: column; align-items: stretch; gap: 6px; }
+.settingControlStacked { max-width: none; width: 100%; justify-content: flex-start; }
+.settingDivider { height: 1px; background: var(--corum-glass-border); opacity: 0.5; }
 
-.modelEntry {
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  padding: 6px;
-}
-
-.modelRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto;
+/* ── 字段（label 13/600 + desc 11 + 控件） ── */
+.fieldRow {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+}
+.fieldMeta { display: inline-flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fieldLabel { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.fieldDesc { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+
+.textField {
+  width: 180px;
+  height: 32px;
+  padding: 7px 10px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+.textFieldWide { width: 260px; }
+.textField:focus { outline: none; border-color: var(--corum-glass-border-active); }
+.textField::placeholder { color: var(--dsw-alias-label-dimmed); }
+.textField:disabled { opacity: 0.6; }
+
+/* ── 下拉（180 glass-2 r10 + chevron） ── */
+.selectWrap { position: relative; display: inline-flex; width: 180px; }
+.selectField {
+  width: 100%;
+  height: 32px;
+  appearance: none;
+  padding: 7px 30px 7px 10px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+.selectField:focus { outline: none; border-color: var(--corum-glass-border-active); }
+.selectChevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--dsw-alias-label-tertiary);
+  pointer-events: none;
 }
 
-/* Square, label-free affordances: the row's own inputs carry the meaning, so
-   the actions stay glyphs and announce themselves through aria-label. */
-.iconButton {
-  box-sizing: border-box;
+/* ── 开关（36×20） ── */
+.switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-3, var(--corum-glass-2));
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.switchKnob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-secondary);
+  transition: transform 120ms ease, background 120ms ease;
+}
+.switchOn { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); border-color: transparent; }
+.switchOn .switchKnob { transform: translateX(16px); background: var(--corum-label-on-brand, #fff); }
+.switch:disabled { opacity: 0.5; cursor: default; }
+
+/* ── 玻璃按钮 ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.btnPrimary {
+  background: var(--corum-state-running, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand, #fff);
+  font-weight: 600;
+}
+.btnOutline {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border);
+  color: var(--dsw-alias-label-primary);
+}
+.btnGhost {
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+}
+.btnGhost:hover:not(:disabled) { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+.btnOutline:hover:not(:disabled) { border-color: var(--corum-glass-border-active); }
+.btnDanger { color: var(--dsw-alias-state-error-primary); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── 步进器（− N ＋） ── */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+}
+.stepperBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 28px;
+  height: 30px;
+  padding: 0;
   border: none;
-  border-radius: 6px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
-
-.iconButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-.iconButton:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
-/* The delete glyph keeps the danger tint the rest of the section uses. */
-.iconButtonDanger:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-danger);
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.modelAdvanced {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-  padding: 8px 4px 2px;
-}
-
-.modelField {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.modelFieldLabel {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.modelEmpty {
-  padding: 12px;
-  border: 1px dashed var(--dsw-alias-border-l3);
-  border-radius: 8px;
-  text-align: center;
-}
-
-.addModelButton {
-  box-sizing: border-box;
-  align-self: flex-start;
+.stepperBtn:hover:not(:disabled) { color: var(--dsw-alias-label-primary); }
+.stepperBtn:disabled { opacity: 0.4; cursor: default; }
+.stepperVal {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 14px;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
+  justify-content: center;
+  width: 44px;
+  height: 30px;
   font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
-}
-
-.addModelButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.input {
-  box-sizing: border-box;
-  width: 100%;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  font: inherit;
-  font-size: 14px;
-  line-height: 22px;
-  background: var(--dsw-alias-bg-layer-1);
+  font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
-/* Enum pickers hold a handful of short options; a field-width dropdown reads
-   as a text field the user is expected to fill. */
-select.input {
-  max-width: 240px;
-  cursor: pointer;
-}
-
-.input:focus {
-  outline: none;
-  border-color: var(--dsw-alias-brand-primary);
-}
-
-.input::placeholder {
-  color: var(--dsw-alias-label-dimmed);
-}
-
-.input:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-/* Select variant of .input: replaces the OS arrow (which sits flush against
-   the right edge) with the shared 12px chevron inset like the composer's
-   .select chips; the right pad reserves its cell. */
-.selectInput {
-  appearance: none;
-  padding-right: 32px;
-  /* Data-URI SVGs cannot resolve CSS variables; #81858C is the caption gray
-     shared by both themes. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 12px 12px;
-}
-
-.error {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.deleteDialog {
-  width: min(480px, 100%);
-}
-
-.deleteConfirm:not(:disabled) {
-  border-color: var(--dsw-alias-state-error-primary);
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.deleteConfirm:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-danger);
-}
-
-/* Icon-button label seat: named for assistive tech and for the tests that
-   query these controls by their text. */
-.hiddenLabel {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .customizedSummary::before,
-  .switchThumb {
-    transition: none;
-  }
-}
-
-.fetchDialog {
-  max-width: 520px;
-
-  /* The candidate list scrolls inside this dialog, an elevated surface, so the
-     scrollbar indirection is rebound here rather than on the scrolling child:
-     the elevation choice belongs with the surface and inherits down (see
-     ui-theme styles/scrollbar.css for the contract). */
-  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
-  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
-}
-
-.candidateActions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 6px;
-}
-
-.candidateList {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 320px;
-  margin: 0;
-  overflow-y: auto;
-  padding: 0;
-  list-style: none;
-}
-
-.candidate {
+/* ── 测试结果胶囊 ── */
+.resultPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  background: var(--corum-glass-2);
   border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
 }
+.resultPill_ok { color: var(--dsw-alias-state-success-primary); }
+.resultPill_err { color: var(--dsw-alias-state-error-primary); }
 
-.candidateLabel {
+/* ── 底部按钮行 ── */
+.foot {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
+}
+.footRight { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ── 错误 / 提示 ── */
+.error { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); }
+.notice { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.savedNotice { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-success-primary); }
+
+/* ── 编辑器内分隔 ── */
+.hDivider { height: 1px; background: var(--corum-glass-border); opacity: 0.5; }
+
+/* ── 主页：模型卡片网格（3 列） ── */
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.modelCard {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 14px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 148px;
+}
+.modelCard:hover { border-color: var(--corum-glass-border-active); }
+.modelCardTop { display: inline-flex; align-items: center; gap: 8px; }
+.brandLogo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  color: var(--corum-brand-accent, var(--dsw-alias-brand-primary));
+}
+.modelCardProv { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.modelCardName { font-size: 14px; line-height: 20px; font-weight: 700; color: var(--dsw-alias-label-primary); }
+.modelCardSpecs { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.modelCardDiv { height: 1px; background: var(--corum-glass-border); opacity: 0.5; }
+.modelCardPrice { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+.modelCardAdd {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px;
+  min-height: 148px;
+  background: transparent;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
+.modelCardAdd:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-1); }
 
-.candidateId {
-  flex: 1 1 auto;
-  font-family: var(--ds-font-family-code);
-  font-size: 13px;
-  overflow-wrap: anywhere;
+/* ── 模型卡片删除快捷入口（hover 显示，右上） ── */
+.modelCardWrap { position: relative; display: block; }
+.modelCardWrap .modelCard { width: 100%; }
+.modelCardDelete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
+.modelCardWrap:hover .modelCardDelete,
+.modelCardDelete:focus-visible { opacity: 1; }
+.modelCardDelete:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary); border-color: var(--dsw-alias-state-error-primary); }
+.modelCardDelete:disabled { opacity: 0; cursor: default; }
+
+/* ── 配置向导：品牌网格 ── */
+.segSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  width: fit-content;
+}
+.segBtn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.segBtnActive { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); color: var(--corum-label-on-brand, #fff); font-weight: 600; }
+.brandGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+}
+.brandCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.brandCell:hover { background: var(--corum-glass-1); }
+.brandCellActive { background: var(--corum-glass-1); border-color: var(--corum-glass-border-active); }
+
+/* ── 侦测结果：复选模型行卡 ── */
+.selRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.selRowActive { background: var(--corum-glass-2); border-color: var(--corum-glass-border-active); }
+.selCb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 4px;
+  background: transparent;
+  color: transparent;
+}
+.selCbOn { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); border-color: transparent; color: var(--corum-label-on-brand, #fff); }
+.selRowId { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.selRowSpec { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+.selRowDisabled { opacity: 0.5; cursor: default; }
+.selRowTag { margin-left: auto; font-size: 10px; color: var(--dsw-alias-label-dimmed); }
+/* 单选 radio 圆点 */
+.radio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 50%;
+  background: transparent;
+}
+.radioOn { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); border-color: transparent; }
+.radioInner { width: 6px; height: 6px; border-radius: 50%; background: var(--corum-label-on-brand, #fff); }
+.btnRowBetween { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lockedProviderTag { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-weight: 400; }
+
+/* ── 主页：供应商卡片（单列横排大卡） ── */
+.providerList { display: flex; flex-direction: column; gap: 10px; }
+.providerCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.providerCard:hover { border-color: var(--corum-glass-border-active); }
+.providerCardLeft { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.providerCardRight { display: inline-flex; align-items: center; gap: 8px; flex: none; color: var(--dsw-alias-label-tertiary); }
+.addProviderCard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 16px;
+  background: transparent;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.addProviderCard:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-1); }
+
+/* ── 锁定供应商（添加模型场景，只读） ── */
+.lockedProvider { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--corum-glass-2); border: 1px solid var(--corum-glass-border); border-radius: 10px; width: fit-content; }
+.lockedProviderName { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+
+/* ── 表单字段（label 上 + 控件下，整宽） ── */
+.fieldCol { display: flex; flex-direction: column; gap: 6px; }
+.formCard {
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.inputFull {
+  width: 100%;
+  height: 34px;
+  padding: 8px 12px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+.inputFull:focus { outline: none; border-color: var(--corum-glass-border-active); }
+.inputFull::placeholder { color: var(--dsw-alias-label-dimmed); }
+.priceInput { display: inline-flex; align-items: center; gap: 4px; }
+.priceUnit { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+
+
+/* ── 列表 ul 重置 ── */
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+
+/* ── 编辑器卡（嵌在 provider 卡内展开的表单区） ── */
+.editorSection { display: flex; flex-direction: column; gap: 12px; }
