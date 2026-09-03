@@ -757,6 +757,37 @@
 
 /* ── 编辑弹窗名片预览 ──────────────────────────────────────────────── */
 
+.editPageLayout {
+  display: flex;
+  gap: 20px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.editPreviewCol {
+  flex: none;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.editFormCol {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
 .cardPreviewRow {
   display: flex;
   align-items: flex-start;

@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useRef, useContext, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ArrowLeft, Bot, Cpu, Search, Check, Box, Ghost } from 'lucide-react'
+import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, ArrowLeft, Bot, Cpu, Search, Check, Box, Ghost, Maximize2, Minimize2 } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { SettingRow } from './SettingRow.tsx'
 import { SelectField } from './SelectField.tsx'
@@ -555,16 +555,19 @@ function PlaceholderCard() {
   )
 }
 
-/* ── 主 section ──────────────────────────────────────────────────────── */
+/* ── 主 section（home / edit 两级 view）───────────────────────────────── */
+
+type PresetsView =
+  | { kind: 'home' }
+  | { kind: 'edit'; profile: AgentProfileSummary | 'new' }
 
 function AgentPresetsSection() {
   const rpc = useCorumRpc()
+  const [view, setView] = useState<PresetsView>({ kind: 'home' })
   const [profiles, setProfiles] = useState<AgentProfileSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dimFilter, setDimFilter] = useState<string>('全部')
   const [search, setSearch] = useState('')
-  const [editing, setEditing] = useState<AgentProfileSummary | 'new' | null>(null)
-  const [deleting, setDeleting] = useState<AgentProfileSummary | null>(null)
 
   const reload = async () => {
     if (!rpc) return
@@ -581,6 +584,18 @@ function AgentPresetsSection() {
 
   if (!rpc) return <p className={css.hintText}>Agent 服务未就绪。</p>
 
+  if (view.kind === 'edit') {
+    return (
+      <EditPresetView
+        key={view.profile === 'new' ? '__new__' : view.profile.id}
+        profile={view.profile === 'new' ? undefined : view.profile}
+        rpc={rpc}
+        onBack={() => setView({ kind: 'home' })}
+        onSaved={() => { setView({ kind: 'home' }); void reload() }}
+      />
+    )
+  }
+
   const corumProfiles = (profiles ?? []).filter(p => p.source === 'corum')
   const officialProfiles = (profiles ?? []).filter(p => p.source === 'official')
 
@@ -594,7 +609,6 @@ function AgentPresetsSection() {
     return true
   })
 
-  // 3 列网格分行
   const rows: AgentProfileSummary[][] = []
   for (let i = 0; i < filtered.length; i += 3) rows.push(filtered.slice(i, i + 3))
 
@@ -602,7 +616,7 @@ function AgentPresetsSection() {
     <>
       <div className={css.topRow}>
         <span className={css.topHint}>预设决定 Agent 的模型、技能与工具组合。点击名片进入 Agent 设置。</span>
-        <GlassButton variant="primary" onClick={() => setEditing('new')}>+ 新建预设</GlassButton>
+        <GlassButton variant="primary" onClick={() => setView({ kind: 'edit', profile: 'new' })}>+ 新建预设</GlassButton>
       </div>
 
       <div className={css.agentFilterRow}>
@@ -635,7 +649,7 @@ function AgentPresetsSection() {
         {rows.map((row, ri) => (
           <div key={ri} className={css.agentGridRow}>
             {row.map(p => (
-              <AgentCard key={p.id} profile={p} onClick={() => setEditing(p)} />
+              <AgentCard key={p.id} profile={p} onClick={() => setView({ kind: 'edit', profile: p })} />
             ))}
             {row.length < 3 && Array.from({ length: 3 - row.length }, (_, i) => (
               <PlaceholderCard key={`ph-${i}`} />
@@ -659,37 +673,17 @@ function AgentPresetsSection() {
           </div>
         </div>
       )}
-
-      {editing !== null && (
-        <EditPresetDialog
-          key={editing === 'new' ? '__new__' : editing.id}
-          profile={editing === 'new' ? undefined : editing}
-          rpc={rpc}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); void reload() }}
-          onDelete={p => { setEditing(null); setDeleting(p) }}
-        />
-      )}
-
-      {deleting !== null && (
-        <DeletePresetDialog
-          profile={deleting}
-          rpc={rpc}
-          onClose={() => setDeleting(null)}
-          onDeleted={() => { setDeleting(null); void reload() }}
-        />
-      )}
     </>
   )
 }
 
-/* ── 编辑/新建 Agent 预设弹窗 v3（按设计稿 sRGkL 落码）────────────────── */
+/* ── 编辑/新建 Agent 预设二级页（左右分栏，按设计稿 GHBvv 落码）────────── */
 
 const BASE_MODE_OPTIONS = [
-  { id: 'standard', label: '标准模式 — 功能完整的编码 Agent，支持文件编辑/Shell/检索/Skills' },
-  { id: 'ptc', label: 'PTC 模式 — 标准模式 + Code Mode SDK 多步操作' },
-  { id: 'minimal', label: '极简模式 — 仅持久 bash + 编辑器的双工具 Agent' },
-  { id: 'cordis', label: '创造模式 — 用于创建自定义 Agent preset' },
+  { id: 'standard', label: 'standard · 标准（完整编码能力）' },
+  { id: 'ptc', label: 'ptc · 多步操作' },
+  { id: 'minimal', label: 'minimal · 极简双工具' },
+  { id: 'cordis', label: 'cordis · 创造模式' },
 ]
 
 const TERMINAL_OPTIONS = [
@@ -703,12 +697,11 @@ const MEMORY_OPTIONS = [
 
 const DIMENSION_OPTIONS = AGENT_DIMENSIONS.map(d => ({ id: d, label: d }))
 
-function EditPresetDialog({ profile, rpc, onClose, onSaved, onDelete }: {
+function EditPresetView({ profile, rpc, onBack, onSaved }: {
   profile: AgentProfileSummary | undefined
   rpc: CorumRpcCall
-  onClose: () => void
+  onBack: () => void
   onSaved: () => void
-  onDelete: (p: AgentProfileSummary) => void
 }) {
   const isNew = profile === undefined
   const [draft, setDraft] = useState<EditDraft>(() => isNew ? emptyDraft() : draftFromProfile(profile))
@@ -716,6 +709,8 @@ function EditPresetDialog({ profile, rpc, onClose, onSaved, onDelete }: {
   const [error, setError] = useState<string | null>(null)
   const [skillBindOpen, setSkillBindOpen] = useState(false)
   const [mcpBindOpen, setMcpBindOpen] = useState(false)
+  const [promptZoom, setPromptZoom] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   const set = <K extends keyof EditDraft>(k: K, v: EditDraft[K]) => setDraft(prev => ({ ...prev, [k]: v }))
@@ -730,7 +725,7 @@ function EditPresetDialog({ profile, rpc, onClose, onSaved, onDelete }: {
   }
 
   const doSave = async () => {
-    const id = (isNew ? draft.name : draft.name).trim().toLowerCase().replace(/\s+/g, '-')
+    const id = draft.name.trim().toLowerCase().replace(/\s+/g, '-')
     if (id === '') { setError('预设 ID 不能为空'); return }
     if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) { setError('预设 ID 只能包含小写字母、数字、连字符'); return }
     setBusy(true)
@@ -763,177 +758,263 @@ function EditPresetDialog({ profile, rpc, onClose, onSaved, onDelete }: {
     }
   }
 
+  const doDelete = async () => {
+    if (profile === undefined) return
+    setBusy(true)
+    try {
+      await rpc('corumAgent', 'deleteProfile', { id: profile.id })
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+      setDeleting(false)
+    }
+  }
+
   const EXP_QUICK = ['参与 N 个项目', '完成 N 次任务', '已服务 N 天']
 
-  return createPortal(
-    <div className={css.modalOverlay} onClick={onClose}>
-      <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
-        {/* HEADER */}
-        <div className={css.modalHeader}>
-          <span className={css.modalTitle}>{isNew ? '新建 Agent 预设' : '编辑 Agent 预设'}</span>
-          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
+  // 提示词放大态：占满右栏
+  if (promptZoom) {
+    return (
+      <div className={css.editPageLayout}>
+        <div className={css.editPreviewCol}>
+          <button type="button" className={css.backBtn} onClick={() => setPromptZoom(false)}>
+            <ChevronLeft size={14} />返回编辑
+          </button>
+          <AgentCard profile={{
+            id: draft.name || 'new-agent',
+            ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
+            ...(draft.title !== '' ? { title: draft.title } : {}),
+            ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
+            ...(draft.experience !== '' ? { experience: draft.experience } : {}),
+            ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
+            prompt: draft.prompt,
+            model: { provider: draft.provider, model: draft.model },
+            skills: draft.skills,
+            mcpServers: draft.mcpServers,
+            terminal: { mode: draft.terminal },
+            version: 1,
+            trust: draft.trust,
+            source: 'corum',
+          }} onClick={() => {}} />
         </div>
-
-        {/* BODY */}
-        <div className={css.modalBody}>
-          {/* 名片预览 */}
-          <AgentCardPreview draft={draft} />
-
-          {/* 1. 基本信息 */}
+        <div className={css.editFormCol}>
           <div className={css.formGroup}>
-            <div className={css.formGroupTitle}>基本信息</div>
-            <div className={css.avatarRow}>
-              <div className={css.avatarCol}>
-                <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
-                  {draft.avatar !== ''
-                    ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
-                    : <Upload size={22} className={css.avatarIcon} />}
-                </div>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
-                <div className={css.avatarActions}>
-                  <button type="button" className={css.btnUpload} onClick={() => fileRef.current?.click()}><Upload size={11} />上传</button>
-                  <button type="button" className={css.btnAiGen} disabled title="即将上线"><Sparkles size={11} />AI 生成</button>
-                </div>
-              </div>
-              <div className={css.formCols}>
-                <div className={css.formCol}>
-                  <label className={css.fieldLabel}>预设 ID</label>
-                  <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
-                </div>
-                <div className={css.formCol}>
-                  <label className={css.fieldLabel}>昵称</label>
-                  <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
-                </div>
-              </div>
-            </div>
-            <div className={css.formCols}>
-              <div className={css.formCol}>
-                <label className={css.fieldLabel}>岗位 / 职位</label>
-                <input className={css.fieldInput} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
-              </div>
-              <div className={css.formCol}>
-                <label className={css.fieldLabel}>岗位维度（名片筛选）</label>
-                <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} />
-              </div>
-            </div>
-            <label className={css.fieldLabel}>一句话简介（名片上展示的「擅长什么」）</label>
-            <input className={css.fieldInput} value={draft.experience === '' && draft.prompt === '' ? '' : promptToMotto(draft.prompt)} readOnly disabled title="由提示词首行自动生成" />
-          </div>
-
-          {/* 2. 名片履历 */}
-          <div className={css.formGroup}>
-            <div className={css.formGroupTitle}>名片履历（可选，手动编辑；也可由 Agent 运行情况自动汇总）</div>
-            <label className={css.fieldLabel}>经验说明</label>
-            <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
-            <div className={css.expQuickRow}>
-              {EXP_QUICK.map(q => (
-                <button
-                  key={q}
-                  type="button"
-                  className={css.expQuickPill}
-                  onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
-                >+ {q}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* 3. 提示词 */}
-          <div className={css.formGroup}>
-            <div className={css.formGroupTitle}>提示词</div>
-            <label className={css.fieldLabel}>基础模式（继承 dsh 系统提示词）</label>
-            <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} />
-            <label className={css.fieldLabel}>自定义提示词（叠加在基础模式 persona 之上，非替代）</label>
-            <div className={css.promptArea}>
-              <textarea className={css.promptTextarea} value={draft.prompt} onChange={e => set('prompt', e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
-              <div className={css.promptActions}>
+            <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>提示词</span>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
+                <button type="button" className={css.btnPolish} onClick={() => setPromptZoom(false)}><Minimize2 size={11} />缩小</button>
               </div>
             </div>
+            <textarea
+              className={css.promptTextarea}
+              style={{ flex: 1, minHeight: 400, fontSize: 13, lineHeight: 1.6, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
+              value={draft.prompt}
+              onChange={e => set('prompt', e.target.value)}
+              placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。"
+            />
+            <p className={css.hintText}>Esc 缩小 · ⌘Z 撤销润色</p>
           </div>
+        </div>
+      </div>
+    )
+  }
 
-          {/* 4. 模型 */}
-          <div className={css.formGroup}>
-            <div className={css.formGroupTitle}>模型</div>
+  return (
+    <div className={css.editPageLayout}>
+      {/* 左栏：返回 + 名片预览 + 底部删除 */}
+      <div className={css.editPreviewCol}>
+        <button type="button" className={css.backBtn} onClick={onBack}>
+          <ChevronLeft size={14} />返回 Agent 预设
+        </button>
+        <AgentCard profile={{
+          id: draft.name || 'new-agent',
+          ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
+          ...(draft.title !== '' ? { title: draft.title } : {}),
+          ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
+          ...(draft.experience !== '' ? { experience: draft.experience } : {}),
+          ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
+          prompt: draft.prompt,
+          model: { provider: draft.provider, model: draft.model },
+          skills: draft.skills,
+          mcpServers: draft.mcpServers,
+          terminal: { mode: draft.terminal },
+          version: 1,
+          trust: draft.trust,
+          source: 'corum',
+        }} onClick={() => {}} />
+        <div style={{ flex: 1 }} />
+        {!isNew && (
+          <button type="button" className={css.btnAdd} style={{ borderColor: 'var(--dsw-alias-state-error-primary)', color: 'var(--dsw-alias-state-error-primary)' }} onClick={() => setDeleting(true)}>
+            删除此预设
+          </button>
+        )}
+      </div>
+
+      {/* 右栏：表单 */}
+      <div className={css.editFormCol}>
+        {/* 1. 基本信息 */}
+        <div className={css.formGroup}>
+          <div className={css.formGroupTitle}>基本信息</div>
+          <div className={css.avatarRow}>
+            <div className={css.avatarCol}>
+              <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
+                {draft.avatar !== ''
+                  ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
+                  : <Upload size={22} className={css.avatarIcon} />}
+              </div>
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
+              <div className={css.avatarActions}>
+                <button type="button" className={css.btnUpload} onClick={() => fileRef.current?.click()}><Upload size={11} />上传</button>
+                <button type="button" className={css.btnAiGen} disabled title="即将上线"><Sparkles size={11} />AI 生成</button>
+              </div>
+            </div>
             <div className={css.formCols}>
               <div className={css.formCol}>
-                <label className={css.fieldLabel}>主 Agent</label>
-                <div className={css.selectStack}>
-                  <SelectField value={draft.provider} options={[{ id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => set('provider', v)} />
-                  <SelectField value={draft.model} options={[{ id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => set('model', v)} />
-                </div>
+                <label className={css.fieldLabel}>预设 ID</label>
+                <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
               </div>
               <div className={css.formCol}>
-                <label className={css.fieldLabel}>子 Agent（可选，缺省同主 Agent）</label>
-                <div className={css.selectStack}>
-                  <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} />
-                  <SelectField value={draft.subEnabled ? draft.subModel : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} />
-                </div>
+                <label className={css.fieldLabel}>昵称</label>
+                <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
               </div>
             </div>
           </div>
-
-          {/* 5. 技能 + MCP */}
-          <div className={css.formGroup}>
-            <div className={css.formCols}>
-              <div className={css.formCol}>
-                <div className={css.formGroupTitle}>技能配置</div>
-                {draft.skills.map((s, i) => (
-                  <div key={`${s.name}-${i}`} className={css.listRow}>
-                    <Star size={12} className={css.listIcon} />
-                    <span className={css.listName}>{s.name}</span>
-                    <span className={css.bindVersionText}>{s.versionId}</span>
-                    <Trash2 size={12} className={css.listDel} onClick={() => set('skills', draft.skills.filter((_, idx) => idx !== i))} />
-                  </div>
-                ))}
-                <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
-              </div>
-              <div className={css.formCol}>
-                <div className={css.formGroupTitle}>MCP 服务</div>
-                {draft.mcpServers.map((s, i) => (
-                  <div key={`${s}-${i}`} className={css.listRow}>
-                    <span className={css.listDot} />
-                    <span className={css.listName}>{s}</span>
-                    <Trash2 size={12} className={css.listDel} onClick={() => set('mcpServers', draft.mcpServers.filter((_, idx) => idx !== i))} />
-                  </div>
-                ))}
-                <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加 MCP</button>
-              </div>
+          <div className={css.formCols}>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>岗位 / 职位</label>
+              <input className={css.fieldInput} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
+            </div>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>岗位维度（名片筛选）</label>
+              <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} />
             </div>
           </div>
-
-          {/* 6. 终端 + 记忆 */}
-          <div className={css.formGroup}>
-            <div className={css.formCols}>
-              <div className={css.formCol}>
-                <label className={css.fieldLabel}>终端模式</label>
-                <SelectField value={draft.terminal} options={TERMINAL_OPTIONS} onChange={v => set('terminal', v as 'sandbox' | 'host')} />
-              </div>
-              <div className={css.formCol}>
-                <label className={css.fieldLabel}>记忆作用域</label>
-                <SelectField value={draft.memory} options={MEMORY_OPTIONS} onChange={v => set('memory', v)} />
-              </div>
-            </div>
-          </div>
-
-          {error !== null && <p className={css.hintText}>{error}</p>}
+          <label className={css.fieldLabel}>一句话简介（名片上展示的「擅长什么」）</label>
+          <input className={css.fieldInput} value={draft.experience === '' && draft.prompt === '' ? '' : promptToMotto(draft.prompt)} readOnly disabled title="由提示词首行自动生成" />
         </div>
 
-        {/* FOOTER */}
-        <div className={css.modalFooter}>
-          <div className={css.footerLeft}>
+        {/* 2. 名片履历 */}
+        <div className={css.formGroup}>
+          <div className={css.formGroupTitle}>名片履历（可选，手动编辑；也可由 Agent 运行情况自动汇总）</div>
+          <label className={css.fieldLabel}>经验说明</label>
+          <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
+          <div className={css.expQuickRow}>
+            {EXP_QUICK.map(q => (
+              <button
+                key={q}
+                type="button"
+                className={css.expQuickPill}
+                onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
+              >+ {q}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* 3. 继承自 */}
+        <div className={css.formGroup}>
+          <div className={css.formGroupTitle}>继承自</div>
+          <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} />
+          <p className={css.hintText}>将继承 {draft.baseMode} 的系统提示词与 persona</p>
+        </div>
+
+        {/* 4. 提示词 */}
+        <div className={css.formGroup}>
+          <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>提示词</span>
+            <button type="button" className={css.btnPolish} onClick={() => setPromptZoom(true)}><Maximize2 size={11} />放大</button>
+          </div>
+          <label className={css.fieldLabel}>自定义提示词（叠加在基础模式 persona 之上，非替代）</label>
+          <div className={css.promptArea}>
+            <textarea className={css.promptTextarea} value={draft.prompt} onChange={e => set('prompt', e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
+            <div className={css.promptActions}>
+              <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
+            </div>
+          </div>
+        </div>
+
+        {/* 5. 模型 */}
+        <div className={css.formGroup}>
+          <div className={css.formGroupTitle}>模型</div>
+          <div className={css.formCols}>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>主 Agent</label>
+              <div className={css.selectStack}>
+                <SelectField value={draft.provider} options={[{ id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => set('provider', v)} />
+                <SelectField value={draft.model} options={[{ id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => set('model', v)} />
+              </div>
+            </div>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>子 Agent（可选，缺省同主 Agent）</label>
+              <div className={css.selectStack}>
+                <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} />
+                <SelectField value={draft.subEnabled ? draft.subModel : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 6. 技能 + MCP */}
+        <div className={css.formGroup}>
+          <div className={css.formCols}>
+            <div className={css.formCol}>
+              <div className={css.formGroupTitle}>技能配置</div>
+              {draft.skills.map((s, i) => (
+                <div key={`${s.name}-${i}`} className={css.listRow}>
+                  <Star size={12} className={css.listIcon} />
+                  <span className={css.listName}>{s.name}</span>
+                  <span className={css.bindVersionText}>{s.versionId}</span>
+                  <Trash2 size={12} className={css.listDel} onClick={() => set('skills', draft.skills.filter((_, idx) => idx !== i))} />
+                </div>
+              ))}
+              <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
+            </div>
+            <div className={css.formCol}>
+              <div className={css.formGroupTitle}>MCP 服务</div>
+              {draft.mcpServers.map((s, i) => (
+                <div key={`${s}-${i}`} className={css.listRow}>
+                  <span className={css.listDot} />
+                  <span className={css.listName}>{s}</span>
+                  <Trash2 size={12} className={css.listDel} onClick={() => set('mcpServers', draft.mcpServers.filter((_, idx) => idx !== i))} />
+                </div>
+              ))}
+              <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加 MCP</button>
+            </div>
+          </div>
+        </div>
+
+        {/* 7. 终端 + 记忆 */}
+        <div className={css.formGroup}>
+          <div className={css.formCols}>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>终端模式</label>
+              <SelectField value={draft.terminal} options={TERMINAL_OPTIONS} onChange={v => set('terminal', v as 'sandbox' | 'host')} />
+            </div>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>记忆作用域</label>
+              <SelectField value={draft.memory} options={MEMORY_OPTIONS} onChange={v => set('memory', v)} />
+            </div>
+          </div>
+        </div>
+
+        {error !== null && <p className={css.hintText}>{error}</p>}
+
+        {/* footer */}
+        <div className={css.formGroup} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <span className={css.trustLabel}>信任级</span>
             <span className={css.trustBadge}>{draft.trust}</span>
           </div>
-          <div className={css.footerRight}>
-            {!isNew && profile !== undefined && (
-              <GlassButton variant="danger" onClick={() => onDelete(profile)}>删除</GlassButton>
-            )}
-            <GlassButton onClick={onClose}>取消</GlassButton>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <GlassButton onClick={onBack}>取消</GlassButton>
             <GlassButton variant="primary" onClick={() => void doSave()} disabled={busy}>{busy ? '保存中…' : isNew ? '创建' : '保存'}</GlassButton>
           </div>
         </div>
       </div>
 
+      {/* 弹窗 */}
       {skillBindOpen && (
         <SkillBindDialog
           rpc={rpc}
@@ -950,8 +1031,15 @@ function EditPresetDialog({ profile, rpc, onClose, onSaved, onDelete }: {
           onConfirm={servers => { set('mcpServers', servers); setMcpBindOpen(false) }}
         />
       )}
-    </div>,
-    document.body,
+      {deleting && profile !== undefined && (
+        <DeletePresetDialog
+          profile={profile}
+          rpc={rpc}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => { setDeleting(false); onSaved() }}
+        />
+      )}
+    </div>
   )
 }
 
