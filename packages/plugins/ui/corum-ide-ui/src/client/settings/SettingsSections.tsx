@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useRef, useContext, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react'
+import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ArrowLeft, Bot, Cpu, Search, Check, Box } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { SettingRow } from './SettingRow.tsx'
 import { SelectField } from './SelectField.tsx'
@@ -360,156 +360,325 @@ function HooksSection() {
   )
 }
 
-/* ── Agent 预设 ────────────────────────────────────────────────────── */
+/* ── Agent 预设（名片式 + 筛选 + 详情编辑）────────────────────────────── */
 
-interface PresetData {
+/** ProfileSummary 投影（与 host agent-service.ts 对齐）。 */
+interface AgentProfileSummary {
   id: string
-  title: string
-  desc: string
-  chips: string[]
+  nickname?: string
+  title?: string
+  dimension?: string
+  experience?: string
+  avatar?: string
+  baseMode?: string
+  prompt: string
+  model: { provider: string; model: string; reasoningEffort?: string }
+  skills: SkillBinding[]
+  mcpServers: string[]
+  terminal: { mode: string }
+  version: number
+  trust: string
+  source: 'corum' | 'official'
 }
 
-interface PresetFormData {
+const AGENT_DIMENSIONS = ['研发', '产品', '设计', '市场', '自媒体', '创作'] as const
+
+/** 按 prompt 生成「擅长什么」摘要（取首行，去 markdown 标记）。 */
+function promptToMotto(prompt: string): string {
+  const first = prompt.split('\n').find(l => l.trim().length > 0) ?? ''
+  return first.replace(/^#+\s*/, '').replace(/\*\*/g, '').trim() || '—'
+}
+
+/** 推断岗位维度（profile 未显式设置时按 title/id 关键词兜底）。 */
+function inferDimension(p: AgentProfileSummary): string {
+  if (p.dimension !== undefined && p.dimension !== '') return p.dimension
+  const text = `${p.title ?? ''} ${p.id}`.toLowerCase()
+  if (/产品|pm|product/.test(text)) return '产品'
+  if (/设计|design/.test(text)) return '设计'
+  if (/市场|营销|market/.test(text)) return '市场'
+  if (/自媒体|媒体|content/.test(text)) return '自媒体'
+  if (/创作|写作|creative|writer/.test(text)) return '创作'
+  return '研发'
+}
+
+/* ── Agent 名片卡 ─────────────────────────────────────────────────────── */
+
+function AgentCard({ profile, onClick }: { profile: AgentProfileSummary; onClick: () => void }) {
+  const dim = inferDimension(profile)
+  return (
+    <div className={css.agentCard} onClick={onClick} role="button">
+      <div className={css.agentCardHead}>
+        <div className={css.agentAvatar}>
+          {profile.avatar !== undefined && profile.avatar !== ''
+            ? <img className={css.agentAvatarImg} src={profile.avatar} alt="" />
+            : <Bot size={22} className={css.agentAvatarIcon} />}
+        </div>
+        <div className={css.agentNameCol}>
+          <div className={css.agentNameRow}>
+            <span className={css.agentNickname}>{profile.nickname ?? profile.id}</span>
+            <span className={css.trustBadge}>{profile.trust === 'system' ? '系统' : '用户'}</span>
+          </div>
+          <span className={css.agentRole}>{profile.title ?? 'Agent'}</span>
+        </div>
+        <ChevronRight size={14} className={css.agentChevron} />
+      </div>
+      <span className={css.agentMotto}>{promptToMotto(profile.prompt)}</span>
+      {profile.experience !== undefined && profile.experience !== '' && (
+        <span className={css.agentExp}>{profile.experience}</span>
+      )}
+      <div className={css.agentModelRow}>
+        <div className={css.agentModelLeft}>
+          <Cpu size={11} className={css.agentModelIcon} />
+          <span className={css.agentModelName}>{profile.model.model}</span>
+        </div>
+        <span className={css.agentDimTag}>{dim}</span>
+      </div>
+    </div>
+  )
+}
+
+/* ── 名片预览（编辑弹窗右上角）───────────────────────────────────────── */
+
+function AgentCardPreview({ draft }: { draft: EditDraft }) {
+  const pseudo: AgentProfileSummary = {
+    id: draft.name || 'new-agent',
+    ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
+    ...(draft.title !== '' ? { title: draft.title } : {}),
+    ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
+    ...(draft.experience !== '' ? { experience: draft.experience } : {}),
+    ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
+    prompt: draft.prompt,
+    model: { provider: draft.provider, model: draft.model },
+    skills: draft.skills,
+    mcpServers: draft.mcpServers,
+    terminal: { mode: draft.terminal },
+    version: 1,
+    trust: draft.trust,
+    source: 'corum',
+  }
+  return (
+    <div className={css.cardPreviewRow}>
+      <span className={css.cardPreviewLabel}>名片预览 →</span>
+      <div className={css.cardPreviewCard}>
+        <AgentCard profile={pseudo} onClick={() => {}} />
+      </div>
+    </div>
+  )
+}
+
+/* ── 官方模式只读卡 ──────────────────────────────────────────────────── */
+
+const OFFICIAL_MODE_META: Record<string, { label: string; desc: string }> = {
+  standard: { label: '标准模式', desc: '功能完整的编码 Agent，支持文件编辑 / Shell / 检索 / Skills' },
+  ptc: { label: 'PTC 模式', desc: '标准模式 + Code Mode SDK 多步操作' },
+  minimal: { label: '极简模式', desc: '仅持久 bash + 编辑器的双工具 Agent' },
+  cordis: { label: '创造模式', desc: '用于创建自定义 Agent preset' },
+}
+
+function OfficialModeCard({ id }: { id: string }) {
+  const meta = OFFICIAL_MODE_META[id] ?? { label: id, desc: '' }
+  return (
+    <div className={css.officialCard}>
+      <div className={css.officialCardHead}>
+        <Box size={13} className={css.officialCardIcon} />
+        <span className={css.officialCardLabel}>{meta.label}</span>
+        <span className={css.officialBadge}>官方</span>
+      </div>
+      <span className={css.officialCardDesc}>{meta.desc}</span>
+    </div>
+  )
+}
+
+/* ── 编辑表单草稿 ────────────────────────────────────────────────────── */
+
+interface EditDraft {
   name: string
   nickname: string
   title: string
+  dimension: string
+  experience: string
+  avatar: string
   baseMode: string
   prompt: string
   provider: string
   model: string
-  subagentModel: { provider: string; model: string } | undefined
-  permission: string
-  terminal: string
+  subEnabled: boolean
+  subProvider: string
+  subModel: string
+  terminal: 'sandbox' | 'host'
   memory: string
-  skills: string[]
+  skills: SkillBinding[]
   mcpServers: string[]
+  trust: 'system' | 'user'
 }
 
-const INITIAL_PRESETS: PresetData[] = [
-  { id: 'standard', title: 'standard', desc: '通用编码助手，适合大多数开发任务。', chips: ['deepseek-v4', 'skills ×3', 'mcp ×2', 'workspace-write'] },
-  { id: 'reviewer', title: 'reviewer', desc: '代码审查专用，挂载 review 技能与只读权限。', chips: ['deepseek-v4', 'skills ×1', 'read-only'] },
-  { id: 'researcher', title: 'researcher', desc: '调研分析助手，联网检索 + 长上下文。', chips: ['deepseek-r1', 'skills ×2', 'mcp ×1', 'read-only'] },
-]
+function emptyDraft(): EditDraft {
+  return {
+    name: '', nickname: '', title: '', dimension: '研发', experience: '', avatar: '',
+    baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
+    subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
+    terminal: 'sandbox', memory: 'agent', skills: [], mcpServers: [], trust: 'user',
+  }
+}
+
+function draftFromProfile(p: AgentProfileSummary): EditDraft {
+  return {
+    name: p.id,
+    nickname: p.nickname ?? '',
+    title: p.title ?? '',
+    dimension: p.dimension ?? inferDimension(p),
+    experience: p.experience ?? '',
+    avatar: p.avatar ?? '',
+    baseMode: p.baseMode ?? 'standard',
+    prompt: p.prompt,
+    provider: p.model.provider,
+    model: p.model.model,
+    subEnabled: false,
+    subProvider: 'deepseek-official',
+    subModel: 'deepseek-v4-flash',
+    terminal: (p.terminal.mode === 'host' ? 'host' : 'sandbox') as 'sandbox' | 'host',
+    memory: 'agent',
+    skills: p.skills,
+    mcpServers: p.mcpServers,
+    trust: (p.trust === 'system' ? 'system' : 'user') as 'system' | 'user',
+  }
+}
+
+/* ── 主 section ──────────────────────────────────────────────────────── */
 
 function AgentPresetsSection() {
-  const [presets, setPresets] = useState<PresetData[]>(INITIAL_PRESETS)
-  const [defaultId, setDefaultId] = useState('standard')
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const [editPreset, setEditPreset] = useState<PresetData | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
+  const rpc = useCorumRpc()
+  const [profiles, setProfiles] = useState<AgentProfileSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [dimFilter, setDimFilter] = useState<string>('全部')
+  const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState<AgentProfileSummary | 'new' | null>(null)
+  const [deleting, setDeleting] = useState<AgentProfileSummary | null>(null)
 
-  const handleSetDefault = (id: string) => { setDefaultId(id) }
-
-  const handleDelete = (id: string) => {
-    setPresets(prev => prev.filter(p => p.id !== id))
-    if (defaultId === id && presets.length > 1) {
-      setDefaultId(presets.find(p => p.id !== id)?.id ?? '')
+  const reload = async () => {
+    if (!rpc) return
+    try {
+      const r = await rpc<{ profiles: AgentProfileSummary[] }>('corumAgent', 'listProfiles', {})
+      setProfiles(r.profiles)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
-    setDeleteConfirmId(null)
   }
 
-  const handleSave = (data: PresetFormData) => {
-    const id = data.name.toLowerCase().replace(/\s+/g, '-')
-    const chips = [
-      data.model,
-      ...(data.skills.length > 0 ? [`skills ×${data.skills.length}`] : []),
-      ...(data.mcpServers.length > 0 ? [`mcp ×${data.mcpServers.length}`] : []),
-      data.permission,
-    ]
-    const newPreset: PresetData = {
-      id,
-      title: data.nickname || id,
-      desc: data.prompt.split('\n')[0] || '自定义预设',
-      chips,
+  useEffect(() => { void reload() }, [rpc])
+
+  if (!rpc) return <p className={css.hintText}>Agent 服务未就绪。</p>
+
+  const corumProfiles = (profiles ?? []).filter(p => p.source === 'corum')
+  const officialProfiles = (profiles ?? []).filter(p => p.source === 'official')
+
+  const filtered = corumProfiles.filter(p => {
+    if (dimFilter !== '全部' && inferDimension(p) !== dimFilter) return false
+    if (search !== '') {
+      const q = search.toLowerCase()
+      const hay = `${p.nickname ?? ''} ${p.id} ${p.title ?? ''} ${promptToMotto(p.prompt)}`.toLowerCase()
+      if (!hay.includes(q)) return false
     }
-    if (editPreset) {
-      setPresets(prev => prev.map(p => p.id === editPreset.id ? newPreset : p))
-    } else {
-      setPresets(prev => [...prev, newPreset])
-    }
-    setShowCreate(false)
-    setEditPreset(null)
-  }
+    return true
+  })
+
+  // 3 列网格分行
+  const rows: AgentProfileSummary[][] = []
+  for (let i = 0; i < filtered.length; i += 3) rows.push(filtered.slice(i, i + 3))
 
   return (
     <>
       <div className={css.topRow}>
-        <span className={css.topHint}>预设决定 Agent 的模型、技能与工具组合，新建会话时默认使用。</span>
-        <GlassButton variant="primary" onClick={() => setShowCreate(true)}>+ 新建预设</GlassButton>
+        <span className={css.topHint}>预设决定 Agent 的模型、技能与工具组合。点击名片进入 Agent 设置。</span>
+        <GlassButton variant="primary" onClick={() => setEditing('new')}>+ 新建预设</GlassButton>
       </div>
-      {presets.map(p => (
-        <InfoCard
-          key={p.id}
-          title={p.title}
-          desc={p.desc}
-          chips={p.chips}
-          isDefault={p.id === defaultId}
-          onClick={() => { setEditPreset(p) }}
-          actions={
-            p.id !== defaultId ? (
-              <>
-                <GlassButton onClick={() => handleSetDefault(p.id)}>设为默认</GlassButton>
-                <Trash2 size={14} className={css.memDel} onClick={() => setDeleteConfirmId(p.id)} />
-              </>
-            ) : (
-              <Trash2 size={14} className={css.memDel} onClick={() => setDeleteConfirmId(p.id)} />
-            )
-          }
-        />
-      ))}
 
-      {/* 删除确认弹窗 */}
-      {deleteConfirmId !== null && createPortal(
-        <div className={css.confirmOverlay} onClick={() => setDeleteConfirmId(null)}>
-          <div className={css.confirmDialog} onClick={e => e.stopPropagation()}>
-            <span className={css.confirmTitle}>删除预设</span>
-            <p className={css.confirmDesc}>确定要删除预设「{presets.find(p => p.id === deleteConfirmId)?.title}」吗？此操作不可撤销。</p>
-            <div className={css.confirmActions}>
-              <GlassButton onClick={() => setDeleteConfirmId(null)}>取消</GlassButton>
-              <GlassButton variant="danger" onClick={() => handleDelete(deleteConfirmId)}>删除</GlassButton>
-            </div>
-          </div>
-        </div>,
-        document.body,
+      <div className={css.agentFilterRow}>
+        {(['全部', ...AGENT_DIMENSIONS] as const).map(d => (
+          <button
+            key={d}
+            type="button"
+            className={`${css.agentDimPill}${dimFilter === d ? ' ' + css.agentDimPillActive : ''}`}
+            onClick={() => setDimFilter(d)}
+          >{d}</button>
+        ))}
+        <div className={css.agentSearchBox}>
+          <Search size={13} className={css.agentSearchIcon} />
+          <input
+            className={css.agentSearchInput}
+            placeholder="搜索 Agent…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {error !== null && <p className={css.hintText}>加载失败:{error}</p>}
+      {profiles === null && error === null && <p className={css.hintText}>加载中…</p>}
+      {profiles !== null && filtered.length === 0 && (
+        <p className={css.hintText}>{corumProfiles.length === 0 ? '暂无 Agent 预设，点击右上角「新建预设」创建。' : '没有匹配的 Agent。'}</p>
       )}
 
-      {/* 编辑/新建预设弹窗 */}
-      {(showCreate || editPreset !== null) && createPortal(
+      <div className={css.agentCardGrid}>
+        {rows.map((row, ri) => (
+          <div key={ri} className={css.agentGridRow}>
+            {row.map(p => (
+              <AgentCard key={p.id} profile={p} onClick={() => setEditing(p)} />
+            ))}
+            {row.length < 3 && Array.from({ length: 3 - row.length }, (_, i) => (
+              <div key={`spacer-${i}`} style={{ flex: 1, minWidth: 0 }} />
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {officialProfiles.length > 0 && (
+        <div className={css.officialGroup}>
+          <span className={css.officialGroupTitle}>官方基础模式</span>
+          <div className={css.officialGrid}>
+            <div className={css.officialRow}>
+              {officialProfiles.slice(0, 2).map(p => <OfficialModeCard key={p.id} id={p.id} />)}
+            </div>
+            {officialProfiles.length > 2 && (
+              <div className={css.officialRow}>
+                {officialProfiles.slice(2, 4).map(p => <OfficialModeCard key={p.id} id={p.id} />)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {editing !== null && (
         <EditPresetDialog
-          preset={editPreset ?? undefined}
-          onSave={handleSave}
-          onClose={() => { setShowCreate(false); setEditPreset(null) }}
-        />,
-        document.body,
+          key={editing === 'new' ? '__new__' : editing.id}
+          profile={editing === 'new' ? undefined : editing}
+          rpc={rpc}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); void reload() }}
+          onDelete={p => { setEditing(null); setDeleting(p) }}
+        />
+      )}
+
+      {deleting !== null && (
+        <DeletePresetDialog
+          profile={deleting}
+          rpc={rpc}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => { setDeleting(null); void reload() }}
+        />
       )}
     </>
   )
 }
 
-/* ── 编辑/新建预设弹窗（按设计稿 M5E2n 落码）────────────────────── */
+/* ── 编辑/新建 Agent 预设弹窗 v3（按设计稿 sRGkL 落码）────────────────── */
 
 const BASE_MODE_OPTIONS = [
   { id: 'standard', label: '标准模式 — 功能完整的编码 Agent，支持文件编辑/Shell/检索/Skills' },
   { id: 'ptc', label: 'PTC 模式 — 标准模式 + Code Mode SDK 多步操作' },
   { id: 'minimal', label: '极简模式 — 仅持久 bash + 编辑器的双工具 Agent' },
   { id: 'cordis', label: '创造模式 — 用于创建自定义 Agent preset' },
-]
-
-const PROVIDER_OPTIONS = [
-  { id: 'deepseek-official', label: 'deepseek-official' },
-  { id: 'pi-ai', label: 'pi-ai' },
-]
-
-const MODEL_OPTIONS = [
-  { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
-  { id: 'deepseek-v4', label: 'deepseek-v4' },
-  { id: 'deepseek-r1', label: 'deepseek-r1' },
-]
-
-const PERMISSION_OPTIONS = [
-  { id: 'read-only', label: '只读' },
-  { id: 'workspace-write', label: '工作区读写' },
-  { id: 'full', label: '完全访问' },
 ]
 
 const TERMINAL_OPTIONS = [
@@ -521,161 +690,257 @@ const MEMORY_OPTIONS = [
   { id: 'agent', label: 'agent' },
 ]
 
-function EditPresetDialog({ preset, onSave, onClose }: {
-  preset?: PresetData | undefined
-  onSave: (data: PresetFormData) => void
-  onClose: () => void
-}) {
-  const [name, setName] = useState(preset?.id ?? '')
-  const [nickname, setNickname] = useState(preset?.title ?? '')
-  const [title, setTitle] = useState('')
-  const [baseMode, setBaseMode] = useState('standard')
-  const [prompt, setPrompt] = useState('')
-  const [provider, setProvider] = useState('deepseek-official')
-  const [model, setModel] = useState('deepseek-v4-flash')
-  const [subProvider, setSubProvider] = useState('deepseek-official')
-  const [subModel, setSubModel] = useState('deepseek-v4-flash')
-  const [subEnabled, setSubEnabled] = useState(false)
-  const [permission, setPermission] = useState('workspace-write')
-  const [terminal, setTerminal] = useState('sandbox')
-  const [memory, setMemory] = useState('agent')
-  const [skills, setSkills] = useState<string[]>(['code-review', 'web-research'])
-  const [mcpServers, setMcpServers] = useState<string[]>(['filesystem', 'web-search'])
+const DIMENSION_OPTIONS = AGENT_DIMENSIONS.map(d => ({ id: d, label: d }))
 
-  return (
+function EditPresetDialog({ profile, rpc, onClose, onSaved, onDelete }: {
+  profile: AgentProfileSummary | undefined
+  rpc: CorumRpcCall
+  onClose: () => void
+  onSaved: () => void
+  onDelete: (p: AgentProfileSummary) => void
+}) {
+  const isNew = profile === undefined
+  const [draft, setDraft] = useState<EditDraft>(() => isNew ? emptyDraft() : draftFromProfile(profile))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [skillBindOpen, setSkillBindOpen] = useState(false)
+  const [mcpBindOpen, setMcpBindOpen] = useState(false)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+
+  const set = <K extends keyof EditDraft>(k: K, v: EditDraft[K]) => setDraft(prev => ({ ...prev, [k]: v }))
+
+  const handleAvatarFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file === undefined) return
+    const reader = new FileReader()
+    reader.onload = () => { if (typeof reader.result === 'string') set('avatar', reader.result) }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  const doSave = async () => {
+    const id = (isNew ? draft.name : draft.name).trim().toLowerCase().replace(/\s+/g, '-')
+    if (id === '') { setError('预设 ID 不能为空'); return }
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) { setError('预设 ID 只能包含小写字母、数字、连字符'); return }
+    setBusy(true)
+    setError(null)
+    try {
+      await rpc('corumAgent', 'saveProfile', {
+        input: {
+          id,
+          ...(draft.nickname.trim() !== '' ? { nickname: draft.nickname.trim() } : {}),
+          ...(draft.title.trim() !== '' ? { title: draft.title.trim() } : {}),
+          dimension: draft.dimension,
+          ...(draft.experience.trim() !== '' ? { experience: draft.experience.trim() } : {}),
+          ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
+          baseMode: draft.baseMode as EditDraft['baseMode'],
+          prompt: draft.prompt,
+          model: { provider: draft.provider, model: draft.model },
+          ...(draft.subEnabled ? { subagentModel: { provider: draft.subProvider, model: draft.subModel } } : {}),
+          skills: draft.skills,
+          mcpServers: draft.mcpServers,
+          terminal: { mode: draft.terminal },
+          memoryPolicy: { scope: 'agent' },
+          trust: isNew ? 'user' : draft.trust,
+        },
+      })
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const EXP_QUICK = ['参与 N 个项目', '完成 N 次任务', '已服务 N 天']
+
+  return createPortal(
     <div className={css.modalOverlay} onClick={onClose}>
       <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
         {/* HEADER */}
         <div className={css.modalHeader}>
-          <span className={css.modalTitle}>{preset ? '编辑 Agent 预设' : '新建 Agent 预设'}</span>
+          <span className={css.modalTitle}>{isNew ? '新建 Agent 预设' : '编辑 Agent 预设'}</span>
           <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
         </div>
 
         {/* BODY */}
         <div className={css.modalBody}>
+          {/* 名片预览 */}
+          <AgentCardPreview draft={draft} />
+
           {/* 1. 基本信息 */}
           <div className={css.formGroup}>
             <div className={css.formGroupTitle}>基本信息</div>
             <div className={css.avatarRow}>
-              {/* 头像 */}
               <div className={css.avatarCol}>
-                <div className={css.avatarBox}><Upload size={22} className={css.avatarIcon} /></div>
+                <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
+                  {draft.avatar !== ''
+                    ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
+                    : <Upload size={22} className={css.avatarIcon} />}
+                </div>
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
                 <div className={css.avatarActions}>
-                  <button type="button" className={css.btnUpload}><Upload size={11} />上传</button>
-                  <button type="button" className={css.btnAiGen}><Sparkles size={11} />AI 生成</button>
+                  <button type="button" className={css.btnUpload} onClick={() => fileRef.current?.click()}><Upload size={11} />上传</button>
+                  <button type="button" className={css.btnAiGen} disabled title="即将上线"><Sparkles size={11} />AI 生成</button>
                 </div>
               </div>
-              {/* ID + 昵称 */}
               <div className={css.formCols}>
                 <div className={css.formCol}>
                   <label className={css.fieldLabel}>预设 ID</label>
-                  <input className={css.fieldInput} value={name} onChange={e => setName(e.target.value)} placeholder="my-agent" />
+                  <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
                 </div>
                 <div className={css.formCol}>
                   <label className={css.fieldLabel}>昵称</label>
-                  <input className={css.fieldInput} value={nickname} onChange={e => setNickname(e.target.value)} placeholder="我的 Agent" />
+                  <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
                 </div>
               </div>
             </div>
-            <label className={css.fieldLabel}>岗位 / 职位</label>
-            <input className={css.fieldInput} value={title} onChange={e => setTitle(e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
+            <div className={css.formCols}>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>岗位 / 职位</label>
+                <input className={css.fieldInput} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
+              </div>
+              <div className={css.formCol}>
+                <label className={css.fieldLabel}>岗位维度（名片筛选）</label>
+                <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} />
+              </div>
+            </div>
+            <label className={css.fieldLabel}>一句话简介（名片上展示的「擅长什么」）</label>
+            <input className={css.fieldInput} value={draft.experience === '' && draft.prompt === '' ? '' : promptToMotto(draft.prompt)} readOnly disabled title="由提示词首行自动生成" />
           </div>
 
-          {/* 2. 提示词 */}
+          {/* 2. 名片履历 */}
+          <div className={css.formGroup}>
+            <div className={css.formGroupTitle}>名片履历（可选，手动编辑；也可由 Agent 运行情况自动汇总）</div>
+            <label className={css.fieldLabel}>经验说明</label>
+            <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
+            <div className={css.expQuickRow}>
+              {EXP_QUICK.map(q => (
+                <button
+                  key={q}
+                  type="button"
+                  className={css.expQuickPill}
+                  onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
+                >+ {q}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. 提示词 */}
           <div className={css.formGroup}>
             <div className={css.formGroupTitle}>提示词</div>
             <label className={css.fieldLabel}>基础模式（继承 dsh 系统提示词）</label>
-            <div className={css.fieldRow}><SelectField value={baseMode} options={BASE_MODE_OPTIONS} onChange={setBaseMode} /></div>
-            <label className={css.fieldLabel}>自定义提示词（叠加在基础模式之上，非替代）</label>
+            <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} />
+            <label className={css.fieldLabel}>自定义提示词（叠加在基础模式 persona 之上，非替代）</label>
             <div className={css.promptArea}>
-              <textarea className={css.promptTextarea} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
+              <textarea className={css.promptTextarea} value={draft.prompt} onChange={e => set('prompt', e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
               <div className={css.promptActions}>
-                <button type="button" className={css.btnPolish}><Sparkles size={11} />AI 润色</button>
+                <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
               </div>
             </div>
           </div>
 
-          {/* 3. 模型 */}
+          {/* 4. 模型 */}
           <div className={css.formGroup}>
             <div className={css.formGroupTitle}>模型</div>
             <div className={css.formCols}>
               <div className={css.formCol}>
                 <label className={css.fieldLabel}>主 Agent</label>
                 <div className={css.selectStack}>
-                  <SelectField value={provider} options={PROVIDER_OPTIONS} onChange={setProvider} />
-                  <SelectField value={model} options={MODEL_OPTIONS} onChange={setModel} />
+                  <SelectField value={draft.provider} options={[{ id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => set('provider', v)} />
+                  <SelectField value={draft.model} options={[{ id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => set('model', v)} />
                 </div>
               </div>
               <div className={css.formCol}>
-                <label className={css.fieldLabel}>子 Agent（可选，缺省同主）</label>
+                <label className={css.fieldLabel}>子 Agent（可选，缺省同主 Agent）</label>
                 <div className={css.selectStack}>
-                  <SelectField value={subEnabled ? subProvider : ''} options={PROVIDER_OPTIONS} onChange={v => { setSubEnabled(true); setSubProvider(v) }} disabled={false} />
-                  <SelectField value={subEnabled ? subModel : ''} options={MODEL_OPTIONS} onChange={v => { setSubEnabled(true); setSubModel(v) }} disabled={false} />
+                  <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} />
+                  <SelectField value={draft.subEnabled ? draft.subModel : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} />
                 </div>
               </div>
             </div>
           </div>
 
-          {/* 4. 技能 + MCP */}
+          {/* 5. 技能 + MCP */}
           <div className={css.formGroup}>
             <div className={css.formCols}>
               <div className={css.formCol}>
-                <div className={css.formGroupTitle}>技能</div>
-                {skills.map((s, i) => (
-                  <div key={i} className={css.listRow}>
+                <div className={css.formGroupTitle}>技能配置</div>
+                {draft.skills.map((s, i) => (
+                  <div key={`${s.name}-${i}`} className={css.listRow}>
                     <Star size={12} className={css.listIcon} />
-                    <span className={css.listName}>{s}</span>
-                    <Trash2 size={12} className={css.listDel} onClick={() => setSkills(prev => prev.filter((_, idx) => idx !== i))} />
+                    <span className={css.listName}>{s.name}</span>
+                    <span className={css.bindVersionText}>{s.versionId}</span>
+                    <Trash2 size={12} className={css.listDel} onClick={() => set('skills', draft.skills.filter((_, idx) => idx !== i))} />
                   </div>
                 ))}
-                <button type="button" className={css.btnAdd}><Plus size={12} />添加技能</button>
+                <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
               </div>
               <div className={css.formCol}>
                 <div className={css.formGroupTitle}>MCP 服务</div>
-                {mcpServers.map((s, i) => (
-                  <div key={i} className={css.listRow}>
+                {draft.mcpServers.map((s, i) => (
+                  <div key={`${s}-${i}`} className={css.listRow}>
                     <span className={css.listDot} />
                     <span className={css.listName}>{s}</span>
-                    <Trash2 size={12} className={css.listDel} onClick={() => setMcpServers(prev => prev.filter((_, idx) => idx !== i))} />
+                    <Trash2 size={12} className={css.listDel} onClick={() => set('mcpServers', draft.mcpServers.filter((_, idx) => idx !== i))} />
                   </div>
                 ))}
-                <button type="button" className={css.btnAdd}><Plus size={12} />添加 MCP</button>
+                <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加 MCP</button>
               </div>
             </div>
           </div>
 
-          {/* 5. 终端 + 记忆 */}
+          {/* 6. 终端 + 记忆 */}
           <div className={css.formGroup}>
             <div className={css.formCols}>
               <div className={css.formCol}>
                 <label className={css.fieldLabel}>终端模式</label>
-                <SelectField value={terminal} options={TERMINAL_OPTIONS} onChange={setTerminal} />
+                <SelectField value={draft.terminal} options={TERMINAL_OPTIONS} onChange={v => set('terminal', v as 'sandbox' | 'host')} />
               </div>
               <div className={css.formCol}>
                 <label className={css.fieldLabel}>记忆作用域</label>
-                <SelectField value={memory} options={MEMORY_OPTIONS} onChange={setMemory} />
+                <SelectField value={draft.memory} options={MEMORY_OPTIONS} onChange={v => set('memory', v)} />
               </div>
             </div>
           </div>
+
+          {error !== null && <p className={css.hintText}>{error}</p>}
         </div>
 
         {/* FOOTER */}
         <div className={css.modalFooter}>
           <div className={css.footerLeft}>
             <span className={css.trustLabel}>信任级</span>
-            <span className={css.trustBadge}>user</span>
+            <span className={css.trustBadge}>{draft.trust}</span>
           </div>
           <div className={css.footerRight}>
+            {!isNew && profile !== undefined && (
+              <GlassButton variant="danger" onClick={() => onDelete(profile)}>删除</GlassButton>
+            )}
             <GlassButton onClick={onClose}>取消</GlassButton>
-            <GlassButton variant="primary" onClick={() => onSave({
-              name: name || 'new-preset', nickname, title, baseMode, prompt,
-              provider, model, subagentModel: subEnabled ? { provider: subProvider, model: subModel } : undefined,
-              permission, terminal, memory, skills, mcpServers,
-            })}>{preset ? '保存' : '创建'}</GlassButton>
+            <GlassButton variant="primary" onClick={() => void doSave()} disabled={busy}>{busy ? '保存中…' : isNew ? '创建' : '保存'}</GlassButton>
           </div>
         </div>
       </div>
-    </div>
+
+      {skillBindOpen && (
+        <SkillBindDialog
+          rpc={rpc}
+          bound={draft.skills}
+          onClose={() => setSkillBindOpen(false)}
+          onConfirm={skills => { set('skills', skills); setSkillBindOpen(false) }}
+        />
+      )}
+      {mcpBindOpen && (
+        <McpBindDialog
+          rpc={rpc}
+          bound={draft.mcpServers}
+          onClose={() => setMcpBindOpen(false)}
+          onConfirm={servers => { set('mcpServers', servers); setMcpBindOpen(false) }}
+        />
+      )}
+    </div>,
+    document.body,
   )
 }
 
@@ -1706,6 +1971,262 @@ function ExtensionsSection() {
         </SettingRow>
       </SettingGroup>
     </>
+  )
+}
+
+/* ── 技能绑定弹窗（设计稿 ExxZt）─────────────────────────────────────── */
+
+function SkillBindDialog({ rpc, bound, onClose, onConfirm }: {
+  rpc: CorumRpcCall
+  bound: SkillBinding[]
+  onClose: () => void
+  onConfirm: (skills: SkillBinding[]) => void
+}) {
+  const [allSkills, setAllSkills] = useState<SkillInfo[] | null>(null)
+  const [versionsMap, setVersionsMap] = useState<Record<string, SkillVersion[]>>({})
+  const [checked, setChecked] = useState<Map<string, string>>(() => new Map(bound.map(b => [b.name, b.versionId])))
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const r = await rpc<{ skills: SkillInfo[] }>('skillManager', 'listAll', {})
+        if (cancelled) return
+        setAllSkills(r.skills)
+        // 拉取每个技能的版本列表
+        const entries = await Promise.all(r.skills.map(async s => {
+          const h = await rpc<{ versions: SkillVersion[] }>('skillManager', 'getSkillHistory', { name: s.name })
+          return [s.name, h.versions] as const
+        }))
+        if (cancelled) return
+        const map: Record<string, SkillVersion[]> = {}
+        for (const [name, versions] of entries) map[name] = versions
+        setVersionsMap(map)
+        setLoading(false)
+      } catch (e) {
+        if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false) }
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [rpc])
+
+  const toggle = (name: string) => {
+    setChecked(prev => {
+      const next = new Map(prev)
+      if (next.has(name)) next.delete(name)
+      else {
+        const versions = versionsMap[name] ?? []
+        next.set(name, versions[versions.length - 1]?.id ?? '')
+      }
+      return next
+    })
+  }
+
+  const setVersion = (name: string, versionId: string) => {
+    setChecked(prev => new Map(prev).set(name, versionId))
+  }
+
+  const doConfirm = () => {
+    const result: SkillBinding[] = [...checked.entries()]
+      .filter(([, v]) => v !== '')
+      .map(([name, versionId]) => ({ name, versionId }))
+    onConfirm(result)
+  }
+
+  return createPortal(
+    <div className={css.modalOverlay} onClick={onClose}>
+      <div className={css.modalDialog} onClick={e => e.stopPropagation()} style={{ width: 480 }}>
+        <div className={css.modalHeader}>
+          <span className={css.modalTitle}>添加技能</span>
+          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className={css.modalBody}>
+          <p className={css.hintText}>从全局技能库选择技能并绑定版本；一个 Agent 可绑定多个技能。</p>
+          {error !== null && <p className={css.hintText}>{error}</p>}
+          {loading && <p className={css.hintText}>加载中…</p>}
+          {!loading && allSkills !== null && allSkills.length === 0 && (
+            <p className={css.hintText}>暂无技能，请先在「技能」页导入。</p>
+          )}
+          {(allSkills ?? []).map(s => {
+            const isChecked = checked.has(s.name)
+            const versions = versionsMap[s.name] ?? []
+            return (
+              <div
+                key={s.name}
+                className={`${css.bindPickRow}${isChecked ? ' ' + css.bindPickRowActive : ''}`}
+                onClick={() => toggle(s.name)}
+                role="button"
+              >
+                <span className={`${css.bindCheckbox}${isChecked ? ' ' + css.bindCheckboxOn : ''}`}>
+                  {isChecked && <Check size={10} className={css.bindCheckIcon} />}
+                </span>
+                <div className={css.bindPickMeta}>
+                  <div className={css.bindPickName}>
+                    <Star size={12} className={css.listIcon} />
+                    <span className={css.skillLabel}>{s.name}</span>
+                  </div>
+                  <span className={css.bindPickDesc}>{s.description}</span>
+                </div>
+                {isChecked && versions.length > 0 && (
+                  <span onClick={e => e.stopPropagation()}>
+                    <SelectField
+                      value={checked.get(s.name) ?? ''}
+                      options={versions.map(v => ({ id: v.id, label: v.id }))}
+                      onChange={v => setVersion(s.name, v)}
+                    />
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <div className={css.modalFooter}>
+          <div className={css.footerLeft} />
+          <div className={css.footerRight}>
+            <GlassButton onClick={onClose}>取消</GlassButton>
+            <GlassButton variant="primary" onClick={doConfirm}>绑定 {checked.size} 个技能</GlassButton>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/* ── MCP 绑定弹窗（设计稿 hMLsO）─────────────────────────────────────── */
+
+interface McpServerSummaryWire {
+  name: string
+  description?: string
+  transport: string
+  endpoint: string
+  disabled?: boolean
+}
+
+function McpBindDialog({ rpc, bound, onClose, onConfirm }: {
+  rpc: CorumRpcCall
+  bound: string[]
+  onClose: () => void
+  onConfirm: (servers: string[]) => void
+}) {
+  const [servers, setServers] = useState<McpServerSummaryWire[] | null>(null)
+  const [checked, setChecked] = useState<Set<string>>(() => new Set(bound))
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const r = await rpc<{ servers: McpServerSummaryWire[] }>('mcpManager', 'listServers', {})
+        if (!cancelled) { setServers(r.servers); setLoading(false) }
+      } catch (e) {
+        if (!cancelled) { setError(e instanceof Error ? e.message : String(e)); setLoading(false) }
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [rpc])
+
+  const toggle = (name: string) => {
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name); else next.add(name)
+      return next
+    })
+  }
+
+  return createPortal(
+    <div className={css.modalOverlay} onClick={onClose}>
+      <div className={css.modalDialog} onClick={e => e.stopPropagation()} style={{ width: 480 }}>
+        <div className={css.modalHeader}>
+          <span className={css.modalTitle}>添加 MCP 服务</span>
+          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className={css.modalBody}>
+          <p className={css.hintText}>从全局 MCP 注册表选择服务授权给此 Agent；新服务请在「MCP 与集成」中注册。</p>
+          {error !== null && <p className={css.hintText}>{error}</p>}
+          {loading && <p className={css.hintText}>加载中…</p>}
+          {!loading && servers !== null && servers.length === 0 && (
+            <p className={css.hintText}>暂无 MCP 服务，请先在「MCP 与集成」中添加。</p>
+          )}
+          {(servers ?? []).map(s => {
+            const isChecked = checked.has(s.name)
+            const disabled = s.disabled === true
+            return (
+              <div
+                key={s.name}
+                className={`${css.bindPickRow}${isChecked ? ' ' + css.bindPickRowActive : ''}`}
+                onClick={() => toggle(s.name)}
+                role="button"
+              >
+                <span className={`${css.bindCheckbox}${isChecked ? ' ' + css.bindCheckboxOn : ''}`}>
+                  {isChecked && <Check size={10} className={css.bindCheckIcon} />}
+                </span>
+                <div className={css.bindPickMeta}>
+                  <div className={css.bindPickName}>
+                    <span className={css.listDot} style={disabled ? { background: 'var(--dsw-alias-label-dimmed)' } : undefined} />
+                    <span className={css.skillLabel}>{s.name}</span>
+                  </div>
+                  <span className={css.bindPickDesc}>{s.description ?? s.transport}{disabled ? ' · 已停用' : ''}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className={css.modalFooter}>
+          <div className={css.footerLeft} />
+          <div className={css.footerRight}>
+            <GlassButton onClick={onClose}>取消</GlassButton>
+            <GlassButton variant="primary" onClick={() => onConfirm([...checked])}>授权 {checked.size} 个服务</GlassButton>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/* ── 删除预设确认对话框 ──────────────────────────────────────────────── */
+
+function DeletePresetDialog({ profile, rpc, onClose, onDeleted }: {
+  profile: AgentProfileSummary
+  rpc: CorumRpcCall
+  onClose: () => void
+  onDeleted: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const doDelete = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await rpc('corumAgent', 'deleteProfile', { id: profile.id })
+      onDeleted()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return createPortal(
+    <div className={css.confirmOverlay} onClick={onClose}>
+      <div className={css.confirmDialog} onClick={e => e.stopPropagation()}>
+        <span className={css.confirmTitle}>删除预设</span>
+        <p className={css.confirmDesc}>确定要删除预设「{profile.nickname ?? profile.id}」吗？此操作不可撤销。</p>
+        {error !== null && <p className={css.confirmWarn}>{error}</p>}
+        <div className={css.confirmActions}>
+          <GlassButton onClick={onClose}>取消</GlassButton>
+          <GlassButton variant="danger" onClick={() => void doDelete()} disabled={busy}>{busy ? '删除中…' : '删除'}</GlassButton>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 

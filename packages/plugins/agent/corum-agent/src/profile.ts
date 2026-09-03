@@ -58,6 +58,9 @@ export interface SkillBinding {
 /** dsh 四种预设模式，作为 corum Agent 的基础 persona 继承来源。 */
 export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis'
 
+/** Agent 岗位维度（名片筛选维度）。 */
+export type AgentDimension = '研发' | '产品' | '设计' | '市场' | '自媒体' | '创作'
+
 /** AgentProfile 完整定义。 */
 export interface AgentProfile {
   /** profile id（文件名，slug）。 */
@@ -66,6 +69,10 @@ export interface AgentProfile {
   nickname?: string
   /** 岗位 / 职位（显示用，可选）。 */
   title?: string
+  /** 岗位维度（名片筛选，可选）。 */
+  dimension?: AgentDimension
+  /** 名片履历（可选，手动编辑；如「参与 6 个项目 · 完成 128 次任务」）。 */
+  experience?: string
   /** 头像 URL（可选，用户上传或 AI 生成）。 */
   avatar?: string
   /** 基础模式：继承 dsh 四种预设的 persona（standard/ptc/minimal/cordis）。 */
@@ -96,4 +103,9 @@ export interface AgentProfile {
 /** 校验一个 profile id（slug 形式，防路径逃逸）。 */
 export function isValidProfileId(id: string): boolean {
   return /^[a-z0-9][a-z0-9-]*$/.test(id)
+}
+
+/** 校验岗位维度值（可选；不合法值在 saveProfile 处丢弃）。 */
+export function isValidAgentDimension(v: string): v is AgentDimension {
+  return v === '研发' || v === '产品' || v === '设计' || v === '市场' || v === '自媒体' || v === '创作'
 }

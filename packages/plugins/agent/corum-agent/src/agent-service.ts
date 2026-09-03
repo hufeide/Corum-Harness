@@ -35,7 +35,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
-import { isValidProfileId } from './profile.ts'
+import { isValidProfileId, isValidAgentDimension } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
@@ -71,6 +71,14 @@ export interface ProfileSummary {
   id: string
   nickname?: string
   title?: string
+  /** 岗位维度（名片筛选，可选）。 */
+  dimension?: string
+  /** 名片履历（可选）。 */
+  experience?: string
+  /** 头像（dataURL 或 URL，可选）。 */
+  avatar?: string
+  /** 基础模式（编辑回填用）。 */
+  baseMode?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
   skills: SkillBinding[]
@@ -138,6 +146,10 @@ export interface SaveProfileInput {
   id: string
   nickname?: string
   title?: string
+  /** 岗位维度（名片筛选）。 */
+  dimension?: string
+  /** 名片履历。 */
+  experience?: string
   avatar?: string
   baseMode: 'standard' | 'ptc' | 'minimal' | 'cordis'
   prompt: string
@@ -536,6 +548,10 @@ export class CorumAgentService extends TypertRemoteService {
       id: p.id,
       ...(p.nickname !== undefined ? { nickname: p.nickname } : {}),
       ...(p.title !== undefined ? { title: p.title } : {}),
+      ...(p.dimension !== undefined ? { dimension: p.dimension } : {}),
+      ...(p.experience !== undefined ? { experience: p.experience } : {}),
+      ...(p.avatar !== undefined ? { avatar: p.avatar } : {}),
+      baseMode: p.baseMode,
       prompt: p.prompt,
       model: p.model,
       skills: p.skills,
@@ -626,6 +642,8 @@ export class CorumAgentService extends TypertRemoteService {
       id: input.id,
       ...(input.nickname !== undefined && input.nickname.trim() !== '' ? { nickname: input.nickname.trim() } : {}),
       ...(input.title !== undefined && input.title.trim() !== '' ? { title: input.title.trim() } : {}),
+      ...(input.dimension !== undefined && isValidAgentDimension(input.dimension) ? { dimension: input.dimension } : {}),
+      ...(input.experience !== undefined && input.experience.trim() !== '' ? { experience: input.experience.trim() } : {}),
       ...(input.avatar !== undefined && input.avatar.trim() !== '' ? { avatar: input.avatar.trim() } : {}),
       baseMode: input.baseMode,
       prompt: input.prompt,
@@ -652,6 +670,10 @@ export class CorumAgentService extends TypertRemoteService {
         id: saved.id,
         ...(saved.nickname !== undefined ? { nickname: saved.nickname } : {}),
         ...(saved.title !== undefined ? { title: saved.title } : {}),
+        ...(saved.dimension !== undefined ? { dimension: saved.dimension } : {}),
+        ...(saved.experience !== undefined ? { experience: saved.experience } : {}),
+        ...(saved.avatar !== undefined ? { avatar: saved.avatar } : {}),
+        baseMode: saved.baseMode,
         prompt: saved.prompt,
         model: saved.model,
         skills: saved.skills,

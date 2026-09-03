@@ -197,6 +197,366 @@
   align-items: center;
 }
 
+/* ── Agent 名片（职场名片式卡片）──────────────────────────────────── */
+
+.agentCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-1);
+  box-sizing: border-box;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.agentCard:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.agentCardHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.agentAvatar {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.agentAvatarIcon {
+  color: var(--dsw-alias-brand-text);
+}
+
+.agentAvatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.agentNameCol {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agentNameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agentNickname {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.trustBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.agentRole {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-brand-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agentChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.agentMotto {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.agentExp {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agentModelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.agentModelLeft {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agentModelIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.agentModelName {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agentDimTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+}
+
+/* ── Agent 名片网格 + 筛选 ─────────────────────────────────────────── */
+
+.agentFilterRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.agentDimPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--corum-glass-border);
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.agentDimPill:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.agentDimPillActive {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-weight: 600;
+}
+
+.agentDimPillActive:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.agentSearchBox {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+}
+
+.agentSearchIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.agentSearchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.agentSearchInput::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.agentCardGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.agentGridRow {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.agentGridRow > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 新建预设虚线卡 */
+.agentAddCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px;
+  border: 1px dashed var(--corum-glass-border);
+  border-radius: 16px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--dsw-alias-label-tertiary);
+  transition: border-color 0.15s ease;
+}
+
+.agentAddCard:hover {
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* ── 官方模式只读组 ────────────────────────────────────────────────── */
+
+.officialGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.officialGroupTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.officialGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.officialRow {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.officialRow > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.officialCard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.officialCardHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.officialCardIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.officialCardLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.officialBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-1);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.officialCardDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+}
+
 /* ── InfoCard（Agent 预设）─────────────────────────────────────────── */
 
 .card {
@@ -286,6 +646,154 @@
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+/* 绑定弹窗 checkbox */
+.bindCheckbox {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--corum-glass-border);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.bindCheckbox:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.bindCheckboxOn {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-brand-primary);
+}
+
+.bindCheckboxOn:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.bindCheckIcon {
+  color: var(--corum-label-on-brand);
+}
+
+/* 绑定弹窗行 */
+.bindPickRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: transparent;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bindPickRow:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.bindPickRowActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border-active);
+}
+
+.bindPickMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bindPickName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bindPickDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.bindVersionSelect {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 6px;
+  background: var(--corum-glass-2);
+}
+
+.bindVersionText {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+}
+
+.bindVersionTextDim {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* ── 编辑弹窗名片预览 ──────────────────────────────────────────────── */
+
+.cardPreviewRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.cardPreviewLabel {
+  flex: none;
+  padding-top: 4px;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.cardPreviewCard {
+  flex: none;
+  width: 248px;
+}
+
+/* 经验快捷追加 pill */
+.expQuickRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.expQuickPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-1);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.expQuickPill:hover {
+  border-color: var(--corum-glass-border-active);
 }
 
 /* ── MCP 服务器卡片 ────────────────────────────────────────────────── */
