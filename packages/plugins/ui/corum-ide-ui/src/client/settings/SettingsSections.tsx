@@ -369,6 +369,7 @@ interface AgentProfileSummary {
   title?: string
   dimension?: string
   experience?: string
+  persona?: string
   avatar?: string
   baseMode?: string
   prompt: string
@@ -497,6 +498,7 @@ interface EditDraft {
   title: string
   dimension: string
   experience: string
+  persona: string
   avatar: string
   baseMode: string
   prompt: string
@@ -514,7 +516,7 @@ interface EditDraft {
 
 function emptyDraft(): EditDraft {
   return {
-    name: '', nickname: '', title: '', dimension: '研发', experience: '', avatar: '',
+    name: '', nickname: '', title: '', dimension: '研发', experience: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
     terminal: 'sandbox', memory: 'agent', skills: [], mcpServers: [], trust: 'user',
@@ -528,6 +530,7 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     title: p.title ?? '',
     dimension: p.dimension ?? inferDimension(p),
     experience: p.experience ?? '',
+    persona: p.persona ?? '',
     avatar: p.avatar ?? '',
     baseMode: p.baseMode ?? 'standard',
     prompt: p.prompt,
@@ -738,6 +741,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           ...(draft.title.trim() !== '' ? { title: draft.title.trim() } : {}),
           dimension: draft.dimension,
           ...(draft.experience.trim() !== '' ? { experience: draft.experience.trim() } : {}),
+          ...(draft.persona.trim() !== '' ? { persona: draft.persona.trim() } : {}),
           ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
           baseMode: draft.baseMode as EditDraft['baseMode'],
           prompt: draft.prompt,
@@ -828,6 +832,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
     ...(draft.title !== '' ? { title: draft.title } : {}),
     ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
     ...(draft.experience !== '' ? { experience: draft.experience } : {}),
+    ...(draft.persona !== '' ? { persona: draft.persona } : {}),
     ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
     prompt: draft.prompt,
     model: { provider: draft.provider, model: draft.model },
@@ -891,6 +896,23 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
         </div>
       </div>
 
+      {/* 记忆摘要 */}
+      <div className={css.formGroup}>
+        <div className={css.formGroupTitle}>记忆摘要（根据 Agent 的记忆沉淀自动汇总）</div>
+        <label className={css.fieldLabel}>经验说明</label>
+        <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
+        <div className={css.expQuickRow}>
+          {EXP_QUICK.map(q => (
+            <button
+              key={q}
+              type="button"
+              className={css.expQuickPill}
+              onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
+            >+ {q}</button>
+          ))}
+        </div>
+      </div>
+
       {/* 下方全宽表单（独立滚动） */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
         {/* 继承自 */}
@@ -898,6 +920,28 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           <div className={css.formGroupTitle}>继承自</div>
           <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} />
           <p className={css.hintText}>将继承 {draft.baseMode} 的系统提示词与 persona</p>
+        </div>
+
+        {/* 人格设置 */}
+        <div className={css.formGroup}>
+          <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>人格设置</span>
+            <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
+          </div>
+          <label className={css.fieldLabel}>用一段话描述 Agent 的人格特质与行为倾向（不超过 500 字符）</label>
+          <div className={css.promptArea}>
+            <textarea
+              className={css.promptTextarea}
+              value={draft.persona}
+              onChange={e => set('persona', e.target.value.slice(0, 500))}
+              placeholder="务实、简洁、注重结果。接到任务后先理解目标再动手，不废话不拖延。"
+              rows={3}
+              maxLength={500}
+            />
+            <div className={css.promptActions}>
+              <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-dimmed)' }}>{draft.persona.length} / 500</span>
+            </div>
+          </div>
         </div>
 
         {/* 提示词 */}

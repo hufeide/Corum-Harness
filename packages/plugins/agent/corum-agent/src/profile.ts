@@ -73,6 +73,8 @@ export interface AgentProfile {
   dimension?: AgentDimension
   /** 名片履历（可选，手动编辑；如「参与 6 个项目 · 完成 128 次任务」）。 */
   experience?: string
+  /** 人格设置（可选，不超过 500 字符；描述 Agent 的人格特质与行为倾向）。 */
+  persona?: string
   /** 头像 URL（可选，用户上传或 AI 生成）。 */
   avatar?: string
   /** 基础模式：继承 dsh 四种预设的 persona（standard/ptc/minimal/cordis）。 */

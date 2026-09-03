@@ -75,6 +75,8 @@ export interface ProfileSummary {
   dimension?: string
   /** 名片履历（可选）。 */
   experience?: string
+  /** 人格设置（可选，不超过 500 字符）。 */
+  persona?: string
   /** 头像（dataURL 或 URL，可选）。 */
   avatar?: string
   /** 基础模式（编辑回填用）。 */
@@ -150,6 +152,8 @@ export interface SaveProfileInput {
   dimension?: string
   /** 名片履历。 */
   experience?: string
+  /** 人格设置（不超过 500 字符）。 */
+  persona?: string
   avatar?: string
   baseMode: 'standard' | 'ptc' | 'minimal' | 'cordis'
   prompt: string
@@ -550,6 +554,7 @@ export class CorumAgentService extends TypertRemoteService {
       ...(p.title !== undefined ? { title: p.title } : {}),
       ...(p.dimension !== undefined ? { dimension: p.dimension } : {}),
       ...(p.experience !== undefined ? { experience: p.experience } : {}),
+      ...(p.persona !== undefined ? { persona: p.persona } : {}),
       ...(p.avatar !== undefined ? { avatar: p.avatar } : {}),
       baseMode: p.baseMode,
       prompt: p.prompt,
@@ -644,6 +649,7 @@ export class CorumAgentService extends TypertRemoteService {
       ...(input.title !== undefined && input.title.trim() !== '' ? { title: input.title.trim() } : {}),
       ...(input.dimension !== undefined && isValidAgentDimension(input.dimension) ? { dimension: input.dimension } : {}),
       ...(input.experience !== undefined && input.experience.trim() !== '' ? { experience: input.experience.trim() } : {}),
+      ...(input.persona !== undefined && input.persona.trim() !== '' ? { persona: input.persona.trim().slice(0, 500) } : {}),
       ...(input.avatar !== undefined && input.avatar.trim() !== '' ? { avatar: input.avatar.trim() } : {}),
       baseMode: input.baseMode,
       prompt: input.prompt,
@@ -672,6 +678,7 @@ export class CorumAgentService extends TypertRemoteService {
         ...(saved.title !== undefined ? { title: saved.title } : {}),
         ...(saved.dimension !== undefined ? { dimension: saved.dimension } : {}),
         ...(saved.experience !== undefined ? { experience: saved.experience } : {}),
+        ...(saved.persona !== undefined ? { persona: saved.persona } : {}),
         ...(saved.avatar !== undefined ? { avatar: saved.avatar } : {}),
         baseMode: saved.baseMode,
         prompt: saved.prompt,
