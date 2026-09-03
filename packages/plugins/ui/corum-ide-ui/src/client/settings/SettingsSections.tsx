@@ -840,7 +840,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
   }
 
   return (
-    <div className={css.editPageLayout}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', height: '100%', minHeight: 0 }}>
       {/* 返回行 */}
       <div style={{ width: '100%' }}>
         <button type="button" className={css.backBtn} onClick={onBack}>
@@ -891,8 +891,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
         </div>
       </div>
 
-      {/* 下方全宽表单 */}
-      <div className={css.editFormCol}>
+      {/* 下方全宽表单（独立滚动） */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
         {/* 继承自 */}
         <div className={css.formGroup}>
           <div className={css.formGroupTitle}>继承自</div>
