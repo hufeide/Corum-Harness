@@ -58,6 +58,7 @@ export function ensurePmProfile(): AgentProfile {
     id: PM_PROFILE_ID,
     nickname: 'PM 助理',
     title: '项目统筹',
+    baseMode: 'standard',
     prompt: PM_PROMPT,
     model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
     skills: [],
@@ -96,6 +97,7 @@ export function ensureTaskProfile(): AgentProfile {
     id: TASK_PROFILE_ID,
     nickname: 'Task 助理',
     title: '单任务',
+    baseMode: 'standard',
     prompt: TASK_PROMPT,
     model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
     skills: [],
@@ -115,6 +117,7 @@ export function ensureSmokeProfile(): AgentProfile {
   if (existing !== undefined) return existing
   const profile: AgentProfile = {
     id: SMOKE_PROFILE_ID,
+    baseMode: 'standard',
     prompt: 'You are a smoke-test agent. Follow the user instruction exactly and briefly.',
     model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
     skills: [],

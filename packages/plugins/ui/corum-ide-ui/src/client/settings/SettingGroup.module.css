@@ -1,0 +1,37 @@
+/* SettingGroup — 1:1 复刻 design.pen group frame
+ * glass-1 fill, cornerRadius 16, glass-border stroke 1px
+ * vertical layout, padding [6,16,10,16]
+ */
+
+.group {
+  /* 设计稿: fill_container width */
+  width: 100%;
+  /* 在 .body 滚动容器里不被压缩：flex 子项默认 shrink:1，总高超 body 时卡片会被
+   * 压矮、内部 overflow:hidden 把内容（如版本历史多行）裁掉。flex:none 保持
+   * 内容固有高度，超高交由 .body 整体滚动，而非压缩单卡。 */
+  flex: none;
+  /* 设计稿: glass-1 fill */
+  background: var(--corum-glass-1);
+  /* 设计稿: cornerRadius 16 */
+  border-radius: 16px;
+  /* 设计稿: stroke glass-border 1px */
+  border: 1px solid var(--corum-glass-border);
+  /* 设计稿: clip true */
+  overflow: hidden;
+  /* 设计稿: layout vertical */
+  display: flex;
+  flex-direction: column;
+  /* 设计稿: padding [6,16,10,16] */
+  padding: 6px 16px 10px 16px;
+  box-sizing: border-box;
+}
+
+/* 组标题（设计稿 gt: Inter 12px 600, label-secondary）*/
+.groupTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.4;
+  padding: 4px 0 2px;
+}

@@ -65,6 +65,12 @@
 - id: ui-trajectory
   disabled: true
 
+# 官方 Agent 预设设置面板：IDE 模式由 @corum/corum-ide-ui 自建的 AgentPresetsSection
+# 替代（1:1 复刻 design.pen 设置中心）。官方 section 注册 id 'agent-presets'，
+# 与 corum-ide-ui 注册的 id 冲突，显式禁用让 corum-ide-ui 版本接管。
+- id: ui-agent-preset
+  disabled: true
+
 # corum-directory-picker-surface（= dsh-client-ui-directory-picker-native）inject uiWorkspace
 # 服务，而 ui-workspace 已禁用——IDE 模式 pending。kkc 侧栏「添加工作区」的目录选择已改走
 # ctx.remote.directoryPicker.pick()（host backend corum-directory-picker 提供 Remote，不经

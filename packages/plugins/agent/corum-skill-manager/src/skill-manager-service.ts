@@ -131,6 +131,46 @@ export class SkillManagerService extends TypertRemoteService {
     return { binding: { name, versionId } }
   }
 
+  /**
+   * 读取 skill 当前的 SKILL.md 内容（详情页只读预览 / 编辑器装载用）。
+   * 读「当前」文件，不是某个历史版本快照——历史快照需从 .versions/<id>/ 读。
+   */
+  @Remote('getSkillContent')
+  getSkillContent(name: string): { ok: boolean; error?: string; content?: string } {
+    if (!isValidSkillName(name)) return { ok: false, error: `invalid skill name: "${name}"` }
+    const dir = skillDirPath(name)
+    if (!existsSync(dir)) return { ok: false, error: `skill "${name}" does not exist` }
+    const skillMdPath = join(dir, 'SKILL.md')
+    if (!existsSync(skillMdPath)) return { ok: false, error: `SKILL.md not found in skill "${name}"` }
+    return { ok: true, content: readFileSync(skillMdPath, 'utf8') }
+  }
+
+  /**
+   * 提交新版本：把（可能编辑过的）内容写入当前 SKILL.md，并快照为一个新版本。
+   * 这是「编辑 → 保存为新版本」链路的唯一入口——SKILL.md 只能经此更新，
+   * 保证「当前内容」与「版本历史」始终一致（每次变更都落一个版本）。
+   *
+   * @param name - skill 名称。
+   * @param content - 完整的 SKILL.md 新内容（frontmatter 需含 name + description）。
+   * @param label - 版本备注（缺省「手动提交」）。
+   * @returns 新版本的 SkillVersion（id/date/label）。
+   */
+  @Remote('commitVersion')
+  commitVersion(name: string, content: string, label?: string): { ok: boolean; error?: string; version?: SkillVersion } {
+    if (!isValidSkillName(name)) return { ok: false, error: `invalid skill name: "${name}"` }
+    const dir = skillDirPath(name)
+    if (!existsSync(dir)) return { ok: false, error: `skill "${name}" does not exist` }
+    if (!content || content.trim() === '') return { ok: false, error: 'content is empty' }
+    if (parseSkillFrontmatter(content) === undefined) {
+      return { ok: false, error: 'SKILL.md 格式不正确。frontmatter 必须包含 name 和 description 字段。' }
+    }
+    // 先写入新内容为「当前」，再快照（createVersion 复制当前 SKILL.md 进 .versions）。
+    writeFileSync(join(dir, 'SKILL.md'), content, 'utf8')
+    const versionId = createVersion(dir, label && label.trim() !== '' ? label : '手动提交')
+    const version = readVersions(dir).find(v => v.id === versionId)
+    return { ok: true, ...(version !== undefined ? { version } : {}) }
+  }
+
   // ── 目录扫描 + 批量导入 ──────────────────────────────────────────
 
   /**

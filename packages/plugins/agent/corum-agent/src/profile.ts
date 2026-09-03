@@ -55,6 +55,9 @@ export interface SkillBinding {
   versionId: string
 }
 
+/** dsh 四种预设模式，作为 corum Agent 的基础 persona 继承来源。 */
+export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis'
+
 /** AgentProfile 完整定义。 */
 export interface AgentProfile {
   /** profile id（文件名，slug）。 */
@@ -63,10 +66,19 @@ export interface AgentProfile {
   nickname?: string
   /** 岗位 / 职位（显示用，可选）。 */
   title?: string
-  /** dsh 标准 system prompt（与专业相关）。 */
+  /** 头像 URL（可选，用户上传或 AI 生成）。 */
+  avatar?: string
+  /** 基础模式：继承 dsh 四种预设的 persona（standard/ptc/minimal/cordis）。 */
+  baseMode: BaseMode
+  /**
+   * 用户自定义提示词，叠加在基础模式 persona 之上（而非替代）。
+   * compilePreset 拼接：基础模式 persona + "\n\n" + 自定义提示词。
+   */
   prompt: string
   /** 默认大模型配置。 */
   model: ProfileModel
+  /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
+  subagentModel?: ProfileModel
   /** 技能绑定列表（引用全局 skill + pin 版本）。 */
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */

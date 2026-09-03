@@ -138,8 +138,11 @@ export interface SaveProfileInput {
   id: string
   nickname?: string
   title?: string
+  avatar?: string
+  baseMode: 'standard' | 'ptc' | 'minimal' | 'cordis'
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
+  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
   /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
@@ -623,8 +626,11 @@ export class CorumAgentService extends TypertRemoteService {
       id: input.id,
       ...(input.nickname !== undefined && input.nickname.trim() !== '' ? { nickname: input.nickname.trim() } : {}),
       ...(input.title !== undefined && input.title.trim() !== '' ? { title: input.title.trim() } : {}),
+      ...(input.avatar !== undefined && input.avatar.trim() !== '' ? { avatar: input.avatar.trim() } : {}),
+      baseMode: input.baseMode,
       prompt: input.prompt,
       model: input.model,
+      ...(input.subagentModel !== undefined ? { subagentModel: input.subagentModel } : {}),
       skills: input.skills,
       mcpServers: input.mcpServers,
       terminal: input.terminal,
@@ -789,6 +795,7 @@ export class CorumAgentService extends TypertRemoteService {
       const dm = this.ctx.agentDefaultModel.currentSelection()
       profile = {
         id: profileId,
+        baseMode: 'standard',
         prompt: '',
         model: model ?? {
           provider: dm.provider,

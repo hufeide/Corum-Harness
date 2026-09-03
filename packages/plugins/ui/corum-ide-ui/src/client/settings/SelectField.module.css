@@ -1,0 +1,115 @@
+/* SelectField — 1:1 复刻 design.pen Bf3cS reusable component
+ * width 180, glass-2 fill, cornerRadius 10, glass-border stroke 1px
+ * gap 8, padding [7,10], alignItems center
+ * 下拉列表经 portal 挂到 document.body（fixed 定位），不受 body overflow 裁切
+ */
+
+.wrapper {
+  position: relative;
+  flex: none;
+}
+
+.select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 180px;
+  padding: 7px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+  overflow: hidden;
+}
+
+.select:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 下拉列表 — fixed 定位，经 portal 挂到 body，z-index 高于设置面板 */
+.dropdown {
+  position: fixed;
+  z-index: 10000;
+  min-width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-1);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* 未选中选项 */
+.option {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+  box-sizing: border-box;
+}
+
+/* hover 高亮 — 品牌色填充 */
+.option:hover {
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-weight: 600;
+}
+
+/* 选中选项 — 外框高亮（不填充背景）*/
+.optionActive {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+  box-sizing: border-box;
+}
+
+/* 选中项 hover 也跟随品牌色填充 */
+.optionActive:hover {
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  border-color: transparent;
+}
