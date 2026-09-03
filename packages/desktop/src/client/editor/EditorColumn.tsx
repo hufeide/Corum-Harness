@@ -34,12 +34,26 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { PanelRightOpen, X } from 'lucide-react'
+import { Code, Eye, PanelRightOpen, X } from 'lucide-react'
 import type {} from '@corum/corum-ide-ui/client'
 import { MonacoEditor, languageFromPath } from './MonacoEditor.tsx'
 import { ExplorerPane, type ExplorerPaneInjected } from './ExplorerPane.tsx'
 import { DiffViewer } from './DiffViewer.tsx'
+import { ImagePreview, MarkdownPreview, SvgPreview, VideoPreview } from './PreviewView.tsx'
 import css from './EditorColumn.module.css'
+
+/** 文件预览类型（HANDOFF §七.6）：md/svg 双模式可切；图片/视频仅预览。 */
+type PreviewKind = 'markdown' | 'svg' | 'image' | 'video' | null
+
+/** 按扩展名判预览类型（与 host corum-fs 的 IMAGE/VIDEO 表一致）。 */
+function previewKindFromPath(path: string): PreviewKind {
+  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  if (ext === 'md' || ext === 'markdown') return 'markdown'
+  if (ext === 'svg') return 'svg'
+  if (['jpg', 'jpeg', 'png', 'bmp', 'gif', 'webp', 'ico'].includes(ext)) return 'image'
+  if (['mp4', 'm4v', 'webm', 'mov', 'mkv', 'avi'].includes(ext)) return 'video'
+  return null
+}
 
 /** One open file tab. */
 interface EditorTab {
@@ -62,6 +76,10 @@ interface EditorTab {
   preview: boolean
   /** diff tab（VS Code「选择以进行比较」+「与已选项目比较」）：只读双侧 diff 视图。 */
   diff?: { original: string; modified: string }
+  /** 预览类型（md/svg/图片/视频）；null = 普通代码 tab。 */
+  kind?: PreviewKind
+  /** 源码 ⟷ 预览切换（md/svg 有效；图片/视频恒预览）。 */
+  viewMode?: 'source' | 'preview'
 }
 
 /** diff tab 合成 path 前缀（避免与真实文件路径冲突；不持久化）。 */
@@ -87,6 +105,8 @@ export interface EditorColumnInjected {
   explorer: Pick<ExplorerPaneInjected, 'listDir' | 'generation' | 'workspaceRoot'>
   /** 读文件内容（corumFs/read RPC）。 */
   readFile: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { content: string; language: string } }>
+  /** 读图片二进制（corumFs/readBinary RPC，base64；图片预览数据源）。 */
+  readBinary: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { mime: string; base64: string } }>
   /** 写文件内容（corumFs/write RPC，⌘S 保存；自动建父目录）。 */
   writeFile: (path: string, content: string) => Promise<{ ok: boolean; error?: { message?: string } }>
   /** 新建目录（corumFs/mkdir RPC，recursive）。 */
@@ -157,7 +177,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   const persisted = useMemo(loadPersisted, [])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
@@ -236,6 +256,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     // 并发恢复所有 tab（内容 readFile 重载）；恢复的 tab 都是固定（非预览）。
     for (const path of paths) {
       const title = path.split('/').pop() ?? path
+      const kind = previewKindFromPath(path)
       const placeholder: EditorTab = {
         path,
         title,
@@ -245,8 +266,11 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
         error: null,
         externalChanged: false,
         preview: false,
+        ...(kind !== null ? { kind, viewMode: 'preview' as const } : {}),
       }
       setTabs(prev => prev.some(t => t.path === path) ? prev : [...prev, placeholder])
+      // 图片/视频是二进制——不 read（host 也会拒绝），内容恒空。
+      if (kind === 'image' || kind === 'video') continue
       readFile(path).then((result) => {
         if (result.ok && result.value !== undefined) {
           setTabs(prev => prev.map(t => t.path === path
@@ -282,6 +306,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
     }
     // Create a placeholder tab, then load content.
     const title = path.split('/').pop() ?? path
+    const kind = previewKindFromPath(path)
     const newTab: EditorTab = {
       path,
       title,
@@ -291,6 +316,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
       error: null,
       externalChanged: false,
       preview: wantPreview,
+      ...(kind !== null ? { kind, viewMode: 'preview' as const } : {}),
     }
     setTabs(prev => {
       // 预览 tab 替换已有预览位（VS Code 单预览语义）。
@@ -298,6 +324,9 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
       return [...base, newTab]
     })
     setActivePath(path)
+    // 图片/视频是二进制——不 read（host 端对二进制扩展名也直接拒绝），
+    // 内容恒空，预览组件自取（图片 readBinary / 视频 /corumfs URL）。
+    if (kind === 'image' || kind === 'video') return
     try {
       const result = await readFile(path)
       if (result.ok && result.value !== undefined) {
@@ -317,6 +346,14 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
   /** 固定预览 tab（双击 tab / 编辑后 / 双击树文件）。 */
   const pinTab = useCallback((path: string) => {
     setTabs(prev => prev.map(t => t.path === path && t.preview ? { ...t, preview: false } : t))
+  }, [])
+
+  /** 源码 ⟷ 预览切换（md/svg tab；VS Code Ctrl+Shift+V 语义）。 */
+  const toggleViewMode = useCallback((path: string) => {
+    setTabs(prev => prev.map(t => t.path === path && (t.kind === 'markdown' || t.kind === 'svg')
+      ? { ...t, viewMode: t.viewMode === 'preview' ? 'source' : 'preview' }
+      : t,
+    ))
   }, [])
 
   /** 打开 diff tab（VS Code「与已选项目比较」）：只读双侧 diff，内容立即从
@@ -482,7 +519,8 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
           const tab = tabsRef.current.find(t => t.path === p)
           if (tab === undefined) continue
           if (tab.content === tab.savedContent) {
-            // 未 dirty → 自动重载磁盘内容
+            // 未 dirty → 自动重载磁盘内容（图片/视频 tab 无文本内容，跳过）
+            if (tab.kind === 'image' || tab.kind === 'video') continue
             readFile(p).then((r) => {
               if (r.ok && r.value !== undefined) {
                 setTabs(prev => prev.map(t => t.path === p
@@ -812,6 +850,16 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
               >
                 {dirty && <span className={css.tabDirty} />}
                 <span className={css.tabTitle}>{tab.title}</span>
+                {(tab.kind === 'markdown' || tab.kind === 'svg') && (
+                  <button
+                    type="button"
+                    className={css.tabViewModeBtn}
+                    title={tab.viewMode === 'preview' ? '查看源码' : '预览'}
+                    onClick={(e) => { e.stopPropagation(); toggleViewMode(tab.path) }}
+                  >
+                    {tab.viewMode === 'preview' ? <Code size={13} strokeWidth={2} /> : <Eye size={13} strokeWidth={2} />}
+                  </button>
+                )}
                 <button
                   type="button"
                   className={css.tabCloseBtn}
@@ -898,7 +946,7 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
           </div>
         )}
 
-        {/* Code（diff tab → DiffViewer 只读双侧对比；普通 tab → MonacoEditor） */}
+        {/* Code（diff tab → DiffViewer；预览态 md/svg/图片/视频 → PreviewView；普通 tab → MonacoEditor） */}
         <div className={css.code}>
           {activeTab?.diff !== undefined
             ? (
@@ -911,6 +959,14 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
                 dark={dark}
               />
             )
+            : activeTab !== null && activeTab.kind === 'image'
+            ? <ImagePreview key={activeTab.path} path={activeTab.path} title={activeTab.title} readBinary={readBinary} />
+            : activeTab !== null && activeTab.kind === 'video'
+            ? <VideoPreview key={activeTab.path} path={activeTab.path} title={activeTab.title} />
+            : activeTab !== null && activeTab.viewMode === 'preview' && activeTab.kind === 'markdown'
+            ? <MarkdownPreview key={activeTab.path} text={activeTab.content} />
+            : activeTab !== null && activeTab.viewMode === 'preview' && activeTab.kind === 'svg'
+            ? <SvgPreview key={activeTab.path} text={activeTab.content} title={activeTab.title} />
             : monacoFile !== null
             ? (
               <MonacoEditor
@@ -937,6 +993,11 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, writ
             <span>行 {cursorPos.line}, 列 {cursorPos.column}</span>
             <span>UTF-8</span>
             <span>{activeTab.language}</span>
+            {activeTab.viewMode === 'preview' && (activeTab.kind === 'markdown' || activeTab.kind === 'svg') && (
+              <span className={css.savedText}>预览</span>
+            )}
+            {activeTab.kind === 'image' && <span className={css.savedText}>图片</span>}
+            {activeTab.kind === 'video' && <span className={css.savedText}>视频</span>}
             {activeTab.diff !== undefined && <span className={css.savedText}>只读对比</span>}
             {activeTab.externalChanged && activeDirty && (
               <span className={css.externalChangedText} title="磁盘上的文件已被外部修改；保存将覆盖磁盘版本">⚠ 磁盘已更改</span>

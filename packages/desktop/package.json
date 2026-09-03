@@ -146,6 +146,7 @@
     "@deepseek-ai/dsh-client-ui-settings-plugins": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-skill": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-subagent": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-ui-theme": "^0.1.2-alpha.1",

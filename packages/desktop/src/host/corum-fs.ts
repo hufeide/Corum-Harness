@@ -20,7 +20,7 @@
 import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { watch, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { dirname, isAbsolute, resolve, sep } from 'node:path'
+import { dirname, extname, isAbsolute, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 
@@ -35,6 +35,37 @@ declare module '@deepseek-ai/cordis' {
 export interface CorumFsEntry {
   name: string
   type: 'dir' | 'file'
+}
+
+/** 图片扩展名 → MIME（readBinary + 编辑区图片预览）。 */
+const IMAGE_MIME: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.bmp': 'image/bmp',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+}
+
+/** 视频扩展名 → MIME（编辑区视频预览；corumfs:// scheme 同表）。 */
+const VIDEO_MIME: Record<string, string> = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
+}
+
+/** 按扩展名取图片 MIME（非图片返回 undefined）。 */
+export function imageMimeOf(path: string): string | undefined {
+  return IMAGE_MIME[extname(path).toLowerCase()]
+}
+
+/** 按扩展名取视频 MIME（非视频返回 undefined）。 */
+export function videoMimeOf(path: string): string | undefined {
+  return VIDEO_MIME[extname(path).toLowerCase()]
 }
 
 /** 文件扩展名 → Monaco 语言 id（与 client 端 languageFromPath 对齐）。 */
@@ -117,6 +148,14 @@ export class CorumFsService extends TypertRemoteService {
   }
 
   /**
+   * 当前根快照（host 内部 API，非 Remote——bridge.ts 的 /corumfs 媒体流式
+   * 路由与 read 端点共享同一 realpath 防穿越基准）。
+   */
+  currentRoot(): string {
+    return this.root
+  }
+
+  /**
    * 列目录（资源管理器文件树的数据源）。以 host 进程 cwd 为项目根：任何
    * 真实路径逃出根目录的请求都拒绝（realpath 校验，防止 symlink 穿越）。
    * @param path - 相对根的路径（'/' 或 '' = 根；前导斜杠会被剥掉）。
@@ -157,11 +196,17 @@ export class CorumFsService extends TypertRemoteService {
 
   /**
    * 读文件内容（编辑器打开文件的数据源）。与 list 同一 realpath 防穿越校验。
+   * 二进制防御：图片/视频按 UTF-8 读必乱码卡死 Monaco——按扩展名直接拒绝
+   * （`binary file`），client 按类型走 readBinary（图片）/ corumfs://（视频）。
    * @param path - 相对根的路径（'/' 或 '' = 根；前导斜杠会被剥掉）。
    * @returns 文件内容（UTF-8）+ 推断的语言 id（供 Monaco 直接用）。
    */
   @Remote('read')
   async read(path?: string): Promise<{ path: string; content: string; language: string }> {
+    const requested0 = path ?? '/'
+    if (imageMimeOf(requested0) !== undefined || videoMimeOf(requested0) !== undefined) {
+      throw new Error(`binary file: open it as preview instead of text (${requested0})`)
+    }
     const root = resolve(this.rootPath())
     const requested = path ?? '/'
     const normalized = requested === '/' || requested === '' ? '.' : requested.replace(/^\/+/, '')
@@ -177,6 +222,42 @@ export class CorumFsService extends TypertRemoteService {
       const content = await readFile(real, 'utf8')
       return { path: requested, content, language: languageFromPath(requested) }
     } catch (error) {
+      throw new Error(`cannot read file ${requested}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 读图片二进制（编辑区图片预览的数据源）。仅允许图片扩展名（视频走
+   * corumfs:// scheme 流式，不经 RPC）；与 read 同一 realpath 防穿越校验。
+   * 大小钳制 32MB（base64 走 RPC 信封，过大应走协议 URL）。
+   * @param path - 相对根的路径。
+   * @returns base64 内容 + MIME（client 拼 data: URL 渲染 `<img>`）。
+   */
+  @Remote('readBinary')
+  async readBinary(path?: string): Promise<{ path: string; mime: string; base64: string }> {
+    const requested = path ?? '/'
+    const mime = imageMimeOf(requested)
+    if (mime === undefined) {
+      throw new Error(`readBinary only serves image files: ${requested}`)
+    }
+    const root = resolve(this.rootPath())
+    const normalized = requested === '/' || requested === '' ? '.' : requested.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${requested}`)
+    }
+    const real = await realpath(target)
+    if (real !== root && !real.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${requested}`)
+    }
+    try {
+      const buf = await readFile(real)
+      if (buf.byteLength > 32 * 1024 * 1024) {
+        throw new Error(`image too large for preview (>32MB): ${requested}`)
+      }
+      return { path: requested, mime, base64: buf.toString('base64') }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('image too large')) throw error
       throw new Error(`cannot read file ${requested}: ${String(error)}`)
     }
   }

@@ -134,6 +134,10 @@ export function apply(ctx: Context): void {
             const result = await connection.rpc.call('/api', 'corumFs/read', { args: { path } })
             return result as { ok: boolean; error?: { message?: string }; value?: { content: string; language: string } }
           },
+          readBinary: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumFs/readBinary', { args: { path } })
+            return result as { ok: boolean; error?: { message?: string }; value?: { mime: string; base64: string } }
+          },
           writeFile: async (path, content) => {
             const result = await connection.rpc.call('/api', 'corumFs/write', { args: { path, content } })
             return result as { ok: boolean; error?: { message?: string } }

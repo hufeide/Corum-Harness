@@ -142,6 +142,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-plan':
         specifier: ^0.1.2-alpha.1
         version: 0.1.2-alpha.1(b4b4a29a97ca2d8cb6d29a5e4790c808)
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
       '@deepseek-ai/dsh-client-ui-renderer':
         specifier: ^0.1.2-alpha.1
         version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(react@18.2.0)

@@ -20,10 +20,12 @@
 
 import { createInterface } from 'node:readline'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { bootDesktop, resolveDesktopHome } from './boot.ts'
 import { CorumSessionArchive } from './session-archive.ts'
+import { imageMimeOf, videoMimeOf } from './corum-fs.ts'
 
 /** Flush all live session logs to durable storage (the quit hook). */
 interface FlushRequest { type: 'session-flush'; id: string }
@@ -112,6 +114,78 @@ async function main(): Promise<void> {
       },
     })
     process.stderr.write('[corum-desktop] monaco workers served at /monaco/\n')
+
+    // 编辑区媒体预览流式路由（HANDOFF §七.6）：视频/大图片走
+    // `/corumfs/<相对根路径>` 同源 URL（`<video>`/`<img>` 原生拉流），
+    // 不经 RPC（base64 信封对视频太重）。与 corumFs/read 同一 realpath
+    // 防穿越基准；视频支持 HTTP Range（进度条拖拽必需）。
+    const corumFsSvc = ctx.get('corumFs')
+    if (corumFsSvc === undefined) {
+      throw new Error('corum-desktop: corumFs service missing after boot')
+    }
+    webServer.register({
+      kind: 'prefix',
+      path: '/corumfs',
+      handler: async (req, res) => {
+        try {
+          const url = new URL(req.url ?? '', webUrl)
+          const rel = decodeURIComponent(url.pathname.slice('/corumfs'.length))
+          const mime = videoMimeOf(rel) ?? imageMimeOf(rel)
+          if (mime === undefined) {
+            res.statusCode = 404
+            res.end('not a media file')
+            return
+          }
+          const root = resolve(corumFsSvc.currentRoot())
+          const normalized = rel === '/' || rel === '' ? '.' : rel.replace(/^\/+/, '')
+          const target = resolve(root, normalized)
+          if (target !== root && !target.startsWith(root + sep)) {
+            res.statusCode = 403
+            res.end('forbidden')
+            return
+          }
+          const real = await realpath(target)
+          if (real !== root && !real.startsWith(root + sep)) {
+            res.statusCode = 403
+            res.end('forbidden')
+            return
+          }
+          const info = await stat(real)
+          if (!info.isFile()) {
+            res.statusCode = 404
+            res.end('not found')
+            return
+          }
+          res.setHeader('content-type', mime)
+          res.setHeader('accept-ranges', 'bytes')
+          res.setHeader('cache-control', 'no-cache')
+          const range = req.headers.range
+          const size = info.size
+          if (typeof range === 'string' && range.startsWith('bytes=')) {
+            const [startStr, endStr] = range.slice('bytes='.length).split('-')
+            const start = Number.parseInt(startStr ?? '', 10)
+            const end = endStr === undefined || endStr === '' ? size - 1 : Number.parseInt(endStr, 10)
+            if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end >= size || start > end) {
+              res.statusCode = 416
+              res.setHeader('content-range', `bytes */${String(size)}`)
+              res.end()
+              return
+            }
+            res.statusCode = 206
+            res.setHeader('content-range', `bytes ${String(start)}-${String(end)}/${String(size)}`)
+            res.setHeader('content-length', end - start + 1)
+            createReadStream(real, { start, end }).pipe(res)
+            return
+          }
+          res.setHeader('content-length', size)
+          createReadStream(real).pipe(res)
+        } catch {
+          if (!res.headersSent) res.statusCode = 404
+          res.end('not found')
+        }
+      },
+    })
+    process.stderr.write('[corum-desktop] media preview served at /corumfs/\n')
   }
 
   send({ type: 'ready', authenticatedUrl })
