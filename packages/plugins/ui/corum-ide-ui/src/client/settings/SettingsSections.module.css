@@ -245,6 +245,14 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 22px;
+}
+
+.agentAvatarPlaceholder {
+  width: 100%;
+  height: 100%;
+  border-radius: 22px;
+  background: var(--corum-glass-2);
 }
 
 .agentNameCol {

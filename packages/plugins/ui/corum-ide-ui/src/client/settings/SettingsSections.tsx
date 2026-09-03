@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useRef, useContext, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ArrowLeft, Bot, Cpu, Search, Check, Box } from 'lucide-react'
+import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ArrowLeft, Bot, Cpu, Search, Check, Box, Ghost } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { SettingRow } from './SettingRow.tsx'
 import { SelectField } from './SelectField.tsx'
@@ -411,7 +411,7 @@ function AgentCard({ profile, onClick }: { profile: AgentProfileSummary; onClick
         <div className={css.agentAvatar}>
           {profile.avatar !== undefined && profile.avatar !== ''
             ? <img className={css.agentAvatarImg} src={profile.avatar} alt="" />
-            : <Bot size={22} className={css.agentAvatarIcon} />}
+            : <div className={css.agentAvatarPlaceholder} />}
         </div>
         <div className={css.agentNameCol}>
           <div className={css.agentNameRow}>
@@ -544,6 +544,17 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
   }
 }
 
+/* ── 虚位以待占位卡（每行不足 3 张时补齐）───────────────────────────── */
+
+function PlaceholderCard() {
+  return (
+    <div className={css.agentAddCard} style={{ minHeight: 143 }}>
+      <Ghost size={16} style={{ color: 'var(--dsw-alias-label-dimmed)' }} />
+      <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-dimmed)' }}>虚位以待</span>
+    </div>
+  )
+}
+
 /* ── 主 section ──────────────────────────────────────────────────────── */
 
 function AgentPresetsSection() {
@@ -627,7 +638,7 @@ function AgentPresetsSection() {
               <AgentCard key={p.id} profile={p} onClick={() => setEditing(p)} />
             ))}
             {row.length < 3 && Array.from({ length: 3 - row.length }, (_, i) => (
-              <div key={`spacer-${i}`} style={{ flex: 1, minWidth: 0 }} />
+              <PlaceholderCard key={`ph-${i}`} />
             ))}
           </div>
         ))}
