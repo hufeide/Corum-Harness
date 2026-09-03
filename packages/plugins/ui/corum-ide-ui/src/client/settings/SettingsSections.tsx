@@ -822,64 +822,54 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
     )
   }
 
+  const previewProfile: AgentProfileSummary = {
+    id: draft.name || 'new-agent',
+    ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
+    ...(draft.title !== '' ? { title: draft.title } : {}),
+    ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
+    ...(draft.experience !== '' ? { experience: draft.experience } : {}),
+    ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
+    prompt: draft.prompt,
+    model: { provider: draft.provider, model: draft.model },
+    skills: draft.skills,
+    mcpServers: draft.mcpServers,
+    terminal: { mode: draft.terminal },
+    version: 1,
+    trust: draft.trust,
+    source: 'corum',
+  }
+
   return (
     <div className={css.editPageLayout}>
-      {/* 左栏：返回 + 名片预览 + 底部删除 */}
-      <div className={css.editPreviewCol}>
+      {/* 返回行 */}
+      <div style={{ width: '100%' }}>
         <button type="button" className={css.backBtn} onClick={onBack}>
           <ChevronLeft size={14} />返回 Agent 预设
         </button>
-        <AgentCard profile={{
-          id: draft.name || 'new-agent',
-          ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
-          ...(draft.title !== '' ? { title: draft.title } : {}),
-          ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
-          ...(draft.experience !== '' ? { experience: draft.experience } : {}),
-          ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
-          prompt: draft.prompt,
-          model: { provider: draft.provider, model: draft.model },
-          skills: draft.skills,
-          mcpServers: draft.mcpServers,
-          terminal: { mode: draft.terminal },
-          version: 1,
-          trust: draft.trust,
-          source: 'corum',
-        }} onClick={() => {}} />
-        <div style={{ flex: 1 }} />
-        {!isNew && (
-          <button type="button" className={css.btnAdd} style={{ borderColor: 'var(--dsw-alias-state-error-primary)', color: 'var(--dsw-alias-state-error-primary)' }} onClick={() => setDeleting(true)}>
-            删除此预设
-          </button>
-        )}
       </div>
 
-      {/* 右栏：表单 */}
-      <div className={css.editFormCol}>
-        {/* 1. 基本信息 */}
-        <div className={css.formGroup}>
+      {/* 顶部一排：基本信息（左）+ 名片预览（右） */}
+      <div style={{ display: 'flex', gap: 20, width: '100%' }}>
+        {/* 左：基本信息 */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div className={css.formGroupTitle}>基本信息</div>
-          <div className={css.avatarRow}>
-            <div className={css.avatarCol}>
-              <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
-                {draft.avatar !== ''
-                  ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
-                  : <Upload size={22} className={css.avatarIcon} />}
-              </div>
-              <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
-              <div className={css.avatarActions}>
-                <button type="button" className={css.btnUpload} onClick={() => fileRef.current?.click()}><Upload size={11} />上传</button>
-                <button type="button" className={css.btnAiGen} disabled title="即将上线"><Sparkles size={11} />AI 生成</button>
-              </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button" style={{ cursor: 'pointer' }}>
+              {draft.avatar !== ''
+                ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
+                : <Upload size={22} className={css.avatarIcon} />}
             </div>
-            <div className={css.formCols}>
-              <div className={css.formCol}>
-                <label className={css.fieldLabel}>预设 ID</label>
-                <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
-              </div>
-              <div className={css.formCol}>
-                <label className={css.fieldLabel}>昵称</label>
-                <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
-              </div>
+            <span className={css.hintText}>点击上传头像</span>
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
+          <div className={css.formCols}>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>预设 ID</label>
+              <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
+            </div>
+            <div className={css.formCol}>
+              <label className={css.fieldLabel}>昵称</label>
+              <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
             </div>
           </div>
           <div className={css.formCols}>
@@ -892,35 +882,25 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
               <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} />
             </div>
           </div>
-          <label className={css.fieldLabel}>一句话简介（名片上展示的「擅长什么」）</label>
-          <input className={css.fieldInput} value={draft.experience === '' && draft.prompt === '' ? '' : promptToMotto(draft.prompt)} readOnly disabled title="由提示词首行自动生成" />
         </div>
 
-        {/* 2. 名片履历 */}
-        <div className={css.formGroup}>
-          <div className={css.formGroupTitle}>名片履历（可选，手动编辑；也可由 Agent 运行情况自动汇总）</div>
-          <label className={css.fieldLabel}>经验说明</label>
-          <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
-          <div className={css.expQuickRow}>
-            {EXP_QUICK.map(q => (
-              <button
-                key={q}
-                type="button"
-                className={css.expQuickPill}
-                onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
-              >+ {q}</button>
-            ))}
-          </div>
+        {/* 右：名片预览 */}
+        <div style={{ flex: 'none', width: 280, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className={css.formGroupTitle}>名片预览</div>
+          <AgentCard profile={previewProfile} onClick={() => {}} />
         </div>
+      </div>
 
-        {/* 3. 继承自 */}
+      {/* 下方全宽表单 */}
+      <div className={css.editFormCol}>
+        {/* 继承自 */}
         <div className={css.formGroup}>
           <div className={css.formGroupTitle}>继承自</div>
           <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} />
           <p className={css.hintText}>将继承 {draft.baseMode} 的系统提示词与 persona</p>
         </div>
 
-        {/* 4. 提示词 */}
+        {/* 提示词 */}
         <div className={css.formGroup}>
           <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>提示词</span>
@@ -935,7 +915,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           </div>
         </div>
 
-        {/* 5. 模型 */}
+        {/* 模型 */}
         <div className={css.formGroup}>
           <div className={css.formGroupTitle}>模型</div>
           <div className={css.formCols}>
@@ -956,7 +936,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           </div>
         </div>
 
-        {/* 6. 技能 + MCP */}
+        {/* 技能 + MCP */}
         <div className={css.formGroup}>
           <div className={css.formCols}>
             <div className={css.formCol}>
@@ -985,7 +965,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           </div>
         </div>
 
-        {/* 7. 终端 + 记忆 */}
+        {/* 终端 + 记忆 */}
         <div className={css.formGroup}>
           <div className={css.formCols}>
             <div className={css.formCol}>
@@ -1008,6 +988,9 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
             <span className={css.trustBadge}>{draft.trust}</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            {!isNew && (
+              <GlassButton variant="danger" onClick={() => setDeleting(true)}>删除</GlassButton>
+            )}
             <GlassButton onClick={onBack}>取消</GlassButton>
             <GlassButton variant="primary" onClick={() => void doSave()} disabled={busy}>{busy ? '保存中…' : isNew ? '创建' : '保存'}</GlassButton>
           </div>
