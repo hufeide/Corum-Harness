@@ -19,6 +19,7 @@ import { Badge } from './Badge.tsx'
 import { KbdKey } from './KbdKey.tsx'
 import { ColorChips } from './ColorChips.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { useDeveloperMode, setDeveloperMode } from './developer-mode.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from './SettingsSections.module.css'
 
@@ -772,6 +773,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
   const [promptZoom, setPromptZoom] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const sectionNav = useSectionNav()
+  const developerMode = useDeveloperMode()
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   // 模型目录（corumAgent/listModels 动态加载；失败用兜底静态目录）。
@@ -1032,12 +1034,19 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
       {/* 下方单一纵向表单列（设计稿 GHBvv formCol: gap 4；整页滚动流，不再局部滚动）。
           顺序 = 设计稿 formCol.children：继承 → 工作经验 → 人格 → 提示词 → 模型 → 技能+MCP → 终端/记忆 → 页脚。 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
-        {/* 继承自（设计稿 GHBvv g-inherit: label + sel + hint，无组标题） */}
-        <div className={css.formGroup} style={{ gap: 3 }}>
-          <label className={css.fieldLabel}>继承自</label>
-          <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} variant="fill" />
-          <p className={css.fieldHint}>将继承「{baseModeLabel(draft.baseMode)}」的系统提示词与 persona</p>
-        </div>
+        {/* 继承自（设计稿 GHBvv g-inherit：仅开发者模式显示；非开发者模式固定
+            继承标准模式并覆盖其 persona，不展示该选项） */}
+        {developerMode && (
+          <div className={css.formGroup} style={{ gap: 3 }}>
+            <label className={css.fieldLabel}>继承自</label>
+            <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} variant="fill" />
+            <p className={css.fieldHint}>
+              {draft.baseMode === 'standard'
+                ? '标准模式将覆盖官方身份模板，使用你的人格与提示词'
+                : `将继承「${baseModeLabel(draft.baseMode)}」的系统提示词与 persona`}
+            </p>
+          </div>
+        )}
 
         {/* 工作经验（设计稿 GHBvv g-exp F73NUB：只读，基于 Agent 记忆自动总结；
             后续在「记忆管理」中维护，此处不可编辑） */}
@@ -2173,6 +2182,7 @@ function ImportSkillDialog({ onClose, onImported, rpc }: {
 /* ── 高级 ──────────────────────────────────────────────────────────── */
 
 function AdvancedSection() {
+  const developerMode = useDeveloperMode()
   return (
     <>
       <SettingGroup title="配置文件">
@@ -2190,8 +2200,8 @@ function AdvancedSection() {
         <SettingRow label="打开日志目录" desc="在文件管理器中显示日志目录">
           <GlassButton>打开</GlassButton>
         </SettingRow>
-        <SettingRow label="开发者模式" desc="启用调试面板与详细日志" divider={false}>
-          <Switch checked={false} onChange={() => {}} />
+        <SettingRow label="开发者模式" desc="开启后 Agent 预设显示「继承自」，可编排非标准模式" divider={false}>
+          <Switch checked={developerMode} onChange={v => setDeveloperMode(v)} />
         </SettingRow>
       </SettingGroup>
     </>

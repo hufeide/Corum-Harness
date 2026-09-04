@@ -250,12 +250,20 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * @returns 两份文件文本（agent.cordis.yml + preset.yml）。
  */
 export function compilePreset(profile: AgentProfile): CompiledPreset {
-  // persona：基础模式 persona + 用户自定义提示词叠加
+  // persona 拼接（语义按 baseMode 分覆盖/继承）：
+  // - baseMode === 'standard'（用户自建 Agent，默认）：**覆盖**官方 coding-agent 模板，
+  //   persona = 人格 + 自定义提示词（不含 "You are a coding agent..."）。
+  // - 其它模式（开发者编排，ptc/minimal/cordis）：**继承**该模式模板，
+  //   persona = 模式模板 + 人格 + 自定义提示词。
   const basePersona = BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard
   const isComplete = BASE_MODE_COMPLETE.has(profile.baseMode)
-  const personaText = profile.prompt.trim().length > 0
-    ? `${basePersona}\n\n${profile.prompt}`
-    : basePersona
+  const inheritBase = profile.baseMode !== 'standard'
+  const personaParts: string[] = []
+  if (inheritBase) personaParts.push(basePersona)
+  if (typeof profile.persona === 'string' && profile.persona.trim().length > 0) personaParts.push(profile.persona.trim())
+  if (profile.prompt.trim().length > 0) personaParts.push(profile.prompt.trim())
+  // 全部为空时回退 basePersona（保证 persona 非空、模型有基本身份）。
+  const personaText = personaParts.length > 0 ? personaParts.join('\n\n') : basePersona
 
   const rows: CordisRow[] = [
     {
