@@ -29,6 +29,7 @@ import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-con
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { SectionNavContext } from './settings/SettingsSections.tsx'
+import { OPEN_SETTINGS_SECTION_EVENT } from './service.ts'
 import css from './SettingsShell.module.css'
 
 /* ── 导航分组定义（设计稿 nav: secA/B/C/D/E/F）───────────────────────── */
@@ -202,9 +203,9 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, t }: Pan
           </div>
           <div className={css.headerDivider} />
           <div className={css.body}>
-            {/* section 切换函数经 context 下发（如 Agent 预设 footer「记忆管理」→ memory），
-                不走 slot owner props（slot 契约不含 openSection）。 */}
-            <SectionNavContext.Provider value={onSelect}>
+            {/* section 操作面（openSection 切换 + close 关面板）经 context 下发，
+                不走 slot owner props（slot 契约不含这些）。 */}
+            <SectionNavContext.Provider value={{ openSection: onSelect, close: onClose }}>
               {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
             </SectionNavContext.Provider>
           </div>
@@ -234,6 +235,17 @@ export function SettingsShell(props: SettingsRootComponentProps) {
     setActiveId(id)
     setOpen(true)
   }, [])
+
+  // 监听壳「打开设置某 section」事件（如插件中心入口 → 扩展面板）。
+  // OPEN_SETTINGS_SECTION_EVENT 是一次性触发信号（detail=section id），合法 window 用法。
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const id = (e as CustomEvent<string>).detail
+      if (typeof id === 'string' && id !== '') openSection(id)
+    }
+    window.addEventListener(OPEN_SETTINGS_SECTION_EVENT, handler)
+    return () => { window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, handler) }
+  }, [openSection])
 
   const rows = useSections(s => s)
   const onboardingSteps = useOnboardingSteps(s => s)

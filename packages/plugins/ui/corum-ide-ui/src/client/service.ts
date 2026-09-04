@@ -21,6 +21,13 @@ export type SidebarMode = 'task' | 'project'
 export const OPEN_PLUGIN_MANAGER_EVENT = 'corum:open-plugin-manager'
 
 /**
+ * 「打开设置中心某 section」触发事件名（壳 openSettingsSection 广播，SettingsShell
+ * 监听并 openSection）。插件中心入口改版后：点插件中心 → 打开设置「扩展面板」。
+ * 一次性触发信号（detail 带 section id），同 bundle 经 window CustomEvent 传递。
+ */
+export const OPEN_SETTINGS_SECTION_EVENT = 'corum:open-settings-section'
+
+/**
  * uSES 兼容的可观测快照源（组件侧经 InjectFace 绑定为选择器 Hook）。
  * getSnapshot 返回的引用在模式不变时保持稳定。
  */
@@ -85,11 +92,15 @@ export interface ILayout {
    */
   openNewTaskForm(): void
   /**
-   * 打开插件中心（FloatingLayer modal）。壳自身不实现面板——它经
-   * `pluginManager/open` 事件广播，由 corum-ide-plugin-manager-ui 插件
-   * 监听并打开自己的 FloatingLayer 面板（业务 chrome 拆出壳，§3）。
+   * 打开插件中心（2026-09 改版）：不再开独立浮层，改为打开设置中心「扩展面板」
+   * section（默认停插件市场 tab）。
    */
   openPluginManager(): void
+  /**
+   * 打开设置中心某 section：广播 OPEN_SETTINGS_SECTION_EVENT，SettingsShell 监听后
+   * openSection(id)（打开面板并选中该 section）。
+   */
+  openSettingsSection(id: string): void
   /**
    * 网格 hidden 槽位集合（uSES getSnapshot 契约，稳定引用）。
    * 插件中心视图管理的读面（壳内 AppFrame attach 的 grid actions 提供）。
@@ -173,13 +184,22 @@ export class LayoutController implements ILayout {
   }
 
   /**
-   * 插件中心触发：壳不持面板，经 window CustomEvent 广播，由
-   * corum-ide-plugin-manager-ui 插件监听并打开自己的 FloatingLayer 面板。
-   * 事件是一次性触发信号（非共享可变状态），合法 window 用法。
+   * 插件中心触发：广播 OPEN_PLUGIN_MANAGER_EVENT，由 corum-ide-plugin-manager-ui
+   * 插件监听并打开插件市场浮层（搜索/精选/卡片网格）。一次性触发信号，合法 window 用法。
    */
   openPluginManager(): void {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(OPEN_PLUGIN_MANAGER_EVENT))
+    }
+  }
+
+  /**
+   * 打开设置中心某 section：广播 OPEN_SETTINGS_SECTION_EVENT（detail=section id），
+   * SettingsShell 监听后 openSection(id)（打开面板并选中该 section）。
+   */
+  openSettingsSection(id: string): void {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_SECTION_EVENT, { detail: id }))
     }
   }
 

@@ -2324,3 +2324,38 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   font-weight: 600;
   color: var(--dsw-alias-label-dimmed);
 }
+
+/* ═══ 插件管理（一排两卡 + 详情）═══ */
+.pluginCardGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pluginCard {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  border-radius: 12px; border: 1px solid var(--corum-border);
+  background: var(--corum-bg-tint); cursor: pointer; transition: border-color .15s;
+}
+.pluginCard:hover { border-color: var(--corum-brand); }
+.pluginCardHead { display: flex; align-items: flex-start; gap: 10px; }
+.pluginCardIcon { width: 40px; height: 40px; border-radius: 10px; flex: none; object-fit: cover; }
+.pluginCardNameCol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pluginCardName { font-size: 13px; font-weight: 600; color: var(--corum-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pluginCardVer { font-size: 10px; color: var(--corum-text-secondary); }
+.pluginCardDesc {
+  font-size: 11px; color: var(--corum-text-secondary); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: 33px;
+}
+.pluginCardFoot { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--corum-border); }
+.pluginStateDot { width: 6px; height: 6px; border-radius: 3px; background: var(--corum-text-secondary); flex: none; opacity: .4; }
+.pluginStateOn { background: var(--corum-brand); opacity: 1; }
+.pluginStateText { flex: 1; font-size: 11px; color: var(--corum-text-secondary); }
+
+.pluginDetail { display: flex; flex-direction: column; gap: 14px; }
+.pluginDetailHead { display: flex; align-items: center; gap: 12px; }
+.pluginDetailIcon { width: 48px; height: 48px; border-radius: 12px; flex: none; object-fit: cover; }
+.pluginDetailNameCol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pluginDetailName { font-size: 15px; font-weight: 600; color: var(--corum-text-primary); }
+.pluginDetailMeta { font-size: 11px; color: var(--corum-text-secondary); }
+.pluginChangelog {
+  border-radius: 10px; border: 1px solid var(--corum-border); background: var(--corum-bg-tint);
+  padding: 10px 12px; font-size: 12px; color: var(--corum-text-secondary); line-height: 1.6;
+}
+.pluginDetailActions { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--corum-border); }
