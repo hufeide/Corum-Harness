@@ -39,7 +39,7 @@ import { isValidProfileId, isValidAgentDimension } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
-import { SMOKE_PROMPT, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID, TASK_PROJECT_ID } from './builtin-profiles.ts'
+import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID, TASK_PROJECT_ID } from './builtin-profiles.ts'
 import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './event-projection.ts'
 import { scanSkills } from './skill-catalog.ts'
 import { corumHome } from './home.ts'
@@ -236,6 +236,10 @@ export class CorumAgentService extends TypertRemoteService {
 
   constructor(ctx: Context) {
     super(ctx, 'corumAgent')
+    // 行业角色预置（25 个岗位）：幂等确保存在——system profile 的 prompt 随
+    // 版本演进刷新，用户自建/已改的 user profile 不动。服务启动时一次性注册，
+    // 让新建任务表单的 Agent 下拉与名片页立即可见全量预置角色。
+    ensureBuiltinRoleProfiles()
     /**
      * 用户发出第一条真实消息时，兑现待定的访问权限档位。
      *
