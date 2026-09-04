@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useRef, useContext, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, ArrowLeft, Bot, Cpu, Search, Check, Box, Ghost, Maximize2, Minimize2, Layers, Globe, Database } from 'lucide-react'
+import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, ArrowLeft, Bot, Cpu, Search, Check, Box, Ghost, Maximize2, Minimize2, Layers, Globe, Database, Lock, Brain } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { SettingRow } from './SettingRow.tsx'
 import { SelectField } from './SelectField.tsx'
@@ -29,6 +29,16 @@ export const CorumRpcContext = createContext<CorumRpcCall | null>(null)
 /** 取出 RPC 调用函数；未 provide 时返回 null（组件降级为静态占位）。 */
 function useCorumRpc(): CorumRpcCall | null {
   return useContext(CorumRpcContext)
+}
+
+/* ── section 间跳转上下文（SettingsShell 经 owner props → Host 下发 openSection）── */
+
+/** 设置壳的 section 切换函数（如 Agent 预设 footer「记忆管理」→ memory section）。 */
+export const SectionNavContext = createContext<((id: string) => void) | null>(null)
+
+/** 取出 section 切换函数；未 provide 时返回 null（跳转按钮降级隐藏）。 */
+function useSectionNav(): ((id: string) => void) | null {
+  return useContext(SectionNavContext)
 }
 
 /* ── 通用玻璃按钮（设计稿 btn: glass-2, radius 13, padding [9,16]）────── */
@@ -424,7 +434,7 @@ function toolIcon(name: string, size: number, className?: string) {
 
 /* ── Agent 名片卡 ─────────────────────────────────────────────────────── */
 
-function AgentCard({ profile, onClick }: { profile: AgentProfileSummary; onClick: () => void }) {
+function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSummary; onClick: () => void; hideChevron?: boolean }) {
   const dim = inferDimension(profile)
   return (
     <div className={css.agentCard} onClick={onClick} role="button">
@@ -441,7 +451,7 @@ function AgentCard({ profile, onClick }: { profile: AgentProfileSummary; onClick
           </div>
           <span className={css.agentRole}>{profile.title ?? 'Agent'}</span>
         </div>
-        <ChevronRight size={14} className={css.agentChevron} />
+        {hideChevron !== true && <ChevronRight size={14} className={css.agentChevron} />}
       </div>
       <span className={css.agentMotto}>{promptToMotto(profile.prompt)}</span>
       {/* 经验行固定占位（设计稿 exp 行；无经验时留空占位保证名片等高） */}
@@ -746,7 +756,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
   const [skillBindOpen, setSkillBindOpen] = useState(false)
   const [mcpBindOpen, setMcpBindOpen] = useState(false)
   const [promptZoom, setPromptZoom] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
+  const sectionNav = useSectionNav()
   const fileRef = useRef<HTMLInputElement | null>(null)
 
   // 模型目录（corumAgent/listModels 动态加载；失败用兜底静态目录）。
@@ -825,6 +836,19 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
     e.target.value = ''
   }
 
+  // AI 生成头像（接通）：按岗位/昵称生成方形头像，走项目 text_to_image 图片 API。
+  const [aiGenBusy, setAiGenBusy] = useState(false)
+  const handleAiGenAvatar = () => {
+    if (aiGenBusy) return
+    setAiGenBusy(true)
+    const subject = (draft.title || draft.nickname || draft.name || 'AI agent').trim()
+    const prompt = encodeURIComponent(
+      `minimalist flat vector avatar icon for an AI assistant, role: ${subject}, soft gradient glass style, centered, clean background, high quality`,
+    )
+    set('avatar', `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${prompt}&image_size=square`)
+    setAiGenBusy(false)
+  }
+
   const doSave = async () => {
     const id = draft.name.trim().toLowerCase().replace(/\s+/g, '-')
     if (id === '') { setError('预设 ID 不能为空'); return }
@@ -871,11 +895,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
-      setDeleting(false)
     }
   }
-
-  const EXP_QUICK = ['参与 N 个项目', '完成 N 次任务', '已服务 N 天']
 
   // Esc 缩小（设计稿 sBqOd：「Esc 缩小 · ⌘Z 撤销润色」）。
   // ⚠️ 必须用 capture 阶段：设置壳 dialog 的 bubble 阶段 Esc 处理器会关闭整个设置弹窗，
@@ -944,18 +965,24 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
       {/* 顶部一排：基本信息（左）+ 名片预览（右） */}
       <div style={{ display: 'flex', gap: 20, width: '100%' }}>
-        {/* 左：基本信息（设计稿 GHBvv basicCol: gap 8 + avatarRow gap 18，纵向居中） */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* 左：基本信息（设计稿 GHBvv basicCol: gap 4 + avatarRow gap 18，纵向居中） */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div className={css.formGroupTitle}>基本信息</div>
           <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
-            {/* avatar：88 圆形（仅上传入口，去上传提示/AI 生成，随设计稿微调） */}
-            <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
-              {draft.avatar !== ''
-                ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
-                : <Upload size={32} className={css.avatarIcon} />}
+            {/* avatarCol：88 头像 + AI 生成钮 + 上传提示（纵向 gap 4，居中；AI 生成接通） */}
+            <div className={css.avatarBlock}>
+              <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
+                {draft.avatar !== ''
+                  ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
+                  : <Upload size={32} className={css.avatarIcon} />}
+              </div>
+              <button type="button" className={css.btnAiGen} onClick={handleAiGenAvatar}>
+                <Sparkles size={12} className={css.btnPolishIcon} />AI 生成
+              </button>
+              <span className={css.avatarHint}>点击上传头像</span>
             </div>
-            {/* fieldsBlock：两列字段（组内 gap 4） */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {/* fieldsBlock：两列字段（组内 gap 14，纵向居中） */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'center' }}>
               <div className={css.formCols}>
                 <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>预设 ID</label>
@@ -981,37 +1008,34 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
         </div>
 
-        {/* 右：名片预览（设计稿 prevCol: width 280, gap 4） */}
+        {/* 右：名片预览（设计稿 prevCol: width 280, gap 4；预览卡 chev enabled:false，隐藏箭头） */}
         <div style={{ flex: 'none', width: 280, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div className={css.formGroupTitle}>名片预览</div>
-          <AgentCard profile={previewProfile} onClick={() => {}} />
+          <AgentCard profile={previewProfile} onClick={() => {}} hideChevron />
         </div>
       </div>
 
-      {/* 下方单一纵向表单列（设计稿 GHBvv formCol: gap 14；整页滚动流，不再局部滚动）。
-          顺序 = 设计稿 formCol.children：记忆摘要 → 继承 → 人格 → 提示词 → 模型 → 技能+MCP → 终端/记忆 → 页脚。 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%' }}>
-        {/* 记忆摘要（整宽；用户要求占满整行而非嵌在 280 预览列内） */}
-        <div className={css.formGroup}>
-          <div className={css.formGroupTitle}>记忆摘要</div>
-          <label className={css.fieldLabelSm}>经验说明</label>
-          <input className={css.fieldInputSm} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
-          <div className={css.expQuickRow}>
-            {EXP_QUICK.map(q => (
-              <button
-                key={q}
-                type="button"
-                className={css.expQuickPill}
-                onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
-              >+ {q}</button>
-            ))}
-          </div>
-        </div>
+      {/* 下方单一纵向表单列（设计稿 GHBvv formCol: gap 4；整页滚动流，不再局部滚动）。
+          顺序 = 设计稿 formCol.children：继承 → 工作经验 → 人格 → 提示词 → 模型 → 技能+MCP → 终端/记忆 → 页脚。 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
         {/* 继承自（设计稿 GHBvv g-inherit: label + sel + hint，无组标题） */}
         <div className={css.formGroup} style={{ gap: 3 }}>
           <label className={css.fieldLabel}>继承自</label>
           <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} variant="fill" />
           <p className={css.fieldHint}>将继承 {draft.baseMode} 的系统提示词与 persona</p>
+        </div>
+
+        {/* 工作经验（设计稿 GHBvv g-exp F73NUB：只读，基于 Agent 记忆自动总结；
+            后续在「记忆管理」中维护，此处不可编辑） */}
+        <div className={css.formGroup} style={{ gap: 3 }}>
+          <div className={css.formGroupTitle}>工作经验</div>
+          <div className={css.expReadBox}>
+            <span className={css.expReadText}>{draft.experience || '暂无记忆摘要。'}</span>
+          </div>
+          <div className={css.expNoteRow}>
+            <Lock size={11} className={css.expNoteIcon} />
+            <span className={css.expNoteText}>基于 Agent 记忆自动总结 · 不可编辑</span>
+          </div>
         </div>
 
         {/* 人格设置（设计稿 GHBvv g-persona：AI 润色在文本域内底部行，与字数统计同行） */}
@@ -1153,17 +1177,39 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
         {error !== null && <p className={css.hintText}>{error}</p>}
 
-        {/* footer（设计稿 GHBvv footer：左信任级 badge，右取消/保存两钮——删除走
-            DeletePresetDialog 独立入口，footer 不放删除钮） */}
-        <div className={css.formGroup} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10 }}>
+        {/* footer（设计稿 GHBvv footer s8r0w：左 信任级 badge + 记忆管理(brain)，
+            右 删除(error)/取消/保存；删除走内联二次确认弹窗 confirm-pop） */}
+        <div className={css.formGroup} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, position: 'relative' }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <span className={css.trustLabel}>信任级</span>
             <span className={css.trustBadge}>{draft.trust}</span>
+            {sectionNav !== null && (
+              <button type="button" className={css.btnMemoryNav} onClick={() => sectionNav('memory')}>
+                <Brain size={14} className={css.btnMemoryNavIcon} />记忆管理
+              </button>
+            )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {!isNew && (
+              <button type="button" className={css.btnDeleteGhost} onClick={() => setConfirmDel(true)} disabled={busy}>
+                <Trash2 size={13} className={css.btnDeleteIcon} />删除
+              </button>
+            )}
             <GlassButton onClick={onBack}>取消</GlassButton>
             <GlassButton variant="primary" onClick={() => void doSave()} disabled={busy}>{busy ? '保存中…' : isNew ? '创建' : '保存'}</GlassButton>
           </div>
+
+          {/* 内联二次确认弹窗（设计稿 DKRwC confirm-pop：absolute, glass-1, radius 12, 外阴影） */}
+          {confirmDel && profile !== undefined && (
+            <div className={css.confirmPop}>
+              <div className={css.confirmPopTitle}>删除该预设？</div>
+              <div className={css.confirmPopDesc}>预设删除后不可恢复，此操作需要二次确认。</div>
+              <div className={css.confirmPopRow}>
+                <button type="button" className={css.confirmPopCancel} onClick={() => setConfirmDel(false)} disabled={busy}>取消</button>
+                <button type="button" className={css.confirmPopDel} onClick={() => { setConfirmDel(false); void doDelete() }} disabled={busy}>确认删除</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1182,14 +1228,6 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           bound={draft.mcpServers}
           onClose={() => setMcpBindOpen(false)}
           onConfirm={servers => { set('mcpServers', servers); setMcpBindOpen(false) }}
-        />
-      )}
-      {deleting && profile !== undefined && (
-        <DeletePresetDialog
-          profile={profile}
-          rpc={rpc}
-          onClose={() => setDeleting(false)}
-          onDeleted={() => { setDeleting(false); onSaved() }}
         />
       )}
     </div>
@@ -2443,46 +2481,6 @@ function McpBindDialog({ rpc, bound, onClose, onConfirm }: {
             <GlassButton onClick={onClose}>取消</GlassButton>
             <GlassButton variant="primary" onClick={() => onConfirm([...checked])}>授权 {checked.size} 个服务</GlassButton>
           </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  )
-}
-
-/* ── 删除预设确认对话框 ──────────────────────────────────────────────── */
-
-function DeletePresetDialog({ profile, rpc, onClose, onDeleted }: {
-  profile: AgentProfileSummary
-  rpc: CorumRpcCall
-  onClose: () => void
-  onDeleted: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const doDelete = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await rpc('corumAgent', 'deleteProfile', { id: profile.id })
-      onDeleted()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return createPortal(
-    <div className={css.confirmOverlay} onClick={onClose}>
-      <div className={css.confirmDialog} onClick={e => e.stopPropagation()}>
-        <span className={css.confirmTitle}>删除预设</span>
-        <p className={css.confirmDesc}>确定要删除预设「{profile.nickname ?? profile.id}」吗？此操作不可撤销。</p>
-        {error !== null && <p className={css.confirmWarn}>{error}</p>}
-        <div className={css.confirmActions}>
-          <GlassButton onClick={onClose}>取消</GlassButton>
-          <GlassButton variant="danger" onClick={() => void doDelete()} disabled={busy}>{busy ? '删除中…' : '删除'}</GlassButton>
         </div>
       </div>
     </div>,

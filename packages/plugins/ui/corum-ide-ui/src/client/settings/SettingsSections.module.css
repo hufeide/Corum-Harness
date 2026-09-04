@@ -1324,6 +1324,181 @@
   gap: 3px;
 }
 
+/* ── 工作经验只读块（设计稿 GHBvv g-exp F73NUB）────────────────────── */
+/* box: glass-2, radius 10, padding [7,10]，内 11px secondary 长文 */
+.expReadBox {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.expReadText {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.5;
+}
+
+/* note-row：lock 11px + 「基于 Agent 记忆自动总结 · 不可编辑」10px tertiary */
+.expNoteRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.expNoteIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.expNoteText {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* AI 生成头像钮（设计稿 miDfl: glass-2, radius 7, padding [4,12], sparkles brand-text） */
+.btnAiGen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  padding: 4px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.btnAiGen:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+/* 记忆管理跳转钮（设计稿 o81rr7: ghost, brain 14 + 12px secondary, padding [6,10]） */
+.btnMemoryNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.btnMemoryNav:hover {
+  background: var(--corum-glass-2);
+}
+
+.btnMemoryNavIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 删除幽灵钮（设计稿 m5TDsm: state-error 描边+文字+trash, radius 10, padding [7,14]） */
+.btnDeleteGhost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--dsw-alias-label-error, var(--corum-state-error));
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-error, var(--corum-state-error));
+}
+
+.btnDeleteGhost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btnDeleteIcon {
+  flex: none;
+  color: var(--dsw-alias-label-error, var(--corum-state-error));
+}
+
+/* 内联二次确认弹窗（设计稿 DKRwC confirm-pop: absolute, glass-1, radius 12, 外阴影） */
+.confirmPop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 224px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-1);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+  z-index: 20;
+}
+
+.confirmPopTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.confirmPopDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.4;
+}
+
+.confirmPopRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.confirmPopCancel {
+  padding: 5px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+}
+
+.confirmPopDel {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-label-error, var(--corum-state-error));
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--corum-label-on-brand);
+}
+
 /* 编辑页模型 pair（设计稿 CI0hN: 供应商/模型两列并排，gap 10） */
 .formColsStretch {
   display: flex;

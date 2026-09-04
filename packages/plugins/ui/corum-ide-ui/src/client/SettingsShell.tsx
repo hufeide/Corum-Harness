@@ -28,6 +28,7 @@ import {
 import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-contract.ts'
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import { SectionNavContext } from './settings/SettingsSections.tsx'
 import css from './SettingsShell.module.css'
 
 /* ── 导航分组定义（设计稿 nav: secA/B/C/D/E/F）───────────────────────── */
@@ -201,7 +202,11 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, t }: Pan
           </div>
           <div className={css.headerDivider} />
           <div className={css.body}>
-            {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
+            {/* section 切换函数经 context 下发（如 Agent 预设 footer「记忆管理」→ memory），
+                不走 slot owner props（slot 契约不含 openSection）。 */}
+            <SectionNavContext.Provider value={onSelect}>
+              {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
+            </SectionNavContext.Provider>
           </div>
         </div>
       </div>
