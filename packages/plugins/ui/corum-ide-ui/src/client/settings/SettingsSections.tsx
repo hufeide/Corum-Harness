@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useRef, useContext, createContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, ArrowLeft, Bot, Cpu, Search, Check, Box, Ghost, Maximize2, Minimize2 } from 'lucide-react'
+import { Trash2, Star, Plug, Puzzle, Server, Plus, X, Sparkles, Upload, Package, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, ArrowLeft, Bot, Cpu, Search, Check, Box, Ghost, Maximize2, Minimize2, Layers, Globe, Database } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { SettingRow } from './SettingRow.tsx'
 import { SelectField } from './SelectField.tsx'
@@ -406,6 +406,22 @@ function inferDimension(p: AgentProfileSummary): string {
   return '研发'
 }
 
+/* 技能卡 icon 语义映射（设计稿 uC1P0：code-review→layers、research→search，默认 star） */
+function skillIcon(name: string, size: number, className?: string) {
+  const n = name.toLowerCase()
+  if (/review|audit|层/.test(n)) return <Layers size={size} className={className} />
+  if (/research|search|检索|调研/.test(n)) return <Search size={size} className={className} />
+  return <Star size={size} className={className} />
+}
+
+/* 工具（MCP）卡 icon 语义映射（设计稿 LTUPo：filesystem→database、websearch→globe） */
+function toolIcon(name: string, size: number, className?: string) {
+  const n = name.toLowerCase()
+  if (/file|fs|database|db|目录/.test(n)) return <Database size={size} className={className} />
+  if (/web|search|http|browser|网/.test(n)) return <Globe size={size} className={className} />
+  return <Server size={size} className={className} />
+}
+
 /* ── Agent 名片卡 ─────────────────────────────────────────────────────── */
 
 function AgentCard({ profile, onClick }: { profile: AgentProfileSummary; onClick: () => void }) {
@@ -428,9 +444,8 @@ function AgentCard({ profile, onClick }: { profile: AgentProfileSummary; onClick
         <ChevronRight size={14} className={css.agentChevron} />
       </div>
       <span className={css.agentMotto}>{promptToMotto(profile.prompt)}</span>
-      {profile.experience !== undefined && profile.experience !== '' && (
-        <span className={css.agentExp}>{profile.experience}</span>
-      )}
+      {/* 经验行固定占位（设计稿 exp 行；无经验时留空占位保证名片等高） */}
+      <span className={css.agentExp}>{profile.experience ?? ''}</span>
       <div className={css.agentModelRow}>
         <Cpu size={11} className={css.agentModelIcon} />
         <span className={css.agentInheritTag}>继承自 {profile.baseMode ?? (profile.source === 'official' ? profile.id : 'standard')}</span>
@@ -558,7 +573,8 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
 
 function PlaceholderCard() {
   return (
-    <div className={css.agentAddCard} style={{ minHeight: 143 }}>
+    // 占位卡与同行名片等高（flex 行 stretch），不写死高度。
+    <div className={css.agentAddCard}>
       <Ghost size={16} style={{ color: 'var(--dsw-alias-label-dimmed)' }} />
       <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-dimmed)' }}>虚位以待</span>
     </div>
@@ -757,6 +773,42 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
   const mainProviderOptions = catalog.providers
   const mainModelOptions = catalog.modelsByProvider[draft.provider] ?? FALLBACK_MODELS
+
+  // 技能目录（skillManager/listAll）：技能卡 desc 行显示技能描述（设计稿 VttzW/a0RSk）。
+  const [skillDescMap, setSkillDescMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const r = await rpc<{ skills: Array<{ name: string; description: string }> }>('skillManager', 'listAll', {})
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const s of r.skills) map[s.name] = s.description
+        setSkillDescMap(map)
+      } catch {
+        // 静默：无描述时技能卡 desc 退回版本号。
+      }
+    })()
+    return () => { cancelled = true }
+  }, [rpc])
+
+  // MCP 服务器目录（mcpManager/listServers）：工具卡 desc 行显示服务描述（设计稿 V0OOkx/cMHCe）。
+  const [mcpDescMap, setMcpDescMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const r = await rpc<{ servers: Array<{ name: string; description?: string }> }>('mcpManager', 'listServers', {})
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const s of r.servers) map[s.name] = s.description ?? ''
+        setMcpDescMap(map)
+      } catch {
+        // 静默：无描述时工具卡 desc 退回服务名。
+      }
+    })()
+    return () => { cancelled = true }
+  }, [rpc])
   const subProviderOptions = [SAME_AS_MAIN, ...catalog.providers]
   const subModelOptions = draft.subEnabled
     ? [SAME_AS_MAIN, ...(catalog.modelsByProvider[draft.subProvider] ?? FALLBACK_MODELS)]
@@ -1028,7 +1080,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
         </div>
 
         {/* 技能 + 工具（设计稿 GHBvv g-skill-mcp：双列各「2 卡网格 + 添加钮」，
-            卡片 = icon+name+tag / ver+del 头行 + desc 行） */}
+            卡片 = icon+name(+tag) / ver+del 头行 + desc 行；右列标题「工具配置」） */}
         <div className={css.formColsStretch}>
           <div className={css.formCol} style={{ gap: 4 }}>
             <div className={css.formGroupTitle}>技能配置</div>
@@ -1037,7 +1089,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                 <div key={`${s.name}-${i}`} className={css.skillCard}>
                   <div className={css.skillCardTop}>
                     <div className={css.skillCardLeft}>
-                      <Star size={13} className={css.skillCardIcon} />
+                      {skillIcon(s.name, 13, css.skillCardIcon)}
                       <span className={css.skillCardName}>{s.name}</span>
                     </div>
                     <div className={css.skillCardRight}>
@@ -1045,20 +1097,20 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                       <Trash2 size={12} className={css.listDel} onClick={() => set('skills', draft.skills.filter((_, idx) => idx !== i))} />
                     </div>
                   </div>
-                  <span className={css.skillCardDesc}>绑定版本 {s.versionId}</span>
+                  <span className={css.skillCardDesc}>{skillDescMap[s.name] || `绑定版本 ${s.versionId}`}</span>
                 </div>
               ))}
             </div>
             <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
           </div>
           <div className={css.formCol} style={{ gap: 4 }}>
-            <div className={css.formGroupTitle}>MCP 服务</div>
+            <div className={css.formGroupTitle}>工具配置</div>
             <div className={css.skillCardGrid}>
               {draft.mcpServers.slice(0, 2).map((s, i) => (
                 <div key={`${s}-${i}`} className={css.skillCard}>
                   <div className={css.skillCardTop}>
                     <div className={css.skillCardLeft}>
-                      <span className={css.listDot} />
+                      {toolIcon(s, 13, css.skillCardIcon)}
                       <span className={css.skillCardName}>{s}</span>
                       <span className={css.skillCardTag}>MCP</span>
                     </div>
@@ -1066,10 +1118,11 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                       <Trash2 size={12} className={css.listDel} onClick={() => set('mcpServers', draft.mcpServers.filter((_, idx) => idx !== i))} />
                     </div>
                   </div>
+                  <span className={css.skillCardDesc}>{mcpDescMap[s] || s}</span>
                 </div>
               ))}
             </div>
-            <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加 MCP</button>
+            <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加工具</button>
           </div>
         </div>
 
