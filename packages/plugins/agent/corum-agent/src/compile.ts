@@ -250,18 +250,25 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * @returns 两份文件文本（agent.cordis.yml + preset.yml）。
  */
 /**
- * 覆盖模式（standard）的固定结构化 persona 模板组装。
+ * corum 自定义 persona 结构化组装（四种模式统一）。
  *
- * corum 自定义生成规则：先按固定段落拼装成完整 persona 文本（含 dsh 变量占位
- * {{model}}/{{cwd}}），再交 dsh agentLoop 做变量插值与 section 装配。
- * 各段按字段非空拼接，空字段省略对应子句；全空回退 basePersona。
+ * 先按固定段落拼装成完整 persona 文本（含 dsh 变量占位 {{model}}/{{cwd}}），
+ * 再交 dsh agentLoop 做变量插值与 section 装配。各段按字段非空拼接。
  *
- * 结构：专业领域 + 岗位 + 人格 + 工作职责 + 模型/工作目录占位。
+ * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型/工作目录占位。
  * （{{memory摘要}} 段预留——待 Agent memory 机制设计完成后再接入，当前不参与组装。）
+ *
+ * 模式核心身份（modeIdentity）：仅 cordis 保留 harness 自述（「你是 harness、可读写
+ * 自己」不可丢）；standard/ptc/minimal 无独立核心身份，由结构化身份段覆盖。
+ *
+ * @param profile - AgentProfile。
+ * @param includeModeIdentity - 是否在最前拼模式核心身份（cordis 必传 true）。
  */
-function composeOverridePersona(profile: AgentProfile): string {
+function composeStructuredPersona(profile: AgentProfile, includeModeIdentity: boolean): string {
   const segments: string[] = []
-  // 身份句：专业领域 + 岗位（合并为一句）。
+  // 模式核心身份（如 cordis 的 harness 自述）。
+  if (includeModeIdentity) segments.push(BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard)
+  // 身份句：专业领域 + 岗位（合并为一句；领域限定帮助模型路由到合适专家）。
   const domain = typeof profile.domain === 'string' ? profile.domain.trim() : ''
   const title = typeof profile.title === 'string' ? profile.title.trim() : ''
   if (domain !== '' && title !== '') segments.push(`You are an expert in the ${domain} field, working as a ${title}.`)
@@ -276,35 +283,31 @@ function composeOverridePersona(profile: AgentProfile): string {
   if (profile.prompt.trim() !== '') {
     segments.push(`Your responsibilities: ${profile.prompt.trim()}`)
   }
-  // 模型 + 工作目录占位（dsh 变量，render 时插值）。
+  // 模型 + 工作目录占位（dsh 变量，render 时插值；variables 全局注册，与 complete/
+  // suppressRuntimeContext 无关，minimal 下仍有值）。
   segments.push('You are powered by the {{model}} model. Your working directory is {{cwd}}.')
   return segments.join('\n\n')
 }
 
 export function compilePreset(profile: AgentProfile): CompiledPreset {
-  // persona 拼接（语义按 baseMode 分覆盖/继承）：
-  // - baseMode === 'standard'（用户自建 Agent，默认）：**覆盖**官方 coding-agent 模板，
-  //   走 corum 固定结构化模板（composeOverridePersona）。
-  // - 其它模式（开发者编排，ptc/minimal/cordis）：**继承**该模式模板，
-  //   persona = 模式模板 + 人格 + 自定义提示词。
+  // persona 统一走 corum 结构化组装（composeStructuredPersona），四种模式均可继承：
+  // - standard/ptc：无独立模式核心身份，纯结构化身份段（standard 即用户自建覆盖）。
+  // - cordis：保留 harness 自述作为核心身份，再接结构化身份段。
+  // - minimal：complete 独占 system prompt，但仍可套结构化身份段做领域限定
+  //   （{{model}}/{{cwd}} 变量不受 complete/suppressRuntimeContext 影响，仍有值）。
   const basePersona = BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard
   const isComplete = BASE_MODE_COMPLETE.has(profile.baseMode)
-  let personaText: string
-  if (profile.baseMode === 'standard') {
-    const composed = composeOverridePersona(profile)
-    // 仅有占位行、无任何实质内容（domain/title/persona/prompt 全空）时回退 basePersona。
-    const hasSubstance =
-      (typeof profile.domain === 'string' && profile.domain.trim() !== '') ||
-      (typeof profile.title === 'string' && profile.title.trim() !== '') ||
-      (typeof profile.persona === 'string' && profile.persona.trim() !== '') ||
-      profile.prompt.trim() !== ''
-    personaText = hasSubstance ? composed : basePersona
-  } else {
-    const parts: string[] = [basePersona]
-    if (typeof profile.persona === 'string' && profile.persona.trim() !== '') parts.push(profile.persona.trim())
-    if (profile.prompt.trim() !== '') parts.push(profile.prompt.trim())
-    personaText = parts.join('\n\n')
-  }
+  const includeModeIdentity = profile.baseMode === 'cordis'
+  const composed = composeStructuredPersona(profile, includeModeIdentity)
+  // 无实质用户身份内容（domain/title/persona/prompt 全空）且非 cordis 时回退 basePersona，
+  // 避免 persona 只剩模型/目录占位行。cordis 始终保留 harness 自述，无需回退。
+  const hasSubstance =
+    includeModeIdentity ||
+    (typeof profile.domain === 'string' && profile.domain.trim() !== '') ||
+    (typeof profile.title === 'string' && profile.title.trim() !== '') ||
+    (typeof profile.persona === 'string' && profile.persona.trim() !== '') ||
+    profile.prompt.trim() !== ''
+  const personaText = hasSubstance ? composed : basePersona
 
   const rows: CordisRow[] = [
     {

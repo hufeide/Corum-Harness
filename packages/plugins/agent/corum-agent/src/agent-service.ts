@@ -706,6 +706,11 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('deleteProfile')
   deleteProfileRemote(id: string): { ok: boolean } {
     if (!isValidProfileId(id)) throw new Error(`corum-agent: invalid profile id "${id}"`)
+    // 系统级预置 Agent（trust:'system'，开发者模式编排固化）不可删除。
+    const existing = loadProfile(id)
+    if (existing?.trust === 'system') {
+      throw new Error(`corum-agent: profile "${id}" 是系统级预置 Agent，不可删除`)
+    }
     this.agents.delete(id)
     deleteProfile(id)
     return { ok: true }

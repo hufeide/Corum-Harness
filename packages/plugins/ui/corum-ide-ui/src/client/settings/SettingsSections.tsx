@@ -895,7 +895,9 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           terminal: { mode: draft.terminal },
           // 记忆开关落 memoryPolicy.scope：开='agent'（专属记忆目录），关='none'。
           memoryPolicy: { scope: draft.memoryEnabled ? 'agent' : 'none' },
-          trust: isNew ? 'user' : draft.trust,
+          // 开发者模式下编排的 Agent 固化为系统级预置（trust:'system'，不可删除）；
+          // 非开发者模式新建为 user；已有 profile 保留原 trust。
+          trust: developerMode ? 'system' : (isNew ? 'user' : draft.trust),
         },
       })
       onSaved()
@@ -1225,7 +1227,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {!isNew && (
+            {/* 系统级预置 Agent（trust:'system'）不可删除，隐藏删除钮 */}
+            {!isNew && draft.trust !== 'system' && (
               <button type="button" className={css.btnDeleteGhost} onClick={() => setConfirmDel(true)} disabled={busy}>
                 <Trash2 size={13} className={css.btnDeleteIcon} />删除
               </button>
