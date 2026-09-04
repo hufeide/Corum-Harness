@@ -553,3 +553,121 @@
   padding: 4px 10px;
   overflow-wrap: anywhere;
 }
+
+/* ── 插件市场卡片（设计稿 YU1gr：icon+名称‖安装钮右上 + 简介1行 + 版本·日期 meta）── */
+
+/* 网格：一排 2 张，gap 14（对齐设计稿 row gap 14） */
+.marketGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+.marketCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-line-1));
+  border-radius: 16px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-2));
+  box-sizing: border-box;
+}
+
+/* head：icon+名称（左）‖ 安装钮（右） */
+.marketCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.marketCardLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* icon-box：34×34，glass-2 底，radius 9，图标 brand-text（对齐设计稿） */
+.marketIconBox {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-3));
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  box-sizing: border-box;
+}
+
+.marketCardName {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 安装钮：brand 底，radius 8，padding [5,12]，11px/600（对齐设计稿右上角小钮） */
+.marketInstallBtn {
+  flex: none;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-brand-primary, var(--corum-state-running));
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--corum-label-on-brand, #fff);
+}
+
+.marketInstallBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 简介：11px secondary，1 行截断（设计稿简介收敛 1 行） */
+.marketCardDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* meta 行：版本(mono 10 tertiary) · 日期(10 dimmed)，gap 6 */
+.marketCardMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.marketVer {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.marketSep {
+  font-size: 10px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.marketDate {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+}

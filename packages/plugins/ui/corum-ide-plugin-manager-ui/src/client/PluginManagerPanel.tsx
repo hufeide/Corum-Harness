@@ -19,6 +19,7 @@ import type { ReactNode } from 'react'
 import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
   ChevronLeft, Download, Eye, EyeOff, Power, RefreshCw, Search, Trash2, X,
+  Puzzle, GitBranch, Sun, TerminalSquare, Bug, ShieldCheck, Archive, Bot,
 } from 'lucide-react'
 import {
   getAllRegisteredSlots, getSlotMeta,
@@ -62,6 +63,32 @@ interface PluginSearchResult {
   readonly version: string
   readonly description?: string
   readonly installed: boolean
+  /** 发布/最后更新日期（ISO 字符串，Host 取自 npm search 的 package.date）。 */
+  readonly date?: string
+}
+
+/** 检索卡片图标（npm 包无固定图标，按名称关键词映射语义图标，默认 Puzzle）。 */
+function searchResultIcon(name: string, size: number): ReactNode {
+  const n = name.toLowerCase()
+  if (/git|vcs|commit/.test(n)) return <GitBranch size={size} />
+  if (/theme|color|dark|light|aurora/.test(n)) return <Sun size={size} />
+  if (/terminal|shell|bash|tty|pty/.test(n)) return <TerminalSquare size={size} />
+  if (/debug|breakpoint|inspect/.test(n)) return <Bug size={size} />
+  if (/review|lint|code/.test(n)) return <ShieldCheck size={size} />
+  if (/export|archive|download|pdf/.test(n)) return <Archive size={size} />
+  if (/search|find|grep/.test(n)) return <Search size={size} />
+  if (/ai|llm|model|gpt|agent/.test(n)) return <Bot size={size} />
+  return <Puzzle size={size} />
+}
+
+/** 格式化 ISO 日期为 YYYY-MM-DD；非法输入回退原串。 */
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 /** 变更类操作的结果（restartRequired = 需重启 host 生效）。 */
@@ -400,27 +427,41 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
             </div>
             {searchError !== null && <div className={css.errorText}>检索失败：{searchError}</div>}
             {results !== null && results.length === 0 && <div className={css.dimText}>没有匹配的包</div>}
-            {results?.map((row) => (
-              <div key={row.name} className={css.row}>
-                <div className={css.rowMain}>
-                  <span className={css.rowName}>{row.name}</span>
-                  <span className={css.rowMeta}>{row.version}{row.description !== undefined && row.description !== '' ? ` · ${row.description}` : ''}</span>
-                </div>
-                {row.installed
-                  ? <span className={css.dimText}>已安装</span>
-                  : (
-                    <button
-                      type="button"
-                      className={css.iconButton}
-                      disabled={busy.has(`install:${row.name}`)}
-                      title="安装"
-                      onClick={() => { void onInstall(row.name) }}
-                    >
-                      <Download size={14} />
-                    </button>
+            {/* 插件市场卡片（设计稿 YU1gr：icon+名称‖安装钮右上 + 简介1行 + 版本·日期 meta，一排 2 张） */}
+            <div className={css.marketGrid}>
+              {results?.map((row) => (
+                <div key={row.name} className={css.marketCard}>
+                  <div className={css.marketCardHead}>
+                    <div className={css.marketCardLeft}>
+                      <div className={css.marketIconBox}>{searchResultIcon(row.name, 17)}</div>
+                      <span className={css.marketCardName}>{row.name}</span>
+                    </div>
+                    {row.installed
+                      ? <span className={css.dimText}>已安装</span>
+                      : (
+                        <button
+                          type="button"
+                          className={css.marketInstallBtn}
+                          disabled={busy.has(`install:${row.name}`)}
+                          onClick={() => { void onInstall(row.name) }}
+                        >安装</button>
+                      )}
+                  </div>
+                  {row.description !== undefined && row.description !== '' && (
+                    <span className={css.marketCardDesc}>{row.description}</span>
                   )}
-              </div>
-            ))}
+                  <div className={css.marketCardMeta}>
+                    <span className={css.marketVer}>v{row.version}</span>
+                    {row.date !== undefined && row.date !== '' && (
+                      <>
+                        <span className={css.marketSep}>·</span>
+                        <span className={css.marketDate}>{formatDate(row.date)}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </section>
         )}
 

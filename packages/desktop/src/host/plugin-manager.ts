@@ -117,6 +117,8 @@ export interface PluginSearchResult {
   readonly version: string
   readonly description?: string
   readonly installed: boolean
+  /** 发布/最后更新日期（ISO 字符串，来自 npm search 的 package.date）。 */
+  readonly date?: string
 }
 
 /** Runtime mirror: FiberState is a cross-package const enum. */
@@ -141,7 +143,7 @@ const FIBER_PHASE = {
 /** npm registry 搜索响应里我们关心的最小形状。 */
 interface NpmSearchResponse {
   objects?: Array<{
-    package?: { name?: string; version?: string; description?: string }
+    package?: { name?: string; version?: string; description?: string; date?: string }
   }>
 }
 
@@ -302,6 +304,7 @@ export class CorumPluginManager extends TypertRemoteService {
         version: pkg.version,
         ...(pkg.description !== undefined ? { description: pkg.description } : {}),
         installed: installed.has(pkg.name),
+        ...(pkg.date !== undefined ? { date: pkg.date } : {}),
       })
     }
     return { results }
