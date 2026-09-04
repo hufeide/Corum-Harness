@@ -379,6 +379,8 @@ interface AgentProfileSummary {
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
+  /** 记忆功能开关（UI 投影；持久化在 memoryPolicy.scope，'agent'=开启）。 */
+  memoryEnabled?: boolean
   version: number
   trust: string
   source: 'corum' | 'official'
@@ -510,7 +512,8 @@ interface EditDraft {
   subProvider: string
   subModel: string
   terminal: 'sandbox' | 'host'
-  memory: string
+  /** 记忆功能开关（设计稿 GHBvv「记忆功能」switch；持久化在 memoryPolicy.scope）。 */
+  memoryEnabled: boolean
   skills: SkillBinding[]
   mcpServers: string[]
   trust: 'system' | 'user'
@@ -521,7 +524,7 @@ function emptyDraft(): EditDraft {
     name: '', nickname: '', title: '', dimension: '研发', experience: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
-    terminal: 'sandbox', memory: 'agent', skills: [], mcpServers: [], trust: 'user',
+    terminal: 'sandbox', memoryEnabled: false, skills: [], mcpServers: [], trust: 'user',
   }
 }
 
@@ -544,7 +547,7 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     subProvider: p.subagentModel?.provider ?? 'deepseek-official',
     subModel: p.subagentModel?.model ?? 'deepseek-v4-flash',
     terminal: (p.terminal.mode === 'host' ? 'host' : 'sandbox') as 'sandbox' | 'host',
-    memory: 'agent',
+    memoryEnabled: p.memoryEnabled === true,
     skills: p.skills,
     mcpServers: p.mcpServers,
     trust: (p.trust === 'system' ? 'system' : 'user') as 'system' | 'user',
@@ -698,11 +701,21 @@ const TERMINAL_OPTIONS = [
   { id: 'host', label: 'host' },
 ]
 
-const MEMORY_OPTIONS = [
-  { id: 'agent', label: 'agent' },
+const DIMENSION_OPTIONS = AGENT_DIMENSIONS.map(d => ({ id: d, label: d }))
+
+/** 模型下拉兜底目录（corumAgent/listModels 不可用时；与设计稿文案一致）。 */
+const FALLBACK_PROVIDERS = [
+  { id: 'deepseek-official', label: 'deepseek-official' },
+  { id: 'pi-ai', label: 'pi-ai' },
+]
+const FALLBACK_MODELS = [
+  { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
+  { id: 'deepseek-v4', label: 'deepseek-v4' },
+  { id: 'deepseek-r1', label: 'deepseek-r1' },
 ]
 
-const DIMENSION_OPTIONS = AGENT_DIMENSIONS.map(d => ({ id: d, label: d }))
+/** 子 Agent 模型未启用时的占位项（设计稿 iUSeO「（同主 Agent）」）。 */
+const SAME_AS_MAIN = { id: '', label: '（同主 Agent）' }
 
 function EditPresetView({ profile, rpc, onBack, onSaved }: {
   profile: AgentProfileSummary | undefined
@@ -719,6 +732,35 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
   const [promptZoom, setPromptZoom] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+
+  // 模型目录（corumAgent/listModels 动态加载；失败用兜底静态目录）。
+  const [catalog, setCatalog] = useState<{ providers: typeof FALLBACK_PROVIDERS; modelsByProvider: Record<string, typeof FALLBACK_MODELS> }>(
+    { providers: FALLBACK_PROVIDERS, modelsByProvider: {} },
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const r = await rpc<{ providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }> }>('corumAgent', 'listModels', {})
+        if (cancelled) return
+        const providers = r.providers.map(p => ({ id: p.id, label: p.name !== '' ? p.name : p.id }))
+        const modelsByProvider: Record<string, typeof FALLBACK_MODELS> = {}
+        for (const p of r.providers) modelsByProvider[p.id] = p.models.map(m => ({ id: m.id, label: m.name !== '' ? m.name : m.id }))
+        setCatalog({ providers, modelsByProvider })
+      } catch {
+        // 静默用兜底目录（不阻断编辑页）。
+      }
+    })()
+    return () => { cancelled = true }
+  }, [rpc])
+
+  const mainProviderOptions = catalog.providers
+  const mainModelOptions = catalog.modelsByProvider[draft.provider] ?? FALLBACK_MODELS
+  const subProviderOptions = [SAME_AS_MAIN, ...catalog.providers]
+  const subModelOptions = draft.subEnabled
+    ? [SAME_AS_MAIN, ...(catalog.modelsByProvider[draft.subProvider] ?? FALLBACK_MODELS)]
+    : [SAME_AS_MAIN]
 
   const set = <K extends keyof EditDraft>(k: K, v: EditDraft[K]) => setDraft(prev => ({ ...prev, [k]: v }))
 
@@ -754,7 +796,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           skills: draft.skills,
           mcpServers: draft.mcpServers,
           terminal: { mode: draft.terminal },
-          memoryPolicy: { scope: 'agent' },
+          // 记忆开关落 memoryPolicy.scope：开='agent'（专属记忆目录），关='none'。
+          memoryPolicy: { scope: draft.memoryEnabled ? 'agent' : 'none' },
           trust: isNew ? 'user' : draft.trust,
         },
       })
@@ -868,21 +911,21 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div className={css.formCols}>
                 <div className={css.formCol}>
-                  <label className={css.fieldLabel}>预设 ID</label>
-                  <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
+                  <label className={css.fieldLabelSm}>预设 ID</label>
+                  <input className={css.fieldInputSm} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
                 </div>
                 <div className={css.formCol}>
-                  <label className={css.fieldLabel}>昵称</label>
-                  <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
+                  <label className={css.fieldLabelSm}>昵称</label>
+                  <input className={css.fieldInputSm} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
                 </div>
               </div>
               <div className={css.formCols}>
                 <div className={css.formCol}>
-                  <label className={css.fieldLabel}>岗位 / 职位</label>
-                  <input className={css.fieldInput} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
+                  <label className={css.fieldLabelSm}>岗位 / 职位</label>
+                  <input className={css.fieldInputSm} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
                 </div>
                 <div className={css.formCol}>
-                  <label className={css.fieldLabel}>岗位维度（名片筛选）</label>
+                  <label className={css.fieldLabelSm}>岗位维度（名片筛选）</label>
                   <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} variant="fill" />
                 </div>
               </div>
@@ -897,8 +940,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           <AgentCard profile={previewProfile} onClick={() => {}} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
             <div className={css.formGroupTitle}>记忆摘要</div>
-            <label className={css.fieldLabel}>经验说明</label>
-            <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
+            <label className={css.fieldLabelSm}>经验说明</label>
+            <input className={css.fieldInputSm} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
             <div className={css.expQuickRow}>
               {EXP_QUICK.map(q => (
                 <button
@@ -948,8 +991,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
         {/* 提示词（设计稿 GHBvv g-prompt：放大钮为 ghost 小钮；AI 润色在文本域内底部行） */}
         <div className={css.formGroup}>
-          <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>提示词</span>
+          <div className={css.formGroupTitleRow}>
+            <span className={css.formGroupTitle}>提示词</span>
             <button type="button" className={css.btnGhost} onClick={() => setPromptZoom(true)}><Maximize2 size={12} />放大</button>
           </div>
           <label className={css.fieldLabel}>自定义提示词（叠加在基础模式 persona 之上，非替代）</label>
@@ -963,82 +1006,98 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           </div>
         </div>
 
-        {/* 模型 */}
+        {/* 模型（设计稿 GHBvv g-model: model-row 横向两组，各 pair=供应商+模型两列并排） */}
         <div className={css.formGroup}>
           <div className={css.formGroupTitle}>模型</div>
-          <div className={css.formCols}>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>主 Agent</label>
+          <div className={css.formColsStretch}>
+            <div className={css.formCol} style={{ gap: 4 }}>
+              <span className={css.formSubLabel}>主 Agent</span>
               <div className={css.selectStack}>
-                <SelectField value={draft.provider} options={[{ id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => set('provider', v)} variant="fill" />
-                <SelectField value={draft.model} options={[{ id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => set('model', v)} variant="fill" />
+                <SelectField value={draft.provider} options={mainProviderOptions} onChange={v => set('provider', v)} variant="fill" />
+                <SelectField value={draft.model} options={mainModelOptions} onChange={v => set('model', v)} variant="fill" />
               </div>
             </div>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>子 Agent（可选，缺省同主 Agent）</label>
+            <div className={css.formCol} style={{ gap: 4 }}>
+              <span className={css.formSubLabel}>子 Agent（可选，缺省同主 Agent）</span>
               <div className={css.selectStack}>
-                <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} variant="fill" />
-                <SelectField value={draft.subEnabled ? draft.subModel : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} variant="fill" />
+                <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} variant="fill" />
+                <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} variant="fill" />
               </div>
             </div>
           </div>
         </div>
 
-        {/* 技能 + MCP */}
-        <div className={css.formGroup}>
-          <div className={css.formCols}>
-            <div className={css.formCol}>
-              <div className={css.formGroupTitle}>技能配置</div>
-              {draft.skills.map((s, i) => (
-                <div key={`${s.name}-${i}`} className={css.listRow}>
-                  <Star size={12} className={css.listIcon} />
-                  <span className={css.listName}>{s.name}</span>
-                  <span className={css.bindVersionText}>{s.versionId}</span>
-                  <Trash2 size={12} className={css.listDel} onClick={() => set('skills', draft.skills.filter((_, idx) => idx !== i))} />
+        {/* 技能 + 工具（设计稿 GHBvv g-skill-mcp：双列各「2 卡网格 + 添加钮」，
+            卡片 = icon+name+tag / ver+del 头行 + desc 行） */}
+        <div className={css.formColsStretch}>
+          <div className={css.formCol} style={{ gap: 4 }}>
+            <div className={css.formGroupTitle}>技能配置</div>
+            <div className={css.skillCardGrid}>
+              {draft.skills.slice(0, 2).map((s, i) => (
+                <div key={`${s.name}-${i}`} className={css.skillCard}>
+                  <div className={css.skillCardTop}>
+                    <div className={css.skillCardLeft}>
+                      <Star size={13} className={css.skillCardIcon} />
+                      <span className={css.skillCardName}>{s.name}</span>
+                    </div>
+                    <div className={css.skillCardRight}>
+                      <span className={css.skillCardVer}>{s.versionId}</span>
+                      <Trash2 size={12} className={css.listDel} onClick={() => set('skills', draft.skills.filter((_, idx) => idx !== i))} />
+                    </div>
+                  </div>
+                  <span className={css.skillCardDesc}>绑定版本 {s.versionId}</span>
                 </div>
               ))}
-              <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
             </div>
-            <div className={css.formCol}>
-              <div className={css.formGroupTitle}>MCP 服务</div>
-              {draft.mcpServers.map((s, i) => (
-                <div key={`${s}-${i}`} className={css.listRow}>
-                  <span className={css.listDot} />
-                  <span className={css.listName}>{s}</span>
-                  <Trash2 size={12} className={css.listDel} onClick={() => set('mcpServers', draft.mcpServers.filter((_, idx) => idx !== i))} />
+            <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
+          </div>
+          <div className={css.formCol} style={{ gap: 4 }}>
+            <div className={css.formGroupTitle}>MCP 服务</div>
+            <div className={css.skillCardGrid}>
+              {draft.mcpServers.slice(0, 2).map((s, i) => (
+                <div key={`${s}-${i}`} className={css.skillCard}>
+                  <div className={css.skillCardTop}>
+                    <div className={css.skillCardLeft}>
+                      <span className={css.listDot} />
+                      <span className={css.skillCardName}>{s}</span>
+                      <span className={css.skillCardTag}>MCP</span>
+                    </div>
+                    <div className={css.skillCardRight}>
+                      <Trash2 size={12} className={css.listDel} onClick={() => set('mcpServers', draft.mcpServers.filter((_, idx) => idx !== i))} />
+                    </div>
+                  </div>
                 </div>
               ))}
-              <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加 MCP</button>
             </div>
+            <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加 MCP</button>
           </div>
         </div>
 
-        {/* 终端 + 记忆 */}
-        <div className={css.formGroup}>
-          <div className={css.formCols}>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>终端模式</label>
-              <SelectField value={draft.terminal} options={TERMINAL_OPTIONS} onChange={v => set('terminal', v as 'sandbox' | 'host')} variant="fill" />
-            </div>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>记忆作用域</label>
-              <SelectField value={draft.memory} options={MEMORY_OPTIONS} onChange={v => set('memory', v)} variant="fill" />
+        {/* 终端 + 记忆（设计稿 GHBvv g-misc：终端模式 sel + 记忆功能 field(「默认关闭」+switch)） */}
+        <div className={css.formColsStretch}>
+          <div className={css.formCol} style={{ gap: 3 }}>
+            <label className={css.fieldLabelSm}>终端模式</label>
+            <SelectField value={draft.terminal} options={TERMINAL_OPTIONS} onChange={v => set('terminal', v as 'sandbox' | 'host')} variant="fill" />
+          </div>
+          <div className={css.formCol} style={{ gap: 3 }}>
+            <label className={css.fieldLabelSm}>记忆功能</label>
+            <div className={css.memoryField}>
+              <span className={css.memoryState}>{draft.memoryEnabled ? '已开启' : '默认关闭'}</span>
+              <Switch checked={draft.memoryEnabled} onChange={v => set('memoryEnabled', v)} />
             </div>
           </div>
         </div>
 
         {error !== null && <p className={css.hintText}>{error}</p>}
 
-        {/* footer */}
+        {/* footer（设计稿 GHBvv footer：左信任级 badge，右取消/保存两钮——删除走
+            DeletePresetDialog 独立入口，footer 不放删除钮） */}
         <div className={css.formGroup} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10 }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <span className={css.trustLabel}>信任级</span>
             <span className={css.trustBadge}>{draft.trust}</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {!isNew && (
-              <GlassButton variant="danger" onClick={() => setDeleting(true)}>删除</GlassButton>
-            )}
             <GlassButton onClick={onBack}>取消</GlassButton>
             <GlassButton variant="primary" onClick={() => void doSave()} disabled={busy}>{busy ? '保存中…' : isNew ? '创建' : '保存'}</GlassButton>
           </div>

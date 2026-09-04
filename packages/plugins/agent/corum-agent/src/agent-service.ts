@@ -88,6 +88,8 @@ export interface ProfileSummary {
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
+  /** 记忆功能开关（UI 投影；sourceOfTruth 在 memoryPolicy.scope，'agent'=开启）。 */
+  memoryEnabled?: boolean
   version: number
   trust: string
   /** 目录来源（2026-09-02 合并官方 preset 后区分）：'corum' = corum profile
@@ -166,7 +168,7 @@ export interface SaveProfileInput {
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
   mcpServers: string[]
   terminal: { mode: 'sandbox' | 'host' }
-  memoryPolicy: { scope: 'agent'; dir?: string }
+  memoryPolicy: { scope: 'agent' | 'none'; dir?: string }
   trust: 'system' | 'user'
 }
 
@@ -565,6 +567,7 @@ export class CorumAgentService extends TypertRemoteService {
       skills: p.skills,
       mcpServers: p.mcpServers,
       terminal: { mode: p.terminal.mode },
+      memoryEnabled: p.memoryPolicy.scope !== 'none',
       version: p.version,
       trust: p.trust,
       source: 'corum' as const,
@@ -690,6 +693,7 @@ export class CorumAgentService extends TypertRemoteService {
         skills: saved.skills,
         mcpServers: saved.mcpServers,
         terminal: { mode: saved.terminal.mode },
+        memoryEnabled: saved.memoryPolicy.scope !== 'none',
         version: saved.version,
         trust: saved.trust,
         source: 'corum' as const,

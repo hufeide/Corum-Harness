@@ -1127,6 +1127,40 @@
   margin-top: 8px;
 }
 
+/* 编辑页小字段标签（设计稿 GHBvv lbl: 10px normal, label-tertiary, 无 margin） */
+.fieldLabelSm {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 编辑页输入框（设计稿 GHBvv input: glass-2, radius 8, padding [6,10], 13px） */
+.fieldInputSm {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.fieldInputSm:focus {
+  border-color: var(--corum-glass-border-active);
+}
+
+.fieldInputSm:disabled {
+  opacity: 0.5;
+}
+
+.fieldInputSm::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
 .fieldInput {
   width: 100%;
   padding: 10px 14px;
@@ -1194,6 +1228,22 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* 编辑页组标签行（设计稿 gt-row: 左右两端对齐） */
+.formGroupTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+/* 编辑页子组小标签（设计稿 glbl: 10px 600, label-secondary） */
+.formSubLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
 }
 
 .formGroupTitle {
@@ -1266,10 +1316,24 @@
   gap: 3px;
 }
 
+/* 编辑页模型 pair（设计稿 CI0hN: 供应商/模型两列并排，gap 10） */
+.formColsStretch {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+/* selectStack 改横向双列（设计稿 pair: 供应商|模型 并排，各 fill_container） */
 .selectStack {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  gap: 10px;
+  width: 100%;
+}
+
+.selectStack > * {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 文本域容器（设计稿 GHBvv area: glass-2 底, radius 8, padding 10, 内 gap 3；按钮/统计在容器内底部行） */
@@ -1487,6 +1551,121 @@
 .btnAdd:hover {
   border-color: var(--corum-glass-border-active);
   color: var(--dsw-alias-label-secondary);
+}
+
+/* 技能/MCP 卡片（设计稿 J9GII: glass-2, radius 10, padding [6,8], gap 2；
+ * top 行 = 左(icon 13 + name 12px 600 + tag) 右(ver Mono 10 + trash 12)；
+ * desc 11px dimmed） */
+.skillCard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.skillCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.skillCardLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skillCardIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.skillCardName {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.skillCardRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.skillCardVer {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.skillCardDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 技能卡右上角类型 tag（设计稿 a6NJoh: radius 4, padding [1,5], Mono 9px tertiary） */
+.skillCardTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 技能/MCP 卡片网格（设计稿 d47mv: 两列 gap 10） */
+.skillCardGrid {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.skillCardGrid > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 终端+记忆行：记忆功能 field（设计稿 F8BCCp: glass-2, radius 8, padding [3,10],
+ * space_between — 「默认关闭」11px tertiary + switch 36×20） */
+.memoryField {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.memoryState {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* ── MCP 对话框（添加服务器 sIDC1 / 服务器详情 fw8aK）────────────────── */

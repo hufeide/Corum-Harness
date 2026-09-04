@@ -36,8 +36,11 @@ export interface ProfileTerminal {
 
 /** 专属记忆策略（PRD §4.0.5）。 */
 export interface ProfileMemoryPolicy {
-  /** 记忆作用域（当前固定 agent）。 */
-  scope: 'agent'
+  /**
+   * 记忆作用域：'agent' = 专属记忆目录（默认 ~/.corum/memory/<profileId>/）；
+   * 'none' = 关闭记忆（Agent 预设「记忆功能」开关的关态）。
+   */
+  scope: 'agent' | 'none'
   /** 自定义记忆目录（空 = 默认 `~/.corum/memory/<profileId>/`）。 */
   dir?: string
 }
