@@ -837,19 +837,17 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', height: '100%', minHeight: 0 }}>
-      {/* 返回行 */}
-      <div style={{ width: '100%' }}>
-        <button type="button" className={css.backBtn} onClick={onBack}>
-          <ChevronLeft size={14} />返回 Agent 预设
-        </button>
-      </div>
+      {/* 返回行（设计稿 GHBvv KLRxp：纯文本幽灵行，非按钮） */}
+      <button type="button" className={css.backRowGhost} onClick={onBack}>
+        <ChevronLeft size={14} />返回 Agent 预设
+      </button>
 
       {/* 顶部一排：基本信息（左）+ 名片预览（右） */}
       <div style={{ display: 'flex', gap: 20, width: '100%' }}>
         {/* 左：基本信息（设计稿 GHBvv basicCol: gap 8 + avatarRow gap 18） */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div className={css.formGroupTitle}>基本信息</div>
-          <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
             {/* avatarBlock：64 头像 + 上传提示 + AI 生成（纵向 gap 6，居中） */}
             <div className={css.avatarBlock}>
               <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">

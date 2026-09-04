@@ -1750,6 +1750,27 @@
   border-color: var(--corum-glass-border-active);
 }
 
+/* Agent 预设编辑页返回行（设计稿 GHBvv KLRxp：纯文本幽灵行，无底无边 — chevron-left 14 + 12px tertiary 文字，gap 4） */
+.backRowGhost {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: left;
+}
+
+.backRowGhost:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* 详情：名称标题行 */
 .skillTitleRow {
   display: flex;
