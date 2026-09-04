@@ -944,40 +944,34 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
       {/* 顶部一排：基本信息（左）+ 名片预览（右） */}
       <div style={{ display: 'flex', gap: 20, width: '100%' }}>
-        {/* 左：基本信息（设计稿 GHBvv basicCol: gap 8 + avatarRow gap 18） */}
+        {/* 左：基本信息（设计稿 GHBvv basicCol: gap 8 + avatarRow gap 18，纵向居中） */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div className={css.formGroupTitle}>基本信息</div>
-          <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
-            {/* avatarBlock：64 头像 + 上传提示 + AI 生成（纵向 gap 6，居中） */}
-            <div className={css.avatarBlock}>
-              <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
-                {draft.avatar !== ''
-                  ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
-                  : <Upload size={26} className={css.avatarIcon} />}
-              </div>
-              <span className={css.avatarHint}>点击上传头像</span>
-              <button type="button" className={css.btnPolish} disabled title="即将上线">
-                <Sparkles size={12} className={css.btnPolishIcon} />AI 生成
-              </button>
+          <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+            {/* avatar：88 圆形（仅上传入口，去上传提示/AI 生成，随设计稿微调） */}
+            <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
+              {draft.avatar !== ''
+                ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
+                : <Upload size={32} className={css.avatarIcon} />}
             </div>
-            {/* fieldsBlock：两列字段（组内 gap 6） */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* fieldsBlock：两列字段（组内 gap 4） */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div className={css.formCols}>
-                <div className={css.formCol}>
+                <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>预设 ID</label>
                   <input className={css.fieldInputSm} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
                 </div>
-                <div className={css.formCol}>
+                <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>昵称</label>
                   <input className={css.fieldInputSm} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
                 </div>
               </div>
               <div className={css.formCols}>
-                <div className={css.formCol}>
+                <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>岗位 / 职位</label>
                   <input className={css.fieldInputSm} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
                 </div>
-                <div className={css.formCol}>
+                <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>岗位维度（名片筛选）</label>
                   <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} variant="fill" />
                 </div>
@@ -1059,22 +1053,35 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           </div>
         </div>
 
-        {/* 模型（设计稿 GHBvv g-model: model-row 横向两组，各 pair=供应商+模型两列并排） */}
+        {/* 模型（设计稿 GHBvv g-model: model-row 横向两组，各 pair=供应商+模型两列并排，
+            每个下拉上方有 10px tertiary 小字「供应商」「模型」标签） */}
         <div className={css.formGroup}>
           <div className={css.formGroupTitle}>模型</div>
           <div className={css.formColsStretch}>
             <div className={css.formCol} style={{ gap: 4 }}>
               <span className={css.formSubLabel}>主 Agent</span>
               <div className={css.selectStack}>
-                <SelectField value={draft.provider} options={mainProviderOptions} onChange={v => set('provider', v)} variant="fill" />
-                <SelectField value={draft.model} options={mainModelOptions} onChange={v => set('model', v)} variant="fill" />
+                <div className={css.formCol} style={{ gap: 3 }}>
+                  <label className={css.fieldLabelSm}>供应商</label>
+                  <SelectField value={draft.provider} options={mainProviderOptions} onChange={v => set('provider', v)} variant="fill" />
+                </div>
+                <div className={css.formCol} style={{ gap: 3 }}>
+                  <label className={css.fieldLabelSm}>模型</label>
+                  <SelectField value={draft.model} options={mainModelOptions} onChange={v => set('model', v)} variant="fill" />
+                </div>
               </div>
             </div>
             <div className={css.formCol} style={{ gap: 4 }}>
               <span className={css.formSubLabel}>子 Agent（可选，缺省同主 Agent）</span>
               <div className={css.selectStack}>
-                <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} variant="fill" />
-                <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} variant="fill" />
+                <div className={css.formCol} style={{ gap: 3 }}>
+                  <label className={css.fieldLabelSm}>供应商</label>
+                  <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} variant="fill" />
+                </div>
+                <div className={css.formCol} style={{ gap: 3 }}>
+                  <label className={css.fieldLabelSm}>模型</label>
+                  <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} variant="fill" />
+                </div>
               </div>
             </div>
           </div>
@@ -1101,6 +1108,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                   <span className={css.skillCardDesc}>{skillDescMap[s.name] || `绑定版本 ${s.versionId}`}</span>
                 </div>
               ))}
+              {draft.skills.length === 1 && <div className={css.skillCardPlaceholder} />}
             </div>
             <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
           </div>
@@ -1122,6 +1130,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                   <span className={css.skillCardDesc}>{mcpDescMap[s] || s}</span>
                 </div>
               ))}
+              {draft.mcpServers.length === 1 && <div className={css.skillCardPlaceholder} />}
             </div>
             <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加工具</button>
           </div>

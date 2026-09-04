@@ -1142,10 +1142,10 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 编辑页输入框（设计稿 GHBvv input: glass-2, radius 8, padding [6,10], 13px） */
+/* 编辑页输入框（设计稿 GHBvv input: glass-2, radius 8, padding [4,10], 13px） */
 .fieldInputSm {
   width: 100%;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
@@ -1287,9 +1287,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 32px;
+  flex: none;
+  width: 88px;
+  height: 88px;
+  border-radius: 44px;
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-2);
   cursor: pointer;
@@ -1646,6 +1647,17 @@
   display: flex;
   gap: 10px;
   width: 100%;
+}
+
+/* 单卡时补位的占位矩形框（与技能卡同 glass-2/radius 10，虚位空态） */
+.skillCardPlaceholder {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px dashed var(--corum-glass-border);
+  border-radius: 10px;
+  background: transparent;
+  box-sizing: border-box;
 }
 
 .skillCardGrid > * {
