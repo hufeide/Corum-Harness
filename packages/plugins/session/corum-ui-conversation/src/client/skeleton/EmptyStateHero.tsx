@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Clock, FolderGit2, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
 import type { AgentOption, ConversationInjected, ModelProviderOption, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
+import { AgentTwoLevelSelect } from './AgentTwoLevelSelect.tsx'
 import css from './EmptyStateHero.module.css'
 
 /** 路径末段（用于「选择新目录」按钮上显示已选目录名）。 */
@@ -283,31 +284,33 @@ function NewTaskForm({ emptyActions, onClose }: {
       </div>
 
       <div className={css.field}>
-        <label className={css.label} htmlFor="new-task-agent">Agent</label>
-        <div className={css.selectWrap}>
-          <select
-            id="new-task-agent"
-            className={css.select}
-            value={profileId}
-            onChange={(e) => { setProfileId(e.target.value); modelTouched.current = false }}
-          >
-            {agents.length === 0 && <option value="">加载中…</option>}
-            {/* 并列展示（2026-09-02 用户定调）：corum Agent 一组 + 官方四模式一组
-                （optgroup 分组标注「官方」）。官方项模型跟随部署默认。 */}
-            {agents.some((a) => a.source === 'official')
-              ? (
-                <>
-                  <optgroup label="用户">
-                    {agents.filter((a) => a.source !== 'official').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </optgroup>
-                  <optgroup label="官方模式">
-                    {agents.filter((a) => a.source === 'official').map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </optgroup>
-                </>
-              )
-              : agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-        </div>
+        <span className={css.label} id="new-task-agent-label">Agent</span>
+        {/* 二级分组选择器（2026-09-07 用户定调：预置 25 角色后列表过长，收敛为
+            通用 / Corum 内置 / 用户 三组 + 组内展开）。切换 Agent 时模型未手动
+            改过则跟随其默认（modelTouched 复位）。 */}
+        {agents.length === 0
+          ? <span className={css.permEmpty}>加载中…</span>
+          : (
+            <AgentTwoLevelSelect
+              agents={agents}
+              value={profileId}
+              onChange={(id) => { setProfileId(id); modelTouched.current = false }}
+              ariaLabel="选择执行 Agent"
+              css={{
+                root: css.agentSelRoot,
+                trigger: css.agentSelTrigger,
+                triggerName: css.agentSelTriggerName,
+                chevron: css.agentSelChevron,
+                panel: css.agentSelPanel,
+                groupHead: css.agentSelGroupHead,
+                groupLabel: css.agentSelGroupLabel,
+                groupCount: css.agentSelGroupCount,
+                list: css.agentSelList,
+                item: css.agentSelItem,
+                itemCheck: css.agentSelItemCheck,
+              }}
+            />
+          )}
       </div>
 
       <div className={css.field}>

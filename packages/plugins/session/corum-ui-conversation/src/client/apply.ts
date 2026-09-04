@@ -347,6 +347,7 @@ export function apply(ctx: Context): void {
               name: p.nickname ?? p.title ?? p.id,
               ...(p.model === undefined ? {} : { defaultModel: p.model }),
               ...(p.source === undefined ? {} : { source: p.source }),
+              ...(p.trust === undefined ? {} : { trust: p.trust as 'system' | 'user' }),
               ...(p.title === undefined ? {} : { title: p.title }),
               ...(p.dimension === undefined ? {} : { dimension: p.dimension }),
             }))

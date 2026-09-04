@@ -283,6 +283,10 @@ export interface AgentOption {
   /** 目录来源（2026-09-02 并列展示）：'corum' = corum Agent；'official' = 官方
    *  四模式（cordis/minimal/ptc/standard，模型跟随部署默认）。下拉按此分组标注。 */
   source?: 'corum' | 'official'
+  /** 信任级（corum profile.trust）：'system' = Corum 内置（25 个行业预置 +
+   *  PM/Task 兜底）；'user' = 用户自定义。official preset 恒为 system 但其分组
+   *  由 source 决定（「通用」组），分组判断先看 source、corum 内再看 trust。 */
+  trust?: 'system' | 'user'
   /** 岗位 / 职位（corum profile.title；official preset 无）。 */
   title?: string
   /** 岗位维度（corum profile.dimension：研发/产品/设计/市场/自媒体/创作；official 无）。 */

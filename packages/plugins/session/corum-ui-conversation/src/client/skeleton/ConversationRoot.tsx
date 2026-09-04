@@ -11,6 +11,7 @@ import type { ConversationSlotProps, InputZone, TaskAgentInfo } from '../contrac
 import { conversationPhase } from '../contract/snapshot.ts'
 import { HeroGlow, HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
 import { EmptyStateHero } from './EmptyStateHero.tsx'
+import { AgentTwoLevelSelect } from './AgentTwoLevelSelect.tsx'
 import { DARK_ATTRIBUTE } from '@corum/corum-ui-base/client'
 import css from './ConversationRoot.module.css'
 
@@ -485,7 +486,7 @@ export function ConversationRoot({
   // 限定；已开始会话 host 拒绝、catch 呈现）。profileId 经 listTaskAgents 拿；
   // 下拉选项经 listAgents（listProfiles 投影）。
   const [agentProfileId, setAgentProfileId] = useState('')
-  const [agentOptions, setAgentOptions] = useState<readonly { id: string; name: string; title?: string; dimension?: string }[]>([])
+  const [agentOptions, setAgentOptions] = useState<readonly { id: string; name: string; title?: string; dimension?: string; source?: 'corum' | 'official'; trust?: 'system' | 'user' }[]>([])
   const [agentSwitchError, setAgentSwitchError] = useState('')
   useEffect(() => {
     if (!isTaskLane || sessionId === undefined) { setAgentProfileId(''); return }
@@ -502,6 +503,8 @@ export function ConversationRoot({
           name: o.name,
           ...(o.title === undefined ? {} : { title: o.title }),
           ...(o.dimension === undefined ? {} : { dimension: o.dimension }),
+          ...(o.source === undefined ? {} : { source: o.source }),
+          ...(o.trust === undefined ? {} : { trust: o.trust }),
         })))
         setAgentProfileId(profileId ?? options[0]?.id ?? '')
       })
@@ -568,17 +571,29 @@ export function ConversationRoot({
         {isTaskLane && summaryBlank === true && (
           <span className={css.agentLockChip} data-select>
             <Bot size={12} />
-            <select
-              className={css.agentSelect}
+            {/* 二级分组选择器（2026-09-07）：预置 25 角色后列表收敛为通用/
+                Corum 内置/用户三组 + 组内展开；面板向右上浮出（chip 在 composer
+                工具栏底部），切换失败仍走 agentSwitchError 提示。 */}
+            <AgentTwoLevelSelect
+              agents={agentOptions}
               value={agentProfileId}
+              onChange={switchAgent}
+              ariaLabel={agentSwitchError !== '' ? `选择执行 Agent（切换失败：${agentSwitchError}）` : '选择执行 Agent'}
               disabled={agentOptions.length === 0}
-              title={agentSwitchError !== '' ? `切换失败：${agentSwitchError}` : '选择执行 Agent'}
-              aria-label="选择执行 Agent"
-              onChange={(e) => switchAgent(e.target.value)}
-            >
-              {agentOptions.length === 0 && <option value="">{agentInfo?.name ?? '加载中…'}</option>}
-              {agentOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
+              css={{
+                root: css.agentSelRoot,
+                trigger: css.agentSelTrigger,
+                triggerName: css.agentSelTriggerName,
+                chevron: css.agentSelChevron,
+                panel: css.agentSelPanel,
+                groupHead: css.agentSelGroupHead,
+                groupLabel: css.agentSelGroupLabel,
+                groupCount: css.agentSelGroupCount,
+                list: css.agentSelList,
+                item: css.agentSelItem,
+                itemCheck: css.agentSelItemCheck,
+              }}
+            />
           </span>
         )}
         {renderSlot('conversation.input.left', zone)}
