@@ -70,6 +70,18 @@
 - id: directory-picker
   disabled: true
 
+# API Key 加密落盘（TODO 安全项）：官方 dsh-credentials-local 把凭证明文写入
+# `$DSH_HOME/.credentials.yaml`（仅 0600 权限，无加密）。corum 的 fork 包
+# @corum/corum-credentials-local 在 durable 边界对 ref 值与 api-key record 的
+# key/env 值做 AES-256-GCM 加密（enc:v1: 前缀，存量明文条目双读兼容），主密钥
+# 由 Electron main 经 safeStorage 封装后注入（CORUM_CREDENTIALS_MASTER_KEY）。
+# 官方行在 base bundle 的 insert 块内——compose 的行覆盖对 insert 行按序追加而
+# 非替换（同名服务会 duplicate-registration 失败），故沿用本文件的既有纪律：
+# 先禁用官方行，再在下方 insert 段以同 id 挂 fork。下游（llm 适配器 /
+# Models 页 / credentials RPC）对服务名 `credentials` 的引用零感知。
+- id: credentials
+  disabled: true
+
 # ── desktop persona ─────────────────────────────────────────────────────────
 
 - id: system-prompt
@@ -82,6 +94,18 @@
 # ── the desktop rows ────────────────────────────────────────────────────────
 
 - insert:
+    # Forked encrypted credentials provider (replaces the disabled official
+    # credentials row above). NOTE: the row id must differ — the loader rejects
+    # a top-level id that collides with a (even disabled) bundle-inserted row
+    # ("duplicate loader entry id"), which is also why the settings-models
+    # forks above carry the corum- prefix. The cordis SERVICE name stays
+    # `credentials` (the fork's provider class calls super(ctx, 'credentials')
+    # exactly like the official one), so llm adapters / the Models page / the
+    # credentials RPC surface — all of which inject the service, not the row
+    # id — see zero difference.
+    - id: corum-credentials
+      name: '@corum/corum-credentials-local'
+
     # Native-only directory picker (the desktop always sits on the host
     # display); replaces the disabled auto row above. The `-auto` row would
     # have mounted BOTH the host backend and the client surface; pinning the

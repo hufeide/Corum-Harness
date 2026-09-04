@@ -24,6 +24,7 @@ import { registerSchemes, registerProtocols } from './protocol.ts'
 import { registerIpc } from './ipc.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
 import { findCombo, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
+import { resolveMasterKeyB64, MASTER_KEY_ENV } from './credentials-key.ts'
 
 /**
  * Whether this launch runs from a packaged bundle: the bundled host runtime
@@ -174,6 +175,12 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value
   }
+  // API Key 主密钥注入（safeStorage 封装，见 credentials-key.ts）：host 侧
+  // corum-credentials-local 据此对凭证值 AES-256-GCM 加密落盘。smoke（combo
+  // 为 null）同样注入——smoke 路径也走 credentials 服务。safeStorage 不可用时
+  // resolveMasterKeyB64 返回 undefined，host 侧进入「拒绝写密文」降级。
+  const masterKey = resolveMasterKeyB64()
+  if (masterKey !== undefined) env[MASTER_KEY_ENV] = masterKey
   if (combo === null) return env
   // combo.env 先过黑名单（NODE_OPTIONS / DYLD_* / ELECTRON_RUN_AS_NODE 等解释器/
   // 链接器接管类 key 一律剔除并告警），再合并进子进程环境。

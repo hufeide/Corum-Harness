@@ -74,6 +74,7 @@
     "@deepseek-ai/dsh-workflow": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-workflow-worker-thread": "^0.1.2-alpha.1",
     "@deepseek-ai/schemastery": "^3.18.1",
+    "@corum/corum-credentials-local": "workspace:*",
     "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-ide-test-conversation-ui": "workspace:*",
     "@corum/corum-ide-test-sidebar-ui": "workspace:*",

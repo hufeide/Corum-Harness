@@ -97,6 +97,7 @@
   "license": "MIT",
   "dependencies": {
     "@corum/corum-agent": "workspace:*",
+    "@corum/corum-credentials-local": "workspace:*",
     "@corum/corum-ide-conversation-ui": "workspace:*",
     "@corum/corum-ide-explorer-ui": "workspace:*",
     "@corum/corum-ide-panel-bottom-ui": "workspace:*",

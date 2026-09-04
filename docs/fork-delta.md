@@ -5,6 +5,7 @@
 > - 生成方式：`diff -r packages/plugins/session/<pkg>/src /Users/kukucai/dsh/packages/client/<官方包>/src` + 逐文件 diff 分类（脚本统计，非印象）。
 > - 官方基线版本：`0.1.2-alpha.2`（`/Users/kukucai/dsh/packages/client/*/package.json` 的 `version`）。⚠️ corum 各 fork 的 `dependencies` 仍锁 `^0.1.2-alpha.1`——**源码对照的是 alpha.2、依赖锁 alpha.1，双向差一代**（审计 B 群 P1，见 §3.4）。
 > - 参考：`.dbg/audit-B-session.md`（session 群逐文件审计）、`docs/audit/CODE-AUDIT-REPORT.md`（P0-6/11/12/13/15）。
+> - 2026-09-07 增补：第 7 个 fork 包 `@corum/corum-credentials-local`（host 侧，fork 自官方 `@deepseek-ai/dsh-credentials-local`）登记于 **§7 host 域 fork**，升级时同样按 §5 runbook 处理。
 
 ---
 
@@ -255,3 +256,39 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 4. **chat/contract/slots.ts:129 contract 层 inline import 渲染层 review-source**——包内反向依赖，rebase 合并 slots.ts 时会被官方纯净 contract 文件掩盖，需单独记。
 5. **settings-models invariant.ts 死文件仍打包 + exports 已删 ./invariant**（审计 P2 已记，台账复核确认仍存）；**onboarding-copy.ts WELCOME_NOTICE_COPY 死代码**（审计已记）。
 6. 官方 ui-chat 的 `MessageItem` reveal/usageAction 机制与 `TurnUsagePanel/TurnTimePanel` 是 alpha.2 的演进方向，与 corum 的 TurnUsageDisclosure 重设计**方向相反**——这是 chat 包未来 rebase 最大的结构性冲突源（不只是行级冲突）。
+
+---
+
+## 7. host 域 fork：`@corum/corum-credentials-local`（API Key 加密落盘）
+
+> 登记日期：2026-09-07。动机：TODO 安全项「API Key 本地加密存储（safeStorage）」——官方把凭证明文写 `$DSH_HOME/.credentials.yaml`（仅 0600 权限，官方注释明言 "the file's protection is skipped rather than faked"）。
+
+| 项 | 内容 |
+|---|---|
+| fork 包 | `@corum/corum-credentials-local`（`packages/plugins/agent/corum-credentials-local`） |
+| 官方对照包 | `@deepseek-ai/dsh-credentials-local`（`packages/credentials/credentials-local`） |
+| 官方基线 | **0.1.2-alpha.2**（git diff `6c705be1ce..3f1b46a5db` 证实 alpha.1→alpha.2 该包 src **零变化**——仅版本号 bump；corum 运行时锁 alpha.1，故源码级完全兼容） |
+| 文件数 | 3 / 2（`index.ts` 实质修改、`invariant.ts` 仅改名、`value-crypto.ts` corum 新增） |
+| rebase 风险 | **低**：加密挂点集中在 durable 边界的 6 个函数（`parseRefs`/`parseRecord`/`parseRecordEnv`/`renderRef`/`renderRecord` + 新增 `encryptRecordSecrets`），每处都有 `// fork（corum）：` 注释锚点；官方这些函数是纯函数，演进概率低 |
+
+**实质差异清单（index.ts 共 6 处挂点 + 1 个新增文件）**：
+
+1. `value-crypto.ts`（corum 新增，139 行）：AES-256-GCM 逐条值加密。格式 `enc:v1:<b64 iv>:<b64 tag>:<b64 ct>`；主密钥读 `CORUM_CREDENTIALS_MASTER_KEY` env（base64，Electron main 注入）；`encryptValue`/`decryptValue`/`isEncryptedValue`/`encryptionAvailable`；双读兼容（无前缀 = 明文原样返回）；无密钥降级 = 写时拒绝 + 密文读抛错 + 明文读正常（**绝不静默退回明文写**）；篡改/密钥不匹配 = GCM 认证失败 loud 抛错。
+2. `parseRefs`：ref 值落盘 → 内存时 `decryptValue(value)`。
+3. `parseRecord`（api-key 分支）：`key` 字段 `decryptValue`；`env` 经 `parseRecordEnv` 同步处理；grant payload **不加密**（官方未承诺机密性，结构校验语义保留）。
+4. `parseRecordEnv`：env 值 `decryptValue(value)`。
+5. `renderRef`：写入一律 `encryptValue(value)`（删除路径不加密）。
+6. `renderRecord` + 新增 `encryptRecordSecrets`：api-key 的 `key`/`env` 值加密落盘（readonly 字段用对象字面量展开构造，与官方 parseRecord 同形）；grant 原样。
+7. `invariant.ts`：包名改 `@corum/corum-credentials-local`（模板性修改）。
+8. 模块头注释：fork 基线声明 + 差异摘要。
+
+**装配（cordis.patch.yml）**：`- id: credentials disabled: true` + insert 段 `- id: corum-credentials name: '@corum/corum-credentials-local'`。**注意**：行 id 必须不同名——cordis-plugin-loader 的 `EntryGroup.update` 对同层 config 数组做唯一 id 检查（`duplicate loader entry id`），disabled 的官方行仍占位；cordis **服务名**不受影响（插件代码内 `super(ctx, 'credentials')` 与官方一致），下游 llm 适配器 / Models 页 / credentials RPC 全部按服务名 inject，零感知。
+
+**主密钥链路（desktop 包，非本 fork）**：`src/electron/credentials-key.ts`（Electron main）——32 字节随机主密钥，`safeStorage.encryptString`（macOS Keychain / Windows DPAPI）封装后落盘 `$CORUM_HOME/.master-key`（0600）；spawn host 时 `buildHostEnv` 注入 `CORUM_CREDENTIALS_MASTER_KEY`（base64）。safeStorage 不可用（headless Linux 等）→ 不生成密钥、不注入 env → fork 侧进入上述「拒绝写密文」降级。密钥文件解密失败（换机器/钥匙串条目丢失）→ 不覆盖文件、本次启动降级，既有密文凭证不失锁。
+
+**升级注意**：
+- 官方 alpha.1→alpha.2 该包零变化；未来升级先 `git diff <old>..<new> -- packages/credentials/credentials-local/src/index.ts` 确认漂移面，再核 6 处挂点是否仍对齐。
+- 官方若将来内建加密（如 `enc:` 前缀冲突），以官方格式为准迁移；`enc:v1:` 前缀是 corum 私有命名空间。
+- `Config` schema 未动（`path`/`dshHome`/`watch`/`debounceMs`），overlay 无需 config 行。
+
+**验证记录**（CDP 三层，2026-09-07）：新 Key 写入 → 落盘 `enc:v1:` 密文（同文件存量明文条目原样保留）；重启应用 → 密文条目 `credentials/describe` 正常（解密成功）；存量明文条目重写 → 自动转密文（迁移语义）；`unset` 删除正常；UI 渲染正常 + 零 console 错误；单元级：明文双读 / 篡改检测 / 错误密钥 loud 失败 / 无密钥写拒绝，全部通过。
