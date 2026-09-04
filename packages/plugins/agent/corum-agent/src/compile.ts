@@ -292,9 +292,10 @@ function composeStructuredPersona(profile: AgentProfile, coreIdentity: string | 
   if (domain !== '' && title !== '') segments.push(`You are an expert in the ${domain} field, working as a ${title}.`)
   else if (domain !== '') segments.push(`You are an expert in the ${domain} field.`)
   else if (title !== '') segments.push(`You are a ${title}.`)
-  // 人格（做事风格）。
+  // 人格（做事风格）。去掉末尾自带句号，避免与模板句号叠加成「。.」。
   if (typeof profile.persona === 'string' && profile.persona.trim() !== '') {
-    segments.push(`Your working style: ${profile.persona.trim()}.`)
+    const persona = profile.persona.trim().replace(/[。.．]+$/u, '')
+    segments.push(`Your working style: ${persona}.`)
   }
   // TODO(memory): 「你有丰富的工作经验：{{memory摘要}}」段——待 memory 机制后接入，当前不组装。
   // 工作职责（用户自定义提示词）。
