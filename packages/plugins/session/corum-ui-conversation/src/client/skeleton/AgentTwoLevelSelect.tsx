@@ -20,7 +20,7 @@
  * Esc 收起，焦点回 trigger。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Search, X } from 'lucide-react'
 import type { AgentOption } from '../contract/slots.ts'
 
 /** 三个顶级分组的展示定义（顺序即面板顺序）。 */
@@ -44,12 +44,35 @@ export interface AgentSelectCss {
   triggerName?: string
   chevron: string
   panel: string
+  /** 搜索框（2026-09-07 增加）：面板顶部的过滤输入行。 */
+  searchRow: string
+  searchIcon: string
+  searchInput: string
+  searchClear: string
   groupHead: string
   groupLabel: string
   groupCount: string
   list: string
   item: string
   itemCheck: string
+  /** 搜索无命中 / 条目旁的次级说明文本。 */
+  itemHint?: string
+  empty: string
+}
+
+/** 归一化匹配串（小写 + 去空白），用于搜索的子串匹配。 */
+function norm(s: string | undefined): string {
+  return (s ?? '').toLowerCase().replace(/\s+/g, '')
+}
+
+/** 一个 Agent 是否命中搜索词：name / title / dimension / id 任一含子串。 */
+function matches(a: AgentOption, q: string): boolean {
+  const query = norm(q)
+  if (query === '') return true
+  return norm(a.name).includes(query)
+    || norm(a.title).includes(query)
+    || norm(a.dimension).includes(query)
+    || norm(a.id).includes(query)
 }
 
 export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, disabled }: {
@@ -62,12 +85,21 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  /** 搜索词（面板内顶部过滤框；非空时跨组平铺命中项）。 */
+  const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const groups = useMemo(() => {
     const map: Record<GroupKey, AgentOption[]> = { official: [], builtin: [], user: [] }
     for (const a of agents) map[groupOf(a)].push(a)
     return map
   }, [agents])
+  /** 搜索态：非空 query → 跨组命中项（保持原相对顺序：通用→内置→用户）。 */
+  const searching = query.trim() !== ''
+  const hits = useMemo(
+    () => (searching ? GROUPS.flatMap(({ key }) => groups[key]).filter((a) => matches(a, query)) : []),
+    [searching, groups, query],
+  )
   /** 选中项所在组（默认展开）；无选中默认「Corum 内置」（预置角色主入口）。 */
   const selectedGroup: GroupKey = useMemo(() => {
     const cur = agents.find((a) => a.id === value)
@@ -79,9 +111,14 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
     if (open) setExpanded((prev) => ({ ...prev, [selectedGroup]: true }))
   }, [open, selectedGroup])
 
-  // 点击面板外部 / Esc 收起。
+  // 点击面板外部 / Esc 收起；关闭时清空搜索词（下次打开回分组视图）。
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setQuery('')
+      return
+    }
+    // 打开即聚焦搜索框（定位高频操作：点开就能直接敲关键字过滤）。
+    searchRef.current?.focus()
     const onDown = (e: MouseEvent): void => {
       if (rootRef.current !== null && !rootRef.current.contains(e.target as Node)) setOpen(false)
     }
@@ -113,25 +150,37 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
       </button>
       {open && (
         <div className={css.panel} role="menu" aria-label={ariaLabel}>
-          {GROUPS.map(({ key, label }) => {
-            const list = groups[key]
-            if (list.length === 0) return null
-            const isOpen = expanded[key]
-            return (
-              <div key={key}>
-                <button
-                  type="button"
-                  className={css.groupHead}
-                  aria-expanded={isOpen}
-                  onClick={() => setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))}
-                >
-                  {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <span className={css.groupLabel}>{label}</span>
-                  <span className={css.groupCount}>{list.length}</span>
-                </button>
-                {isOpen && (
-                  <div className={css.list} role="group" aria-label={label}>
-                    {list.map((a) => (
+          {/* 搜索框（2026-09-07）：面板顶部过滤——非空时跨组平铺命中项（name/
+              title/dimension/id 子串匹配），清空回三级分组视图；打开即聚焦。 */}
+          <div className={css.searchRow}>
+            <Search size={13} className={css.searchIcon} />
+            <input
+              ref={searchRef}
+              type="text"
+              className={css.searchInput}
+              placeholder="搜索 Agent…"
+              value={query}
+              aria-label="搜索 Agent"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query !== '' && (
+              <button
+                type="button"
+                className={css.searchClear}
+                aria-label="清空搜索"
+                onClick={() => { setQuery(''); searchRef.current?.focus() }}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          {searching
+            ? (
+              hits.length === 0
+                ? <div className={css.empty}>无匹配的 Agent</div>
+                : (
+                  <div className={css.list} role="group" aria-label="搜索结果">
+                    {hits.map((a) => (
                       <button
                         key={a.id}
                         type="button"
@@ -143,13 +192,51 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
                       >
                         <span className={css.itemCheck}>{a.id === value && <Check size={13} />}</span>
                         {a.name}
+                        {a.title !== undefined && a.title !== a.name && (
+                          <span className={css.itemHint}>{a.title}</span>
+                        )}
                       </button>
                     ))}
                   </div>
-                )}
-              </div>
+                )
             )
-          })}
+            : GROUPS.map(({ key, label }) => {
+              const list = groups[key]
+              if (list.length === 0) return null
+              const isOpen = expanded[key]
+              return (
+                <div key={key}>
+                  <button
+                    type="button"
+                    className={css.groupHead}
+                    aria-expanded={isOpen}
+                    onClick={() => setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))}
+                  >
+                    {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    <span className={css.groupLabel}>{label}</span>
+                    <span className={css.groupCount}>{list.length}</span>
+                  </button>
+                  {isOpen && (
+                    <div className={css.list} role="group" aria-label={label}>
+                      {list.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className={css.item}
+                          role="menuitemradio"
+                          aria-checked={a.id === value}
+                          data-active={a.id === value || undefined}
+                          onClick={() => { onChange(a.id); setOpen(false) }}
+                        >
+                          <span className={css.itemCheck}>{a.id === value && <Check size={13} />}</span>
+                          {a.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
         </div>
       )}
     </div>

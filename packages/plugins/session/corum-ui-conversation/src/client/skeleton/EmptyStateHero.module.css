@@ -750,3 +750,62 @@
   display: inline-flex;
   color: var(--dsw-alias-state-business-primary);
 }
+
+/* Agent 选择器搜索框（面板顶部过滤行）。 */
+.agentSelSearchRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+.agentSelSearchIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.agentSelSearchInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  padding: 2px 0;
+}
+.agentSelSearchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+.agentSelSearchClear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.agentSelSearchClear:hover {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-primary);
+}
+.agentSelItemHint {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+.agentSelEmpty {
+  padding: 14px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}

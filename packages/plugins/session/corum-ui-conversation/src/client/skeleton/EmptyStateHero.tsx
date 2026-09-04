@@ -302,12 +302,18 @@ function NewTaskForm({ emptyActions, onClose }: {
                 triggerName: css.agentSelTriggerName,
                 chevron: css.agentSelChevron,
                 panel: css.agentSelPanel,
+                searchRow: css.agentSelSearchRow,
+                searchIcon: css.agentSelSearchIcon,
+                searchInput: css.agentSelSearchInput,
+                searchClear: css.agentSelSearchClear,
                 groupHead: css.agentSelGroupHead,
                 groupLabel: css.agentSelGroupLabel,
                 groupCount: css.agentSelGroupCount,
                 list: css.agentSelList,
                 item: css.agentSelItem,
                 itemCheck: css.agentSelItemCheck,
+                itemHint: css.agentSelItemHint,
+                empty: css.agentSelEmpty,
               }}
             />
           )}
