@@ -50,6 +50,30 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* fill 变体 — 编辑表单列（设计稿 GHBvv sel: 占满列宽, radius 8, padding [6,8], 12px 值, 16 箭头） */
+.wrapperFill {
+  flex: 1;
+  min-width: 0;
+}
+
+.selectFill {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* compact 变体 — 弹窗版本选择器（设计稿 ExxZt verSel: radius 6, padding [3,7], Mono 10px, 11 箭头） */
+.selectCompact {
+  width: auto;
+  padding: 3px 7px;
+  border-radius: 6px;
+  gap: 3px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 /* 下拉列表 — fixed 定位，经 portal 挂到 body，z-index 高于设置面板 */
 .dropdown {
   position: fixed;

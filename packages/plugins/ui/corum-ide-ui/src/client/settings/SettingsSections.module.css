@@ -332,16 +332,8 @@
 .agentModelRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-}
-
-.agentModelLeft {
-  display: flex;
-  align-items: center;
   gap: 5px;
-  min-width: 0;
+  width: 100%;
 }
 
 .agentModelIcon {
@@ -350,6 +342,8 @@
 }
 
 .agentModelName {
+  flex: 1;
+  min-width: 0;
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
   font-weight: 400;
@@ -371,6 +365,22 @@
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
   flex: none;
+}
+
+/* 继承自标签（设计稿 v2VgxM inheritTag: glass-1 底, radius 5, padding [2,6], 9px dimmed） */
+.agentInheritTag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-1);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+  white-space: nowrap;
 }
 
 /* ── Agent 名片网格 + 筛选 ─────────────────────────────────────────── */
@@ -752,6 +762,20 @@
 }
 
 .bindVersionTextDim {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* 未选中行的版本选择器（设计稿 ExxZt v5nv52: dimmed 禁用态） */
+.bindVersionDim {
+  opacity: 0.7;
+}
+
+/* 字段下提示（设计稿 GHBvv hint: 10px dimmed） */
+.fieldHint {
+  margin: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
 }
 
@@ -1193,63 +1217,39 @@
   flex: none;
 }
 
+/* avatarBlock（设计稿 GHBvv: 64 头像 + 10px 提示 + AI 生成按钮，纵向 gap 6 居中） */
+.avatarBlock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
 .avatarBox {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 28px;
+  width: 64px;
+  height: 64px;
+  border-radius: 32px;
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-2);
   cursor: pointer;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .avatarIcon {
   color: var(--dsw-alias-label-tertiary);
 }
 
-.avatarActions {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.btnUpload {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 8px;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 7px;
-  background: var(--corum-glass-2);
-  cursor: pointer;
+.avatarHint {
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 10px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.btnUpload:hover {
-  border-color: var(--corum-glass-border-active);
-}
-
-.btnAiGen {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 8px;
-  border: none;
-  border-radius: 7px;
-  background: var(--dsw-alias-brand-primary);
-  cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--corum-label-on-brand);
-}
-
-.btnAiGen:hover {
-  opacity: 0.9;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+  white-space: nowrap;
 }
 
 .formCols {
@@ -1272,37 +1272,50 @@
   gap: 4px;
 }
 
+/* 文本域容器（设计稿 GHBvv area: glass-2 底, radius 8, padding 10, 内 gap 3；按钮/统计在容器内底部行） */
 .promptArea {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.promptTextarea {
-  width: 100%;
+  gap: 3px;
   padding: 10px;
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 11px;
-  color: var(--dsw-alias-label-primary);
-  outline: none;
-  resize: vertical;
   box-sizing: border-box;
 }
 
-.promptTextarea:focus {
-  border-color: var(--corum-glass-border-active);
+.promptTextarea {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  outline: none;
+  resize: vertical;
+  box-sizing: border-box;
 }
 
 .promptTextarea::placeholder {
   color: var(--dsw-alias-label-tertiary);
 }
 
-.promptActions {
+/* 容器内底部行（设计稿 gwMie: 右对齐, gap 8 — 字数统计 + AI 润色同行） */
+.promptActionsRow {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.promptCount {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
 }
 
 .btnPolish {
@@ -1321,6 +1334,99 @@
 
 .btnPolish:hover {
   border-color: var(--corum-glass-border-active);
+}
+
+.btnPolish:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnPolishIcon {
+  color: var(--dsw-alias-brand-text);
+}
+
+/* ghost 小钮（设计稿 btn-expand/btn-shrink: 透明底, radius 6, padding [3,6], 10px tertiary） */
+.btnGhost {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.btnGhost:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* ── 提示词放大态（设计稿 sBqOd: 单栏铺满 — zoom-hd + big-area + hint）── */
+
+.promptZoomCol {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.promptZoomHd {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.promptZoomTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.promptZoomActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.promptZoomArea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.promptZoomTextarea {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  resize: none;
+  box-sizing: border-box;
+}
+
+.promptZoomTextarea::placeholder {
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* 技能/MCP 列表行 */

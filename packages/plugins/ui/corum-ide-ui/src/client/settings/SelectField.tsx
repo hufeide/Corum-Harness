@@ -25,6 +25,8 @@ interface SelectFieldProps {
   onChange: (id: string) => void
   /** 是否禁用。 */
   disabled?: boolean
+  /** 尺寸变体：'fill'=占满父容器宽（编辑表单列）; 'compact'=设计稿弹窗版本选择器（小尺寸、自适应内容）。 */
+  variant?: 'default' | 'fill' | 'compact'
 }
 
 /**
@@ -32,7 +34,7 @@ interface SelectFieldProps {
  * @param props - value, options, onChange, disabled.
  * @returns the select field element.
  */
-export function SelectField({ value, options, onChange, disabled }: SelectFieldProps) {
+export function SelectField({ value, options, onChange, disabled, variant = 'default' }: SelectFieldProps) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const dropdownStyle = useRef<CSSStyleDeclaration | null>(null)
@@ -83,18 +85,18 @@ export function SelectField({ value, options, onChange, disabled }: SelectFieldP
   }, [open])
 
   return (
-    <div className={css.wrapper}>
+    <div className={`${css.wrapper}${variant === 'fill' ? ' ' + css.wrapperFill : ''}`}>
       <button
         ref={buttonRef}
         type="button"
-        className={css.select}
+        className={`${css.select}${variant === 'fill' ? ' ' + css.selectFill : variant === 'compact' ? ' ' + css.selectCompact : ''}`}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => { setOpen(v => !v) }}
       >
         <span className={css.value}>{displayLabel}</span>
-        <ChevronDown className={css.chevron} size={18} />
+        <ChevronDown className={css.chevron} size={variant === 'compact' ? 11 : variant === 'fill' ? 16 : 18} />
       </button>
       {open && !disabled && createPortal(
         <div id="__select-dropdown" className={css.dropdown} role="listbox" style={{ position: 'fixed' }}>

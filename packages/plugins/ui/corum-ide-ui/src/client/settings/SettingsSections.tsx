@@ -428,10 +428,9 @@ function AgentCard({ profile, onClick }: { profile: AgentProfileSummary; onClick
         <span className={css.agentExp}>{profile.experience}</span>
       )}
       <div className={css.agentModelRow}>
-        <div className={css.agentModelLeft}>
-          <Cpu size={11} className={css.agentModelIcon} />
-          <span className={css.agentModelName}>{profile.model.model}</span>
-        </div>
+        <Cpu size={11} className={css.agentModelIcon} />
+        <span className={css.agentInheritTag}>继承自 {profile.baseMode ?? (profile.source === 'official' ? profile.id : 'standard')}</span>
+        <span className={css.agentModelName}>{profile.model.model}</span>
         <span className={css.agentDimTag}>{dim}</span>
       </div>
     </div>
@@ -484,6 +483,7 @@ function OfficialModeCard({ id }: { id: string }) {
         <Box size={13} className={css.officialCardIcon} />
         <span className={css.officialCardLabel}>{meta.label}</span>
         <span className={css.officialBadge}>官方</span>
+        <span className={css.agentInheritTag}>继承自</span>
       </div>
       <span className={css.officialCardDesc}>{meta.desc}</span>
     </div>
@@ -778,50 +778,41 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
   const EXP_QUICK = ['参与 N 个项目', '完成 N 次任务', '已服务 N 天']
 
-  // 提示词放大态：占满右栏
+  // Esc 缩小（设计稿 sBqOd：「Esc 缩小 · ⌘Z 撤销润色」）。
+  // ⚠️ 必须用 capture 阶段：设置壳 dialog 的 bubble 阶段 Esc 处理器会关闭整个设置弹窗，
+  //    capture 阶段先拿到事件并 stopPropagation，Esc 只缩小、不冒泡到壳。
+  useEffect(() => {
+    if (!promptZoom) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      e.preventDefault()
+      setPromptZoom(false)
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [promptZoom])
+
+  // 提示词放大态（设计稿 sBqOd：单栏铺满内容区 — zoom-hd + big-area + hint）
   if (promptZoom) {
     return (
-      <div className={css.editPageLayout}>
-        <div className={css.editPreviewCol}>
-          <button type="button" className={css.backBtn} onClick={() => setPromptZoom(false)}>
-            <ChevronLeft size={14} />返回编辑
-          </button>
-          <AgentCard profile={{
-            id: draft.name || 'new-agent',
-            ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
-            ...(draft.title !== '' ? { title: draft.title } : {}),
-            ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
-            ...(draft.experience !== '' ? { experience: draft.experience } : {}),
-            ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
-            prompt: draft.prompt,
-            model: { provider: draft.provider, model: draft.model },
-            skills: draft.skills,
-            mcpServers: draft.mcpServers,
-            terminal: { mode: draft.terminal },
-            version: 1,
-            trust: draft.trust,
-            source: 'corum',
-          }} onClick={() => {}} />
-        </div>
-        <div className={css.editFormCol}>
-          <div className={css.formGroup}>
-            <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>提示词</span>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
-                <button type="button" className={css.btnPolish} onClick={() => setPromptZoom(false)}><Minimize2 size={11} />缩小</button>
-              </div>
-            </div>
-            <textarea
-              className={css.promptTextarea}
-              style={{ flex: 1, minHeight: 400, fontSize: 13, lineHeight: 1.6, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}
-              value={draft.prompt}
-              onChange={e => set('prompt', e.target.value)}
-              placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。"
-            />
-            <p className={css.hintText}>Esc 缩小 · ⌘Z 撤销润色</p>
+      <div className={css.promptZoomCol}>
+        <div className={css.promptZoomHd}>
+          <span className={css.promptZoomTitle}>提示词</span>
+          <div className={css.promptZoomActions}>
+            <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
+            <button type="button" className={css.btnGhost} onClick={() => setPromptZoom(false)}><Minimize2 size={12} />缩小</button>
           </div>
         </div>
+        <div className={css.promptZoomArea}>
+          <textarea
+            className={css.promptZoomTextarea}
+            value={draft.prompt}
+            onChange={e => set('prompt', e.target.value)}
+            placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。"
+          />
+        </div>
+        <p className={css.hintText}>Esc 缩小 · ⌘Z 撤销润色</p>
       </div>
     )
   }
@@ -855,42 +846,51 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
       {/* 顶部一排：基本信息（左）+ 名片预览（右） */}
       <div style={{ display: 'flex', gap: 20, width: '100%' }}>
-        {/* 左：基本信息 */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* 左：基本信息（设计稿 GHBvv basicCol: gap 8 + avatarRow gap 18） */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div className={css.formGroupTitle}>基本信息</div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button" style={{ cursor: 'pointer' }}>
-              {draft.avatar !== ''
-                ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
-                : <Upload size={22} className={css.avatarIcon} />}
+          <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+            {/* avatarBlock：64 头像 + 上传提示 + AI 生成（纵向 gap 6，居中） */}
+            <div className={css.avatarBlock}>
+              <div className={css.avatarBox} onClick={() => fileRef.current?.click()} role="button">
+                {draft.avatar !== ''
+                  ? <img className={css.agentAvatarImg} src={draft.avatar} alt="" />
+                  : <Upload size={26} className={css.avatarIcon} />}
+              </div>
+              <span className={css.avatarHint}>点击上传头像</span>
+              <button type="button" className={css.btnPolish} disabled title="即将上线">
+                <Sparkles size={12} className={css.btnPolishIcon} />AI 生成
+              </button>
             </div>
-            <span className={css.hintText}>点击上传头像</span>
+            {/* fieldsBlock：两列字段（组内 gap 6） */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className={css.formCols}>
+                <div className={css.formCol}>
+                  <label className={css.fieldLabel}>预设 ID</label>
+                  <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
+                </div>
+                <div className={css.formCol}>
+                  <label className={css.fieldLabel}>昵称</label>
+                  <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
+                </div>
+              </div>
+              <div className={css.formCols}>
+                <div className={css.formCol}>
+                  <label className={css.fieldLabel}>岗位 / 职位</label>
+                  <input className={css.fieldInput} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
+                </div>
+                <div className={css.formCol}>
+                  <label className={css.fieldLabel}>岗位维度（名片筛选）</label>
+                  <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} variant="fill" />
+                </div>
+              </div>
+            </div>
           </div>
           <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
-          <div className={css.formCols}>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>预设 ID</label>
-              <input className={css.fieldInput} value={draft.name} onChange={e => set('name', e.target.value)} placeholder="my-agent" disabled={!isNew} />
-            </div>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>昵称</label>
-              <input className={css.fieldInput} value={draft.nickname} onChange={e => set('nickname', e.target.value)} placeholder="我的 Agent" />
-            </div>
-          </div>
-          <div className={css.formCols}>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>岗位 / 职位</label>
-              <input className={css.fieldInput} value={draft.title} onChange={e => set('title', e.target.value)} placeholder="如：前端工程师 / 测试 / PM" />
-            </div>
-            <div className={css.formCol}>
-              <label className={css.fieldLabel}>岗位维度（名片筛选）</label>
-              <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} />
-            </div>
-          </div>
         </div>
 
-        {/* 右：名片预览 */}
-        <div style={{ flex: 'none', width: 280, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* 右：名片预览（设计稿 prevCol: width 280, gap 4） */}
+        <div style={{ flex: 'none', width: 280, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div className={css.formGroupTitle}>名片预览</div>
           <AgentCard profile={previewProfile} onClick={() => {}} />
         </div>
@@ -915,19 +915,16 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
 
       {/* 下方全宽表单（独立滚动） */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {/* 继承自 */}
-        <div className={css.formGroup}>
-          <div className={css.formGroupTitle}>继承自</div>
-          <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} />
-          <p className={css.hintText}>将继承 {draft.baseMode} 的系统提示词与 persona</p>
+        {/* 继承自（设计稿 GHBvv g-inherit: label + sel + hint，无组标题） */}
+        <div className={css.formGroup} style={{ gap: 3 }}>
+          <label className={css.fieldLabel}>继承自</label>
+          <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} variant="fill" />
+          <p className={css.fieldHint}>将继承 {draft.baseMode} 的系统提示词与 persona</p>
         </div>
 
-        {/* 人格设置 */}
+        {/* 人格设置（设计稿 GHBvv g-persona：AI 润色在文本域内底部行，与字数统计同行） */}
         <div className={css.formGroup}>
-          <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>人格设置</span>
-            <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
-          </div>
+          <div className={css.formGroupTitle}>人格设置</div>
           <label className={css.fieldLabel}>用一段话描述 Agent 的人格特质与行为倾向（不超过 500 字符）</label>
           <div className={css.promptArea}>
             <textarea
@@ -938,23 +935,28 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
               rows={3}
               maxLength={500}
             />
-            <div className={css.promptActions}>
-              <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-dimmed)' }}>{draft.persona.length} / 500</span>
+            <div className={css.promptActionsRow}>
+              <span className={css.promptCount}>{draft.persona.length} / 500</span>
+              <button type="button" className={css.btnPolish} disabled title="即将上线">
+                <Sparkles size={11} className={css.btnPolishIcon} />AI 润色
+              </button>
             </div>
           </div>
         </div>
 
-        {/* 提示词 */}
+        {/* 提示词（设计稿 GHBvv g-prompt：放大钮为 ghost 小钮；AI 润色在文本域内底部行） */}
         <div className={css.formGroup}>
           <div className={css.formGroupTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>提示词</span>
-            <button type="button" className={css.btnPolish} onClick={() => setPromptZoom(true)}><Maximize2 size={11} />放大</button>
+            <button type="button" className={css.btnGhost} onClick={() => setPromptZoom(true)}><Maximize2 size={12} />放大</button>
           </div>
           <label className={css.fieldLabel}>自定义提示词（叠加在基础模式 persona 之上，非替代）</label>
           <div className={css.promptArea}>
             <textarea className={css.promptTextarea} value={draft.prompt} onChange={e => set('prompt', e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
-            <div className={css.promptActions}>
-              <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
+            <div className={css.promptActionsRow}>
+              <button type="button" className={css.btnPolish} disabled title="即将上线">
+                <Sparkles size={11} className={css.btnPolishIcon} />AI 润色
+              </button>
             </div>
           </div>
         </div>
@@ -966,15 +968,15 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
             <div className={css.formCol}>
               <label className={css.fieldLabel}>主 Agent</label>
               <div className={css.selectStack}>
-                <SelectField value={draft.provider} options={[{ id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => set('provider', v)} />
-                <SelectField value={draft.model} options={[{ id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => set('model', v)} />
+                <SelectField value={draft.provider} options={[{ id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => set('provider', v)} variant="fill" />
+                <SelectField value={draft.model} options={[{ id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => set('model', v)} variant="fill" />
               </div>
             </div>
             <div className={css.formCol}>
               <label className={css.fieldLabel}>子 Agent（可选，缺省同主 Agent）</label>
               <div className={css.selectStack}>
-                <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} />
-                <SelectField value={draft.subEnabled ? draft.subModel : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} />
+                <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-official', label: 'deepseek-official' }, { id: 'pi-ai', label: 'pi-ai' }]} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} variant="fill" />
+                <SelectField value={draft.subEnabled ? draft.subModel : ''} options={[{ id: '', label: '（同主 Agent）' }, { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' }, { id: 'deepseek-v4', label: 'deepseek-v4' }, { id: 'deepseek-r1', label: 'deepseek-r1' }]} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} variant="fill" />
               </div>
             </div>
           </div>
@@ -1014,11 +1016,11 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           <div className={css.formCols}>
             <div className={css.formCol}>
               <label className={css.fieldLabel}>终端模式</label>
-              <SelectField value={draft.terminal} options={TERMINAL_OPTIONS} onChange={v => set('terminal', v as 'sandbox' | 'host')} />
+              <SelectField value={draft.terminal} options={TERMINAL_OPTIONS} onChange={v => set('terminal', v as 'sandbox' | 'host')} variant="fill" />
             </div>
             <div className={css.formCol}>
               <label className={css.fieldLabel}>记忆作用域</label>
-              <SelectField value={draft.memory} options={MEMORY_OPTIONS} onChange={v => set('memory', v)} />
+              <SelectField value={draft.memory} options={MEMORY_OPTIONS} onChange={v => set('memory', v)} variant="fill" />
             </div>
           </div>
         </div>
@@ -2179,6 +2181,9 @@ function SkillBindDialog({ rpc, bound, onClose, onConfirm }: {
           {(allSkills ?? []).map(s => {
             const isChecked = checked.has(s.name)
             const versions = versionsMap[s.name] ?? []
+            // 设计稿 ExxZt：未选中行也显示版本选择器（dimmed 禁用态，值为最新版）
+            const latest = versions[versions.length - 1]?.id ?? ''
+            const displayVersion = isChecked ? (checked.get(s.name) ?? latest) : latest
             return (
               <div
                 key={s.name}
@@ -2196,12 +2201,17 @@ function SkillBindDialog({ rpc, bound, onClose, onConfirm }: {
                   </div>
                   <span className={css.bindPickDesc}>{s.description}</span>
                 </div>
-                {isChecked && versions.length > 0 && (
-                  <span onClick={e => e.stopPropagation()}>
+                {versions.length > 0 && (
+                  <span
+                    className={isChecked ? undefined : css.bindVersionDim}
+                    onClick={e => e.stopPropagation()}
+                  >
                     <SelectField
-                      value={checked.get(s.name) ?? ''}
+                      value={displayVersion}
                       options={versions.map(v => ({ id: v.id, label: v.id }))}
                       onChange={v => setVersion(s.name, v)}
+                      disabled={!isChecked}
+                      variant="compact"
                     />
                   </span>
                 )}
