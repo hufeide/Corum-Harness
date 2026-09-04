@@ -83,6 +83,8 @@ export interface ProfileSummary {
   baseMode?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
+  /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
+  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
@@ -559,6 +561,7 @@ export class CorumAgentService extends TypertRemoteService {
       baseMode: p.baseMode,
       prompt: p.prompt,
       model: p.model,
+      ...(p.subagentModel !== undefined ? { subagentModel: p.subagentModel } : {}),
       skills: p.skills,
       mcpServers: p.mcpServers,
       terminal: { mode: p.terminal.mode },
@@ -683,6 +686,7 @@ export class CorumAgentService extends TypertRemoteService {
         baseMode: saved.baseMode,
         prompt: saved.prompt,
         model: saved.model,
+        ...(saved.subagentModel !== undefined ? { subagentModel: saved.subagentModel } : {}),
         skills: saved.skills,
         mcpServers: saved.mcpServers,
         terminal: { mode: saved.terminal.mode },

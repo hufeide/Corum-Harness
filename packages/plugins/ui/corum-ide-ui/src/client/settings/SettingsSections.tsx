@@ -374,6 +374,8 @@ interface AgentProfileSummary {
   baseMode?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
+  /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
+  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
@@ -536,9 +538,11 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     prompt: p.prompt,
     provider: p.model.provider,
     model: p.model.model,
-    subEnabled: false,
-    subProvider: 'deepseek-official',
-    subModel: 'deepseek-v4-flash',
+    // 子 Agent 模型回填：已配 → subEnabled + 回填 provider/model；未配 → subEnabled=false
+    // （否则编辑已配子模型的 Agent 再保存会把 subagentModel 静默冲掉）。
+    subEnabled: p.subagentModel !== undefined,
+    subProvider: p.subagentModel?.provider ?? 'deepseek-official',
+    subModel: p.subagentModel?.model ?? 'deepseek-v4-flash',
     terminal: (p.terminal.mode === 'host' ? 'host' : 'sandbox') as 'sandbox' | 'host',
     memory: 'agent',
     skills: p.skills,

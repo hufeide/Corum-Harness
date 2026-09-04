@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
-import type { AgentProfile, BaseMode } from './profile.ts'
+import type { AgentProfile, BaseMode, ProfileModel } from './profile.ts'
 
 /**
  * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
@@ -74,8 +74,14 @@ export interface CompiledPreset {
  *
  * **官方升级同步**：bump dsh-agent-presets 后，对照官方 standard 源文件逐行
  * diff 本数组（结构一致，机械合并）。
+ *
+ * @param subagentModel - 子 Agent 默认 LLM 路由（可选）。dsh `tool-subagent`
+ *   原生支持 `Config.agentOptions` 作为该 tool 实例 spawn 的所有子 Agent 的
+ *   默认 agentOptions（`requestedAgentOptions()` 把它作 baseline，逐次调用
+ *   仍可覆盖）；profile.subagentModel 即映射到该 config，缺省则不注入
+ *   （子 Agent 走 `resolveChildAgentOptions` 的 parentOptions 兜底 = 同主 Agent）。
  */
-function standardRows(): CordisRow[] {
+function standardRows(subagentModel?: ProfileModel): CordisRow[] {
   return [
     // ── identity ──
     { id: 'agent-instructions', name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } },
@@ -150,7 +156,26 @@ function standardRows(): CordisRow[] {
         {
           id: 'tool-subagent',
           name: '@deepseek-ai/dsh-tool-subagent',
-          config: { provider: 'spawn', toolName: 'subagent', modelSelectionSettings: true, backgroundMode: 'continuable' },
+          config: {
+            provider: 'spawn',
+            toolName: 'subagent',
+            modelSelectionSettings: true,
+            backgroundMode: 'continuable',
+            // 子 Agent 默认模型（profile.subagentModel）：映射 dsh 原生
+            // Config.agentOptions。reasoningEffort 缺省不注入——dsh 在换路由且
+            // 未显式给 effort 时会丢弃继承值、用新模型默认档（与模型页默认 high 一致）。
+            ...(subagentModel !== undefined
+              ? {
+                  agentOptions: {
+                    provider: subagentModel.provider,
+                    model: subagentModel.model,
+                    ...(subagentModel.reasoningEffort !== undefined && subagentModel.reasoningEffort !== ''
+                      ? { reasoningEffort: subagentModel.reasoningEffort }
+                      : {}),
+                  },
+                }
+              : {}),
+          },
         },
         {
           id: 'tool-subagent-fork',
@@ -241,7 +266,7 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
         ...(isComplete ? { complete: true, includeRuntimeContext: false } : {}),
       },
     },
-    ...standardRows(),
+    ...standardRows(profile.subagentModel),
   ]
 
   // corum 覆盖 ①：一次性 tool-bash/tool-pwsh → persistent-shell 持久终端组。
@@ -346,9 +371,7 @@ function renderRows(rows: readonly CordisRow[]): string {
         if (child.disabled !== undefined) lines.push(`      disabled: ${child.disabled}`)
         if (child.config !== undefined) {
           lines.push(`      config:`)
-          for (const [key, value] of Object.entries(child.config)) {
-            lines.push(`        ${key}: ${renderScalar(value)}`)
-          }
+          renderConfigLines(child.config, '        ', lines)
         }
       }
     } else {
@@ -357,9 +380,7 @@ function renderRows(rows: readonly CordisRow[]): string {
       if (row.disabled !== undefined) lines.push(`  disabled: ${row.disabled}`)
       if (row.config !== undefined) {
         lines.push(`  config:`)
-        for (const [key, value] of Object.entries(row.config)) {
-          lines.push(`    ${key}: ${renderScalar(value)}`)
-        }
+        renderConfigLines(row.config, '    ', lines)
       }
     }
     lines.push('')
@@ -379,6 +400,18 @@ function renderScalar(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (value === null || value === undefined) return 'null'
   return JSON.stringify(value)
+}
+
+/** 把 config 的键值渲染成 YAML 行（嵌套对象递归缩进一层，标量走 renderScalar）。 */
+function renderConfigLines(config: Record<string, unknown>, indent: string, lines: string[]): void {
+  for (const [key, value] of Object.entries(config)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      lines.push(`${indent}${key}:`)
+      renderConfigLines(value as Record<string, unknown>, `${indent}  `, lines)
+    } else {
+      lines.push(`${indent}${key}: ${renderScalar(value)}`)
+    }
+  }
 }
 
 /**
