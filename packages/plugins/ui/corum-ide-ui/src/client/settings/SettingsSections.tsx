@@ -18,6 +18,7 @@ import { Switch } from './Switch.tsx'
 import { Badge } from './Badge.tsx'
 import { KbdKey } from './KbdKey.tsx'
 import { ColorChips } from './ColorChips.tsx'
+import { ConfirmDialog } from './ConfirmDialog.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from './SettingsSections.module.css'
 
@@ -1199,16 +1200,17 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
             <GlassButton variant="primary" onClick={() => void doSave()} disabled={busy}>{busy ? '保存中…' : isNew ? '创建' : '保存'}</GlassButton>
           </div>
 
-          {/* 内联二次确认弹窗（设计稿 DKRwC confirm-pop：absolute, glass-1, radius 12, 外阴影） */}
+          {/* 内联二次确认（统一确认框 inline 形态，设计稿 DKRwC confirm-pop） */}
           {confirmDel && profile !== undefined && (
-            <div className={css.confirmPop}>
-              <div className={css.confirmPopTitle}>删除该预设？</div>
-              <div className={css.confirmPopDesc}>预设删除后不可恢复，此操作需要二次确认。</div>
-              <div className={css.confirmPopRow}>
-                <button type="button" className={css.confirmPopCancel} onClick={() => setConfirmDel(false)} disabled={busy}>取消</button>
-                <button type="button" className={css.confirmPopDel} onClick={() => { setConfirmDel(false); void doDelete() }} disabled={busy}>确认删除</button>
-              </div>
-            </div>
+            <ConfirmDialog
+              placement="inline"
+              title="删除该预设？"
+              message="预设删除后不可恢复，此操作需要二次确认。"
+              confirmLabel="确认删除"
+              busy={busy}
+              onConfirm={() => { setConfirmDel(false); void doDelete() }}
+              onCancel={() => setConfirmDel(false)}
+            />
           )}
         </div>
       </div>
@@ -1990,30 +1992,18 @@ function DeleteSkillDialog({ skill, bindCount, onClose, onDeleted, rpc }: {
       setBusy(false)
     }
   }
-  return createPortal(
-    <div className={css.confirmOverlay} onClick={onClose}>
-      <div className={css.confirmDialog} onClick={e => e.stopPropagation()}>
-        <div className={css.modalHeader}>
-          <span className={css.modalTitle}>删除技能</span>
-          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className={css.modalBody}>
-          <p className={css.confirmMsg}>确定删除技能「{skill.name}」吗？</p>
-          {bindCount > 0 && (
-            <p className={css.confirmWarn}>该技能已绑定 {bindCount} 个 Agent。删除后这些 Agent 将失去此技能，且不可恢复。</p>
-          )}
-          {error && <p className={css.confirmWarn}>{error}</p>}
-        </div>
-        <div className={css.modalFooter}>
-          <div className={css.footerLeft} />
-          <div className={css.footerRight}>
-            <GlassButton onClick={onClose}>取消</GlassButton>
-            <GlassButton variant="danger" onClick={() => void doDelete()} disabled={busy}>{busy ? '删除中…' : '删除'}</GlassButton>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <ConfirmDialog
+      title="删除技能"
+      message={<>确定删除技能「{skill.name}」吗？</>}
+      warning={bindCount > 0 ? `该技能已绑定 ${bindCount} 个 Agent。删除后这些 Agent 将失去此技能，且不可恢复。` : undefined}
+      error={error}
+      confirmLabel="删除"
+      busyLabel="删除中…"
+      busy={busy}
+      onConfirm={() => void doDelete()}
+      onCancel={onClose}
+    />
   )
 }
 
