@@ -356,6 +356,34 @@ export function apply(ctx: Context): void {
             const result = await call<ListModelsResult>('corumAgent', CORUM_AGENT_METHODS.listModels, {})
             return (result.providers ?? []).map((p) => ({ id: p.id, name: p.name, models: p.models ?? [] }))
           },
+          listModelCatalog: async () => {
+            // session/modelCatalog（与 composer 模型选择器同源）——含推理元数据。
+            // 用 connection.rpc.call 直打（不依赖 ctx.remote 的 fiber inject，与
+            // pickDir 同通道同契约）。
+            const result = await connection.rpc.call('/api', 'session/modelCatalog', { args: {} })
+            if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+            const catalog = result.value as { groups?: { id: string; name?: string; models?: { id: string; name?: string; reasoning?: { efforts?: { id: string; name: string; description?: string }[]; defaultEffort?: string } }[] }[] }
+            return (catalog.groups ?? []).map((g) => ({
+              id: g.id,
+              name: g.name ?? g.id,
+              models: (g.models ?? []).map((m) => ({
+                id: m.id,
+                name: m.name ?? m.id,
+                ...(m.reasoning === undefined
+                  ? {}
+                  : {
+                    reasoning: {
+                      efforts: (m.reasoning.efforts ?? []).map((e) => ({
+                        id: e.id,
+                        name: e.name,
+                        ...(e.description === undefined ? {} : { description: e.description }),
+                      })),
+                      ...(m.reasoning.defaultEffort === undefined ? {} : { defaultEffort: m.reasoning.defaultEffort }),
+                    },
+                  }),
+              })),
+            }))
+          },
           listPermissions: async () => {
             const result = await call<ListPermissionPresetsResult>('corumAgent', CORUM_AGENT_METHODS.listPermissionPresets, {})
             return { presets: result.presets ?? [], defaultPreset: result.defaultPreset ?? '' }

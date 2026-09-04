@@ -14,8 +14,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Clock, FolderGit2, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
-import type { AgentOption, ConversationInjected, ModelProviderOption, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
+import type { AgentOption, ConversationInjected, ModelProviderGroup, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
 import { AgentTwoLevelSelect } from './AgentTwoLevelSelect.tsx'
+import { ModelSelectWithEffort, type ModelRouteSelection } from './ModelSelectWithEffort.tsx'
 import css from './EmptyStateHero.module.css'
 
 /** 路径末段（用于「选择新目录」按钮上显示已选目录名）。 */
@@ -94,15 +95,15 @@ function NewTaskForm({ emptyActions, onClose }: {
   const [agents, setAgents] = useState<readonly AgentOption[]>([])
   const [permissions, setPermissions] = useState<readonly PermissionOption[]>([])
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceOption[]>([])
-  const [providers, setProviders] = useState<readonly ModelProviderOption[]>([])
+  const [modelGroups, setModelGroups] = useState<readonly ModelProviderGroup[]>([])
   const [profileId, setProfileId] = useState('')
   const [permission, setPermission] = useState('')
   const [cwd, setCwd] = useState('')
   const [pickError, setPickError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  /** 模型下拉当前值：`<provider>/<model>`；'' = 跟随 Agent 默认。 */
-  const [modelKey, setModelKey] = useState('')
-  /** 模型是否被用户手动改过——没改时选定 Agent 自动跟随其默认模型。 */
+  /** 模型选择当前值（provider/model/reasoningEffort）；null = 跟随 Agent 默认。 */
+  const [modelSel, setModelSel] = useState<ModelRouteSelection | null>(null)
+  /** 模型是否被用户手动改过——没改时选定 Agent 自动跟随其默认模型（含默认档）。 */
   const modelTouched = useRef(false)
   /** 工作区自绘下拉展开态 + 容器 ref（点击外部收起）。 */
   const [wsOpen, setWsOpen] = useState(false)
@@ -123,8 +124,8 @@ function NewTaskForm({ emptyActions, onClose }: {
     emptyActions.listAgents()
       .then((list) => { if (!alive) return; setAgents(list); setProfileId((cur) => cur === '' ? (list[0]?.id ?? '') : cur) })
       .catch(() => { /* Agent 列表拉取失败：留空，提交时 host 用内置 task profile */ })
-    emptyActions.listModels()
-      .then((list) => { if (alive) setProviders(list) })
+    emptyActions.listModelCatalog()
+      .then((list) => { if (alive) setModelGroups(list) })
       .catch(() => { /* 模型目录拉取失败：留空，提交时跟随 Agent 默认 */ })
     emptyActions.listWorkspaces()
       .then((list) => { if (!alive) return; setWorkspaces(list); setCwd((cur) => cur === '' ? (list[0]?.path ?? '') : cur) })
@@ -143,15 +144,22 @@ function NewTaskForm({ emptyActions, onClose }: {
     return () => { alive = false }
   }, [emptyActions])
 
-  /** 当前选中 Agent 的默认模型 key（选定 Agent 后模型下拉默认跟随它）。 */
+  /** 当前选中 Agent 的默认模型（选定 Agent 后模型选择默认跟随它，含默认档）。 */
   const agentDefault = useMemo(
     () => agents.find((a) => a.id === profileId)?.defaultModel,
     [agents, profileId],
   )
-  /** 模型下拉实际选中值：用户没手动改时跟随 Agent 默认；改过后保持用户选择。 */
-  const effectiveModelKey = modelTouched.current
-    ? modelKey
-    : (agentDefault === undefined ? '' : `${agentDefault.provider}/${agentDefault.model}`)
+  /** 模型选择实际选中值：用户没手动改时跟随 Agent 默认（含其 reasoningEffort）；
+   *  改过后保持用户选择（含用户选的推理档）。 */
+  const effectiveModelSel: ModelRouteSelection | null = modelTouched.current
+    ? modelSel
+    : (agentDefault === undefined
+      ? null
+      : {
+        provider: agentDefault.provider,
+        model: agentDefault.model,
+        ...(agentDefault.reasoningEffort === undefined ? {} : { reasoningEffort: agentDefault.reasoningEffort }),
+      })
 
   const pick = useCallback(async (): Promise<void> => {
     // 失败绝不静默吞（PROGRESS §4 同类坑）：弹不出选择器要让用户
@@ -168,22 +176,15 @@ function NewTaskForm({ emptyActions, onClose }: {
   const submit = (): void => {
     if (cwd === '' || submitting) return
     setSubmitting(true)
-    // 模型解析：'' 时让 host 用 Agent 默认；有值则拆 provider/model。跟随 Agent
-    // 默认时也显式带上（含 reasoningEffort），保证所选即所得。
-    let model: NewTaskOptions['model']
-    const key = effectiveModelKey
-    if (key !== '') {
-      const slash = key.indexOf('/')
-      if (slash > 0) {
-        model = {
-          provider: key.slice(0, slash),
-          model: key.slice(slash + 1),
-          ...(agentDefault !== undefined && key === `${agentDefault.provider}/${agentDefault.model}` && agentDefault.reasoningEffort !== undefined
-            ? { reasoningEffort: agentDefault.reasoningEffort }
-            : {}),
-        }
+    // 模型解析：null（跟随 Agent 默认）时让 host 用 Agent 默认；有值则带
+    // provider/model/reasoningEffort（含 Agent 默认档或用户选档），保证所选即所得。
+    const model: NewTaskOptions['model'] = effectiveModelSel === null
+      ? undefined
+      : {
+        provider: effectiveModelSel.provider,
+        model: effectiveModelSel.model,
+        ...(effectiveModelSel.reasoningEffort === undefined ? {} : { reasoningEffort: effectiveModelSel.reasoningEffort }),
       }
-    }
     const options: NewTaskOptions = {
       cwd,
       ...(profileId === '' ? {} : { profileId }),
@@ -320,26 +321,39 @@ function NewTaskForm({ emptyActions, onClose }: {
       </div>
 
       <div className={css.field}>
-        <label className={css.label} htmlFor="new-task-model">模型</label>
-        <div className={css.selectWrap}>
-          <select
-            id="new-task-model"
-            className={css.select}
-            value={effectiveModelKey}
-            onChange={(e) => { modelTouched.current = true; setModelKey(e.target.value) }}
-          >
-            {providers.length === 0 && <option value={effectiveModelKey}>{effectiveModelKey === '' ? '加载中…' : effectiveModelKey}</option>}
-            {providers.map((p) => (
-              <optgroup key={p.id} label={p.name}>
-                {p.models.map((m) => <option key={`${p.id}/${m.id}`} value={`${p.id}/${m.id}`}>{m.name}</option>)}
-              </optgroup>
-            ))}
-            {/* Agent 默认模型不在目录里时，补一项保证选中值可显示。 */}
-            {agentDefault !== undefined
-              && !providers.some((p) => p.id === agentDefault.provider && p.models.some((m) => m.id === agentDefault.model))
-              && <option value={`${agentDefault.provider}/${agentDefault.model}`}>{agentDefault.model}</option>}
-          </select>
-        </div>
+        <span className={css.label} id="new-task-model-label">模型</span>
+        {/* 模型 + 推理等级两级选择器（2026-09-07 用户定调：所有模型都支持推理
+            等级，选择模型的交互与 composer 统一）。trigger 显示「模型名 · 档位
+            名」，面板 root 层下钻模型列表（按 provider 分组）与推理等级（仅当前
+            模型有 reasoning 时）；无 reasoning 的模型不显示档位入口。 */}
+        {modelGroups.length === 0
+          ? <span className={css.permEmpty}>加载中…</span>
+          : (
+            <ModelSelectWithEffort
+              groups={modelGroups}
+              value={effectiveModelSel}
+              onChange={(sel) => { modelTouched.current = true; setModelSel(sel) }}
+              ariaLabel="选择模型与推理等级"
+              css={{
+                root: css.modelSelRoot,
+                trigger: css.modelSelTrigger,
+                triggerName: css.modelSelTriggerName,
+                triggerEffort: css.modelSelTriggerEffort,
+                chevron: css.modelSelChevron,
+                panel: css.modelSelPanel,
+                cell: css.modelSelCell,
+                cellLabel: css.modelSelCellLabel,
+                cellValue: css.modelSelCellValue,
+                cellChevron: css.modelSelCellChevron,
+                backRow: css.modelSelBackRow,
+                groupTitle: css.modelSelGroupTitle,
+                list: css.modelSelList,
+                item: css.modelSelItem,
+                itemName: css.modelSelItemName,
+                itemCheck: css.modelSelItemCheck,
+              }}
+            />
+          )}
         {!modelTouched.current && agentDefault !== undefined && (
           <span className={css.fieldHint}>已按 Agent 默认模型自动选择</span>
         )}

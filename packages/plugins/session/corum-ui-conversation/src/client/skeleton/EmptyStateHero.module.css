@@ -817,3 +817,170 @@
   font-size: 12px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* ── 模型 + 推理等级两级选择器（2026-09-07）── 与 Agent 二级菜单同形态
+   （trigger + 浮出面板），面板 root 层下钻模型列表与推理等级。 */
+.modelSelRoot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.modelSelTrigger {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+}
+.modelSelTrigger:hover {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+.modelSelTriggerName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modelSelTriggerEffort {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+.modelSelChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.modelSelPanel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(420px, 90vw);
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-3, var(--dsw-alias-background-level-3));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.modelSelCell {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.modelSelCell:hover {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+.modelSelCellLabel {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+.modelSelCellValue {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.modelSelCellChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.modelSelBackRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  border: none;
+  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.modelSelBackRow:hover {
+  color: var(--dsw-alias-label-primary);
+}
+.modelSelGroupTitle {
+  padding: 6px 8px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+}
+.modelSelList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.modelSelItem {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+.modelSelItem:hover {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+.modelSelItem[data-active] {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 600;
+}
+.modelSelItemName {
+  flex: 1 1 auto;
+}
+.modelSelItemCheck {
+  flex: none;
+  width: 14px;
+  display: inline-flex;
+  color: var(--dsw-alias-state-business-primary);
+}

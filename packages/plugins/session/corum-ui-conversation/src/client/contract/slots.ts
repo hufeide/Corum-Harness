@@ -239,6 +239,11 @@ export interface ConversationInjected {
     /** 可选模型目录（corumAgent.listModels，provider→models）。新建任务表单模型
      *  下拉的数据源：选定 Agent 后默认取该 Agent 的默认模型，用户仍可改。 */
     listModels: () => Promise<readonly ModelProviderOption[]>
+    /** 含推理元数据的模型目录（session/modelCatalog，与 composer 模型选择器同源）。
+     *  新建任务表单的「模型 + 推理等级」两级面板数据源：每个模型带 reasoning
+     *  （efforts + defaultEffort）；无 reasoning 的模型（如部分第三方路由）不显示
+     *  推理等级入口。 */
+    listModelCatalog: () => Promise<readonly ModelProviderGroup[]>
     /** 可选的访问权限档位（corumAgent.listPermissionPresets，官方 preset 表）。
      *  返回含 `defaultPreset` 的整体值——默认档位取官方 defaultPreset（组合默认
      *  workspace-write），不能取列表首项（表首项恰是 read-only，最严档）。 */
@@ -308,6 +313,30 @@ export interface ModelProviderOption {
   id: string
   name: string
   models: readonly { id: string; name: string }[]
+}
+
+/** 一个推理档位（session/modelCatalog 投影的 adapter-owned effort）。 */
+export interface ModelEffortOption {
+  id: string
+  name: string
+  description?: string
+}
+/** 一个模型的推理元数据（可选档位 + provider 默认档）。 */
+export interface ModelReasoningInfo {
+  efforts: readonly ModelEffortOption[]
+  defaultEffort?: string
+}
+/** 含推理元数据的一个模型（session/modelCatalog 投影）。 */
+export interface ModelCatalogModelOption {
+  id: string
+  name: string
+  reasoning?: ModelReasoningInfo
+}
+/** 含推理元数据的模型 provider 分组（session/modelCatalog 投影）。 */
+export interface ModelProviderGroup {
+  id: string
+  name: string
+  models: readonly ModelCatalogModelOption[]
 }
 
 /** 新建任务表单的一个访问权限档位（官方 permissionPresets 预设表投影）。 */
