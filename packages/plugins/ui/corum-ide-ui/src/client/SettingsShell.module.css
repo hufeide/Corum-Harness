@@ -83,9 +83,10 @@
   position: relative;
   z-index: 1;
   display: flex;
-  /* 设计稿: 1040 wide, 820 high */
+  /* 设计稿: 1040 wide；高 965（GHBvv Agent 设置 v3，含完整编辑表单）。
+     小窗口兜底 vh-48。原 820 是旧稿 MEGzM 高度，会把编辑页表单压出滚动条。 */
   width: 1040px;
-  height: min(820px, calc(100vh - 48px));
+  height: min(965px, calc(100vh - 48px));
   max-width: calc(100vw - 48px);
   /* 设计稿: cornerRadius 24, glass-1 fill */
   border-radius: 24px;

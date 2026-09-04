@@ -891,31 +891,31 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
         </div>
 
-        {/* 右：名片预览（设计稿 prevCol: width 280, gap 4） */}
+        {/* 右：名片预览 + 记忆摘要（设计稿 prevCol: width 280, gap 4；经验说明附预览列下） */}
         <div style={{ flex: 'none', width: 280, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div className={css.formGroupTitle}>名片预览</div>
           <AgentCard profile={previewProfile} onClick={() => {}} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+            <div className={css.formGroupTitle}>记忆摘要</div>
+            <label className={css.fieldLabel}>经验说明</label>
+            <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
+            <div className={css.expQuickRow}>
+              {EXP_QUICK.map(q => (
+                <button
+                  key={q}
+                  type="button"
+                  className={css.expQuickPill}
+                  onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
+                >+ {q}</button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* 记忆摘要 */}
-      <div className={css.formGroup}>
-        <div className={css.formGroupTitle}>记忆摘要（根据 Agent 的记忆沉淀自动汇总）</div>
-        <label className={css.fieldLabel}>经验说明</label>
-        <input className={css.fieldInput} value={draft.experience} onChange={e => set('experience', e.target.value)} placeholder="参与 6 个项目 · 完成 128 次任务" />
-        <div className={css.expQuickRow}>
-          {EXP_QUICK.map(q => (
-            <button
-              key={q}
-              type="button"
-              className={css.expQuickPill}
-              onClick={() => set('experience', draft.experience === '' ? q : `${draft.experience} · ${q}`)}
-            >+ {q}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* 下方全宽表单（独立滚动） */}
+      {/* 下方单一纵向表单列（设计稿 GHBvv formCol: gap 14，独立滚动）。
+          顺序 = 设计稿 formCol.children：继承 → 人格 → 提示词 → 模型 → 技能+MCP → 终端/记忆 → 页脚。
+          记忆摘要附在名片预览列下（设计稿 prevCol 的「经验」行即名片字段，编辑区不重复成组）。 */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
         {/* 继承自（设计稿 GHBvv g-inherit: label + sel + hint，无组标题） */}
         <div className={css.formGroup} style={{ gap: 3 }}>
