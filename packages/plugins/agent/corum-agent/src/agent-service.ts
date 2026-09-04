@@ -71,6 +71,8 @@ export interface ProfileSummary {
   id: string
   nickname?: string
   title?: string
+  /** 专业领域（可选，覆盖模式组装进 persona）。 */
+  domain?: string
   /** 岗位维度（名片筛选，可选）。 */
   dimension?: string
   /** 名片履历（可选）。 */
@@ -152,6 +154,8 @@ export interface SaveProfileInput {
   id: string
   nickname?: string
   title?: string
+  /** 专业领域（覆盖模式组装进 persona）。 */
+  domain?: string
   /** 岗位维度（名片筛选）。 */
   dimension?: string
   /** 名片履历。 */
@@ -550,6 +554,7 @@ export class CorumAgentService extends TypertRemoteService {
       id: p.id,
       ...(p.nickname !== undefined ? { nickname: p.nickname } : {}),
       ...(p.title !== undefined ? { title: p.title } : {}),
+      ...(p.domain !== undefined ? { domain: p.domain } : {}),
       ...(p.dimension !== undefined ? { dimension: p.dimension } : {}),
       ...(p.experience !== undefined ? { experience: p.experience } : {}),
       ...(p.persona !== undefined ? { persona: p.persona } : {}),
@@ -647,6 +652,7 @@ export class CorumAgentService extends TypertRemoteService {
       id: input.id,
       ...(input.nickname !== undefined && input.nickname.trim() !== '' ? { nickname: input.nickname.trim() } : {}),
       ...(input.title !== undefined && input.title.trim() !== '' ? { title: input.title.trim() } : {}),
+      ...(input.domain !== undefined && input.domain.trim() !== '' ? { domain: input.domain.trim() } : {}),
       ...(input.dimension !== undefined && isValidAgentDimension(input.dimension) ? { dimension: input.dimension } : {}),
       ...(input.experience !== undefined && input.experience.trim() !== '' ? { experience: input.experience.trim() } : {}),
       ...(input.persona !== undefined && input.persona.trim() !== '' ? { persona: input.persona.trim().slice(0, 500) } : {}),
@@ -676,6 +682,7 @@ export class CorumAgentService extends TypertRemoteService {
         id: saved.id,
         ...(saved.nickname !== undefined ? { nickname: saved.nickname } : {}),
         ...(saved.title !== undefined ? { title: saved.title } : {}),
+        ...(saved.domain !== undefined ? { domain: saved.domain } : {}),
         ...(saved.dimension !== undefined ? { dimension: saved.dimension } : {}),
         ...(saved.experience !== undefined ? { experience: saved.experience } : {}),
         ...(saved.persona !== undefined ? { persona: saved.persona } : {}),

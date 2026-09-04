@@ -249,21 +249,62 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * @param profile - AgentProfile。
  * @returns 两份文件文本（agent.cordis.yml + preset.yml）。
  */
+/**
+ * 覆盖模式（standard）的固定结构化 persona 模板组装。
+ *
+ * corum 自定义生成规则：先按固定段落拼装成完整 persona 文本（含 dsh 变量占位
+ * {{model}}/{{cwd}}），再交 dsh agentLoop 做变量插值与 section 装配。
+ * 各段按字段非空拼接，空字段省略对应子句；全空回退 basePersona。
+ *
+ * 结构：专业领域 + 岗位 + 人格 + 工作职责 + 模型/工作目录占位。
+ * （{{memory摘要}} 段预留——待 Agent memory 机制设计完成后再接入，当前不参与组装。）
+ */
+function composeOverridePersona(profile: AgentProfile): string {
+  const segments: string[] = []
+  // 身份句：专业领域 + 岗位（合并为一句）。
+  const domain = typeof profile.domain === 'string' ? profile.domain.trim() : ''
+  const title = typeof profile.title === 'string' ? profile.title.trim() : ''
+  if (domain !== '' && title !== '') segments.push(`You are an expert in the ${domain} field, working as a ${title}.`)
+  else if (domain !== '') segments.push(`You are an expert in the ${domain} field.`)
+  else if (title !== '') segments.push(`You are a ${title}.`)
+  // 人格（做事风格）。
+  if (typeof profile.persona === 'string' && profile.persona.trim() !== '') {
+    segments.push(`Your working style: ${profile.persona.trim()}.`)
+  }
+  // TODO(memory): 「你有丰富的工作经验：{{memory摘要}}」段——待 memory 机制后接入，当前不组装。
+  // 工作职责（用户自定义提示词）。
+  if (profile.prompt.trim() !== '') {
+    segments.push(`Your responsibilities: ${profile.prompt.trim()}`)
+  }
+  // 模型 + 工作目录占位（dsh 变量，render 时插值）。
+  segments.push('You are powered by the {{model}} model. Your working directory is {{cwd}}.')
+  return segments.join('\n\n')
+}
+
 export function compilePreset(profile: AgentProfile): CompiledPreset {
   // persona 拼接（语义按 baseMode 分覆盖/继承）：
   // - baseMode === 'standard'（用户自建 Agent，默认）：**覆盖**官方 coding-agent 模板，
-  //   persona = 人格 + 自定义提示词（不含 "You are a coding agent..."）。
+  //   走 corum 固定结构化模板（composeOverridePersona）。
   // - 其它模式（开发者编排，ptc/minimal/cordis）：**继承**该模式模板，
   //   persona = 模式模板 + 人格 + 自定义提示词。
   const basePersona = BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard
   const isComplete = BASE_MODE_COMPLETE.has(profile.baseMode)
-  const inheritBase = profile.baseMode !== 'standard'
-  const personaParts: string[] = []
-  if (inheritBase) personaParts.push(basePersona)
-  if (typeof profile.persona === 'string' && profile.persona.trim().length > 0) personaParts.push(profile.persona.trim())
-  if (profile.prompt.trim().length > 0) personaParts.push(profile.prompt.trim())
-  // 全部为空时回退 basePersona（保证 persona 非空、模型有基本身份）。
-  const personaText = personaParts.length > 0 ? personaParts.join('\n\n') : basePersona
+  let personaText: string
+  if (profile.baseMode === 'standard') {
+    const composed = composeOverridePersona(profile)
+    // 仅有占位行、无任何实质内容（domain/title/persona/prompt 全空）时回退 basePersona。
+    const hasSubstance =
+      (typeof profile.domain === 'string' && profile.domain.trim() !== '') ||
+      (typeof profile.title === 'string' && profile.title.trim() !== '') ||
+      (typeof profile.persona === 'string' && profile.persona.trim() !== '') ||
+      profile.prompt.trim() !== ''
+    personaText = hasSubstance ? composed : basePersona
+  } else {
+    const parts: string[] = [basePersona]
+    if (typeof profile.persona === 'string' && profile.persona.trim() !== '') parts.push(profile.persona.trim())
+    if (profile.prompt.trim() !== '') parts.push(profile.prompt.trim())
+    personaText = parts.join('\n\n')
+  }
 
   const rows: CordisRow[] = [
     {

@@ -379,6 +379,7 @@ interface AgentProfileSummary {
   id: string
   nickname?: string
   title?: string
+  domain?: string
   dimension?: string
   experience?: string
   persona?: string
@@ -475,6 +476,7 @@ function AgentCardPreview({ draft }: { draft: EditDraft }) {
     id: draft.name || 'new-agent',
     ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
     ...(draft.title !== '' ? { title: draft.title } : {}),
+    ...(draft.domain !== '' ? { domain: draft.domain } : {}),
     ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
     ...(draft.experience !== '' ? { experience: draft.experience } : {}),
     ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
@@ -527,6 +529,7 @@ interface EditDraft {
   name: string
   nickname: string
   title: string
+  domain: string
   dimension: string
   experience: string
   persona: string
@@ -548,7 +551,7 @@ interface EditDraft {
 
 function emptyDraft(): EditDraft {
   return {
-    name: '', nickname: '', title: '', dimension: '研发', experience: '', persona: '', avatar: '',
+    name: '', nickname: '', title: '', domain: '', dimension: '研发', experience: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
     terminal: 'sandbox', memoryEnabled: false, skills: [], mcpServers: [], trust: 'user',
@@ -560,6 +563,7 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     name: p.id,
     nickname: p.nickname ?? '',
     title: p.title ?? '',
+    domain: p.domain ?? '',
     dimension: p.dimension ?? inferDimension(p),
     experience: p.experience ?? '',
     persona: p.persona ?? '',
@@ -877,6 +881,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           id,
           ...(draft.nickname.trim() !== '' ? { nickname: draft.nickname.trim() } : {}),
           ...(draft.title.trim() !== '' ? { title: draft.title.trim() } : {}),
+          ...(draft.domain.trim() !== '' ? { domain: draft.domain.trim() } : {}),
           dimension: draft.dimension,
           ...(draft.experience.trim() !== '' ? { experience: draft.experience.trim() } : {}),
           ...(draft.persona.trim() !== '' ? { persona: draft.persona.trim() } : {}),
@@ -1017,6 +1022,13 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                 <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>岗位维度（名片筛选）</label>
                   <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} variant="fill" />
+                </div>
+              </div>
+              {/* 专业领域（覆盖模式组装进 persona：「You are an expert in the {domain} field」） */}
+              <div className={css.formCols}>
+                <div className={css.formCol} style={{ gap: 4 }}>
+                  <label className={css.fieldLabelSm}>专业领域</label>
+                  <input className={css.fieldInputSm} value={draft.domain} onChange={e => set('domain', e.target.value)} placeholder="如：软件开发 / 制造业 / 工程项目管理" />
                 </div>
               </div>
             </div>
