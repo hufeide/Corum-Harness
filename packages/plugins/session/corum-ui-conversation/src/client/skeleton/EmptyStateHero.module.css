@@ -671,13 +671,19 @@
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  right: 0;
   z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* 宽度自适应最长条目（同 ConversationRoot 的 chip 面板）：left:0 + width
+     max-content（不再 right:0 拉伸），min-width 与 trigger 同宽（表单字段
+     面板不窄于触发器），max-width 防极端长昵称顶出表单列。 */
+  width: max-content;
+  min-width: 100%;
+  max-width: min(480px, 90vw);
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 6px;
   border-radius: 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
@@ -735,6 +741,8 @@
   font: inherit;
   font-size: 13px;
   text-align: left;
+  /* 不换行：让面板 width:max-content 按真实最长条目撑开（配合面板宽度自适应）。 */
+  white-space: nowrap;
 }
 .agentSelItem:hover {
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));

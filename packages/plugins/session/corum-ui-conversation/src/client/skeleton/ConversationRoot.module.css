@@ -660,9 +660,16 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 220px;
+  /* 宽度自适应最长条目（2026-09-07 用户定调：「昵称-岗位」变长后 220px 写死
+     会截断）。width:max-content 按内容撑开，min-width 保底（短列表不塌缩成
+     窄条），max-width 防极端长昵称把面板顶出列；条目自身 white-space:nowrap
+     保证不换行，max-width 兜底时 overflow-x 由条目 ellipsis 处理。 */
+  width: max-content;
+  min-width: 220px;
+  max-width: min(420px, 90vw);
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 6px;
   border-radius: 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
@@ -720,6 +727,10 @@
   font: inherit;
   font-size: 12px;
   text-align: left;
+  /* 不换行：让面板 width:max-content 按真实最长条目撑开（配合面板宽度自
+     适应）；面板 max-width 兜底时本条 overflow ellipsis 由面板 overflow-x
+     hidden 裁切。 */
+  white-space: nowrap;
 }
 .agentSelItem:hover {
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
