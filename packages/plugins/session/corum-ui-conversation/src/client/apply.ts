@@ -347,6 +347,8 @@ export function apply(ctx: Context): void {
               name: p.nickname ?? p.title ?? p.id,
               ...(p.model === undefined ? {} : { defaultModel: p.model }),
               ...(p.source === undefined ? {} : { source: p.source }),
+              ...(p.title === undefined ? {} : { title: p.title }),
+              ...(p.dimension === undefined ? {} : { dimension: p.dimension }),
             }))
           },
           listModels: async () => {
@@ -377,6 +379,28 @@ export function apply(ctx: Context): void {
             try {
               const tasks = await call<ListTaskAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listTaskAgents, {})
               return (tasks.tasks ?? []).find((x) => x.sessionId === sessionId)?.profileId
+            } catch {
+              return undefined
+            }
+          },
+          getTaskAgentInfo: async (sessionId) => {
+            // task 泳道 Agent 的名片信息（对话起始页按专业方向定制推荐命令）：
+            // listTaskAgents 拿 profileId → listProfiles 映射 name/title/dimension。
+            // 任一步失败回退 undefined（推荐命令回退通用集）。
+            try {
+              const [tasks, profiles] = await Promise.all([
+                call<ListTaskAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listTaskAgents, {}),
+                call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {}),
+              ])
+              const task = (tasks.tasks ?? []).find((x) => x.sessionId === sessionId)
+              if (task === undefined) return undefined
+              const profile = (profiles.profiles ?? []).find((p) => p.id === task.profileId)
+              if (profile === undefined) return undefined
+              return {
+                name: profile.nickname ?? profile.title ?? profile.id,
+                ...(profile.title === undefined ? {} : { title: profile.title }),
+                ...(profile.dimension === undefined ? {} : { dimension: profile.dimension }),
+              }
             } catch {
               return undefined
             }

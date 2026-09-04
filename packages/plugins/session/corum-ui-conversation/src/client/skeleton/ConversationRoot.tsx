@@ -4,33 +4,80 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { ArrowLeft, Bot, Compass, History, Wand2 } from 'lucide-react'
+import { ArrowLeft, Bot, Bug, Compass, FileText, History, LayoutGrid, Megaphone, PenLine, TestTube2, Wand2 } from 'lucide-react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ConversationSlotProps, InputZone } from '../contract/slots.ts'
+import type { ConversationSlotProps, InputZone, TaskAgentInfo } from '../contract/slots.ts'
 import { conversationPhase } from '../contract/snapshot.ts'
 import { HeroGlow, HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
 import { EmptyStateHero } from './EmptyStateHero.tsx'
 import { DARK_ATTRIBUTE } from '@corum/corum-ui-base/client'
 import css from './ConversationRoot.module.css'
 
-/** 新会话界面的快捷指令卡（设计稿 L4 1:1）：icon 上 + 标题 + 描述，竖排玻璃卡。
- *  点击把指令文本填入 composer 待发送。 */
-const QUICK_COMMANDS: readonly { icon: typeof History; title: string; desc: string; prompt: string }[] = [
+/** 一条快捷指令卡（icon + 标题 + 描述 + 填入 composer 的提示词）。 */
+interface QuickCommand {
+  icon: typeof History
+  title: string
+  desc: string
+  prompt: string
+}
+
+/** 通用快捷指令卡（设计稿 L4 1:1）：无岗位维度信息（official preset / 查询失败）时的回退集。 */
+const GENERIC_QUICK_COMMANDS: readonly QuickCommand[] = [
   { icon: History, title: '继续未完成的任务', desc: '从上次中断的地方接着推进当前工作区的工作', prompt: '继续未完成的任务：从上次中断的地方接着推进当前工作区的工作。' },
   { icon: Wand2, title: '整理代码', desc: '清理结构、统一风格，让项目更易维护', prompt: '整理代码：清理结构、统一风格，让项目更易维护。' },
   { icon: Compass, title: '帮我探索项目', desc: '梳理项目结构，说明各模块职责与关联', prompt: '帮我探索项目：梳理项目结构，说明各模块职责与关联。' },
 ]
 
+/**
+ * 按 Agent 岗位维度定制的快捷指令卡（2026-09-07 用户定调：不同专业领域的
+ * Agent，对话起始页的推荐命令应贴合其专业方向）。key = profile.dimension
+ * （研发/产品/设计/市场/自媒体/创作）；未命中（含无 dimension 的 official
+ * preset）回退 GENERIC_QUICK_COMMANDS。 */
+const DIMENSION_QUICK_COMMANDS: Readonly<Record<string, readonly QuickCommand[]>> = {
+  研发: [
+    { icon: Wand2, title: '重构这段代码', desc: '优化结构与命名，提升可读性与可维护性', prompt: '重构这段代码：优化结构与命名，提升可读性与可维护性。' },
+    { icon: Bug, title: '排查并修复问题', desc: '定位根因，给出修复方案与验证步骤', prompt: '排查并修复问题：定位根因，给出修复方案与验证步骤。' },
+    { icon: TestTube2, title: '补充自动化测试', desc: '为核心逻辑补齐单元测试与边界用例', prompt: '补充自动化测试：为核心逻辑补齐单元测试与边界用例。' },
+  ],
+  产品: [
+    { icon: FileText, title: '起草需求文档', desc: '把想法整理成结构化的 PRD 与用户故事', prompt: '起草需求文档：把想法整理成结构化的 PRD 与用户故事。' },
+    { icon: LayoutGrid, title: '梳理任务优先级', desc: '按价值与成本排出迭代计划与里程碑', prompt: '梳理任务优先级：按价值与成本排出迭代计划与里程碑。' },
+    { icon: Compass, title: '竞品调研分析', desc: '对比同类产品，提炼差异化机会点', prompt: '竞品调研分析：对比同类产品，提炼差异化机会点。' },
+  ],
+  设计: [
+    { icon: PenLine, title: '设计界面方案', desc: '给出布局、配色与组件的设计建议', prompt: '设计界面方案：给出布局、配色与组件的设计建议。' },
+    { icon: LayoutGrid, title: '走查现有界面', desc: '指出一致性与可用性问题并给改进建议', prompt: '走查现有界面：指出一致性与可用性问题并给改进建议。' },
+    { icon: Compass, title: '提炼设计规范', desc: '整理颜色/字体/间距为可复用的设计令牌', prompt: '提炼设计规范：整理颜色/字体/间距为可复用的设计令牌。' },
+  ],
+  市场: [
+    { icon: Megaphone, title: '撰写推广文案', desc: '面向目标用户提炼卖点与行动号召', prompt: '撰写推广文案：面向目标用户提炼卖点与行动号召。' },
+    { icon: Compass, title: '分析目标用户', desc: '勾勒用户画像与触达渠道建议', prompt: '分析目标用户：勾勒用户画像与触达渠道建议。' },
+    { icon: FileText, title: '策划营销活动', desc: '给出活动主题、节奏与物料清单', prompt: '策划营销活动：给出活动主题、节奏与物料清单。' },
+  ],
+  自媒体: [
+    { icon: PenLine, title: '生成内容选题', desc: '结合定位给一批可落地的选题方向', prompt: '生成内容选题：结合定位给一批可落地的选题方向。' },
+    { icon: FileText, title: '撰写图文初稿', desc: '产出标题、正文与结尾互动的完整初稿', prompt: '撰写图文初稿：产出标题、正文与结尾互动的完整初稿。' },
+    { icon: Megaphone, title: '优化标题封面', desc: '提升点击率：标题候选与封面文案建议', prompt: '优化标题封面：提升点击率：标题候选与封面文案建议。' },
+  ],
+  创作: [
+    { icon: PenLine, title: '续写这段文字', desc: '保持语气与风格，自然推进情节或论述', prompt: '续写这段文字：保持语气与风格，自然推进情节或论述。' },
+    { icon: Compass, title: '头脑风暴创意方向', desc: '围绕主题发散多个可选切入点', prompt: '头脑风暴创意方向：围绕主题发散多个可选切入点。' },
+    { icon: Wand2, title: '润色这段文字', desc: '精炼表达、修正语病，保留原作者风格', prompt: '润色这段文字：精炼表达、修正语病，保留原作者风格。' },
+  ],
+}
+
 /** 新会话界面（blank 会话）：标语 + 副标语 + 快捷指令卡。点卡把指令填入 composer。 */
-function NewSessionHero({ workspaceTitle, agentName, onPick }: {
+function NewSessionHero({ workspaceTitle, agentInfo, onPick }: {
   workspaceTitle?: string | undefined
-  agentName?: string | undefined
+  agentInfo?: TaskAgentInfo | undefined
   onPick: (prompt: string) => void
 }) {
   const sub = workspaceTitle !== undefined && workspaceTitle !== ''
-    ? `已在 ${workspaceTitle} 工作区${agentName !== undefined && agentName !== '' ? ` · 由 ${agentName} 执行` : ''}`
+    ? `已在 ${workspaceTitle} 工作区${agentInfo?.name !== undefined && agentInfo.name !== '' ? ` · 由 ${agentInfo.name} 执行` : ''}`
     : undefined
+  const commands = (agentInfo?.dimension !== undefined ? DIMENSION_QUICK_COMMANDS[agentInfo.dimension] : undefined)
+    ?? GENERIC_QUICK_COMMANDS
   return (
     <div className={css.newSessionHero}>
       <div className={css.newSessionHeadline}>
@@ -38,7 +85,7 @@ function NewSessionHero({ workspaceTitle, agentName, onPick }: {
         {sub !== undefined && <span className={css.newSessionSub}>{sub}</span>}
       </div>
       <div className={css.quickCommands}>
-        {QUICK_COMMANDS.map((cmd) => {
+        {commands.map((cmd) => {
           const Icon = cmd.icon
           return (
             <button
@@ -421,15 +468,15 @@ export function ConversationRoot({
       </div>
     )
 
-  // task 泳道会话的 Agent 显示名（副标语「由 X 执行」+ composer Agent chip 昵称）：
+  // task 泳道会话的 Agent 名片信息（副标语「由 X 执行」+ 对话起始页专业推荐命令）：
   // 所有 task 泳道（blank 与正式会话）都查，发消息切换会话时也保持。
-  const [agentName, setAgentName] = useState<string | undefined>(undefined)
+  const [agentInfo, setAgentInfo] = useState<TaskAgentInfo | undefined>(undefined)
   useEffect(() => {
-    if (!isTaskLane || sessionId === undefined) { setAgentName(undefined); return }
+    if (!isTaskLane || sessionId === undefined) { setAgentInfo(undefined); return }
     let alive = true
-    emptyActions.getTaskAgentName(String(sessionId))
-      .then((name) => { if (alive) setAgentName(name) })
-      .catch(() => { /* 查询失败则不显示 Agent 名，chip 回退默认项 */ })
+    emptyActions.getTaskAgentInfo(String(sessionId))
+      .then((info) => { if (alive) setAgentInfo(info) })
+      .catch(() => { /* 查询失败则不显示 Agent 名，推荐命令回退通用集 */ })
     return () => { alive = false }
   }, [isTaskLane, sessionId, emptyActions])
 
@@ -438,7 +485,7 @@ export function ConversationRoot({
   // 限定；已开始会话 host 拒绝、catch 呈现）。profileId 经 listTaskAgents 拿；
   // 下拉选项经 listAgents（listProfiles 投影）。
   const [agentProfileId, setAgentProfileId] = useState('')
-  const [agentOptions, setAgentOptions] = useState<readonly { id: string; name: string }[]>([])
+  const [agentOptions, setAgentOptions] = useState<readonly { id: string; name: string; title?: string; dimension?: string }[]>([])
   const [agentSwitchError, setAgentSwitchError] = useState('')
   useEffect(() => {
     if (!isTaskLane || sessionId === undefined) { setAgentProfileId(''); return }
@@ -450,7 +497,12 @@ export function ConversationRoot({
     ])
       .then(([options, profileId]) => {
         if (!alive) return
-        setAgentOptions(options.map((o) => ({ id: o.id, name: o.name })))
+        setAgentOptions(options.map((o) => ({
+          id: o.id,
+          name: o.name,
+          ...(o.title === undefined ? {} : { title: o.title }),
+          ...(o.dimension === undefined ? {} : { dimension: o.dimension }),
+        })))
         setAgentProfileId(profileId ?? options[0]?.id ?? '')
       })
       .catch(() => { /* 拉取失败：下拉留空，不可切换 */ })
@@ -462,8 +514,15 @@ export function ConversationRoot({
     void emptyActions.selectTaskAgent(String(sessionId), profileId)
       .then(() => {
         setAgentProfileId(profileId)
-        const name = agentOptions.find((o) => o.id === profileId)?.name
-        if (name !== undefined) setAgentName(name)
+        // 名片信息同步刷新（副标语 + 专业推荐命令随新 Agent 更新）。
+        const option = agentOptions.find((o) => o.id === profileId)
+        if (option !== undefined) {
+          setAgentInfo({
+            name: option.name,
+            ...(option.title === undefined ? {} : { title: option.title }),
+            ...(option.dimension === undefined ? {} : { dimension: option.dimension }),
+          })
+        }
       })
       .catch((e) => {
         // 失败绝不静默吞（PROGRESS §4）：呈现原因，下拉回弹当前值。
@@ -517,7 +576,7 @@ export function ConversationRoot({
               aria-label="选择执行 Agent"
               onChange={(e) => switchAgent(e.target.value)}
             >
-              {agentOptions.length === 0 && <option value="">{agentName ?? '加载中…'}</option>}
+              {agentOptions.length === 0 && <option value="">{agentInfo?.name ?? '加载中…'}</option>}
               {agentOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </span>
@@ -551,7 +610,7 @@ export function ConversationRoot({
       {hasSession && summaryBlank === true && (
         <NewSessionHero
           workspaceTitle={chipTitle ?? (cwd !== undefined && cwd !== '' ? workspaceLabel(cwd) : undefined)}
-          agentName={agentName}
+          agentInfo={agentInfo}
           onPick={(prompt) => { inputActions?.setDraft(prompt) }}
         />
       )}

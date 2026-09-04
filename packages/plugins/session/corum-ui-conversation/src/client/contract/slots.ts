@@ -247,6 +247,9 @@ export interface ConversationInjected {
     pickDirectory: () => Promise<string | null>
     /** task 泳道会话的 Agent 显示名（设计稿副标语「由 X 执行」）；非 task 会话/查询失败返回 undefined。 */
     getTaskAgentName: (sessionId: string) => Promise<string | undefined>
+    /** task 泳道会话的 Agent 名片信息（显示名 + 岗位 + 岗位维度）——对话起始页
+     *  按专业方向定制推荐命令的数据源；非 task 会话/查询失败返回 undefined。 */
+    getTaskAgentInfo: (sessionId: string) => Promise<TaskAgentInfo | undefined>
     /** task 泳道会话当前绑定的 Agent profileId（composer 可选 Agent chip 的选中值）；非 task 会话/查询失败返回 undefined。 */
     getTaskAgentProfileId: (sessionId: string) => Promise<string | undefined>
     /** 切换 task 泳道的 Agent（新会话界面 composer 可选 Agent chip）。blank 限定：
@@ -280,6 +283,20 @@ export interface AgentOption {
   /** 目录来源（2026-09-02 并列展示）：'corum' = corum Agent；'official' = 官方
    *  四模式（cordis/minimal/ptc/standard，模型跟随部署默认）。下拉按此分组标注。 */
   source?: 'corum' | 'official'
+  /** 岗位 / 职位（corum profile.title；official preset 无）。 */
+  title?: string
+  /** 岗位维度（corum profile.dimension：研发/产品/设计/市场/自媒体/创作；official 无）。 */
+  dimension?: string
+}
+
+/** task 泳道 Agent 的名片信息（对话起始页按专业方向定制推荐命令）。 */
+export interface TaskAgentInfo {
+  /** 显示名（nickname 优先，其次 title/id）。 */
+  name: string
+  /** 岗位 / 职位（corum profile.title；official preset 无）。 */
+  title?: string
+  /** 岗位维度（corum profile.dimension；official preset 无 → 推荐命令回退通用集）。 */
+  dimension?: string
 }
 
 /** 模型目录里的一个 provider（corumAgent.listModels 投影）。 */

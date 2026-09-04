@@ -873,6 +873,29 @@ export class CorumAgentService extends TypertRemoteService {
       this.ctx.logger.info(`corum-agent(task): reuse blank lane — ${reuse} (cwd=${root})`)
       const resolved = await this.resolveTaskAgent(reuse)
       if (resolved !== undefined) {
+        // fork（corum）：复用的 blank 泳道必须兑现本次新建表单的 Agent/模型选择——
+        // 此前实现静默沿用泳道创建时的 profile/model，用户在「新建任务」表单里
+        // 改选 Agent 或模型后开始的对话仍是旧配置（2026-09-07 用户实测反馈）。
+        // 泳道是 blank（未发消息），官方 agentPresets.select 的 blank 限定成立，
+        // 可安全换绑：select 重组 scoped 工具链并记 agent-preset/selected，
+        // installModelSelection 重装模型绑定；task 索引/存活表/落盘目录同步。
+        if (resolved.profileId !== profile.id) {
+          await this.ctx.agentPresets.select(resolved.agent, profile.id)
+          // 官方 preset 无 corum profile 实体——跳过编译落盘（同 selectTaskAgentProfile）。
+          if (!isOfficialPreset) this.writeAgentDir(profile, agentDirPath(profile.id))
+          this.registerTaskSession(resolved.sessionId, resolved.cwd, profile.id)
+          this.taskAgents.set(String(resolved.sessionId), { ...resolved, profileId: profile.id })
+          this.ctx.logger.info(`corum-agent(task): reused lane preset switched — ${reuse} → ${profile.id}`)
+        }
+        const reuseSelection: ModelSelectionRef = {
+          current: {
+            provider: effectiveModel.provider,
+            model: effectiveModel.model,
+            ...(effectiveModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effectiveModel.reasoningEffort) }),
+          },
+          assembled: undefined,
+        }
+        installModelSelection(resolved.agent.ctx, reuseSelection)
         // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
         this.rememberPendingPermission(String(resolved.sessionId), permission)
         return { agent: resolved.agent, presetId: profile.id, sessionId: resolved.sessionId }
