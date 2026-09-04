@@ -225,15 +225,33 @@ function standardRows(subagentModel?: ProfileModel): CordisRow[] {
  *   goal/plan/compaction/subagent/workflow/todo/web）。
  *
 /**
- * dsh 四种预设模式的基础 persona 文本。
+ * dsh 四种预设模式的基础 persona 文本（兜底用）。
  * 来源：shipped-presets/official/<mode>/agent.cordis.yml 中的 persona config.text。
- * compilePreset 用基础模式 persona + 用户自定义提示词拼接为最终 persona。
+ * 仅在「用户身份段全空」时整体回退，保证 persona 非空、模型有基本身份。
  */
 const BASE_MODE_PERSONA: Record<BaseMode, string> = {
   standard: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
   ptc: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
   minimal: 'You are a helpful software engineer assistant.',
   cordis: 'You are a coding agent powered by the {{model}} model, running on the DeepSeek Harness. Your working directory is {{cwd}}.\n\nYou can read and modify the harness you run on. Its composition is Cordis: every capability is a plugin row in a `cordis.yml`, and an agent preset is one such file mounted for a single session.',
+}
+
+/**
+ * 模式核心身份（每模式独立声明，参与结构化组装的最前段）。
+ *
+ * 与用户身份段（domain/title/persona/prompt）解耦：核心身份表达「这个模式本身是什么」，
+ * 用户身份段表达「这个 Agent 是什么专家」。null = 该模式无独立核心身份，由用户身份段覆盖。
+ *
+ * - standard / ptc：null —— coding-agent 模板属「官方默认身份」，继承时应被用户身份段
+ *   覆盖而非保留（用户自建 Agent 不希望顶一句 "You are a coding agent"）。
+ * - minimal：保留「通用软件工程助手」自述 —— 极简模式的核心身份，与领域限定叠加。
+ * - cordis：保留 harness 自述 —— 「你是 harness、可读写自己」不可丢，是该模式存在的意义。
+ */
+const MODE_CORE_IDENTITY: Record<BaseMode, string | null> = {
+  standard: null,
+  ptc: null,
+  minimal: 'You are a helpful software engineer assistant.',
+  cordis: BASE_MODE_PERSONA.cordis,
 }
 
 /** 极简模式的特殊 flag（complete + suppressRuntimeContext）。 */
@@ -258,16 +276,16 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型/工作目录占位。
  * （{{memory摘要}} 段预留——待 Agent memory 机制设计完成后再接入，当前不参与组装。）
  *
- * 模式核心身份（modeIdentity）：仅 cordis 保留 harness 自述（「你是 harness、可读写
- * 自己」不可丢）；standard/ptc/minimal 无独立核心身份，由结构化身份段覆盖。
+ * 模式核心身份取自 MODE_CORE_IDENTITY（每模式独立声明，可空）：minimal=通用软件工程
+ * 助手自述、cordis=harness 自述，standard/ptc=空（官方 coding-agent 模板被用户身份段覆盖）。
  *
  * @param profile - AgentProfile。
- * @param includeModeIdentity - 是否在最前拼模式核心身份（cordis 必传 true）。
+ * @param coreIdentity - 模式核心身份文本（MODE_CORE_IDENTITY 值，null 则不拼该段）。
  */
-function composeStructuredPersona(profile: AgentProfile, includeModeIdentity: boolean): string {
+function composeStructuredPersona(profile: AgentProfile, coreIdentity: string | null): string {
   const segments: string[] = []
-  // 模式核心身份（如 cordis 的 harness 自述）。
-  if (includeModeIdentity) segments.push(BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard)
+  // 模式核心身份（如 cordis harness 自述 / minimal 通用助手自述）。
+  if (coreIdentity !== null && coreIdentity !== '') segments.push(coreIdentity)
   // 身份句：专业领域 + 岗位（合并为一句；领域限定帮助模型路由到合适专家）。
   const domain = typeof profile.domain === 'string' ? profile.domain.trim() : ''
   const title = typeof profile.title === 'string' ? profile.title.trim() : ''
@@ -290,19 +308,20 @@ function composeStructuredPersona(profile: AgentProfile, includeModeIdentity: bo
 }
 
 export function compilePreset(profile: AgentProfile): CompiledPreset {
-  // persona 统一走 corum 结构化组装（composeStructuredPersona），四种模式均可继承：
-  // - standard/ptc：无独立模式核心身份，纯结构化身份段（standard 即用户自建覆盖）。
-  // - cordis：保留 harness 自述作为核心身份，再接结构化身份段。
-  // - minimal：complete 独占 system prompt，但仍可套结构化身份段做领域限定
-  //   （{{model}}/{{cwd}} 变量不受 complete/suppressRuntimeContext 影响，仍有值）。
+  // persona 统一走 corum 结构化组装（composeStructuredPersona），四种模式均可继承。
+  // 模式核心身份（MODE_CORE_IDENTITY）与用户身份段解耦：
+  // - standard/ptc：核心身份为空，纯用户身份段（standard 即用户自建覆盖官方模板）。
+  // - minimal：核心身份=通用软件工程助手自述，与领域限定叠加；complete 独占 system prompt
+  //   仍可套结构化身份段（{{model}}/{{cwd}} 变量不受 complete/suppress 影响，仍有值）。
+  // - cordis：核心身份=harness 自述（不可丢），再接用户身份段。
   const basePersona = BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard
   const isComplete = BASE_MODE_COMPLETE.has(profile.baseMode)
-  const includeModeIdentity = profile.baseMode === 'cordis'
-  const composed = composeStructuredPersona(profile, includeModeIdentity)
-  // 无实质用户身份内容（domain/title/persona/prompt 全空）且非 cordis 时回退 basePersona，
-  // 避免 persona 只剩模型/目录占位行。cordis 始终保留 harness 自述，无需回退。
+  const coreIdentity = MODE_CORE_IDENTITY[profile.baseMode] ?? null
+  const composed = composeStructuredPersona(profile, coreIdentity)
+  // 无实质内容（无核心身份且 domain/title/persona/prompt 全空）时回退 basePersona，
+  // 避免 persona 只剩模型/目录占位行。有核心身份（minimal/cordis）时始终用 composed。
   const hasSubstance =
-    includeModeIdentity ||
+    (coreIdentity !== null && coreIdentity !== '') ||
     (typeof profile.domain === 'string' && profile.domain.trim() !== '') ||
     (typeof profile.title === 'string' && profile.title.trim() !== '') ||
     (typeof profile.persona === 'string' && profile.persona.trim() !== '') ||
