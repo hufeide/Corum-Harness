@@ -315,12 +315,6 @@ export class CorumAgentService extends TypertRemoteService {
 
     this.agents.set(profileId, handle.agent)
     this.ctx.logger.info(`corum-agent: root agent created for profile "${profileId}" — ${sessionId}`)
-    // 装配诊断（一次性，确认模型覆盖与 home 隔离是否生效）：
-    // 打印 profile 指定模型 vs 进程实际 DSH_HOME（应指向 .corum-dev-home）。
-    // 若 model 与预期不符、或 home 不是 dev home，说明配置串了。
-    process.stderr.write(
-      `[corum-agent] createAgent — profile=${profileId} model=${profile.model.provider}/${profile.model.model} DSH_HOME=${process.env.DSH_HOME ?? '(unset)'}\n`,
-    )
     return { agent: handle.agent, presetId: profile.id }
   }
 
