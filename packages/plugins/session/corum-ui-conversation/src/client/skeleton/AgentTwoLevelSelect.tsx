@@ -75,6 +75,16 @@ function matches(a: AgentOption, q: string): boolean {
     || norm(a.id).includes(query)
 }
 
+/**
+ * 展示名「昵称-岗位」（2026-09-07 用户定调）：昵称可变（张三李四），岗位是
+ * 角色的稳定身份——并列展示让用户按岗位定位，同时保留自定义昵称。规则：
+ * title 存在且与 name 不同 → `name-title`；相同或无 title → 只显示 name。
+ */
+export function agentDisplayName(a: Pick<AgentOption, 'name' | 'title'>): string {
+  const title = a.title?.trim()
+  return title !== undefined && title !== '' && title !== a.name ? `${a.name}-${title}` : a.name
+}
+
 export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, disabled }: {
   agents: readonly AgentOption[]
   /** 当前选中的 profileId（'' = 无）。 */
@@ -145,7 +155,7 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
         disabled={disabled === true}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={css.triggerName}>{selected?.name ?? '选择 Agent'}</span>
+        <span className={css.triggerName}>{selected !== undefined ? agentDisplayName(selected) : '选择 Agent'}</span>
         <ChevronDown size={14} className={css.chevron} />
       </button>
       {open && (
@@ -191,10 +201,7 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
                         onClick={() => { onChange(a.id); setOpen(false) }}
                       >
                         <span className={css.itemCheck}>{a.id === value && <Check size={13} />}</span>
-                        {a.name}
-                        {a.title !== undefined && a.title !== a.name && (
-                          <span className={css.itemHint}>{a.title}</span>
-                        )}
+                        {agentDisplayName(a)}
                       </button>
                     ))}
                   </div>
@@ -229,7 +236,7 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
                           onClick={() => { onChange(a.id); setOpen(false) }}
                         >
                           <span className={css.itemCheck}>{a.id === value && <Check size={13} />}</span>
-                          {a.name}
+                          {agentDisplayName(a)}
                         </button>
                       ))}
                     </div>
