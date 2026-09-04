@@ -1355,20 +1355,30 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* 删除幽灵钮（设计稿 m5TDsm: state-error 描边+文字+trash, radius 10, padding [7,14]） */
+/* 删除幽灵钮（设计稿 m5TDsm: state-error 描边+文字+trash, radius 10, padding [7,14]；
+   dark 下加 error 浅底保证可辨——transparent 底在 dark 玻璃面上看不清） */
 .btnDeleteGhost {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  border: 1px solid var(--dsw-alias-label-error, var(--corum-state-error));
+  border: 1px solid var(--dsw-alias-state-error-primary);
   border-radius: 10px;
   background: transparent;
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 400;
-  color: var(--dsw-alias-label-error, var(--corum-state-error));
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* dark 主题：error 浅底托底，避免描边/文字融入深色玻璃背景 */
+body[data-ds-dark-theme] .btnDeleteGhost {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+}
+
+.btnDeleteGhost:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 18%, transparent);
 }
 
 .btnDeleteGhost:disabled {
@@ -1378,7 +1388,7 @@
 
 .btnDeleteIcon {
   flex: none;
-  color: var(--dsw-alias-label-error, var(--corum-state-error));
+  color: var(--dsw-alias-state-error-primary);
 }
 
 /* 编辑页模型 pair（设计稿 CI0hN: 供应商/模型两列并排，gap 10） */
@@ -2268,7 +2278,7 @@
   margin: 0;
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 12px;
-  color: var(--dsw-alias-label-error, var(--corum-state-error));
+  color: var(--dsw-alias-state-error-primary);
 }
 
 /* 导入·扫描目录结果行 */

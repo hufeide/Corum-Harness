@@ -459,7 +459,7 @@ function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSum
       <span className={css.agentExp}>{profile.experience ?? ''}</span>
       <div className={css.agentModelRow}>
         <Cpu size={11} className={css.agentModelIcon} />
-        <span className={css.agentInheritTag}>继承自 {profile.baseMode ?? (profile.source === 'official' ? profile.id : 'standard')}</span>
+        <span className={css.agentInheritTag}>继承自 {baseModeLabel(profile.baseMode ?? (profile.source === 'official' ? profile.id : 'standard'))}</span>
         <span className={css.agentModelName}>{profile.model.model}</span>
         <span className={css.agentDimTag}>{dim}</span>
       </div>
@@ -716,12 +716,25 @@ function AgentPresetsSection() {
 
 /* ── 编辑/新建 Agent 预设二级页（左右分栏，按设计稿 GHBvv 落码）────────── */
 
+/** 基础模式中文描述（继承自下拉 + 名片 inheritTag 共用）。 */
+const BASE_MODE_LABELS: Record<string, string> = {
+  standard: '标准模式（完整编码能力）',
+  ptc: '多步操作模式',
+  minimal: '极简双工具模式',
+  cordis: '创造模式',
+}
+
 const BASE_MODE_OPTIONS = [
-  { id: 'standard', label: 'standard · 标准（完整编码能力）' },
-  { id: 'ptc', label: 'ptc · 多步操作' },
-  { id: 'minimal', label: 'minimal · 极简双工具' },
-  { id: 'cordis', label: 'cordis · 创造模式' },
+  { id: 'standard', label: BASE_MODE_LABELS.standard },
+  { id: 'ptc', label: BASE_MODE_LABELS.ptc },
+  { id: 'minimal', label: BASE_MODE_LABELS.minimal },
+  { id: 'cordis', label: BASE_MODE_LABELS.cordis },
 ]
+
+/** 取基础模式中文描述（未知名称回退原 id）。 */
+function baseModeLabel(id: string): string {
+  return BASE_MODE_LABELS[id] ?? id
+}
 
 const TERMINAL_OPTIONS = [
   { id: 'sandbox', label: 'sandbox' },
@@ -1023,7 +1036,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
         <div className={css.formGroup} style={{ gap: 3 }}>
           <label className={css.fieldLabel}>继承自</label>
           <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} variant="fill" />
-          <p className={css.fieldHint}>将继承 {draft.baseMode} 的系统提示词与 persona</p>
+          <p className={css.fieldHint}>将继承「{baseModeLabel(draft.baseMode)}」的系统提示词与 persona</p>
         </div>
 
         {/* 工作经验（设计稿 GHBvv g-exp F73NUB：只读，基于 Agent 记忆自动总结；
@@ -1138,7 +1151,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
             <button type="button" className={css.btnAdd} onClick={() => setSkillBindOpen(true)}><Plus size={12} />添加技能</button>
           </div>
           <div className={css.formCol} style={{ gap: 4 }}>
-            <div className={css.formGroupTitle}>工具配置</div>
+            <div className={css.formGroupTitle}>MCP 配置</div>
             <div className={css.skillCardGrid}>
               {draft.mcpServers.slice(0, 2).map((s, i) => (
                 <div key={`${s}-${i}`} className={css.skillCard}>
@@ -1157,7 +1170,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
               ))}
               {draft.mcpServers.length === 1 && <div className={css.skillCardPlaceholder} />}
             </div>
-            <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加工具</button>
+            <button type="button" className={css.btnAdd} onClick={() => setMcpBindOpen(true)}><Plus size={12} />添加 MCP</button>
           </div>
         </div>
 

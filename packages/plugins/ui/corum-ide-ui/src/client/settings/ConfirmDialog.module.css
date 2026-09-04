@@ -102,7 +102,7 @@
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 10px;
   font-weight: 400;
-  color: var(--dsw-alias-label-error, var(--corum-state-error));
+  color: var(--dsw-alias-state-error-primary);
   line-height: 1.4;
 }
 
@@ -138,7 +138,7 @@
   padding: 5px 12px;
   border: none;
   border-radius: 8px;
-  background: var(--dsw-alias-label-error, var(--corum-state-error));
+  background: var(--dsw-alias-state-error-primary);
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 11px;
