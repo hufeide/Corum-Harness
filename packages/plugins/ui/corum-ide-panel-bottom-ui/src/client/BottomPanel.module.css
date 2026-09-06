@@ -50,31 +50,25 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* ── term（JetBrains Mono 11px 终端输出） ───────────────────────────── */
+/* ── term（真实 xterm.js 终端，JetBrains Mono） ────────────────────── */
 
 .term {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  overflow-y: auto;
+  min-width: 0;
+  /* xterm 容器自己管理滚动与排版；这里只做填满 + 裁掉溢出。 */
+  overflow: hidden;
+  position: relative;
 }
-.line {
-  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 15px;
-  white-space: pre-wrap;
-  word-break: break-all;
+/* xterm 挂载后填满分到的区域（.term 是 flex:1 叶子）。 */
+.term :global(.xterm) {
+  height: 100%;
+  width: 100%;
 }
-.line[data-tone='primary'] {
-  color: var(--dsw-alias-label-primary);
-}
-.line[data-tone='secondary'] {
-  color: var(--dsw-alias-label-secondary);
-}
-.line[data-tone='success'] {
-  color: var(--dsw-alias-state-success-primary);
-}
-.line[data-tone='brand'] {
-  color: var(--dsw-alias-brand-text);
+/* 透明背景融入玻璃卡：xterm 的视口/屏幕层默认会铺实底色，压成透明让
+   RegionCard 基座的玻璃外观透出来（主题 foreground/cursor 已在 TSX 里用
+   var() 对齐设计 token）。 */
+.term :global(.xterm .xterm-viewport),
+.term :global(.xterm .xterm-screen) {
+  background-color: transparent !important;
 }

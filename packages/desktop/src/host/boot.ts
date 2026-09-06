@@ -52,6 +52,7 @@ export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
 import { CorumFsService } from './corum-fs.ts'
+import { CorumTerminalService } from './corum-terminal.ts'
 
 /**
  * Resolve the desktop UI mode. The shell injects `CORUM_DESKTOP_MODE` per
@@ -400,6 +401,10 @@ export async function bootDesktop(): Promise<Context> {
       // 挂载前的根 ctx 上，api-gateway 的 SRC 发现把 /api/corumFs/list 挂进
       // /api 拦截器（与 pluginManager 同理）。
       new CorumFsService(hostCtx)
+      // 真实终端 Host 半（Typert Remote，service 名 corumTerminal）：IDE 底部
+      // 面板 xterm.js 的 node-pty 会话源（create/write/resize/poll/kill），
+      // 与 corumFs 同一注册时机，api-gateway SRC 发现自动认领。
+      new CorumTerminalService(hostCtx)
       // ui-onboarding 命名空间注册：官方 ui-settings-general 的 host 半负责本
       // 注册，IDE overlay 禁用它后无人注册 → settings.describe 找不到 →
       // WelcomeNotice（内测声明）load/acknowledge 失败，弹窗卡「暂时无法保存
