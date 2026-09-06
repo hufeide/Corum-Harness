@@ -130,7 +130,30 @@ export function collectProviderCards(state: ModelsSettingsState, schema: Setting
   for (const row of state.rows) {
     if (!providerUsable(row)) continue
     const namespace = state.namespaces.get(row.entry.settingsNs)
-    if (namespace === undefined) continue
+    // fork（corum）：无 settingsNs 的 provider（如本地 Ollama，route 注册但无
+    // 配置界面）不跳过，显示一张只读卡片。
+    if (namespace === undefined) {
+      if (row.entry.settingsNs === '') {
+        const brand = brandOf(row.entry.provider) ?? { name: row.entry.provider, mark: row.entry.provider.slice(0, 2).toUpperCase(), color: '#888888' }
+        const cards = state.routeModels.get(row.entry.provider) ?? []
+        out.push({
+          provider: row.entry.provider,
+          providerName: row.entry.displayName,
+          brand,
+          desc: '本地模型 · 无需配置',
+          modelCount: cards.length,
+          connected: true,
+          cards,
+          settingsNs: '',
+          settingsPath: [],
+          family: undefined,
+          apiKeyEnv: undefined,
+          baseURL: undefined,
+          row,
+        })
+      }
+      continue
+    }
     const family = familyOfNamespace(row.entry.settingsNs)
     const brand = brandOf(row.entry.provider) ?? brandOf(row.entry.settingsNs)
     const isOfficial = row.entry.settingsNs === 'llm-deepseek'

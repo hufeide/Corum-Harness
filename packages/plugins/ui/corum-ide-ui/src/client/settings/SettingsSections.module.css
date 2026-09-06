@@ -211,6 +211,9 @@
   cursor: pointer;
   overflow: hidden;
   transition: border-color 0.15s ease;
+  /* 设计稿名片 256×143（aspect 1.79）；宽屏卡片 ~253px → ~143 高，
+     保证 motto(2 行)+exp+modelrow 全部落在卡内不被裁切。 */
+  aspect-ratio: 1.79;
 }
 
 .agentCard:hover {
@@ -267,6 +270,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .agentNickname {
@@ -277,6 +282,9 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /* 不设 max-width：namecol 有足够空间时展示全名，超宽才省略（flex:1 吃满 namecol 宽） */
+  flex: 1;
+  min-width: 0;
 }
 
 .trustBadge {
@@ -290,6 +298,8 @@
   font-size: 9px;
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
+  flex: none;
+  white-space: nowrap;
 }
 
 .agentRole {
@@ -307,18 +317,16 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 座右铭（设计稿 motto 11 tertiary，最多 2 行；固定 2 行高保证名片等高） */
+/* 座右铭（设计稿 motto：单行省略，11px tertiary，溢出 … 截断） */
 .agentMotto {
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 11px;
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
   line-height: 1.45;
-  min-height: 32px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* 经验行（设计稿 exp 10 dimmed；固定行高保证名片等高） */
@@ -334,13 +342,13 @@
   text-overflow: ellipsis;
 }
 
-/* 模型行（设计稿 SEIYE modelrow: space_between + gap 5） */
+/* 模型行（设计稿 SEIYE modelrow：cpu + 模型名 + 弹性 sp + inheritTag + dimTag，gap 5） */
 .agentModelRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 5px;
   width: 100%;
+  min-width: 0;
 }
 
 .agentModelIcon {
@@ -348,6 +356,8 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* 设计稿 modelrow：模型名是自适应内容宽的文本（flex none），
+   弹性 sp 把 inheritTag/dimTag 推到行尾。 */
 .agentModelName {
   flex: none;
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -357,6 +367,13 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 弹性间隔（设计稿 lAYbt sp：fill_container × 1） */
+.agentModelSp {
+  flex: 1;
+  min-width: 0;
 }
 
 .agentDimTag {
@@ -373,63 +390,81 @@
   flex: none;
 }
 
-/* 继承自标签（设计稿 v2VgxM inheritTag: glass-1 底, radius 5, padding [2,6], 9px dimmed） */
+/* 继承自标签（设计稿微调 B9WgJz：glass-2 底, radius 5, padding [2,6], gap 4 —— 彩点 + 9px 600 品牌色短名） */
 .agentInheritTag {
   flex: none;
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   padding: 2px 6px;
   border-radius: 5px;
   border: 1px solid var(--corum-glass-border);
-  background: var(--corum-glass-1);
+  background: var(--corum-glass-2);
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 9px;
-  font-weight: 400;
-  color: var(--dsw-alias-label-dimmed);
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
   white-space: nowrap;
+}
+
+/* 模式圆点（设计稿 ax0fY：5×5 实心圆，颜色按模式区分） */
+.agentInheritDot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
 }
 
 /* ── Agent 名片网格 + 筛选 ─────────────────────────────────────────── */
 
+/* 设计稿 OFTlf filterRow：pill 行 + 右置搜索框（392px 固定宽，非拉伸）。
+   nowrap 保证七个 pill 始终横排不换行（竖排的根因是默认 wrap + 定宽搜索框挤压）。 */
 .agentFilterRow {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+  flex-wrap: nowrap;
 }
 
+/* 设计稿 d19SH：padding [5,12]，radius 8，透明无边，11px secondary。 */
 .agentDimPill {
   display: inline-flex;
   align-items: center;
+  flex: none;
   padding: 5px 12px;
   border-radius: 8px;
-  border: 1px solid var(--corum-glass-border);
+  border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 11px;
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
 }
 
 .agentDimPill:hover {
-  border-color: var(--corum-glass-border-active);
+  background: var(--corum-glass-2);
 }
 
+/* 设计稿 HCQ1I dim-全部：品牌色实底 + 白字 normal（非 600）。 */
 .agentDimPillActive {
   border-color: var(--dsw-alias-brand-primary);
   background: var(--dsw-alias-brand-primary);
   color: var(--corum-label-on-brand);
-  font-weight: 600;
 }
 
 .agentDimPillActive:hover {
   border-color: var(--dsw-alias-brand-primary);
 }
 
+/* 设计稿 YCFcL searchBox：margin-left auto 推到行尾，392px 基准宽（可收缩，不挤压 pill 换行）。 */
 .agentSearchBox {
-  flex: 1;
+  flex: 0 1 auto;
+  width: 392px;
   min-width: 0;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -437,6 +472,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 9px;
   background: var(--corum-glass-2);
+  box-sizing: border-box;
 }
 
 .agentSearchIcon {
@@ -477,7 +513,8 @@
   min-width: 0;
 }
 
-/* 新建预设/虚位以待占位卡（与同行名片等高：stretch 拉齐） */
+/* 新建预设/虚位以待占位卡（与同行名片等高：stretch 拉齐 + 相同长宽比）。
+   设计稿 Ko6rW：透明底 + 浅色虚线描边（弱存在感占位），icon/文字 dimmed。 */
 .agentAddCard {
   display: flex;
   flex-direction: column;
@@ -489,14 +526,14 @@
   border: 1px dashed var(--corum-glass-border);
   border-radius: 16px;
   background: transparent;
-  cursor: pointer;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-dimmed);
   transition: border-color 0.15s ease;
+  /* 与名片同比例（设计稿占位卡与名片同 256×143） */
+  aspect-ratio: 1.79;
 }
 
 .agentAddCard:hover {
   border-color: var(--corum-glass-border-active);
-  color: var(--dsw-alias-label-secondary);
 }
 
 /* ── 官方模式只读组 ────────────────────────────────────────────────── */
@@ -555,10 +592,11 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* 设计稿 mjvEK label：12px normal（非 600）。 */
 .officialCardLabel {
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -1482,6 +1520,172 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .btnPolishIcon {
   color: var(--dsw-alias-brand-text);
+}
+
+/* 人格行（设计稿 GHBvv persona-row veGKk：300 宽预设 trigger + 右侧说明，gap 12，纵向居中） */
+.personaRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+/* 预设 trigger（设计稿 nv00g：固定 300 宽；smile icon 缀在下拉前） */
+.personaTriggerWrap {
+  flex: none;
+  width: 300px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.personaTriggerIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 右侧说明（设计稿 jdPDY cap：10px tertiary） */
+.personaCap {
+  flex: 1;
+  min-width: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 自定义人格名称（设计稿 DA4gi row-custom：单行输入 ≤ 20 字 + 右计数 + 底部说明） */
+.personaCustomCol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 与 persona-row 的 trigger 列对齐（缩进 smile icon 宽 + gap） */
+  margin-left: 22px;
+  width: 300px;
+  box-sizing: border-box;
+}
+
+.personaCustomInput {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 7px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.personaCustomField {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.personaCustomField::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.personaCustomCount {
+  flex: none;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.personaCustomNote {
+  margin: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* AI 润色配置块（高级设置：说明在上、控件在下，规避行宽不足左右并排） */
+.polishBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 2px;
+  box-sizing: border-box;
+}
+
+.polishMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.polishLabel {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  line-height: 1.4;
+}
+
+.polishDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.4;
+}
+
+.polishRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.polishCell {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 首次润色引导：本地/线上 选择卡 */
+.polishChoice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.polishChoiceMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.polishChoiceTitle {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.polishChoiceDesc {
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.4;
 }
 
 /* ghost 小钮（设计稿 btn-expand/btn-shrink: 透明底, radius 6, padding [3,6], 10px tertiary） */

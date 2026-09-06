@@ -37,6 +37,7 @@ const BRANDS: ReadonlyArray<readonly [string, Brand]> = [
   ['openrouter', { name: 'OpenRouter', mark: 'OR', color: '#6366F1' }],
   ['xai', { name: 'xAI', mark: 'X', color: '#1A1A1A' }],
   ['mistral', { name: 'Mistral', mark: 'M', color: '#FF7000' }],
+  ['ollama', { name: 'Ollama', mark: '🦙', color: '#22C55E' }],
   ['groq', { name: 'Groq', mark: 'Q', color: '#F55036' }],
   ['bedrock', { name: 'AWS Bedrock', mark: 'B', color: '#FF9900' }],
   ['azure', { name: 'Azure', mark: 'Az', color: '#0078D4' }],

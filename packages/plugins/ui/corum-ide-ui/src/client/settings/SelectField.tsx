@@ -95,7 +95,7 @@ export function SelectField({ value, options, onChange, disabled, variant = 'def
         aria-expanded={open}
         onClick={() => { setOpen(v => !v) }}
       >
-        <span className={css.value}>{displayLabel}</span>
+        <span className={css.value}>{displayLabel || '　'}</span>
         <ChevronDown className={css.chevron} size={variant === 'compact' ? 11 : variant === 'fill' ? 16 : 18} />
       </button>
       {open && !disabled && createPortal(

@@ -21,6 +21,7 @@ import {
   IconCheckOutline16, IconChevronDownOutline14, IconChevronRightOutline14,
   IconQuestionOutline14, IconWarningOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
@@ -42,15 +43,21 @@ interface EffortChoice {
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, t }:
+  { locked, available, directory, blank, load, select, t }:
   ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
 ) {
   const state = useSyncExternalStore(
     fn => directory.subscribe(fn),
     () => directory.getSnapshot(),
   )
+  const isBlank = useSyncExternalStore(
+    fn => blank.subscribe(fn),
+    () => blank.getSnapshot(),
+  )
   const [open, setOpen] = useState(false)
   const [pane, setPane] = useState<Pane>('root')
+  /** 待确认的换模型选择（非空会话换模型前需确认；null = 无弹窗）。 */
+  const [pending, setPending] = useState<ModelSelection | null>(null)
   // The in-menu error strip serves catalog loads (its Retry re-runs the
   // load); a rejected SELECTION announces through the transient toast
   // instead, so the strip renders only while the latest failure-capable
@@ -177,17 +184,24 @@ export function ModelSelect(
     }
   }
 
+  const applySelection = (selection: ModelSelection): void => {
+    lastActionRef.current = 'select'
+    void select(selection).then(settleSelection)
+  }
+
   const choose = (selection: ModelSelection): void => {
     if (state.current?.provider === selection.provider && state.current.model === selection.model) {
       close(true)
       return
     }
     // 2026-09-02 用户定调：换模型前提示——可能导致效果变差，建议在新任务中更换。
-    // 确认后才执行；取消则留在菜单（用户可重新考虑或选回原模型）。
-    const confirmed = window.confirm('更换模型有可能导致效果变差。\n建议在新任务中更换模型。\n\n仍要更换吗？')
-    if (!confirmed) return
-    lastActionRef.current = 'select'
-    void select(selection).then(settleSelection)
+    // 2026-09-08 修订：新会话（空日志）无上下文代价，直接换不弹；非空会话
+    // 弹统一风格的 ConfirmDialog（替掉原生 window.confirm），确认后才执行。
+    if (isBlank) {
+      applySelection(selection)
+      return
+    }
+    setPending(selection)
   }
 
   const chooseEffort = (effort: string | undefined): void => {
@@ -372,6 +386,22 @@ export function ModelSelect(
           icon={toast.kind === 'info' ? <IconQuestionOutline14 /> : <IconWarningOutline16 />}
           anchor={rootRef.current?.closest<HTMLElement>('[data-composer-card]') ?? null}
           onDone={() => { setToast(null) }}
+        />
+      )}
+      {pending !== null && (
+        <ConfirmDialog
+          title={t('confirm.switchTitle')}
+          message={t('confirm.switchMessage')}
+          warning={t('confirm.switchWarning')}
+          tone="primary"
+          confirmLabel={t('confirm.switchConfirm')}
+          cancelLabel={t('confirm.switchCancel')}
+          onConfirm={() => {
+            const selection = pending
+            setPending(null)
+            applySelection(selection)
+          }}
+          onCancel={() => { setPending(null) }}
         />
       )}
     </div>

@@ -132,6 +132,33 @@ export function thinkingOptionsOf(levels: readonly string[]): SelectOption[] {
   return levels.map(id => ({ id, label: id }))
 }
 
+/** pi-ai schema 的 reasoningEfforts dict 形态（off 可 null，其余必须非空 wire 值）。 */
+export type ReasoningEfforts = Record<string, string | null>
+
+/**
+ * 由侦测到的档位集合推 `reasoningEfforts` dict（方案 A：能力集合落盘）。
+ * 映射（用户定）：off → null，其余 → 档位 id 本身；用户已配置的 wire 值保留。
+ * 返回 undefined = 不该写（无档位）；调用方决定写/删。
+ */
+export function reasoningEffortsOf(
+  levels: readonly string[],
+  existing: unknown,
+): ReasoningEfforts | undefined {
+  if (levels.length === 0) return undefined
+  const prev: Record<string, unknown> =
+    typeof existing === 'object' && existing !== null && !Array.isArray(existing)
+      ? existing as Record<string, unknown>
+      : {}
+  const dict: ReasoningEfforts = {}
+  for (const level of levels) {
+    if (level === 'off') { dict.off = null; continue }
+    const wire = prev[level]
+    dict[level] = typeof wire === 'string' && wire !== '' ? wire : level
+  }
+  // pi-ai 校验：dict 必须至少有一个非 off 档（否则应写 false / 省略字段）。
+  return Object.keys(dict).some(k => k !== 'off') ? dict : undefined
+}
+
 /**
  * 按 provider route id 列出 catalog 表里的全部模型 id（官方目录路由的「可用模型」，
  * discoverModels 不注册网络发现时由此提供）。

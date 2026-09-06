@@ -10,12 +10,13 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { JsonValue } from '@deepseek-ai/dsh-api-remotes/client'
+import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { messageOf } from './store.ts'
 import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { ModelCard } from './model-cards.ts'
 import { formatCapacity, parseCapacity, readModel } from './model-profile.ts'
-import { readModelThinking, thinkingOptionsOf } from './reasoning.ts'
+import { readModelThinking, reasoningEffortsOf, thinkingOptionsOf } from './reasoning.ts'
 import { BrandLogo } from './brands.tsx'
 import { useConnTest } from './useConnTest.ts'
 
@@ -63,6 +64,46 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
   const isDeepSeekOfficial = card.settingsNs === 'llm-deepseek'
 
   if (namespace === undefined) {
+    // fork（corum）：无 settingsNs 的 route provider（如 Ollama 本地模型），
+    // 模型由本地引擎管理，无需在设置页配置——显示只读信息而非报错。
+    if (card.settingsNs === '') {
+      return (
+        <div className={styles['section']}>
+          <BackRow onBack={onBack} />
+          <div className={styles['card']}>
+            <span className={styles['cardHead']}>
+              <span className={styles['cardHeadLeft']}>
+                <BrandLogo brand={card.brand} size={34} fallback={<IconCpu size={17} />} />
+                <span className={styles['cardHeadTitle']}>
+                  <span className={styles['cardName']}>{card.modelId}</span>
+                  <span className={styles['cardDesc']}>本地模型 · 由 Ollama 引擎管理</span>
+                </span>
+              </span>
+              <span className={styles['cardHeadRight']}>
+                <StatusPill tone="success" label="已就绪" />
+              </span>
+            </span>
+          </div>
+          <SettingGroup title="基本信息">
+            <SettingRow label="供应商" desc="本地推理引擎" control={<span style={{ fontSize: 13, color: 'var(--dsw-alias-label-primary)' }}>{card.providerName}</span>} />
+            <SettingRow label="思考模式" desc="Ollama 支持 关闭/low/medium/high/max 五档思考。在 Agent 预设编辑页选择模型后可设置思考程度。" control={
+              <SelectField
+                value="off"
+                options={[
+                  { id: 'off', label: '关闭思考' },
+                  { id: 'low', label: 'low · 轻量思考' },
+                  { id: 'medium', label: 'medium · 标准思考' },
+                  { id: 'high', label: 'high · 深度思考' },
+                  { id: 'max', label: 'max · 最大思考' },
+                ]}
+                onChange={() => {}}
+              />
+            } />
+            <SettingRow label="配置说明" desc="本地模型无需 API 密钥、无需配置端点。激活后在 Agent 预设中可选为驱动模型。" divider={true} control={<span />} />
+          </SettingGroup>
+        </div>
+      )
+    }
     return (
       <div className={styles['section']}>
         <BackRow onBack={onBack} />
@@ -121,6 +162,13 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
         const thinkKey = card.family === 'deepseek' ? 'reasoningEffort' : 'reasoning'
         if (thinking !== '' && thinking !== 'off') next[thinkKey] = thinking
         else delete next[thinkKey]
+        // 方案 A：pi-ai 族同步落 reasoningEfforts 能力集合（modelCatalog 的
+        // efforts 读取源），让新建任务表单/composer 选择器能读到档位。
+        if (card.family !== 'deepseek') {
+          const efforts = reasoningEffortsOf(modelThinking.levels, next.reasoningEfforts)
+          if (efforts !== undefined) next.reasoningEfforts = efforts
+          else delete next.reasoningEfforts
+        }
         // 费用（自建 pricing 字段）。
         const pricing: Record<string, number> = {}
         const ph = Number(priceHit)
@@ -146,8 +194,10 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
     }
   }
 
+  // 删除模型：点「删除模型」先开统一风格确认弹窗（pendingDelete），确认才执行。
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
   const remove = async (): Promise<void> => {
-    if (!window.confirm(`删除模型 ${card.modelId}？将从 ${card.providerName} 的目录中移除。`)) return
     setBusy(true)
     setFailure(undefined)
     try {
@@ -288,7 +338,7 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
         {isNew === true
           ? <span />
           : (
-            <GlassButton kind="ghost" icon={<IconTrash size={12} />} danger onClick={() => { void remove() }} disabled={disabled}>
+            <GlassButton kind="ghost" icon={<IconTrash size={12} />} danger onClick={() => { setConfirmDelete(true) }} disabled={disabled}>
               删除模型
             </GlassButton>
           )}
@@ -299,6 +349,20 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
           </GlassButton>
         </span>
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="删除模型"
+          message={`删除模型 ${card.modelId}？`}
+          warning={`将从 ${card.providerName} 的目录中移除。`}
+          tone="danger"
+          confirmLabel="删除"
+          busy={busy}
+          busyLabel="删除中…"
+          onConfirm={() => { setConfirmDelete(false); void remove() }}
+          onCancel={() => { setConfirmDelete(false) }}
+        />
+      )}
     </div>
   )
 }

@@ -14,6 +14,11 @@ export interface ModelSelectInjected {
   available: boolean
   /** The session's shared directory store (same instance the /model popup reads). */
   directory: SnapshotStore<ModelDirectoryState>
+  /**
+   * 空日志镜像（host 推导；新会话=true）。为 true 时更换模型不弹确认——
+   * 尚无上下文，换模型无「效果变差」代价。空会话直接换。
+   */
+  blank: SnapshotStore<boolean>
   /** Ensure the shared advisory catalog is loaded (errors land on the store). */
   load: () => void
   /**

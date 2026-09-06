@@ -22,6 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from './directory.ts'
 import { ModelDirectoryResolver } from './service.ts'
 import type { ModelSelectInjected } from './slots.ts'
@@ -164,9 +165,19 @@ export function apply(ctx: ClientContext): void {
       inject: (sessionId): ModelSelectInjected => {
         const directory = models.directoryFor(sessionId)
         const available = sessions.subagentAddress(sessionId) === undefined
+        // 空会话镜像（blank→非 blank 翻转由 host 摘要推导，首轮受理后变 false）。
+        // 用它决定换模型要不要弹确认：新会话无上下文代价，直接换。
+        const blank = createSnapshotStore<boolean>(
+          sessions.list.getSnapshot().byId[sessionId]?.blank ?? false,
+        )
+        const stopList = sessions.list.subscribe(() => {
+          blank.set(sessions.list.getSnapshot().byId[sessionId]?.blank ?? false)
+        })
+        sessions.scope(sessionId)?.effect(() => () => { stopList() }, 'ui-model-selection: blank mirror')
         return {
           available,
           directory: directory.store,
+          blank: blank as ModelSelectInjected['blank'],
           load: () => {
             if (available) directory.load().catch(() => { /* surfaced on the store */ })
           },

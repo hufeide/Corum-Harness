@@ -22,8 +22,8 @@ import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import {
   Archive, Bell, BookOpen, Box, Brain, ChevronDown, Command, Cpu, Layers,
-  Lock, Plug, Puzzle, Search, Server, Settings as SettingsIcon, Shield,
-  Star, Sun, Terminal, Trash2, User, Wrench, X,
+  Lock, Plug, Search, Settings as SettingsIcon, Shield, Sparkles,
+  Star, Sun, Terminal, Trash2, User, Webhook, Repeat, Wrench, X,
 } from 'lucide-react'
 import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-contract.ts'
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
@@ -58,32 +58,32 @@ function navIcon(id: string): ReactNode {
     rules: <BookOpen className={cls} size={14} />,
     memory: <Brain className={cls} size={14} />,
     terminal: <Terminal className={cls} size={14} />,
+    hooks: <Webhook className={cls} size={14} />,
+    'agent-loop': <Repeat className={cls} size={14} />,
     account: <User className={cls} size={14} />,
     privacy: <Shield className={cls} size={14} />,
     data: <Archive className={cls} size={14} />,
     extensions: <Box className={cls} size={14} />,
     mcp: <Plug className={cls} size={14} />,
     skills: <Star className={cls} size={14} />,
+    'ai-polish': <Sparkles className={cls} size={14} />,
     advanced: <Wrench className={cls} size={14} />,
     profiles: <User className={cls} size={14} />,
-    'skill-manager': <Puzzle className={cls} size={14} />,
-    'mcp-manager': <Server className={cls} size={14} />,
   }
   return map[id] ?? <SettingsIcon className={cls} size={14} />
 }
 
 /**
  * 导航分组：从注册的 section rows 中按 id 前缀分组。
- * 设计稿 6 个分组：通用 / AGENT / 数据与隐私 / 扩展 / 高级 / 插件。
+ * 设计稿 5 个分组：通用 / AGENT / 数据与隐私 / 扩展 / 高级。
  * 动态分组：注册的 section 按其 id 匹配到分组，未匹配的归入「高级」。
  */
 const NAV_GROUPS: { title: string; ids: string[] }[] = [
   { title: '通用', ids: ['general', 'appearance', 'notifications', 'shortcuts'] },
-  { title: 'AGENT', ids: ['models', 'agent-presets', 'permissions', 'rules', 'memory', 'terminal'] },
+  { title: 'AGENT', ids: ['models', 'agent-presets', 'permissions', 'rules', 'memory', 'terminal', 'hooks', 'agent-loop'] },
   { title: '数据与隐私', ids: ['account', 'privacy', 'data'] },
-  { title: '扩展', ids: ['extensions', 'mcp', 'skills'] },
+  { title: '扩展', ids: ['extensions', 'mcp', 'skills', 'ai-polish'] },
   { title: '高级', ids: ['advanced', 'profiles'] },
-  { title: '插件', ids: ['skill-manager', 'mcp-manager'] },
 ]
 
 /* ── 面板 ────────────────────────────────────────────────────────── */

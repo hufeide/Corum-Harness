@@ -50,7 +50,7 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* fill 变体 — 编辑表单列（设计稿 GHBvv sel: 占满列宽, radius 8, padding [6,8], 12px 值, 16 箭头） */
+/* fill 变体 — 编辑表单列（设计稿 GHBvv sel: 占满列宽, radius 8, padding [7,10], 12px 值, 16 箭头） */
 .wrapperFill {
   flex: 1;
   min-width: 0;
@@ -58,7 +58,7 @@
 
 .selectFill {
   width: 100%;
-  padding: 6px 8px;
+  padding: 7px 10px;
   border-radius: 8px;
   gap: 6px;
   font-size: 12px;

@@ -31,6 +31,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@corum/corum-ui-base": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-api-remotes": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-client-connection": "^0.1.2-alpha.1",

@@ -8,6 +8,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { deriveKeyRef, messageOf } from './store.ts'
 import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
@@ -46,10 +47,11 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
   const [saved, setSaved] = useState(false)
   const conn = useConnTest(api)
   const disabled = busy || !state.writable
+  // 删除模型确认弹窗：待删卡片（null = 不弹）。
+  const [pendingDelete, setPendingDelete] = useState<ModelCard | null>(null)
 
   /** 删除一个模型（从该供应商 profile.models[] 移除）。 */
   const removeModel = async (card: ModelCard): Promise<void> => {
-    if (!window.confirm(`删除模型 ${card.modelId}？将从 ${provider.providerName} 的目录中移除。`)) return
     setBusy(true)
     setFailure(undefined)
     try {
@@ -119,6 +121,8 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
             <StatusPill tone={keyConfigured || provider.connected ? 'success' : 'dim'} label={keyConfigured || provider.connected ? '已连接' : '未配置'} />
           </span>
         </span>
+        {/* fork（corum）：无 settingsNs 的 route provider（如 Ollama）不需要 API key/baseURL 配置。 */}
+        {provider.settingsNs !== '' && (<>
         <div className={styles['hDivider']} />
         <SettingRow
           label="API 密钥"
@@ -177,6 +181,7 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
             {busy ? '保存中…' : '保存'}
           </GlassButton>
         </div>
+        </>)}
       </div>
 
       {/* ── 已配置模型 ── */}
@@ -201,7 +206,7 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
               aria-label={`删除 ${card.modelId}`}
               title={`删除 ${card.modelId}`}
               disabled={disabled}
-              onClick={(e) => { e.stopPropagation(); void removeModel(card) }}
+              onClick={(e) => { e.stopPropagation(); setPendingDelete(card) }}
             >
               <IconTrash size={13} />
             </button>
@@ -212,6 +217,24 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
           <span>添加模型</span>
         </button>
       </div>
+
+      {pendingDelete !== null && (
+        <ConfirmDialog
+          title="删除模型"
+          message={`删除模型 ${pendingDelete.modelId}？`}
+          warning={`将从 ${provider.providerName} 的目录中移除。`}
+          tone="danger"
+          confirmLabel="删除"
+          busy={busy}
+          busyLabel="删除中…"
+          onConfirm={() => {
+            const card = pendingDelete
+            setPendingDelete(null)
+            void removeModel(card)
+          }}
+          onCancel={() => { setPendingDelete(null) }}
+        />
+      )}
     </div>
   )
 }

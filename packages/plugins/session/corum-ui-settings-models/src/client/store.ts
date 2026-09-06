@@ -14,6 +14,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsDescribeFace, SettingsRemote } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
+import type { ModelCard } from './model-cards.ts'
 
 /**
  * Any route key walks a dict schema to the same profile node, so the lookup
@@ -119,6 +120,8 @@ export interface ModelsSettingsState {
   rows: readonly ProviderRow[]
   /** Namespace views by ns, for the editor's schema/layers/secrets. */
   namespaces: ReadonlyMap<string, SettingsNamespaceView>
+  /** fork（corum）：无 settingsNs 的 route provider（如 Ollama）的动态模型列表。 */
+  routeModels: ReadonlyMap<string, ModelCard[]>
 }
 
 /**
@@ -180,7 +183,7 @@ function apiKeyEnvOf(
 export class ModelsSettingsStore {
   /** The snapshot the section renders from (uSES-safe store). */
   readonly store: SnapshotStore<ModelsSettingsState> = createSnapshotStore<ModelsSettingsState>({
-    status: 'idle', error: null, credentialError: null, writable: false, rows: [], namespaces: new Map(),
+    status: 'idle', error: null, credentialError: null, writable: false, rows: [], namespaces: new Map(), routeModels: new Map(),
   })
 
   /** Latest load wins; an older response never overwrites a newer one. */
@@ -265,6 +268,32 @@ export class ModelsSettingsStore {
         credentialError = messageOf(error)
       }
     }
+    // fork（corum）：对无 settingsNs 的 route provider（如 Ollama），
+    // 直接调 provider 的本地 API（Ollama /api/tags）拉取模型列表。
+    const routeProviderIds = providers.filter(p => p.settingsNs === '' && p.active).map(p => p.provider)
+    const routeModels = new Map<string, ModelCard[]>()
+    if (routeProviderIds.length > 0) {
+      await Promise.all(routeProviderIds.map(async (providerId) => {
+        try {
+          if (providerId === 'ollama') {
+            const r = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(2500) })
+            if (!r.ok) return
+            const j = (await r.json()) as { models?: Array<{ name?: string }> }
+            const models = (j.models ?? []).map(m => m.name ?? '').filter(n => n !== '')
+            routeModels.set(providerId, models.map(id => ({
+              provider: providerId,
+              modelId: id,
+              brand: { name: 'Ollama', mark: '🦙', color: '#22C55E' },
+              providerName: 'Ollama（本地）',
+              imageInput: false,
+              settingsNs: '',
+              settingsPath: [],
+              family: undefined,
+            })))
+          }
+        } catch { /* 静默 */ }
+      }))
+    }
     if (generation !== this.generation) return
     this.store.update((s) => {
       s.status = 'ready'
@@ -281,6 +310,7 @@ export class ModelsSettingsStore {
         }
       })
       s.namespaces = namespaces
+      s.routeModels = routeModels
     })
   }
 }

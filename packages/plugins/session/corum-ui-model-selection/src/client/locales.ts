@@ -29,6 +29,11 @@ export const zh = {
   'empty.models': '没有可用的模型。',
   'blocked.composer': '当前模型不可用，请先选择模型',
   'empty.efforts': '当前模型未提供推理等级。',
+  'confirm.switchTitle': '更换模型',
+  'confirm.switchMessage': '更换模型有可能导致效果变差。',
+  'confirm.switchWarning': '建议在新任务中更换模型。',
+  'confirm.switchConfirm': '仍要更换',
+  'confirm.switchCancel': '取消',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -55,4 +60,9 @@ export const en = {
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',
+  'confirm.switchTitle': 'Switch model',
+  'confirm.switchMessage': 'Switching models may degrade quality.',
+  'confirm.switchWarning': 'Consider switching in a new task instead.',
+  'confirm.switchConfirm': 'Switch anyway',
+  'confirm.switchCancel': 'Cancel',
 } satisfies Record<ModelKey, string>
