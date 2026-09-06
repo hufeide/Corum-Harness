@@ -61,6 +61,16 @@ export const CORUM_AGENT_METHODS = {
   runPromptForType: 'runPromptForType',
   /** 读泳道会话的历史事件。 */
   getSessionEventsForType: 'getSessionEventsForType',
+  /** 读取润色配置。 */
+  getPolishConfig: 'getPolishConfig',
+  /** 保存润色配置。 */
+  setPolishConfig: 'setPolishConfig',
+  /** 润色一段提示词。 */
+  polishPrompt: 'polishPrompt',
+  /** 会话内提示词润色（结合对话上下文，意图自动判断）。 */
+  polishConversation: 'polishConversation',
+  /** 中英文互译。 */
+  translatePrompt: 'translatePrompt',
   /** 冒烟测试。 */
   verify: 'verify',
 } as const
@@ -171,6 +181,46 @@ export interface VerifyResult {
   error?: string
 }
 
+/** getPolishConfig 返回：润色配置（未配置为 null）。 */
+export interface GetPolishConfigResult {
+  config: { provider: string; model: string; reasoningEffort?: string } | null
+}
+/** setPolishConfig 入参（engine/provider/model/localModel/reasoningEffort；后两个可空串）。 */
+export type SetPolishConfigArgs = {
+  engine?: 'auto' | 'local' | 'online'
+  provider: string
+  model: string
+  localModel?: string
+  reasoningEffort?: string
+}
+/** polishPrompt 入参。 */
+export type PolishPromptArgs = {
+  text: string
+  kind?: string
+}
+/** polishPrompt 返回：润色后文本。 */
+export interface PolishPromptResult {
+  polished: string
+}
+/** polishConversation 入参（位置参数：text, history——对话上下文 user/AI 最终输出）。 */
+export type PolishConversationArgs = {
+  text: string
+  history: Array<{ role: 'user' | 'assistant'; text: string }>
+}
+/** polishConversation 返回：润色后文本 + 意图（auto 自动判断）。 */
+export interface PolishConversationResult {
+  polished: string
+  intent: string
+}
+/** translatePrompt 入参。 */
+export type TranslatePromptArgs = {
+  text: string
+}
+/** translatePrompt 返回：译文。 */
+export interface TranslatePromptResult {
+  translated: string
+}
+
 /**
  * corumAgent 端点描述表：方法名 → 命名参数对象 / 返回体。
  * `{}` 表示该端点无参数。供消费方做 type-level 查表（typed caller 的数据源）。
@@ -187,5 +237,10 @@ export interface CorumAgentEndpointTable {
   [CORUM_AGENT_METHODS.createAgentForType]: { args: CreateAgentForTypeArgs; result: CreateAgentForTypeResult }
   [CORUM_AGENT_METHODS.runPromptForType]: { args: RunPromptForTypeArgs; result: RunPromptResult }
   [CORUM_AGENT_METHODS.getSessionEventsForType]: { args: GetSessionEventsForTypeArgs; result: GetSessionEventsForTypeResult }
+  [CORUM_AGENT_METHODS.getPolishConfig]: { args: {}; result: GetPolishConfigResult }
+  [CORUM_AGENT_METHODS.setPolishConfig]: { args: SetPolishConfigArgs; result: { ok: boolean } }
+  [CORUM_AGENT_METHODS.polishPrompt]: { args: PolishPromptArgs; result: PolishPromptResult }
+  [CORUM_AGENT_METHODS.polishConversation]: { args: PolishConversationArgs; result: PolishConversationResult }
+  [CORUM_AGENT_METHODS.translatePrompt]: { args: TranslatePromptArgs; result: TranslatePromptResult }
   [CORUM_AGENT_METHODS.verify]: { args: {}; result: VerifyResult }
 }

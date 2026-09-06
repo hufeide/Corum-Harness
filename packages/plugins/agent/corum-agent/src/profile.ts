@@ -64,6 +64,14 @@ export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis'
 /** Agent 岗位维度（名片筛选维度）。 */
 export type AgentDimension = '研发' | '产品' | '设计' | '市场' | '自媒体' | '创作'
 
+/** 工作场景人格预设。 */
+export type PersonaPreset =
+  | 'rigorous-architect'   // 严谨架构师：代码审查、系统设计、质量保证
+  | 'steady-coach'         // 稳健教练：资深带教、方案评审、跨部门协调
+  | 'efficient-executor'   // 高效执行者：任务分解、进度跟踪、应急响应
+  | 'innovative-explorer'  // 创新探索者：技术选型、预研项目、疑难杂症
+  | 'custom'               // 自定义（保留自由文本）
+
 /** AgentProfile 完整定义。 */
 export interface AgentProfile {
   /** profile id（文件名，slug）。 */
@@ -72,13 +80,13 @@ export interface AgentProfile {
   nickname?: string
   /** 岗位 / 职位（显示用，可选）。 */
   title?: string
-  /** 专业领域（可选，自由文本；如「软件开发 / 制造业 / 工程项目管理」，覆盖模式组装进 persona）。 */
-  domain?: string
   /** 岗位维度（名片筛选，可选）。 */
   dimension?: AgentDimension
   /** 名片履历（可选，手动编辑；如「参与 6 个项目 · 完成 128 次任务」）。 */
   experience?: string
-  /** 人格设置（可选，不超过 500 字符；描述 Agent 的人格特质与行为倾向）。 */
+  /** 人格预设（选择工作场景人格原型；'custom' 时走 persona 自由文本）。 */
+  personaPreset?: PersonaPreset
+  /** 自定义人格描述（personaPreset === 'custom' 时使用；其他情况可作补充微调）。 */
   persona?: string
   /** 头像 URL（可选，用户上传或 AI 生成）。 */
   avatar?: string

@@ -112,3 +112,95 @@ export function deleteProfile(id: string): void {
 export function agentDirPath(id: string): string {
   return agentDir(id)
 }
+
+/* ── 官方基础模式覆盖（official overrides）────────────────────────────
+ * 官方 preset（standard/ptc/minimal/cordis）本体只读，但允许用户覆盖
+ * 「模型 / 子 Agent 模型 / 技能 / MCP」四项。覆盖存于
+ * `.agent-presets/_official-overrides.json`（不进 profile 目录，避免被
+ * listProfiles 当成一个 Agent）。 */
+
+export interface OfficialModeOverride {
+  model?: AgentProfile['model']
+  subagentModel?: AgentProfile['subagentModel']
+  skills?: AgentProfile['skills']
+  mcpServers?: string[]
+}
+
+type OfficialOverrideMap = Record<string, OfficialModeOverride>
+
+function officialOverridesPath(): string {
+  return join(agentsRoot(), '_official-overrides.json')
+}
+
+/** 读取全部官方模式覆盖（缺文件/坏 JSON 回落空表）。 */
+export function loadOfficialOverrides(): OfficialOverrideMap {
+  const path = officialOverridesPath()
+  if (!existsSync(path)) return {}
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as OfficialOverrideMap
+  } catch {
+    return {}
+  }
+}
+
+/** 写入某官方模式的覆盖（四字段全空时删除该键，保持文件干净）。 */
+export function saveOfficialOverride(id: string, override: OfficialModeOverride): void {
+  const map = loadOfficialOverrides()
+  const empty = override.model === undefined
+    && override.subagentModel === undefined
+    && (override.skills === undefined || override.skills.length === 0)
+    && (override.mcpServers === undefined || override.mcpServers.length === 0)
+  if (empty) {
+    delete map[id]
+  } else {
+    map[id] = override
+  }
+  mkdirSync(agentsRoot(), { recursive: true })
+  writeFileSync(officialOverridesPath(), JSON.stringify(map, null, 2))
+}
+
+/* ── AI 润色配置（polish config）────────────────────────────────────
+ * 「AI 润色」用哪个已配置的 provider/model 来润色提示词，存于
+ * `.agent-presets/_polish.json`（全局一份，不入任何 Agent 目录）。 */
+
+export interface PolishConfig {
+  /** 润色引擎：auto（≥16 GB 且本地可用走本地，否则线上）/ local / online。缺省 auto。 */
+  engine?: 'auto' | 'local' | 'online'
+  /** 本地模型名（engine=local/auto 本地分支用；缺省 qwen3.5:2b）。 */
+  localModel?: string
+  provider: string
+  model: string
+  /** 思考程度（可选；缺省走协议默认）。 */
+  reasoningEffort?: string
+}
+
+function polishConfigPath(): string {
+  return join(agentsRoot(), '_polish.json')
+}
+
+/** 读取润色配置（缺文件/坏 JSON 回落 undefined = 未配置）。 */
+export function loadPolishConfig(): PolishConfig | undefined {
+  const path = polishConfigPath()
+  if (!existsSync(path)) return undefined
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<PolishConfig>
+    if (typeof raw.provider === 'string' && typeof raw.model === 'string' && raw.provider !== '' && raw.model !== '') {
+      return {
+        ...(raw.engine === 'local' || raw.engine === 'online' || raw.engine === 'auto' ? { engine: raw.engine } : {}),
+        ...(typeof raw.localModel === 'string' && raw.localModel !== '' ? { localModel: raw.localModel } : {}),
+        provider: raw.provider,
+        model: raw.model,
+        ...(typeof raw.reasoningEffort === 'string' && raw.reasoningEffort !== '' ? { reasoningEffort: raw.reasoningEffort } : {}),
+      }
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 写入润色配置。 */
+export function savePolishConfig(config: PolishConfig): void {
+  mkdirSync(agentsRoot(), { recursive: true })
+  writeFileSync(polishConfigPath(), JSON.stringify(config, null, 2))
+}

@@ -26,6 +26,7 @@ import { loadTeam } from './team-store.ts'
 import { isValidProfileId } from './profile.ts'
 import { loadProfile } from './profile-store.ts'
 import { publishDomainEvent } from './events.ts'
+import { ensureWorkspaceAgentsMd } from './workspace-agents.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -99,6 +100,11 @@ export class CorumProjectService extends TypertRemoteService {
       version: 0,
     }
     saveProject(project)
+    // 选定工作区即创建 AGENTS.md（用户定：该文件有则注入、无则不注入；
+    // 幂等，不覆盖用户/历史内容）。仅当项目绑定了工作目录。
+    if (project.cwd !== undefined && ensureWorkspaceAgentsMd(project.cwd)) {
+      this.ctx.logger.info(`corumProject: 已在工作区创建 AGENTS.md (${project.cwd})`)
+    }
     // PM 兜底成员是项目组的初始事实，必须进领域事件（持久日志 seq 0 + 实时流）。
     publishDomainEvent(this.ctx, 'corum/group/member-added', { projectId: id, member: group.members[0] })
     this.ctx.logger.info(`corumProject: created "${id}" — ${name}（PM 助理已带入项目组）(${projectDir(id)})`)

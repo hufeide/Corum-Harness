@@ -155,7 +155,7 @@ interface BuiltinRoleSpec {
 const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   {
     id: 'project-manager',
-    nickname: '项目管理',
+    nickname: '项目经理',
     title: '项目管理',
     dimension: '产品',
     baseMode: 'standard',
@@ -163,7 +163,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'product-expert',
-    nickname: '资深产品专家',
+    nickname: '产品专家',
     title: '产品专家',
     dimension: '产品',
     baseMode: 'standard',
@@ -171,7 +171,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'hardware-product-manager',
-    nickname: '资深硬件产品经理',
+    nickname: '硬件产品经理',
     title: '硬件产品经理',
     dimension: '产品',
     baseMode: 'standard',
@@ -179,7 +179,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'software-product-manager',
-    nickname: '资深软件产品经理',
+    nickname: '软件产品经理',
     title: '软件产品经理',
     dimension: '产品',
     baseMode: 'standard',
@@ -187,7 +187,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'market-strategy-researcher',
-    nickname: '市场战略研究员',
+    nickname: '市场研究员',
     title: '市场战略研究员',
     dimension: '市场',
     baseMode: 'standard',
@@ -195,7 +195,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'marketing-expert',
-    nickname: '营销专家',
+    nickname: '营销顾问',
     title: '营销专家',
     dimension: '市场',
     baseMode: 'standard',
@@ -203,7 +203,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'technical-manager',
-    nickname: '资深技术经理',
+    nickname: '技术经理',
     title: '技术经理',
     dimension: '研发',
     baseMode: 'standard',
@@ -211,7 +211,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'software-architect',
-    nickname: '资深软件架构师',
+    nickname: '软件架构师',
     title: '软件架构师',
     dimension: '研发',
     baseMode: 'standard',
@@ -219,7 +219,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'software-test-expert',
-    nickname: '资深软件测试专家',
+    nickname: '测试专家',
     title: '软件测试专家',
     dimension: '研发',
     baseMode: 'standard',
@@ -227,7 +227,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'hardware-test-expert',
-    nickname: '资深硬件测试专家',
+    nickname: '硬件测试专家',
     title: '硬件测试专家',
     dimension: '研发',
     baseMode: 'standard',
@@ -235,7 +235,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'hardware-developer',
-    nickname: '资深硬件开发',
+    nickname: '硬件开发',
     title: '硬件开发',
     dimension: '研发',
     baseMode: 'standard',
@@ -243,7 +243,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'pcb-layout-engineer',
-    nickname: '资深 PCB-Layout',
+    nickname: 'PCB 工程师',
     title: 'PCB-Layout 工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -251,7 +251,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'test-development-engineer',
-    nickname: '高级测试开发',
+    nickname: '测试开发',
     title: '测试开发工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -259,7 +259,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'tester',
-    nickname: '测试员',
+    nickname: '测试工程师',
     title: '测试员',
     dimension: '研发',
     baseMode: 'standard',
@@ -267,7 +267,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'cpp-engineer',
-    nickname: '高级软件工程师-C/C++',
+    nickname: 'C++ 工程师',
     title: 'C/C++ 软件工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -275,7 +275,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'embedded-engineer',
-    nickname: '高级嵌入式开发工程师',
+    nickname: '嵌入式工程师',
     title: '嵌入式开发工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -283,7 +283,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'android-system-engineer',
-    nickname: '高级 Android 系统开发工程师',
+    nickname: 'Android 系统工程师',
     title: 'Android 系统开发工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -291,7 +291,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'ios-engineer',
-    nickname: '高级应用开发工程师-iOS',
+    nickname: 'iOS 工程师',
     title: 'iOS 应用开发工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -299,7 +299,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'android-app-engineer',
-    nickname: '高级应用开发工程师-Android',
+    nickname: 'Android 工程师',
     title: 'Android 应用开发工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -307,7 +307,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'harmonyos-engineer',
-    nickname: '高级应用开发工程师-鸿蒙',
+    nickname: '鸿蒙工程师',
     title: '鸿蒙应用开发工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -315,7 +315,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'java-engineer',
-    nickname: '高级软件工程师-Java',
+    nickname: 'Java 工程师',
     title: 'Java 软件工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -323,7 +323,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'frontend-engineer',
-    nickname: '高级软件工程师-前端',
+    nickname: '前端工程师',
     title: '前端软件工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -331,7 +331,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'python-engineer',
-    nickname: '高级 Python 开发',
+    nickname: 'Python 工程师',
     title: 'Python 开发工程师',
     dimension: '研发',
     baseMode: 'standard',
@@ -339,7 +339,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'ux-designer',
-    nickname: '资深 UX 设计师',
+    nickname: 'UX 设计师',
     title: 'UX 设计师',
     dimension: '设计',
     baseMode: 'standard',
@@ -347,7 +347,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'ux-researcher',
-    nickname: '用户体验研究员',
+    nickname: '用研专员',
     title: '用户体验研究员',
     dimension: '设计',
     baseMode: 'standard',

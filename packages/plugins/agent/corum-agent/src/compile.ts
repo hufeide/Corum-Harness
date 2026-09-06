@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
-import type { AgentProfile, BaseMode, ProfileModel } from './profile.ts'
+import type { AgentProfile, BaseMode, ProfileModel, PersonaPreset } from './profile.ts'
 
 /**
  * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
@@ -84,7 +84,9 @@ export interface CompiledPreset {
 function standardRows(subagentModel?: ProfileModel): CordisRow[] {
   return [
     // ── identity ──
-    { id: 'agent-instructions', name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } },
+    // agent-instructions 原在 identity 区；corum 把它移进 filesystem 组（与
+    // fs-local 同 realm）——它经 `ctx.get('fs')` 读 AGENTS.md，必须命中 realm 内
+    // 的 fs-local（见下方 filesystem 组注释）。在此删除，避免重复注册。
 
     // ── shell（一次性 bash/pwsh；corum 覆盖为 persistent-shell 持久终端）──
     { id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: '!!js process.platform === \'win32\'' },
@@ -282,25 +284,79 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * @param profile - AgentProfile。
  * @param coreIdentity - 模式核心身份文本（MODE_CORE_IDENTITY 值，null 则不拼该段）。
  */
+/**
+ * 工作场景人格预设 → 英文系统提示词片段（组装时映射为英文，除非用户自定义写了汉字）。
+ * 四大工作场景人格原型组合，覆盖代码审查/带教/执行/预研四类核心场景。
+ */
+const PERSONA_PRESET_PROMPTS: Record<Exclude<PersonaPreset, 'custom'>, string> = {
+  'rigorous-architect':
+    'You are an extremely rigorous technical expert. Before outputting any solution, ' +
+    'you must first list boundary conditions and potential failure risks. Your responses ' +
+    'must follow a "conclusion-argument-example" structure. For ambiguous requirements, ' +
+    'you must proactively ask clarifying questions and never make assumptions.',
+  'steady-coach':
+    'You are an experienced team mentor. When facing problems, first provide the top-level ' +
+    'design thinking, then offer concrete implementation details. For immature proposals ' +
+    'from juniors, first extract their reasonable aspects, then gently point out gaps. ' +
+    'All suggestions must include actionable acceptance criteria.',
+  'efficient-executor':
+    'You take action and results as the highest priority. Responses must follow the ' +
+    'conclusion-first principle and be kept within 150 words. For complex tasks, you must ' +
+    'break them down into a "to-do list" with time estimates. When blocked, directly ' +
+    'provide alternative solutions without emotional preamble.',
+  'innovative-explorer':
+    'You are a curious technical explorer. Beyond the "conventional solution", you must ' +
+    'also provide "out-of-the-box alternatives". You enjoy citing cross-disciplinary cases ' +
+    'and are good at searching for cutting-edge public information beyond the internal knowledge base.',
+}
+
+/**
+ * 取人格段的英文文本：预设走 PERSONA_PRESET_PROMPTS 映射；custom 或补充走 persona 原文。
+ * 预设与补充可叠加（预设为主，补充在后）。
+ */
+function resolvePersonaText(profile: AgentProfile): string | null {
+  const parts: string[] = []
+  if (profile.personaPreset !== undefined && profile.personaPreset !== 'custom') {
+    parts.push(PERSONA_PRESET_PROMPTS[profile.personaPreset])
+  }
+  if (typeof profile.persona === 'string' && profile.persona.trim() !== '') {
+    const persona = profile.persona.trim().replace(/[。.．]+$/u, '')
+    parts.push(persona)
+  }
+  return parts.length > 0 ? parts.join(' ') : null
+}
+
 function composeStructuredPersona(profile: AgentProfile, coreIdentity: string | null): string {
   const segments: string[] = []
   // 模式核心身份（如 cordis harness 自述 / minimal 通用助手自述）。
   if (coreIdentity !== null && coreIdentity !== '') segments.push(coreIdentity)
-  // 身份句：专业领域 + 岗位（合并为一句；领域限定帮助模型路由到合适专家）。
-  const domain = typeof profile.domain === 'string' ? profile.domain.trim() : ''
+  // 身份句：岗位（领域限定帮助模型路由到合适专家）。
   const title = typeof profile.title === 'string' ? profile.title.trim() : ''
-  if (domain !== '' && title !== '') segments.push(`You are an expert in the ${domain} field, working as a ${title}.`)
-  else if (domain !== '') segments.push(`You are an expert in the ${domain} field.`)
-  else if (title !== '') segments.push(`You are a ${title}.`)
-  // 人格（做事风格）。去掉末尾自带句号，避免与模板句号叠加成「。.」。
-  if (typeof profile.persona === 'string' && profile.persona.trim() !== '') {
-    const persona = profile.persona.trim().replace(/[。.．]+$/u, '')
-    segments.push(`Your working style: ${persona}.`)
+  if (title !== '') segments.push(`You are a ${title}.`)
+  // 人格（做事风格）：预设走英文映射，custom 或补充走 persona 原文（可含汉字）。
+  const personaText = resolvePersonaText(profile)
+  if (personaText !== null) {
+    segments.push(`Your working style: ${personaText}.`)
   }
   // TODO(memory): 「你有丰富的工作经验：{{memory摘要}}」段——待 memory 机制后接入，当前不组装。
   // 工作职责（用户自定义提示词）。
   if (profile.prompt.trim() !== '') {
     segments.push(`Your responsibilities: ${profile.prompt.trim()}`)
+  }
+  // 域边界条款（L1 运行时自判域）：对「有专业定位」的 Agent 注入。判定 = title
+  // 非空——用户创建 Agent 时填了岗位，即视为专用 Agent，接到明显越界任务时
+  // 「声明越界 + 建议切通用/对应 Agent」而非硬拦（用户决策，见 DESIGN §2）。
+  // 通用 Agent（Task 助理/PM 助理等 title 为空者）不注入、不受限。读越界可作
+  // 参考，写/深入分析越界禁止。
+  if (title !== '') {
+    segments.push(
+      `Your domain is strictly ${title}. Work outside this domain is out of scope. ` +
+      `When a task clearly belongs to a different domain (for example a frontend task assigned to an embedded engineer), ` +
+      `do NOT attempt it: briefly state that it is outside your domain, name the kind of Agent better suited ` +
+      `(a general-purpose Agent or the matching specialist), and ask the user to switch. ` +
+      `Do not analyze, design, or modify out-of-domain work. Within your domain you may read across the project ` +
+      `for reference, but only create or modify what your role owns.`,
+    )
   }
   // 模型 + 工作目录占位（dsh 变量，render 时插值；variables 全局注册，与 complete/
   // suppressRuntimeContext 无关，minimal 下仍有值）。
@@ -319,12 +375,13 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   const isComplete = BASE_MODE_COMPLETE.has(profile.baseMode)
   const coreIdentity = MODE_CORE_IDENTITY[profile.baseMode] ?? null
   const composed = composeStructuredPersona(profile, coreIdentity)
-  // 无实质内容（无核心身份且 domain/title/persona/prompt 全空）时回退 basePersona，
+  // 无实质内容（无核心身份且 title/persona/prompt 全空）时回退 basePersona，
   // 避免 persona 只剩模型/目录占位行。有核心身份（minimal/cordis）时始终用 composed。
+  // personaPreset 非空也算实质内容（预设会注入英文人格段）。
   const hasSubstance =
     (coreIdentity !== null && coreIdentity !== '') ||
-    (typeof profile.domain === 'string' && profile.domain.trim() !== '') ||
     (typeof profile.title === 'string' && profile.title.trim() !== '') ||
+    (profile.personaPreset !== undefined && profile.personaPreset !== 'custom') ||
     (typeof profile.persona === 'string' && profile.persona.trim() !== '') ||
     profile.prompt.trim() !== ''
   const personaText = hasSubstance ? composed : basePersona
@@ -377,6 +434,13 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   })
 
   // corum 追加 ③：filesystem 组（fs-local 裸本地 FS + str-replace-editor）。
+  // fs 服务的可见性：host 已在 root realm 注册 fs-sandbox（SandboxedFileSystem），
+  // 若 fs-local 也直接挂 root realm 会因同名 `fs` 重复注册而 mount 失败
+  // （2026-09-08 实测：service "fs" has been registered at <SandboxedFileSystem>）。
+  // 所以 fs-local 走 realm 私有符号（isolate:fs），不与沙箱 fs 抢 root。
+  // 但 `dsh-agent-instructions` 经 `ctx.get('fs')` 读 AGENTS.md 基线——它必须
+  // 看到 fs-local：把它移进本组（同 realm），这样它 `ctx.get('fs')` 命中
+  // realm 内的 fs-local（否则在组外拿到 host 的 fs-sandbox/或 undefined）。
   const filesystem: CordisRow = {
     id: 'filesystem',
     name: 'cordis:group',
@@ -384,6 +448,7 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     isolate: { fs: true },
     children: [
       { id: 'fs-local', name: '@deepseek-ai/dsh-fs-local', config: { cwd: '!!js process.env.DSH_CWD ?? process.cwd()' } },
+      { id: 'agent-instructions', name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } },
       { id: 'str-replace-editor', name: '@deepseek-ai/dsh-tool-str-replace-editor', config: { maxOutputChars: 16000 } },
     ],
   }
