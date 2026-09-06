@@ -96,10 +96,18 @@ type SaveFeedback =
   | { kind: 'failed'; message: string }
   | null
 
+/** 编辑器可编程入口（openFile 提升暴露，供 index.ts 桥接 corum:open-in-editor）。
+ *  由 index.ts 创建并经 inject 面传入；EditorColumn 挂载时把 openFile 写入。 */
+export interface EditorApiRef {
+  openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
+}
+
 /** 本插件的注入面（见 client/index.ts apply）。 */
 export interface EditorColumnInjected {
   /** 关闭本区域（隐藏叶子，可在插件中心「视图管理」恢复）。 */
   closeRegion: () => void
+  /** 编辑器可编程入口 ref（openFile 提升暴露；见 EditorApiRef）。 */
+  editorApi: EditorApiRef
   /** 点亮编辑器区域（打开文件时自动显示，取消默认隐藏）。 */
   showEditor: () => void
   /** 资源管理器子面板数据源 + generation 源（ExplorerPane 直通）。 */
@@ -178,7 +186,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   const persisted = useMemo(loadPersisted, [])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
@@ -351,6 +359,13 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
       setTabs(prev => prev.map(t => t.path === path ? { ...t, error: String(err) } : t))
     }
   }, [tabs, readFile, showEditor])
+
+  // 把 openFile 暴露给 index.ts（corum:open-in-editor 桥接 CustomEvent 的回调入口）。
+  // 同 bundle 内 ref 直通，非跨 bundle 共享可变状态，不违反 cordis 红线。
+  useEffect(() => {
+    editorApi.openFile = openFile
+    return () => { editorApi.openFile = null }
+  }, [editorApi, openFile])
 
   /** 固定预览 tab（双击 tab / 编辑后 / 双击树文件）。 */
   const pinTab = useCallback((path: string) => {

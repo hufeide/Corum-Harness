@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@corum/corum-ide-ui/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { EditorColumn } from './editor/EditorColumn.tsx'
-import type { EditorColumnInjected } from './editor/EditorColumn.tsx'
+import type { EditorApiRef, EditorColumnInjected } from './editor/EditorColumn.tsx'
 import type { FsEntry } from './editor/ExplorerPane.tsx'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
@@ -116,12 +116,86 @@ export function apply(ctx: Context): void {
       unsubWorkspaces?.()
     }, 'corum-desktop: workspace root tracking')
 
+    // ── 「在编辑器打开」可编程入口（corum:open-in-editor CustomEvent 桥接）──
+    // chat 插件 dispatch 一次性 CustomEvent（detail = { path: 绝对路径 }），
+    // 此处监听 → 转 corumFs 相对路径 → 点亮编辑器 → 调 EditorColumn openFile。
+    // 同 bundle 内 CustomEvent + ref，合法的一次性信号（非共享可变状态）。
+    const editorApiRef: EditorApiRef = { openFile: null }
+
+    /** 绝对路径 → corumFs 相对路径（去掉 lastRoot 前缀，保证 / 开头）。 */
+    const toRelativePath = (absolute: string): string | null => {
+      if (lastRoot === null || lastRoot === '') return null
+      // lastRoot 可能是 /a/b 或 /a/b/（统一去掉尾部 /）
+      const root = lastRoot.endsWith('/') ? lastRoot.slice(0, -1) : lastRoot
+      if (!absolute.startsWith(root)) return null
+      let rel = absolute.slice(root.length)
+      if (rel === '') rel = '/'
+      if (!rel.startsWith('/')) rel = '/' + rel
+      return rel
+    }
+
+    const onOpenInEditor = (e: Event): void => {
+      const detail = (e as CustomEvent<{ path?: string }>).detail
+      const absolute = detail?.path
+      if (typeof absolute !== 'string' || absolute === '') {
+        console.warn('[corum-desktop] corum:open-in-editor: missing or invalid path in detail')
+        return
+      }
+      const rel = toRelativePath(absolute)
+      if (rel === null) {
+        console.warn('[corum-desktop] corum:open-in-editor: path not under current workspace root', { absolute, lastRoot })
+        return
+      }
+      // 先点亮编辑器区域（hidden 场景：setRegionHidden 清 leaf.hidden 持久化标记）。
+      editorCtx.layout.setRegionHidden('corum.editor', false)
+      // DEFAULT_HIDDEN 场景（effectiveDetached 运行时隐藏，不动树）：编辑器/终端
+      // 默认隐藏在 AppFrame 的 userShown state 中，setRegionHidden 管不到——需要
+      // 模拟「面板切换」按钮点击来触发 showRegion（把 slot 移出 hiddenByDefault）。
+      // 但只在 editor 确实不可见且 grid leaf 无 hidden 标记时才点（避免把刚
+      // setRegionHidden(false) 恢复的 editor 又 toggle 回去）。
+      // 同 bundle DOM 操作，不跨 bundle，不违反 cordis 红线。
+      setTimeout(() => {
+        const editorCell = document.querySelector('[data-code-editor-column]')
+        if (editorCell !== null) return // editor 已显示，无需点按钮
+        // 检查 grid 中 editor leaf 是否仍有 hidden 标记（有则 setRegionHidden 刚清完，
+        // React 还没重渲染，等 poll 即可，不用点按钮）。
+        const rawGrid = localStorage.getItem('corum.ide.grid.v3') ?? ''
+        const hasHiddenMark = rawGrid.includes('"corum.editor","h":1') || rawGrid.includes('"corum.editor", "h": 1')
+        if (hasHiddenMark) return // hidden 标记刚清，等 React 重渲染
+        // leaf 无 hidden 标记但 editor 不渲染 → DEFAULT_HIDDEN 场景，点按钮 showRegion
+        const toggleBtn = document.querySelector('button[aria-label*="编辑器"]') as HTMLButtonElement | null
+        toggleBtn?.click()
+      }, 50)
+      // EditorColumn 挂载后 openFile 才写入 editorApiRef；未挂载时轮询等待
+      if (editorApiRef.openFile !== null) {
+        void editorApiRef.openFile(rel, { pin: true })
+        return
+      }
+      // 轮询等待 EditorColumn 挂载（最多 3s）
+      let attempts = 0
+      const poll = (): void => {
+        attempts++
+        if (editorApiRef.openFile !== null) {
+          void editorApiRef.openFile(rel, { pin: true })
+          return
+        }
+        if (attempts < 30) {
+          setTimeout(poll, 100)
+        } else {
+          console.warn('[corum-desktop] corum:open-in-editor: editor mount timeout', { path: rel })
+        }
+      }
+      setTimeout(poll, 100)
+    }
+    window.addEventListener('corum:open-in-editor', onOpenInEditor)
+
     const dispose = editorCtx.slots.inject('corum.editor', () => editorCtx.slots.register(
       {
         name: 'corum.editor',
         inject: (): EditorColumnInjected => ({
           closeRegion: () => { editorCtx.layout.closeRegion('corum.editor') },
           showEditor: () => { editorCtx.layout.setRegionHidden('corum.editor', false) },
+          editorApi: editorApiRef,
           explorer: {
             generation: connection.generation,
             workspaceRoot: workspaceRootSnapshot,
@@ -199,6 +273,9 @@ export function apply(ctx: Context): void {
       },
       EditorColumn,
     ))
-    return () => { dispose() }
+    return () => {
+      window.removeEventListener('corum:open-in-editor', onOpenInEditor)
+      dispose()
+    }
   })
 }

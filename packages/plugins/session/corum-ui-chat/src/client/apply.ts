@@ -173,10 +173,11 @@ export function apply(ctx: Context): void {
           fileMentions: (owner: TurnTailOwnerProps) => ctx.get('chatFileMentions')?.forClosing(owner),
           openFile: async (path) => {
             const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
-            const result = await ctx.remote.session.openWorkspacePath({
-              path: resolveWorkspacePath(cwd, path),
-            })
-            if (!result.ok) throw new Error(`path open failed: ${result.error.message}`)
+            const absolute = resolveWorkspacePath(cwd, path)
+            // 用内置编辑器打开（替代 openWorkspacePath 跳系统）。desktop 同 bundle 的
+            // corum:open-in-editor 桥接 CustomEvent 转相对路径 + 点亮编辑器。
+            // fire-and-forget：desktop 侧打开失败自行 console.warn / 通知，chat 侧不再 await 结果。
+            window.dispatchEvent(new CustomEvent('corum:open-in-editor', { detail: { path: absolute } }))
           },
           loadOlder: () => { void session.loadOlder() },
           loadImage: Object.assign(
