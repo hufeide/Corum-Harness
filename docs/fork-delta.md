@@ -6,6 +6,7 @@
 > - 官方基线版本：`0.1.2-alpha.2`（`/Users/kukucai/dsh/packages/client/*/package.json` 的 `version`）。⚠️ corum 各 fork 的 `dependencies` 仍锁 `^0.1.2-alpha.1`——**源码对照的是 alpha.2、依赖锁 alpha.1，双向差一代**（审计 B 群 P1，见 §3.4）。
 > - 参考：`.dbg/audit-B-session.md`（session 群逐文件审计）、`docs/audit/CODE-AUDIT-REPORT.md`（P0-6/11/12/13/15）。
 > - 2026-09-07 增补：第 7 个 fork 包 `@corum/corum-credentials-local`（host 侧，fork 自官方 `@deepseek-ai/dsh-credentials-local`）登记于 **§7 host 域 fork**，升级时同样按 §5 runbook 处理。
+> - 2026-09-07 增补：第 8 个 fork 包 `@corum/corum-api-remotes`（host+client 双面，fork 自官方 `@deepseek-ai/dsh-api-remotes`）登记于 **§8**，升级时同样按 §5 runbook 处理。
 
 ---
 
@@ -336,3 +337,35 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
    - **后续（TODO）**：模块级责任边界（项目/AGENTS.md 约定模块→负责 Agent 映射，写权限按模块路径收敛）——配合项目制，本轮未做。
 
 **升级注意**（补）：`domainToStack` 的关键词映射覆盖当前 builtin 角色 title；新增角色若引入新技术域，需同步关键词表，否则该角色不注入边界条款。
+
+---
+
+## 8. host+client 双面 fork：`@corum/corum-api-remotes`（统一事件中心一期）
+
+> 登记日期：2026-09-07。动机：统一事件中心（`docs/agent-foundation/UNIFIED-EVENT-BUS.md`）——官方 `API_REMOTE_FORWARDED_EVENTS` allowlist 是编译期硬编码常量、`registerRemoteEvents` 是 singleton（重复注册抛错），零改动官方包无法把 corum 领域事件纳入「host→renderer forwarded Remote event」通道。fork 是「全仓库最轻的 fork」：核心 165 行转发循环 + 162 行 client contribution 挂载**整文件照抄**，实质 diff 仅「常量数组追加 13 个 corum 事件 + 自包含 corum-events.ts」。
+
+| 项 | 内容 |
+|---|---|
+| fork 包 | `@corum/corum-api-remotes`（`packages/plugins/agent/corum-api-remotes`） |
+| 官方对照包 | `@deepseek-ai/dsh-api-remotes`（`packages/api/remotes`） |
+| 官方基线 | **0.1.2-alpha.2**（源码对照；corum 运行时锁 alpha.1，见 §3.4 同款错位——下方 client/index.ts 有一处按 alpha.1 对齐） |
+| 文件数 | 8（src/ 6 + package.json + tsdown.config.ts + tsconfig.json） |
+| rebase 风险 | **低**：实质 diff 集中在 allowlist 数组追加段（数组合并级别）+ corum-events.ts（corum 新增，官方升级不影响）；转发循环/client 挂载零改动 |
+
+**逐文件分类**：
+- **逐字节相同（3 个，直接覆盖）**：`src/index.ts`（165 行转发循环）、`src/types.ts`、`src/client/index.ts` 的官方主体。
+  - ⚠️ `src/client/index.ts` 有**一处**按 alpha.1 对齐：官方 alpha.2 末尾 re-export「收敛后的 Remote 失败词汇」（`RemoteErrorCode/RemoteErrorDetailsMap/RemoteFailure/RemoteResult` 自 dsh-typert-protocol、`RemoteHostFacts` 自 dsh-api-gateway/client），那批类型是官方 `804b1ffbfc` 在 alpha.2 引入的，corum 锁的 alpha.1 没有。fork 删掉该 4 行 re-export（文件内有 `// fork（corum）：` 注释锚点）。**升 alpha.2 时回退为官方写法**。另加 1 行 `export type {} from '../corum-events.ts'`（corum 增量，拉 $on 类型投影）。
+- **实质修改（2 个）**：
+  - `src/remote-events.ts`：`API_REMOTE_FORWARDED_EVENTS` 数组在官方 17 行后追加 13 行 corum 事件（每行 `{ event: 'corum/...', mode: 'emit' }`，官方行零改动）+ 顶部 `import type {} from './corum-events.ts'`。🔴 rebase 合并点：官方若加同名 `corum/` 前缀事件会重复 `ctx.on`（renderer 收两份）——升级时 diff 官方数组与 corum 追加段（UNIFIED-EVENT-BUS §5.3）。
+  - `src/invariant.ts`：包名改 `@corum/corum-api-remotes`、插件名 `corum-api-remotes-invariant`（模板性修改，同 §3.6）。
+- **corum 新增（1 个）**：`src/corum-events.ts`——13 个 corum 事件的 cordis `Events` 声明（自包含，**不 type-import host-only 的 corum-agent**，其 events.ts 有 node-only 值导入会拖进 client 编译面；载荷类型自包含重声明，以 corum-agent/events.ts 为事实源）+ `declare module '@deepseek-ai/dsh-typert-protocol' { interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {} }`（照 dsh-api-session-controller/src/remote-events.ts:9-12 写法，让 renderer `$on` 拿 key 面 + listener 签名）。官方升级不影响本文件存在，但其镜像的 corum-agent 载荷若演进需同步。
+- **构建配置（3 个，corum 自立）**：`package.json`（`dsh.client` 段 `{ inject: ['@deepseek-ai/dsh-api-gateway'], platform: 'web', immediately: true }` **原样保留**——`ctx.remote` 服务装配的关键；dependencies 锁 alpha.1 同全部 fork）、`tsdown.config.ts`（自立 defineConfig 复刻官方 `clientBundle(..., { hostPhase: true })` 双 face，不 import dsh 私有 helper）、`tsconfig.json`（单文件 tsconfig，lib ES2024+DOM 同官方 host/client 双 face 合集）。
+
+**装配（cordis.patch.yml）**：disable 段 `- id: api-remotes disabled: true` + insert 段 `- id: corum-api-remotes name: '@corum/corum-api-remotes'`（行 id 不同名——loader 同层 id 唯一性检查，同 corum-credentials 纪律；官方行在 base bundle `packages/bundle/web-app/cordis.patch.yml` insert 块内，行 id `api-remotes`）。cordis **服务名** `typertGateway`/`remote` 不变，renderer 各 ui-* 插件对 `ctx.remote` 的消费（$mount/$on）零感知。
+
+**验证记录**（CDP 三层，2026-09-07）：fork 包 build/typecheck 通过；desktop 重启 console 零报错；**官方 17 事件仍通**（session/modelCatalog 默认模型 glm-5.2 + 2 提供商组、agentPresets/list ok）；**corum 事件到达 renderer**（corum/terminal/output 推送帧 + corum/task/assigned→started→completed 全生命周期载荷）；**终端轮询已消灭**（$on 推送主路径，pollStarts=0，输出实时）；截图 `.dbg/unified-event-bus/`。
+
+**升级注意**：
+- 官方 alpha.1→alpha.2 该包 src 有漂移（client/index.ts 失败词汇收敛、index.ts/remote-events.ts 微调）——升级时先 `git diff <old>..<new> -- packages/api/remotes/src` 刷新对照，重点核对 client/index.ts 那处 alpha.1 对齐段是否可回退官方写法。
+- `dsh.client` 段的 `inject`/`platform`/`immediately` 是 `ctx.remote` 装配的开关，rebase 时**绝不可删**。
+- corum-events.ts 的 13 个事件名与 allowlist 追加段一一对应；官方若将来内建 corum 同名事件，以官方为准去重。

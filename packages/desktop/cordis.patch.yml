@@ -82,6 +82,20 @@
 - id: credentials
   disabled: true
 
+# 统一事件中心一期（docs/agent-foundation/UNIFIED-EVENT-BUS.md）：官方
+# dsh-api-remotes 的转发 allowlist 是编译期硬编码常量、registerRemoteEvents 是
+# singleton（重复注册抛错），零改动官方包无法扩展事件名。fork 包
+# @corum/corum-api-remotes 整文件照抄官方 165 行转发循环 + 162 行 client
+# contribution 挂载，仅给 API_REMOTE_FORWARDED_EVENTS 追加 13 个 corum 事件
+# （emit 形态；corum/task/* ×10 + corum/group/* ×2 + corum/terminal/output）。
+# 官方行在 base bundle（packages/bundle/web-app/cordis.patch.yml）的 insert 块
+# 内（行 id `api-remotes`），先禁用再在下方 insert 段挂 fork（行 id 不同名——
+# loader 对同层 id 唯一性检查，见下方 insert 段注释）。cordis 服务名
+# `typertGateway`/`remote` 不变，renderer 各 ui-* 插件对 ctx.remote 的消费
+# （$mount/$on）零感知。
+- id: api-remotes
+  disabled: true
+
 # ── desktop persona ─────────────────────────────────────────────────────────
 
 - id: system-prompt
@@ -105,6 +119,17 @@
     # id — see zero difference.
     - id: corum-credentials
       name: '@corum/corum-credentials-local'
+
+    # Forked Remote BFF assembly (replaces the disabled official api-remotes
+    # row above): the official 17 forwarded events plus 13 corum domain events
+    # (corum/task/*, corum/group/*, corum/terminal/output). The row id must
+    # differ from the official `api-remotes` (same loader uniqueness rule as
+    # corum-credentials above); the cordis SERVICE names stay `typertGateway`/
+    # `remote`, and the fork's package.json `dsh.client` block is preserved
+    # verbatim (inject dsh-api-gateway, platform web, immediately) so the
+    # client half mounts the Remote contributions exactly like the official.
+    - id: corum-api-remotes
+      name: '@corum/corum-api-remotes'
 
     # Native-only directory picker (the desktop always sits on the host
     # display); replaces the disabled auto row above. The `-auto` row would
