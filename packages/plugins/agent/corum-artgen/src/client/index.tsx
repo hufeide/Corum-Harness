@@ -11,7 +11,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 /** sd-cli 可用模型文件（.safetensors / .gguf）。 */
@@ -194,8 +194,9 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
   const [dlEngine, setDlEngine] = useState(false)
   const [dlEngineProgress, setDlEngineProgress] = useState<{ percent: number; total: string; downloaded: string; status: string } | null>(null)
 
-  // 模型下载
-  const [dlModel, setDlModel] = useState(false)
+  // 模型下载（dlModelKey 标识当前下载项：推荐档位 'low|mid|high' 或在线模型 fileName；
+  // 只让正在下载的那一项显示「下载中」，其余项不受波及——修「下载 A 时删 B，B 也显下载中」）
+  const [dlModelKey, setDlModelKey] = useState<string | null>(null)
   const [dlModelProgress, setDlModelProgress] = useState<{ percent: number; total: string; downloaded: string; status: string } | null>(null)
 
   // 生成测试区
@@ -273,7 +274,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
   }
 
   const downloadModel = async (tier: 'low' | 'mid' | 'high'): Promise<void> => {
-    setDlModel(true)
+    setDlModelKey(tier)
     setError(null)
     setDlModelProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
     // 后台下载（不阻塞 RPC 连接），轮询进度槽直到完成/失败。
@@ -306,7 +307,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
       setError(e instanceof Error ? e.message : String(e))
       setDlModelProgress(null)
     } finally {
-      setDlModel(false)
+      setDlModelKey(null)
     }
   }
 
@@ -336,6 +337,20 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
   const [onlineResults, setOnlineResults] = useState<OnlineSdModel[] | null>(null)
   const [onlineSearching, setOnlineSearching] = useState(false)
   const [onlineError, setOnlineError] = useState<string | null>(null)
+  const onlineSearchRef = useRef<HTMLDivElement | null>(null)
+
+  // click-away：点击搜索区域外时收起搜索结果下拉。
+  useEffect(() => {
+    if (onlineResults === null) return
+    const onClick = (e: MouseEvent) => {
+      if (onlineSearchRef.current !== null && !onlineSearchRef.current.contains(e.target as Node)) {
+        setOnlineResults(null)
+        setOnlineError(null)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => { document.removeEventListener('mousedown', onClick) }
+  }, [onlineResults])
 
   const refreshRecommended = async (): Promise<void> => {
     try {
@@ -397,7 +412,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
 
   // 下载在线模型（后台下载 + 轮询进度槽）。
   const downloadOnline = async (m: OnlineSdModel) => {
-    setDlModel(true)
+    setDlModelKey(m.fileName)
     setError(null)
     setDlModelProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
     const poll = setInterval(async () => {
@@ -425,7 +440,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
       setError(e instanceof Error ? e.message : String(e))
       setDlModelProgress(null)
     } finally {
-      setDlModel(false)
+      setDlModelKey(null)
     }
   }
 
@@ -560,7 +575,9 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
             <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>加载推荐…</span>
           ) : recommended.map(m => {
             const downloaded = status?.models.some(x => x.fileName === m.fileName) ?? false
-            const disabled = dlModel || !engineReady || downloaded || m.compatible === false
+            const thisDownloading = dlModelKey === m.tier
+            const anyDownloading = dlModelKey !== null
+            const disabled = anyDownloading || !engineReady || downloaded || m.compatible === false
             return (
               <div key={m.fileName} style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
@@ -589,7 +606,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
                       padding: '5px 12px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
                       background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
                       cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: disabled ? 0.5 : 1,
-                    }}>{dlModel ? '下载中…' : '下载'}</button>}
+                    }}>{thisDownloading ? '下载中…' : '下载'}</button>}
               </div>
             )
           })}
@@ -678,6 +695,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
 
       {/* ── 在线模型目录 ── */}
       <Row label="在线模型目录" desc="搜索 HuggingFace 官方/社区 SD 模型，一键下载使用">
+        <div ref={onlineSearchRef}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
           <input
             style={{
@@ -704,6 +722,9 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
             {onlineResults.map(m => {
               const downloaded = status?.models.some(x => x.fileName === m.fileName) ?? false
+              const thisDownloading = dlModelKey === m.fileName
+              const anyDownloading = dlModelKey !== null
+              const disabled = anyDownloading || !engineReady
               return (
                 <div key={m.repoId} style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
@@ -719,16 +740,17 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
                   </div>
                   {downloaded
                     ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary, #3EE6B0)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
-                    : <button type="button" disabled={dlModel || !engineReady} onClick={() => void downloadOnline(m)} style={{
+                    : <button type="button" disabled={disabled} onClick={() => void downloadOnline(m)} style={{
                         padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
                         background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
-                        cursor: dlModel || !engineReady ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: dlModel || !engineReady ? 0.5 : 1,
-                      }}>{dlModel ? '下载中…' : '下载'}</button>}
+                        cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: disabled ? 0.5 : 1,
+                      }}>{thisDownloading ? '下载中…' : '下载'}</button>}
                 </div>
               )
             })}
           </div>
         )}
+        </div>
       </Row>
 
       {/* ── 生成测试 ── */}
