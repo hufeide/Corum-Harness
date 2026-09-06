@@ -160,9 +160,13 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 
 ### 4.5 corum-ui-model-selection（对照 ui-model-selection）
 
-相同 4 / 改名 0 / 实质 7 / 新增 0 / 删除 0。**rebase 风险：低**（审计 B「教科书式最小 fork」，package.json description 如实）。
+相同 4 / 改名 0 / 实质 7 / 新增 1 / 删除 0。**rebase 风险：低**（审计 B「教科书式最小 fork」，package.json description 如实）。
 
 - `client/directory.ts`（19 diff 行）🟡：新增 `errorKind: string | null` 字段（:36-42 注释说清用途）+ 三处置位/清空。零其它漂移。
+- `client/ModelSelect.tsx`（+35 行，2026-09-08 换模型确认弹窗整改）🟡：`choose()` 由「一律 window.confirm」改为「新会话（`blank`）直接换 / 非空会话弹统一风格 ConfirmDialog」；新增 `blank` uSES 订阅 + `pending` state + `applySelection` 提取；渲染 `<ConfirmDialog>`（`@corum/corum-ui-base/client`，center 模态、tone=primary）。**新增 1 个组件依赖**：`@corum/corum-ui-base`（workspace:*）。
+- `client/slots.ts`（+8 行）🟡：`ModelSelectInjected` 加 `blank: SnapshotStore<boolean>`（空会话镜像，host 摘要推导，决定是否弹确认）。
+- `client/index.ts`（+15 行）🟡：inject 里构造 `blank` store（`createSnapshotStore` + `sessions.list` 订阅 `byId[sessionId].blank`），经 scope effect 解绑；import `createSnapshotStore`。
+- `client/locales.ts`（+5 键）🟡：新增 `confirm.switchTitle/Message/Warning/Confirm/Cancel`（zh+en）——换模型确认弹窗文案。
 - `client/ModelSelect.tsx`（22 diff 行）🟡：`state.errorKind === 'model-unavailable'` 时 Toast 从错误改 info 提示（:162-170，CORUM-PATCH 注释：图片会话切纯文本模型是「约束不是缺陷」）；toast state 加 `kind` 字段；触发器显示 `· {effortLabel}`（设计稿 htxWi，:209,246）；info 图标 `IconQuestionOutline14`。
 - `client/catalog.ts`（12 diff 行）🟡：构造参数从 `ctx` 改为 `session: Pick<ClientRemote['session'],'modelCatalog'>`（窄化依赖，:25-26 注释）；service.ts 同步 2 行。
 - `client/locales.ts`（2 diff 行）🟡：新增 `error.modelUnavailable` 键（zh+en）。
@@ -171,7 +175,7 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 
 ### 4.6 corum-ui-settings-models（对照 ui-settings-models）
 
-相同 11 / 改名 0 / 实质 13 / 新增 0 / 删除 1。**rebase 风险：中**。
+相同 11 / 改名 0 / 实质 15 / 新增 0 / 删除 1。**rebase 风险：中**。
 
 - **官方有但 corum 删除（1 个）**🔴：`client/operations.ts`（官方 109 行封装层 `createModelsOperations`/`ModelsOperations`）。corum 删掉它，14 处改为组件直持 Remote wire face（`ModelsWire{settings,credentials,llm}`）。package.json description 自称「其余与官方逐行一致」**不实**（审计 P1，应如实更新）。改造质量良好（补了官方没有的传输失败 try/catch——store.ts `messageOf` + 各处 catch，修官方「transport reject 成未处理 rejection」的真实缺口），但**官方若更新 operations.ts 或其调用方，corum 全部 14 处调用点要逐处对齐**。
 - **实质修改（13 个）**：
@@ -179,6 +183,9 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
   - `client/ModelListEditor.tsx`（63 diff 行）🟡：`acceptsImage()` + **模型级「支持图片输入」开关**（:442-469，CORUM-PATCH 注释说清语义：勾选写 `input:['text','image']`、不勾删 `input` 键回退 route defaultInput/catalog——这是本包 fork 的**首要动机**，写进了 description）；`api.llm.discoverModels` 直调 + messageOf catch。⚠️ 裸 checkbox 无样式（审计 P1）。
   - `client/CustomProviderCard.tsx` / `ProviderEditor.tsx` / `ModelsSection.tsx` / `DeepSeekOnboardingDialog.tsx`（28/62/57/11 diff 行）🟡：`operations.*` → `api.{settings,credentials,llm}.*` 直调 + wire 结果（`response.ok/error.message`）替换官方 outcome 判别（`written.kind`）+ 传输失败 catch；JsonValue import 从 `dsh-util-values` 改 `dsh-api-remotes/client`。
   - `client/index.ts`（20 diff 行）🟡：删 `createModelsOperations` 调用，组装 `wire` 对象直传；不再 re-export operations 类型。
+  - `client/reasoning.ts`（+30 行，方案 A）🟡：新增 `reasoningEffortsOf(levels, existing)`——把侦测到的思考档位集合落成 pi-ai schema 的 `reasoningEfforts` dict（off→null，其余→档位 id；用户已配 wire 值保留）。这是「能力集合落盘」的数据源，修复「模型设置写默认档单值、modelCatalog 读能力 dict」的 gap（HANDOFF-model-reasoning-gap.md）。
+  - `client/ModelConfigView.tsx`（+7 行，方案 A）🟡：save 时对 pi-ai 族模型同步写 `reasoningEfforts`（`reasoningEffortsOf(modelThinking.levels, next.reasoningEfforts)`，undefined 则删键）；deepseek 族不动（其 catalog 投影走 deepseek 适配器自有链）。⚠️ 官方若改 save 的 writeModels mutate 块，此增量需随写。
+  - `client/ModelConfigView.tsx` / `ProviderDetailView.tsx`（+18/+20 行，2026-09-08 弹窗统一整改）🟡：删除模型的原生 `window.confirm` 换统一 `<ConfirmDialog>`（`@corum/corum-ui-base/client`，danger tone，标题「删除模型」+ 警示 + 取消/删除，busy 态「删除中…」）。**新增 1 个组件依赖**：`@corum/corum-ui-base`（workspace:*）。
   - `client/locales.ts`（4 diff 行）🟡：新增 `modelImageInput`/`modelImageInputHint` 两键（zh+en）——图片开关文案，i18n 合规。
   - `client/welcome-store.ts`（4 diff 行）🟢：import 顺序/风格。
   - `onboarding-copy.ts`（14 diff 行）🟡：新增 `WELCOME_NOTICE_COPY`（⚠️ 死代码双事实源，审计 P1——若确认无引用应删）。
@@ -292,3 +299,40 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 - `Config` schema 未动（`path`/`dshHome`/`watch`/`debounceMs`），overlay 无需 config 行。
 
 **验证记录**（CDP 三层，2026-09-07）：新 Key 写入 → 落盘 `enc:v1:` 密文（同文件存量明文条目原样保留）；重启应用 → 密文条目 `credentials/describe` 正常（解密成功）；存量明文条目重写 → 自动转密文（迁移语义）；`unset` 删除正常；UI 渲染正常 + 零 console 错误；单元级：明文双读 / 篡改检测 / 错误密钥 loud 失败 / 无密钥写拒绝，全部通过。
+
+---
+
+## 8. host 域 fork：`@corum/corum-agent`（skill 注入隔离 + AGENTS.md fs realm + select 编译顺序）
+
+> 登记日期：2026-09-08。corum-agent 非对照官方单一包的 fork（无同名官方包），但以下三处是对**官方机制**（dsh-agent-instructions / dsh-skill-filesystem / dsh-agent-presets）的组合修正，登记备查。
+
+| 项 | 内容 |
+|---|---|
+| 落点 | `packages/plugins/agent/corum-agent/src/compile.ts` / `agent-service.ts` / 新增 `workspace-agents.ts` |
+| 关联官方机制 | dsh-agent-instructions（AGENTS.md 注入）、dsh-skill-filesystem（skill 发现）、dsh-agent-presets（select/mount） |
+
+**实质差异/修正清单**：
+
+1. **AGENTS.md fs realm 断链修复**（compile.ts）：`agent-instructions` 从 standardRows 顶层移进 `filesystem` 组（与 `fs-local` 同 `isolate:{fs:true}` realm）。根因：`dsh-agent-instructions` 经 `ctx.get('fs')` 读 AGENTS.md 基线，此前 fs-local 隔离在组私有 realm、agent-instructions 在组外拿到 undefined → 静默不注入。fs-local 保持 realm 私有（不与 host 的 fs-sandbox 抢 root realm 的 `fs` 名，避免 mount 报 "service fs has been registered at <SandboxedFileSystem>"）。
+2. **AGENTS.md 选定工作区即创建**（新增 workspace-agents.ts + 接线）：`ensureWorkspaceAgentsMd(cwd)` 幂等创建（`wx` 旗标不覆盖用户/历史内容，只读/并发失败静默容错），挂到 `createAgentForTask`（task 泳道 cwd 选定）与 `createProject`（项目带 cwd）。
+3. **select 编译顺序修正**（agent-service.ts 两处：`createAgentForTask` reuse 块 + `selectTaskAgentProfileRemote`）：`writeAgentDir`（编译 agent.cordis.yml）**先于** `agentPresets.select`（mount 读该文件）。原顺序在产物缺失/陈旧时 select 报 "agent.cordis.yml is missing"、writeAgentDir 永远到不了。
+
+**设计事实（实测确认，非改动）**：skill 注入**按 Agent 隔离**——每个 Agent 的 `profile.skills` 独立编成 preset 的 `skill-filesystem.customSkillDirs`（`CORUM_HOME/skills/<name>`），`skill-filesystem` 是 preset（agent scope）级 provider，各 Agent 只见自己绑的 skill 目录。
+
+**验证记录**（CDP 实机，2026-09-08）：
+- 泳道 A（Task 助理，绑 testSkill）：skill-catalog 只含 `test-execution-skill`，命中 `test_skill` 全流程执行 ✅
+- 泳道 B（资深硬件开发，skills 空）：无 skill-catalog 卡片（catalog 空不渲染），加载 `android_skill` 失败 ✅（隔离反证）
+- 泳道 C（高级应用开发工程师-Android，绑 androidSkill）：skill-catalog 只含 `android-dev-skill`，命中 `android_skill` 输出 `【ANDROID_SKILL_LOADED】` ✅
+- AGENTS.md：ai-lib 泳道首启自动创建 389B 模板并被注入（`agent-instructions` durable message + UI 卡片）✅
+- select 顺序：资深硬件开发 → Android 切换成功（此前报 missing 失败）✅
+
+**升级注意**：`dsh-agent-presets` 的 select/mount 语义（blank 限定、compose 文件读取）若演进，需复核 select 前的 writeAgentDir 是否仍必要；`dsh-agent-instructions` 的 `ctx.get('fs')` 解析路径若变，需复核 realm 归属。
+
+4. **专用 Agent 域边界 + 技术栈信号**（2026-09-08，DESIGN-specialized-agent-domain-boundary.md）：
+   - **L1 域边界条款**（compile.ts `composeStructuredPersona`）：`domain`/`title` 经 `domainToStack` 归类命中（真专业域）时注入「你的域严格是 X，越界任务不执行、声明越界 + 建议切通用/对应 Agent；读越界可参考、写/深析越界禁止」。判定用归类而非「title 非空」——否则 task 助理（title「单任务」）等通用角色会被误注（2026-09-08 实测）。
+   - **L2 技术栈兑底信号**（新增 `tech-stack.ts` + agent-service `ctx.inject(['systemPrompt'])` 注册 `corum:tech-stack-signal` context，order 116）：启发式签名文件检测工作区技术栈（react→frontend / platformio→embedded / …），有信号时注入「工作区是 X 类项目（依据）」作 Agent 自判域的客观参考；空区/无信号出 `''`（section 丢弃，Agent 纯靠任务内容自判）。⚠️ `ctx.systemPrompt` 是独立服务，必须经 `ctx.inject` 装配——构造函数裸取报 "cannot get property systemPrompt without inject"（2026-09-08 启动崩溃实测）。
+   - **L2.5 混合项目 + 项目级不匹配警示**（2026-09-08 二轮）：`detectTechStack` 下探**两层**子目录、聚合多栈（新增 `cpp` 类别——C/C++/CUDA 桌面引擎，ai-lib = `cpp`(engines/ds4 等 3 处) + `frontend`(studio/Electron) 混合）。preset 域归类与成分比对，**成分不含 Agent 域**时注入**指令式** IMPORTANT（「先一两句告知项目可能不适合你的专长，再决定动不动手」）。preset 来源 `sessionProjections.stateOf(agent.session,'agentPreset')`（泳道事件流无 `agent-preset/selected` 独立事件）；描述性 Note 会被模型当背景忽略，指令式才迫使表态（2026-09-08 实测对照）。新增依赖 `@deepseek-ai/dsh-session-projection`（Context 合并）。
+   - **验证**：嵌入式工程师接前端任务 → 声明越界 + 建议切通用/前端 Agent，不产出代码 ✅；同泳道接 STM32 任务 → 正常产出 ✅；Task 助理接前端任务 → 正常产出（通用不受限，persona 无边界条款）✅；嵌入式工程师在 ai-lib（C/C++/前端 PC 项目）接 STM32 任务 → 先表态「当前工作区是 C/C++ 桌面/引擎 + 系统后端 + Electron 前端，并不是嵌入式工程」，再判断「独立代码片段仍属本域」后产出 ✅。
+   - **后续（TODO）**：模块级责任边界（项目/AGENTS.md 约定模块→负责 Agent 映射，写权限按模块路径收敛）——配合项目制，本轮未做。
+
+**升级注意**（补）：`domainToStack` 的关键词映射覆盖当前 builtin 角色 title；新增角色若引入新技术域，需同步关键词表，否则该角色不注入边界条款。
