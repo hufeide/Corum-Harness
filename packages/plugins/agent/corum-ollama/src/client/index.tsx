@@ -724,6 +724,6 @@ export function apply(ctx: ClientContext): void {
     name: 'settings.section',
     id: 'ollama',
     order: 195,
-    label: '本地 LLM（Ollama）',
+    label: 'Ollama',
   }, () => <OllamaSection call={call} />))
 }
