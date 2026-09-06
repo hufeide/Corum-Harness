@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { Code, Eye, PanelRightOpen, X } from 'lucide-react'
 import type {} from '@corum/corum-ide-ui/client'
+import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { MonacoEditor, languageFromPath } from './MonacoEditor.tsx'
 import { ExplorerPane, type ExplorerPaneInjected } from './ExplorerPane.tsx'
 import { DiffViewer } from './DiffViewer.tsx'
@@ -190,6 +191,14 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(persisted.activePath ?? null)
   const activeTab = useMemo(() => tabs.find(t => t.path === activePath) ?? null, [tabs, activePath])
+  // ── 统一弹窗（替原生 alert/confirm）：confirm=双键确认执行 / info=单键错误告知。
+  const [dialog, setDialog] = useState<
+    | { kind: 'confirm'; title: string; message: string; warning?: string; confirmLabel: string; danger?: boolean; onConfirm: () => void }
+    | { kind: 'info'; title: string; message: string }
+    | null
+  >(null)
+  /** 错误告知（替 window.alert）。 */
+  const showError = useCallback((message: string) => { setDialog({ kind: 'info', title: '操作失败', message }) }, [])
   const [cursorPos, setCursorPos] = useState({ line: 1, column: 1 })
   /** Models of closed tabs to dispose (consumed once by MonacoEditor). */
   const [disposePaths, setDisposePaths] = useState<string[]>([])
@@ -394,25 +403,36 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
 
   /** Close a tab. If dirty, confirm first (save / discard / cancel). */
   const closeTab = useCallback((path: string) => {
+    const doClose = (): void => {
+      setTabs(prev => {
+        const idx = prev.findIndex(t => t.path === path)
+        if (idx < 0) return prev
+        const next = prev.filter(t => t.path !== path)
+        // If closing the active tab, switch to the neighbour.
+        if (activePath === path) {
+          const neighbour = next[idx] ?? next[idx - 1] ?? null
+          setActivePath(neighbour?.path ?? null)
+        }
+        return next
+      })
+      // Release the Monaco model for the closed tab (undo stack is dropped with it).
+      setDisposePaths([path])
+    }
     const tab = tabs.find(t => t.path === path)
     if (tab === undefined) return
     if (tab.content !== tab.savedContent) {
-      const ok = window.confirm(`「${tab.title}」有未保存的修改，关闭将丢弃这些修改。`)
-      if (!ok) return
+      setDialog({
+        kind: 'confirm',
+        title: '关闭标签页',
+        message: `「${tab.title}」有未保存的修改。`,
+        warning: '关闭将丢弃这些修改。',
+        confirmLabel: '仍要关闭',
+        danger: true,
+        onConfirm: doClose,
+      })
+      return
     }
-    setTabs(prev => {
-      const idx = prev.findIndex(t => t.path === path)
-      if (idx < 0) return prev
-      const next = prev.filter(t => t.path !== path)
-      // If closing the active tab, switch to the neighbour.
-      if (activePath === path) {
-        const neighbour = next[idx] ?? next[idx - 1] ?? null
-        setActivePath(neighbour?.path ?? null)
-      }
-      return next
-    })
-    // Release the Monaco model for the closed tab (undo stack is dropped with it).
-    setDisposePaths([path])
+    doClose()
   }, [tabs, activePath])
 
   /** Update content when the user types in Monaco (dirty = differs from disk baseline).
@@ -591,9 +611,9 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
       void openFile(path)
     } else {
       console.error('[explorer] 新建文件失败', path, result.error?.message)
-      window.alert(`新建文件失败：${result.error?.message ?? '未知错误'}`)
+      showError(`新建文件失败：${result.error?.message ?? '未知错误'}`)
     }
-  }, [writeFile, openFile])
+  }, [writeFile, openFile, showError])
 
   /** 新建文件夹。 */
   const onCreateFolder = useCallback(async (parentDir: string, name: string) => {
@@ -603,36 +623,45 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
       setTreeRefreshGen(g => g + 1)
     } else {
       console.error('[explorer] 新建文件夹失败', path, result.error?.message)
-      window.alert(`新建文件夹失败：${result.error?.message ?? '未知错误'}`)
+      showError(`新建文件夹失败：${result.error?.message ?? '未知错误'}`)
     }
-  }, [mkdirp])
+  }, [mkdirp, showError])
 
   /** 删除文件/文件夹。若文件已打开，关闭其 tab。 */
   const onDeletePath = useCallback(async (path: string, isDir: boolean) => {
     const name = path.split('/').pop() ?? path
-    const ok = window.confirm(`确定删除${isDir ? '文件夹' : '文件'}「${name}」？${isDir ? '目录内所有内容将被删除。' : ''}`)
-    if (!ok) return
-    const result = await deletePath(path)
-    if (result.ok) {
-      setTreeRefreshGen(g => g + 1)
-      // 已打开的 tab（含目录下所有文件）关闭
-      setTabs(prev => {
-        const toClose = prev.filter(t => t.path === path || t.path.startsWith(`${path}/`))
-        if (toClose.length > 0) {
-          setDisposePaths(toClose.map(t => t.path))
-          const remaining = prev.filter(t => !(t.path === path || t.path.startsWith(`${path}/`)))
-          if (activePath !== null && !remaining.some(t => t.path === activePath)) {
-            setActivePath(remaining[remaining.length - 1]?.path ?? null)
+    const doDelete = async (): Promise<void> => {
+      const result = await deletePath(path)
+      if (result.ok) {
+        setTreeRefreshGen(g => g + 1)
+        // 已打开的 tab（含目录下所有文件）关闭
+        setTabs(prev => {
+          const toClose = prev.filter(t => t.path === path || t.path.startsWith(`${path}/`))
+          if (toClose.length > 0) {
+            setDisposePaths(toClose.map(t => t.path))
+            const remaining = prev.filter(t => !(t.path === path || t.path.startsWith(`${path}/`)))
+            if (activePath !== null && !remaining.some(t => t.path === activePath)) {
+              setActivePath(remaining[remaining.length - 1]?.path ?? null)
+            }
+            return remaining
           }
-          return remaining
-        }
-        return prev
-      })
-    } else {
-      console.error('[explorer] 删除失败', path, result.error?.message)
-      window.alert(`删除失败：${result.error?.message ?? '未知错误'}`)
+          return prev
+        })
+      } else {
+        console.error('[explorer] 删除失败', path, result.error?.message)
+        showError(`删除失败：${result.error?.message ?? '未知错误'}`)
+      }
     }
-  }, [deletePath, activePath])
+    setDialog({
+      kind: 'confirm',
+      title: `删除${isDir ? '文件夹' : '文件'}`,
+      message: `确定删除${isDir ? '文件夹' : '文件'}「${name}」？`,
+      ...(isDir ? { warning: '目录内所有内容将被删除。' } : {}),
+      confirmLabel: '删除',
+      danger: true,
+      onConfirm: () => { void doDelete() },
+    })
+  }, [deletePath, activePath, showError])
 
   /** 重命名文件/文件夹（newName = 新文件名，同目录改名）。已打开 tab 路径同步更新。 */
   const onRenamePath = useCallback(async (from: string, newName: string) => {
@@ -656,40 +685,40 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
     const candidate = toDir === fromDir ? join(`${stem} 副本${ext}`) : join(name)
     const readResult = await readFile(from)
     if (!readResult.ok || readResult.value === undefined) {
-      window.alert(`复制失败：无法读取源文件（${readResult.error?.message ?? '未知错误'}）`)
+      showError(`复制失败：无法读取源文件（${readResult.error?.message ?? '未知错误'}）`)
       return
     }
     const result = await writeFile(candidate, readResult.value.content)
     if (result.ok) {
       setTreeRefreshGen(g => g + 1)
     } else {
-      window.alert(`复制失败：${result.error?.message ?? '未知错误'}`)
+      showError(`复制失败：${result.error?.message ?? '未知错误'}`)
     }
-  }, [readFile, writeFile])
+  }, [readFile, writeFile, showError])
 
   /** 「复制路径」数据源：corumFs/absolutePath RPC 取真实绝对路径。 */
   const getAbsolutePath = useCallback(async (path: string): Promise<string | null> => {
     const result = await absolutePath(path)
     if (result.ok && result.value !== undefined) return result.value.absolutePath
-    window.alert(`无法获取绝对路径：${result.error?.message ?? '未知错误'}`)
+    showError(`无法获取绝对路径：${result.error?.message ?? '未知错误'}`)
     return null
-  }, [absolutePath])
+  }, [absolutePath, showError])
 
   /** 「在 Finder 中显示」：corumFs/reveal RPC（host 侧 macOS `open -R`）。 */
   const revealInFinder = useCallback((path: string) => {
     void revealPath(path).then((result) => {
-      if (!result.ok) window.alert(`无法在 Finder 中显示：${result.error?.message ?? '未知错误'}`)
+      if (!result.ok) showError(`无法在 Finder 中显示：${result.error?.message ?? '未知错误'}`)
     })
-  }, [revealPath])
+  }, [revealPath, showError])
 
   /** 「添加到对话」：把文件以 @引用 形式加入当前会话草稿（conversation
    *  cordis service 注入面直通；与手打 @-mention 同构，agent 侧读文件）。 */
   const onAddToChat = useCallback((path: string) => {
     const result = addToConversation(path)
     if (!result.ok) {
-      window.alert(`添加到对话失败：${result.error ?? '未知错误'}`)
+      showError(`添加到对话失败：${result.error ?? '未知错误'}`)
     }
-  }, [addToConversation])
+  }, [addToConversation, showError])
 
   /** 移动路径（跨目录拖拽 / 同目录重命名共用）。to = 完整目标路径。 */
   const movePath = useCallback(async (from: string, to: string) => {
@@ -716,9 +745,9 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
       })
     } else {
       console.error('[explorer] 移动失败', from, '→', to, result.error?.message)
-      window.alert(`移动失败：${result.error?.message ?? '未知错误'}`)
+      showError(`移动失败：${result.error?.message ?? '未知错误'}`)
     }
-  }, [renamePath])
+  }, [renamePath, showError])
 
   /** tab 激活 → 文件树自动展开父级目录。 */
   useEffect(() => {
@@ -1048,6 +1077,31 @@ export function EditorColumn({ closeRegion, showEditor, explorer, readFile, read
             />
           </div>
         </>
+      )}
+
+      {/* 统一弹窗（替原生 alert/confirm）：confirm=确认执行 / info=错误告知。 */}
+      {dialog !== null && (
+        dialog.kind === 'confirm'
+          ? (
+            <ConfirmDialog
+              title={dialog.title}
+              message={dialog.message}
+              {...(dialog.warning !== undefined ? { warning: dialog.warning } : {})}
+              tone={dialog.danger === false ? 'primary' : 'danger'}
+              confirmLabel={dialog.confirmLabel}
+              onConfirm={() => { const fn = dialog.onConfirm; setDialog(null); fn() }}
+              onCancel={() => { setDialog(null) }}
+            />
+          )
+          : (
+            <ConfirmDialog
+              kind="info"
+              tone="primary"
+              title={dialog.title}
+              message={dialog.message}
+              onCancel={() => { setDialog(null) }}
+            />
+          )
       )}
     </div>
   )

@@ -21,6 +21,8 @@ export { RegionCard, INTERACTIVE_SELECTOR, CARD_SELECTOR } from './RegionCard.ts
 export type { RegionCardProps } from './RegionCard.tsx'
 export { FloatingLayer, useFloatingLayer, floatingLayerHost } from './FloatingLayer.tsx'
 export type { FloatingItem, FloatingLayerApi } from './FloatingLayer.tsx'
+export { ConfirmDialog } from './ConfirmDialog.tsx'
+export type { ConfirmDialogProps } from './ConfirmDialog.tsx'
 export { ThemePresenter, DARK_ATTRIBUTE } from './theme-presenter.ts'
 export * from './grid.ts'
 import './base-theme.css'
