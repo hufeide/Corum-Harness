@@ -7,13 +7,14 @@
  * Mono，经 host corumTerminal RPC 驱动 node-pty 登录 shell)。
  * The × close hides this leaf via `ctx.layout.closeRegion`.
  *
- * 真实终端接线（0.1.2 换真）：
- *   - onMount：`create` 拿会话 id → 启动 ~60ms 轮询循环（`poll` 拉输出
- *     `term.write(data)`）→ xterm `onData` 调 `write` 透传输入 →
- *     ResizeObserver 触发 FitAddon.fit() + `resize` 同步行列 → unmount /
- *     关闭区域时 `kill` + 清轮询。
- *   - 输出回流走「缓冲区 + 轮询拉取」（coding combo 无 stream 桥，见 host
- *     corum-terminal.ts 模块注释）。
+ * 真实终端接线（统一事件中心一期，2026-09 迁移）：
+ *   - onMount：`create` 拿会话 id → **主路径 `onTerminalOutput`（ctx.remote.$on
+ *     'corum/terminal/output'）实时推送** `term.write(data)` → xterm `onData`
+ *     调 `write` 透传输入 → ResizeObserver 触发 FitAddon.fit() + `resize`
+ *     同步行列 → unmount / 关闭区域时 `kill` + dispose $on 订阅。
+ *   - 降级兜底：$on 订阅建立后 POLL_GRACE_MS 内未收到任何推送帧（推送通道
+ *     未生效，如 host 是旧版本不 emit），回退到 ~60ms `poll` 轮询（host 端点
+ *     保留）。一旦推送帧到达，轮询永不起动。
  */
 import { useEffect, useRef } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -40,20 +41,28 @@ export interface BottomPanelInjected {
   writeTerm: (id: string, data: string) => Promise<RpcEnvelope<{ written: boolean }>>
   /** 同步窗口尺寸（FitAddon.fit() 后）。 */
   resizeTerm: (id: string, cols: number, rows: number) => Promise<RpcEnvelope<{ resized: boolean }>>
-  /** 拉走累积输出（轮询数据源；返回后 host 清缓冲）。 */
+  /** 拉走累积输出（降级兜底轮询数据源；返回后 host 清缓冲）。 */
   poll: (id: string) => Promise<RpcEnvelope<{ data: string; exited: boolean; exitCode?: number }>>
   /** 终止会话（幂等）。 */
   kill: (id: string) => Promise<RpcEnvelope<{ killed: boolean }>>
+  /**
+   * 订阅终端输出推送（统一事件中心主路径：ctx.remote.$on
+   * 'corum/terminal/output'）。listener 收到 { id, data } 帧；返回 dispose
+   * （组件 unmount 时调用）。
+   */
+  onTerminalOutput: (listener: (frame: { id: string; data: string }) => void) => () => void
 }
 
 /** Composed props: the shell's owner share + 本插件注入面。 */
 export type BottomPanelProps = PropsRuntime<'corum.panel'> & BottomPanelInjected
 
-/** 轮询周期（ms）：够低保证交互流畅，又不至于打满 unary RPC 桥。 */
+/** 轮询周期（ms）：降级兜底路径的周期（主路径 $on 推送无轮询）。 */
 const POLL_INTERVAL_MS = 60
+/** 推送通道宽限期（ms）：$on 订阅建立后这么久仍零推送帧 → 判定推送未生效，回退 poll。 */
+const PUSH_GRACE_MS = 800
 
 /** The IDE terminal panel (real xterm.js driven by host node-pty; see module doc). */
-export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, poll, kill }: BottomPanelProps) {
+export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, poll, kill, onTerminalOutput }: BottomPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -83,10 +92,14 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, poll, 
     term.loadAddon(fit)
     term.open(container)
 
-    // 会话 id 与轮询定时器（create 成功后填充）。
+    // 会话 id、$on 订阅 dispose 与降级轮询定时器（create 成功后填充）。
     let sessionId: string | null = null
+    let disposeOutput: (() => void) | null = null
     let pollTimer: ReturnType<typeof setInterval> | null = null
+    let graceTimer: ReturnType<typeof setTimeout> | null = null
     let disposed = false
+    // 推送通道活性：$on 收到本会话首帧后置 true（降级判定据此关闭）。
+    let pushLive = false
     // 未 attach 前的 kill 防护：unmount 若抢在 create resolve 前，记录后补杀。
     let killRequested = false
 
@@ -95,9 +108,15 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, poll, 
         clearInterval(pollTimer)
         pollTimer = null
       }
+      if (graceTimer !== null) {
+        clearTimeout(graceTimer)
+        graceTimer = null
+      }
     }
 
+    /** 降级兜底：推送通道未生效时的 60ms 轮询（host poll 端点保留）。 */
     const startPolling = (id: string): void => {
+      if (pollTimer !== null || pushLive || disposed) return
       pollTimer = setInterval(() => {
         void poll(id).then((res) => {
           if (disposed) return
@@ -138,7 +157,8 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, poll, 
     // 初次布局（open 后下一帧，容器已有真实尺寸）。
     applyFit()
 
-    // 建会话 → 拿 id → 起轮询；此时再把当前行列补同步一次（create 默认 80×24）。
+    // 建会话 → 拿 id → 主路径挂 $on 推送订阅；宽限期内零推送帧回退 poll。
+    // 此时再把当前行列补同步一次（create 默认 80×24）。
     void create().then((res) => {
       if (disposed || killRequested) {
         // unmount 抢在 create resolve 前：补杀刚建好的会话防泄漏。
@@ -150,7 +170,19 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, poll, 
         return
       }
       sessionId = res.value.id
-      startPolling(sessionId)
+      // 统一事件中心主路径：host proc.onData → ctx.emit → forwarded Remote
+      // event → 本 listener。多终端面板并存时按帧 id 过滤本会话。
+      disposeOutput = onTerminalOutput(({ id, data }) => {
+        if (disposed || id !== sessionId) return
+        pushLive = true
+        term.write(data)
+      })
+      // 宽限期：订阅建立后 PUSH_GRACE_MS 内本会话零推送帧 → 推送通道未生效
+      // （旧 host 不 emit），回退 poll 轮询；一旦有帧到达（pushLive）永不回退。
+      graceTimer = setTimeout(() => {
+        graceTimer = null
+        if (!pushLive && sessionId !== null) startPolling(sessionId)
+      }, PUSH_GRACE_MS)
       applyFit()
     }).catch((error) => {
       if (!disposed) term.write(`\x1b[31m[终端启动失败: ${String(error)}]\x1b[0m\r\n`)
@@ -159,6 +191,7 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, poll, 
     return () => {
       disposed = true
       stopPolling()
+      disposeOutput?.()
       resizeObserver.disconnect()
       dataSub.dispose()
       if (sessionId !== null) {

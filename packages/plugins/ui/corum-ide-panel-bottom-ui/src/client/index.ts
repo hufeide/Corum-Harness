@@ -14,13 +14,17 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@corum/corum-ide-ui/client'
+// 拉入 fork 装配面的 ctx.remote Context 合并 + corum 事件 $on 类型投影
+// （'corum/terminal/output' listener 签名由此而来；package.json dsh.client.inject
+// 已声明 @corum/corum-api-remotes，装配面在 cordis 激活序中先于本插件就绪）。
+import type {} from '@corum/corum-api-remotes/client'
 import { BottomPanel } from './BottomPanel.tsx'
 import type { BottomPanelInjected } from './BottomPanel.tsx'
 
 export type { BottomPanelInjected } from './BottomPanel.tsx'
 
-/** Required services: the slots registry + the connection rpc face + the layout face (ctx.layout.closeRegion)。 */
-export const inject = ['slots', 'connection', 'layout']
+/** Required services: the slots registry + the connection rpc face + the layout face (ctx.layout.closeRegion) + the Remote event face (ctx.remote.$on 终端输出推送)。 */
+export const inject = ['slots', 'connection', 'layout', 'remote']
 
 /** RPC 信封（与 BottomPanel.tsx 的 RpcEnvelope 同构；host Typert Remote 返回）。 */
 interface Envelope<T> {
@@ -57,6 +61,10 @@ export function apply(ctx: ClientContext): void {
             const result = await connection.rpc.call('/api', 'corumTerminal/poll', { args: { id } })
             return result as Envelope<{ data: string; exited: boolean; exitCode?: number }>
           },
+          // 统一事件中心一期：终端输出改走官方 forwarded-Remote-event 通道
+          // （host corumTerminal 在 proc.onData 里 emit；真实推送，取代 60ms poll
+          // 主路径）。$on 返回的 dispose 由组件 unmount 时调用。
+          onTerminalOutput: (listener) => ctx.remote.$on('corum/terminal/output', listener),
           kill: async (id) => {
             const result = await connection.rpc.call('/api', 'corumTerminal/kill', { args: { id } })
             return result as Envelope<{ killed: boolean }>

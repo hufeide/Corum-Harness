@@ -831,6 +831,9 @@ export function IdeAppFrame({
   const gridActions = useMemo<GridActions>(() => ({
     setRegionHidden,
     closeRegion: onCloseSlot,
+    // 点亮区域的单槽包装（LayoutController.showRegion → 本面）：清 userShown
+    // 运行时隐藏 + 树 hidden 持久化，供「corum:open-in-editor」等可编程入口。
+    showRegion: (slot) => { showRegion([slot as GridSlot]) },
     resetLayout,
     toggleSidebar: toggleSidebarLeaf,
     openNewTaskForm,
@@ -846,7 +849,7 @@ export function IdeAppFrame({
     isInGrid: (slot) => findLeafBySlot(gridRef.current, slot) !== null,
     hiddenSlotsSnapshot: getHiddenSnapshot,
     onGridChange: gridSubscribe,
-  }), [setRegionHidden, onCloseSlot, resetLayout, toggleSidebarLeaf, openNewTaskForm, getHiddenSnapshot, gridSubscribe])
+  }), [setRegionHidden, onCloseSlot, showRegion, resetLayout, toggleSidebarLeaf, openNewTaskForm, getHiddenSnapshot, gridSubscribe])
   // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
   // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
   // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
@@ -1054,6 +1057,8 @@ export function IdeAppFrame({
   const floatingGridActions = useMemo<GridActions>(() => ({
     setRegionHidden: (_slot: string, _hidden: boolean) => {},
     closeRegion: (_slot: string) => { window.close() },
+    // 浮窗无 userShown/树 hidden 语义——点亮区域在浮窗无意义，no-op 兜底。
+    showRegion: (_slot: string) => {},
     resetLayout: () => {},
     toggleSidebar: () => {},
     openNewTaskForm: () => {},

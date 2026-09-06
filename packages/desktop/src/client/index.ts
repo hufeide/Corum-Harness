@@ -23,6 +23,16 @@ import type { FsEntry } from './editor/ExplorerPane.tsx'
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
 export const inject: string[] = []
 
+/**
+ * 跨 bundle 能力接口（dev-conventions §2.4）：本 bundle inject 的 ctx.layout
+ * 类型面是官方基线 ILayout（corum 运行时 LayoutController 是其超集，新增
+ * showRegion 面）。用局部能力接口收窄 + 可选链调用，不强耦合 ide-ui 实现包。
+ */
+interface ShowRegionCapableLayout {
+  /** 点亮区域（清 userShown 运行时隐藏 + 树 hidden 持久化；实现缺该面时缺席）。 */
+  showRegion?: (slot: string) => void
+}
+
 // Context merge: the framework notification store is injectable by any plugin.
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -146,26 +156,19 @@ export function apply(ctx: Context): void {
         console.warn('[corum-desktop] corum:open-in-editor: path not under current workspace root', { absolute, lastRoot })
         return
       }
-      // 先点亮编辑器区域（hidden 场景：setRegionHidden 清 leaf.hidden 持久化标记）。
+      // 点亮编辑器区域（两层隐藏一次清）：
+      // ① 树 leaf.hidden 持久化标记 → setRegionHidden('corum.editor', false)；
+      // ② AppFrame userShown 运行时隐藏集（DEFAULT_HIDDEN 场景，① 管不到）→
+      //    layout.showRegion（LayoutController 新增面，AppFrame showRegion 的单槽
+      //    包装，同时清 ①+②；保留 ① 让语义显式且防御未来实现变化）。
+      // 跨 bundle 窄接口收窄（dev-conventions §2.4 红线 3）：editorCtx.layout 的
+      // 类型面是官方基线 ILayout（无 showRegion），用局部能力接口 + 可选链
+      // 防御——实现缺该面时静默跳过（编辑器仍可由用户手动点亮），不强耦合
+      // ide-ui 实现包。原「setTimeout 50ms + 读 localStorage 字符串匹配 + 模拟
+      // 点按钮」hack（6c43655c 引入）随本接口落地删除。
       editorCtx.layout.setRegionHidden('corum.editor', false)
-      // DEFAULT_HIDDEN 场景（effectiveDetached 运行时隐藏，不动树）：编辑器/终端
-      // 默认隐藏在 AppFrame 的 userShown state 中，setRegionHidden 管不到——需要
-      // 模拟「面板切换」按钮点击来触发 showRegion（把 slot 移出 hiddenByDefault）。
-      // 但只在 editor 确实不可见且 grid leaf 无 hidden 标记时才点（避免把刚
-      // setRegionHidden(false) 恢复的 editor 又 toggle 回去）。
-      // 同 bundle DOM 操作，不跨 bundle，不违反 cordis 红线。
-      setTimeout(() => {
-        const editorCell = document.querySelector('[data-code-editor-column]')
-        if (editorCell !== null) return // editor 已显示，无需点按钮
-        // 检查 grid 中 editor leaf 是否仍有 hidden 标记（有则 setRegionHidden 刚清完，
-        // React 还没重渲染，等 poll 即可，不用点按钮）。
-        const rawGrid = localStorage.getItem('corum.ide.grid.v3') ?? ''
-        const hasHiddenMark = rawGrid.includes('"corum.editor","h":1') || rawGrid.includes('"corum.editor", "h": 1')
-        if (hasHiddenMark) return // hidden 标记刚清，等 React 重渲染
-        // leaf 无 hidden 标记但 editor 不渲染 → DEFAULT_HIDDEN 场景，点按钮 showRegion
-        const toggleBtn = document.querySelector('button[aria-label*="编辑器"]') as HTMLButtonElement | null
-        toggleBtn?.click()
-      }, 50)
+      const layoutShowCapable = editorCtx.layout as unknown as ShowRegionCapableLayout
+      layoutShowCapable.showRegion?.('corum.editor')
       // EditorColumn 挂载后 openFile 才写入 editorApiRef；未挂载时轮询等待
       if (editorApiRef.openFile !== null) {
         void editorApiRef.openFile(rel, { pin: true })

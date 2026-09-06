@@ -4,10 +4,13 @@
  * node-pty 驱动的真实登录 shell：renderer 的 xterm.js 经本服务 spawn / 输入 /
  * resize / kill / 轮询输出。
  *
- * 输出回流：coding combo 无 stream 桥（Typert Remote 只有 unary 信封），故采用
- * 「缓冲区 + 轮询拉取」范式（与 corum-fs 的 watch/pollChanges 同理）：host 侧
- * 每会话把 pty.onData 累积进环形缓冲，client 以 ~60ms 周期 `poll` 拉走即清。
- * 缓冲钳制 `MAX_BUFFER_CHARS`（溢出从头截断保尾部，终端语义取最新输出）。
+ * 输出回流（统一事件中心一期，2026-09 迁移）：pty.onData 除累积进环形缓冲外，
+ * 同步 `ctx.emit('corum/terminal/output', { id, data })`——该事件经 fork 包
+ * @corum/corum-api-remotes 的官方 forwarded-Remote-event 通道实时推给
+ * renderer（client `ctx.remote.$on('corum/terminal/output', ...)` 直收，
+ * 不再依赖 60ms poll）。`poll` 端点与缓冲暂保留作降级兜底（确认 $on 稳定后
+ * 二期删除；原「缓冲区 + 轮询拉取」注释见 git 历史）。缓冲钳制
+ * `MAX_BUFFER_CHARS`（溢出从头截断保尾部，终端语义取最新输出）。
  *
  * @Remote 方法直接 return value（信封自动包成 `{ ok: true, value }`），失败
  * throw（包成 `{ ok: false, error }`）。
@@ -18,6 +21,10 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import * as pty from 'node-pty'
+// 拉入 corum 领域事件的 cordis Events 声明（'corum/terminal/output' 等）——
+// 声明在 fork 包 @corum/corum-api-remotes 自包含（UNIFIED-EVENT-BUS §2.2 类型
+// 安全三段式之一），type-only import 编译期即擦除，无运行时依赖。
+import type {} from '@corum/corum-api-remotes/corum-events'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -84,6 +91,9 @@ export class CorumTerminalService extends TypertRemoteService {
       if (session.buffer.length > MAX_BUFFER_CHARS) {
         session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER_CHARS)
       }
+      // 统一事件中心：pty 输出实时推给 renderer（client $on 直收；poll 端点
+      // 保留作降级兜底）。emit 先于缓冲清理无关——载荷是本帧原始数据。
+      this.ctx.emit('corum/terminal/output', { id, data })
     })
     proc.onExit(({ exitCode }) => {
       session.exited = true

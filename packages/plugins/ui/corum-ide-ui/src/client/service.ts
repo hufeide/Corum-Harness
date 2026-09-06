@@ -49,6 +49,13 @@ export interface GridActions {
   setRegionHidden(slot: string, hidden: boolean): void
   /** 关闭区域（= setRegionHidden(slot, true)，可在插件中心视图管理恢复）。 */
   closeRegion(slot: string): void
+  /**
+   * 点亮区域（AppFrame showRegion 的单槽包装）：同时清两层隐藏——
+   * ① userShown 运行时隐藏集（DEFAULT_HIDDEN 场景，setRegionHidden 管不到）；
+   * ② 树 leaf.hidden 持久化标记（与 setRegionHidden(slot, false) 同效）。
+   * 「corum:open-in-editor 点亮编辑器」等可编程入口用本方法，不再模拟点按钮。
+   */
+  showRegion(slot: string): void
   /** 重置布局（按当前 frame 尺寸重算默认布局并持久化）。 */
   resetLayout(): void
   /** 切换侧栏 leaf 的 hidden（折叠 ⟷ 展开）。 */
@@ -82,6 +89,12 @@ export interface ILayout {
   setRegionHidden(slot: string, hidden: boolean): void
   /** 关闭区域（各区域工具组「×」按钮；= setRegionHidden(slot, true)）。 */
   closeRegion(slot: string): void
+  /**
+   * 点亮区域：同时清 userShown 运行时隐藏（DEFAULT_HIDDEN 场景）与树
+   * leaf.hidden 持久化标记。「corum:open-in-editor 点亮编辑器」等可编程入口
+   * 经本方法显示区域（取代「读 localStorage 字符串匹配 + 模拟点按钮」hack）。
+   */
+  showRegion(slot: string): void
   /** 重置布局（视图菜单「重置布局」；回退默认布局的几何）。 */
   resetLayout(): void
   /**
@@ -173,6 +186,10 @@ export class LayoutController implements ILayout {
 
   closeRegion(slot: string): void {
     this.#requireGrid().closeRegion(slot)
+  }
+
+  showRegion(slot: string): void {
+    this.#requireGrid().showRegion(slot)
   }
 
   resetLayout(): void {
