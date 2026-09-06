@@ -13,8 +13,18 @@ export interface SdModel {
   size: string
   /** 文件大小（字节）。 */
   sizeBytes: number
-  /** 是否已激活（加载到内存）。 */
+  /** 是否已激活（当前选中的生成模型，全局唯一）。 */
   active?: boolean
+  /** 模型架构（如 'SD 1.5' / 'SDXL' / 'Flux' / 'SD3' / 'Qwen-Image'）。 */
+  architecture?: string
+  /** 量化/精度（如 'F16' / 'Q4_K_M' / 'Q8_0'）。 */
+  quantization?: string
+  /** 估算 VRAM 需求（GB，按架构+量化估算）。 */
+  vramGb?: number
+  /** 推荐采样步数。 */
+  recommendedSteps?: number
+  /** 推荐分辨率（短边）。 */
+  recommendedSize?: number
 }
 
 /** GPU 信息。 */
@@ -37,7 +47,7 @@ export interface ArtGenStatus {
   models: SdModel[]
   /** 平台。 */
   platform: string
-  /** 当前已激活的模型名（sd-cli 是进程式调用，激活=最近使用的模型）。 */
+  /** 当前已激活的模型名（全局唯一；生成强制使用该模型）。 */
   activeModel?: string
   /** 物理内存（GB）。 */
   totalMemGb: number
@@ -57,8 +67,8 @@ export interface Txt2ImgArgs {
   prompt: string
   /** 反向提示词。 */
   negativePrompt?: string
-  /** 模型文件名（从 models 里选）。 */
-  model: string
+  /** 模型文件名（可选：不填用当前激活模型，再回落第一个本地模型）。 */
+  model?: string
   /** 宽度（默认 512）。 */
   width?: number
   /** 高度（默认 512）。 */
@@ -81,6 +91,52 @@ export interface Txt2ImgResult {
   seed: number
   /** 生成耗时（ms）。 */
   durationMs: number
+}
+
+/** 推荐模型（低/中/高配档位，含完整参数）。 */
+export interface RecommendedSdModel {
+  /** 档位。 */
+  tier: 'low' | 'mid' | 'high'
+  /** 显示名。 */
+  name: string
+  /** 下载后的文件名。 */
+  fileName: string
+  /** 架构。 */
+  architecture: string
+  /** 量化/精度。 */
+  quantization: string
+  /** 文件大小（人类可读）。 */
+  size: string
+  /** 估算 VRAM 需求（GB）。 */
+  vramGb: number
+  /** 推荐采样步数。 */
+  recommendedSteps: number
+  /** 推荐分辨率（短边）。 */
+  recommendedSize: number
+  /** 一句话说明。 */
+  description: string
+  /** 本机是否满足最低要求（内存/VRAM）。 */
+  compatible?: boolean
+  /** 不满足原因。 */
+  incompatibleReason?: string
+}
+
+/** 线上模型目录条目（从 HuggingFace API 查询）。 */
+export interface OnlineSdModel {
+  /** HF repo id（如 'Lykon/DreamShaper'）。 */
+  repoId: string
+  /** 显示名。 */
+  name: string
+  /** 可下载的主模型文件名。 */
+  fileName: string
+  /** 架构（从 tags/文件名推断）。 */
+  architecture: string
+  /** 下载数（热度排序依据）。 */
+  downloads: number
+  /** 点赞数。 */
+  likes: number
+  /** 直接下载 URL（hf-mirror 加速）。 */
+  downloadUrl: string
 }
 
 /** 文生图任务状态（startTxt2Img 后立即返回，getTxt2ImgJob 轮询）。 */

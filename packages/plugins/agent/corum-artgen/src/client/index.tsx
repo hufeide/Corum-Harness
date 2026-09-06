@@ -16,16 +16,43 @@ import type { ReactNode } from 'react'
 
 /** sd-cli 可用模型文件（.safetensors / .gguf）。 */
 interface SdModel {
-  /** 模型文件名（如 'sd-v1-5-pruned-emaonly-fp16.safetensors'）。 */
   fileName: string
-  /** 展示名（如 'SD 1.5'）。 */
   displayName: string
-  /** 人类可读大小（如 '2.0 GB'）。 */
   size: string
-  /** 磁盘占用（字节）。 */
   sizeBytes: number
-  /** 是否已激活。 */
   active?: boolean
+  architecture?: string
+  quantization?: string
+  vramGb?: number
+  recommendedSteps?: number
+  recommendedSize?: number
+}
+
+/** 推荐模型（低/中/高配档位）。 */
+interface RecommendedSdModel {
+  tier: 'low' | 'mid' | 'high'
+  name: string
+  fileName: string
+  architecture: string
+  quantization: string
+  size: string
+  vramGb: number
+  recommendedSteps: number
+  recommendedSize: number
+  description: string
+  compatible?: boolean
+  incompatibleReason?: string
+}
+
+/** 线上模型目录条目。 */
+interface OnlineSdModel {
+  repoId: string
+  name: string
+  fileName: string
+  architecture: string
+  downloads: number
+  likes: number
+  downloadUrl: string
 }
 
 interface GpuInfo {
@@ -60,7 +87,7 @@ interface ArtGenStatus {
 interface Txt2ImgArgs {
   prompt: string
   negativePrompt?: string
-  model: string
+  model?: string
   width?: number
   height?: number
   steps?: number
@@ -156,7 +183,6 @@ function DownloadProgressBar({ progress }: { progress: { percent: number; total:
 }
 
 const SIZES: number[] = [256, 512, 1024]
-const RECOMMENDED_MODEL = 'sd-v1-5-pruned-emaonly-fp16.safetensors'
 const DEFAULT_PROMPT = 'minimalist flat vector avatar icon for an AI assistant, soft gradient glass style, centered, clean background'
 
 function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNode {
@@ -280,13 +306,31 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
     }
   }
 
-  // 激活模型（预热加载到内存）
-  const activateModel = async (fileName: string) => {
+  // ── 推荐模型 / 导入 / 在线目录 状态 ──
+  const [recommended, setRecommended] = useState<RecommendedSdModel[]>([])
+  const [importPath, setImportPath] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [onlineQuery, setOnlineQuery] = useState('')
+  const [onlineResults, setOnlineResults] = useState<OnlineSdModel[] | null>(null)
+  const [onlineSearching, setOnlineSearching] = useState(false)
+  const [onlineError, setOnlineError] = useState<string | null>(null)
+
+  const refreshRecommended = async (): Promise<void> => {
+    try {
+      const recs = await call<RecommendedSdModel[]>('listRecommendedModels', {})
+      setRecommended(recs)
+    } catch { /* 忽略 */ }
+  }
+
+  useEffect(() => { void refreshRecommended() }, [status?.totalMemGb, status?.gpu])
+
+  // 切换激活模型（单选互斥：点哪个激活哪个，全局唯一）。
+  const switchActive = async (fileName: string) => {
     setBusyModel(fileName)
     setError(null)
     try {
       const r = await call<{ ok: boolean; error?: string }>('activateModel', { fileName })
-      if (!r.ok) setError(r.error ?? '激活失败')
+      if (!r.ok) setError(r.error ?? '切换失败')
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -295,33 +339,88 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
     }
   }
 
-  // 停止模型
-  const deactivateModel = async (fileName: string) => {
-    setBusyModel(fileName)
+  // 导入本地模型文件。
+  const doImport = async () => {
+    const p = importPath.trim()
+    if (p === '') return
+    setImporting(true)
     setError(null)
     try {
-      const r = await call<{ ok: boolean; error?: string }>('deactivateModel', { fileName })
-      if (!r.ok) setError(r.error ?? '停止失败')
+      const r = await call<{ ok: boolean; fileName?: string; error?: string }>('importModel', { sourcePath: p })
+      if (!r.ok) { setError(r.error ?? '导入失败'); return }
+      setImportPath('')
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusyModel(null)
+      setImporting(false)
     }
   }
+
+  // 在线目录搜索。
+  const doOnlineSearch = async () => {
+    setOnlineSearching(true)
+    setOnlineError(null)
+    try {
+      const r = await call<{ results: OnlineSdModel[]; error?: string }>('searchOnlineModels', { query: onlineQuery })
+      if (r.error !== undefined && r.results.length === 0) { setOnlineResults([]); setOnlineError(r.error) }
+      else setOnlineResults(r.results)
+    } catch (e) {
+      setOnlineResults([])
+      setOnlineError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOnlineSearching(false)
+    }
+  }
+
+  // 下载在线模型（后台下载 + 轮询进度槽）。
+  const downloadOnline = async (m: OnlineSdModel) => {
+    setDlModel(true)
+    setError(null)
+    setDlModelProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
+    const poll = setInterval(async () => {
+      try {
+        const p = await call<DownloadProgress>('getDownloadProgress', { key: 'model' })
+        setDlModelProgress({ percent: p.percent, total: formatBytesClient(p.totalBytes), downloaded: formatBytesClient(p.downloadedBytes), status: p.status })
+        if (p.status === 'done' || p.status === 'error') clearInterval(poll)
+      } catch { /* 忽略 */ }
+    }, 500)
+    try {
+      const r = await call<{ started: boolean; already?: boolean; error?: string }>('downloadModelFromUrl', { url: m.downloadUrl, fileName: m.fileName })
+      if (r.already === true) { clearInterval(poll); setDlModelProgress(null); await refresh(); return }
+      if (r.error !== undefined) throw new Error(r.error)
+      for (;;) {
+        await new Promise(res => setTimeout(res, 600))
+        const p = await call<DownloadProgress>('getDownloadProgress', { key: 'model' })
+        if (p.status === 'done') break
+        if (p.status === 'error') throw new Error(p.error ?? '下载失败')
+      }
+      clearInterval(poll)
+      setDlModelProgress(null)
+      await refresh()
+    } catch (e) {
+      clearInterval(poll)
+      setError(e instanceof Error ? e.message : String(e))
+      setDlModelProgress(null)
+    } finally {
+      setDlModel(false)
+    }
+  }
+
+  // 当前激活模型（生成唯一使用）。
+  const activeModel = status?.models.find(m => m.active === true)
 
   const generate = async (): Promise<void> => {
     if (prompt.trim() === '') return
-    if (status === null || !status.engineBundled || status.models.length === 0) return
+    if (status === null || !status.engineBundled || activeModel === undefined) return
     setGenerating(true)
     setError(null)
     setResultImage(null)
     setGenDuration(null)
     setGenProgress(0)
     try {
-      const model = status.models[0]!.fileName
-      const args: Txt2ImgArgs = { prompt: prompt.trim(), model, width: size, height: size, steps }
-      // 启动任务 → 轮询真实进度（解析自 sd-cli 输出），替代旧的定时器假进度。
+      // 不指定 model → host 用当前激活模型（互斥后的唯一生效模型）。
+      const args: Txt2ImgArgs = { prompt: prompt.trim(), width: size, height: size, steps }
       const { jobId } = await call<{ jobId: string }>('startTxt2Img', { args: args as unknown as Record<string, unknown> })
       for (;;) {
         await new Promise(r => setTimeout(r, 400))
@@ -344,8 +443,10 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
   }
 
   const engineReady = status !== null && status.engineBundled && status.meetsMinReq
-  const hasModels = status !== null && status.models.length > 0
-  const canGenerate = engineReady && hasModels && !generating && prompt.trim() !== ''
+  const canGenerate = engineReady && activeModel !== undefined && !generating && prompt.trim() !== ''
+
+  const TIER_LABEL: Record<RecommendedSdModel['tier'], string> = { low: '低配', mid: '中配', high: '高配' }
+  const tierOf = (m: RecommendedSdModel) => m.tier
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
@@ -404,87 +505,186 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
         <DownloadProgressBar progress={dlEngineProgress} />
       </Row>
 
-      {/* ── 已下载模型 ── */}
-      <Row label="已下载模型" desc="sd-cli 模型目录中的 .safetensors / .gguf 文件">
+      {/* ── 推荐模型（低/中/高配，含参数）── */}
+      <Row label="推荐模型" desc="按硬件档位推荐 · 显示架构 / 量化 / 大小 / VRAM / 推荐步数">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {status === null ? (
-            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>加载中…</span>
-          ) : status.models.length === 0 ? (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-              borderRadius: 8, border: '1px solid var(--corum-glass-border)',
-              background: 'var(--corum-glass-2)',
-            }}>
-              <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', flex: 1 }}>暂无模型，选择一个档位下载</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button type="button" disabled={dlModel || !engineReady} onClick={() => void downloadModel('low')} style={{ padding: '5px 10px', borderRadius: 8, fontSize: 11, cursor: dlModel ? 'wait' : 'pointer', border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', opacity: dlModel ? 0.5 : 1, }} title="DreamShaper 8 (SD 1.5 微调, 2GB)">低配 (2GB)</button>
-                <button type="button" disabled={dlModel || !engineReady} onClick={() => void downloadModel('mid')} style={{ padding: '5px 10px', borderRadius: 8, fontSize: 11, cursor: dlModel ? 'wait' : 'pointer', border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', opacity: dlModel ? 0.5 : 1, }} title="FLUX.1-schnell Q2_K (3.7GB)">中配 (3.7GB)</button>
-                <button type="button" disabled={dlModel || !engineReady} onClick={() => void downloadModel('high')} style={{ padding: '5px 10px', borderRadius: 8, fontSize: 11, cursor: dlModel ? 'wait' : 'pointer', border: '1px solid var(--corum-glass-border-active)', background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-brand-primary)', whiteSpace: 'nowrap', opacity: dlModel ? 0.5 : 1, }} title="FLUX.1-schnell Q3_K_S (4.8GB)">高配 (4.8GB)</button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {status.models.map(m => {
-                const isActive = m.active === true
-                const busy = busyModel === m.fileName
-                return (
-                  <div key={m.fileName} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-                    borderRadius: 8, border: '1px solid var(--corum-glass-border)',
-                    background: isActive ? 'var(--corum-glass-3)' : 'var(--corum-glass-2)',
-                  }}>
-                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
-                      color: isActive ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--dsw-alias-label-dimmed)',
-                      border: `1px solid ${isActive ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--corum-glass-border)'}`,
-                    }}>{isActive ? '● 已激活' : '○ 未激活'}</span>
-                    <span style={{ ...MONO, fontSize: 12, color: 'var(--dsw-alias-label-primary)' }}>{m.fileName}</span>
-                    <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{m.displayName}</span>
+          {recommended.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>加载推荐…</span>
+          ) : recommended.map(m => {
+            const downloaded = status?.models.some(x => x.fileName === m.fileName) ?? false
+            const disabled = dlModel || !engineReady || downloaded || m.compatible === false
+            return (
+              <div key={m.fileName} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                borderRadius: 8, border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)',
+                opacity: m.compatible === false ? 0.6 : 1,
+              }}>
+                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
+                  color: 'var(--dsw-alias-brand-primary)', border: '1px solid var(--corum-glass-border-active)',
+                }}>{TIER_LABEL[tierOf(m)]}</span>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{m.name}</span>
+                    <span style={{ ...MONO, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-tertiary)' }}>{m.architecture}</span>
+                    <span style={{ ...MONO, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-tertiary)' }}>{m.quantization}</span>
                     <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{m.size}</span>
-                    <span style={{ flex: 1 }} />
-                    {isActive ? (
-                      <button type="button" disabled={busy} onClick={() => void deactivateModel(m.fileName)} style={{
-                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
-                        background: 'transparent', color: 'var(--dsw-alias-label-secondary)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
-                      }}>{busy ? '停止中…' : '停止'}</button>
-                    ) : (
-                      <button type="button" disabled={busy} onClick={() => void activateModel(m.fileName)} style={{
-                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
-                        background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
-                      }}>{busy ? '激活中…' : '激活'}</button>
-                    )}
-                    {confirmDelete === m.fileName ? (
-                      <span style={{ display: 'flex', gap: 4 }}>
-                        <button type="button" disabled={busy} onClick={() => void deleteModel(m.fileName)} style={{
-                          padding: '4px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary, #FF5C8A)',
-                          background: 'var(--dsw-alias-state-error-primary, #FF5C8A)', color: '#fff', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
-                        }}>确认</button>
-                        <button type="button" onClick={() => setConfirmDelete(null)} style={{
-                          padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
-                          background: 'transparent', color: 'var(--dsw-alias-label-secondary)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}>取消</button>
-                      </span>
-                    ) : (
-                      <button type="button" disabled={busy} onClick={() => setConfirmDelete(m.fileName)} style={{
-                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
-                        background: 'transparent', color: 'var(--dsw-alias-state-error-primary, #FF5C8A)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
-                      }}>删除</button>
-                    )}
+                    <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)' }}>VRAM {m.vramGb}GB</span>
+                    <span style={{ fontSize: 10, color: 'var(--dsw-alias-brand-primary)' }}>{m.recommendedSteps} 步 · {m.recommendedSize}px</span>
                   </div>
-                )
-              })}
-              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                <button type="button" disabled={dlModel} onClick={() => void downloadModel('low')} style={{ padding: '5px 10px', borderRadius: 8, fontSize: 11, cursor: dlModel ? 'wait' : 'pointer', border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', }}>+ 低配 (2GB)</button>
-                <button type="button" disabled={dlModel} onClick={() => void downloadModel('mid')} style={{ padding: '5px 10px', borderRadius: 8, fontSize: 11, cursor: dlModel ? 'wait' : 'pointer', border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', }}>+ 中配 (3.7GB)</button>
-                <button type="button" disabled={dlModel} onClick={() => void downloadModel('high')} style={{ padding: '5px 10px', borderRadius: 8, fontSize: 11, cursor: dlModel ? 'wait' : 'pointer', border: '1px solid var(--corum-glass-border-active)', background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-brand-primary)', whiteSpace: 'nowrap', }}>+ 高配 (4.8GB)</button>
+                  <span style={{ fontSize: 11, color: m.compatible === false ? 'var(--dsw-alias-state-warn-primary, #E07A00)' : 'var(--dsw-alias-label-tertiary)' }}>
+                    {m.description}{m.incompatibleReason !== undefined ? ` · ⚠ ${m.incompatibleReason}` : ''}
+                  </span>
+                </div>
+                {downloaded
+                  ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary, #3EE6B0)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
+                  : <button type="button" disabled={disabled} onClick={() => void downloadModel(m.tier)} style={{
+                      padding: '5px 12px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
+                      background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
+                      cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: disabled ? 0.5 : 1,
+                    }}>{dlModel ? '下载中…' : '下载'}</button>}
               </div>
-            </>
-          )}
+            )
+          })}
         </div>
         <DownloadProgressBar progress={dlModelProgress} />
       </Row>
 
+      {/* ── 已下载模型（单选切换，有且仅一个激活）── */}
+      <Row label="已下载模型" desc="点选切换当前生成模型 · 有且仅一个生效 · 生成即用激活模型">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {status === null ? (
+            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>加载中…</span>
+          ) : status.models.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>暂无模型 — 从推荐模型下载，或下方导入本地文件 / 在线目录下载</span>
+          ) : (
+            status.models.map(m => {
+              const isActive = m.active === true
+              const busy = busyModel === m.fileName
+              return (
+                <div key={m.fileName} onClick={() => { if (!isActive && !busy) void switchActive(m.fileName) }} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                  borderRadius: 8, cursor: isActive ? 'default' : 'pointer',
+                  border: `1px solid ${isActive ? 'var(--corum-glass-border-active)' : 'var(--corum-glass-border)'}`,
+                  background: isActive ? 'var(--corum-glass-3)' : 'var(--corum-glass-2)',
+                }}>
+                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
+                    color: isActive ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--dsw-alias-label-dimmed)',
+                    border: `1px solid ${isActive ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--corum-glass-border)'}`,
+                  }}>{isActive ? '● 使用中' : '○'}</span>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{m.displayName}</span>
+                      {m.architecture !== undefined && <span style={{ ...MONO, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-tertiary)' }}>{m.architecture}</span>}
+                      {m.quantization !== undefined && <span style={{ ...MONO, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-tertiary)' }}>{m.quantization}</span>}
+                      <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{m.size}</span>
+                      {m.vramGb !== undefined && <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)' }}>VRAM {m.vramGb}GB</span>}
+                      {m.recommendedSteps !== undefined && <span style={{ fontSize: 10, color: 'var(--dsw-alias-brand-primary)' }}>{m.recommendedSteps} 步 · {m.recommendedSize}px</span>}
+                    </div>
+                    <span style={{ ...MONO, fontSize: 10, color: 'var(--dsw-alias-label-dimmed)' }}>{m.fileName}</span>
+                  </div>
+                  {confirmDelete === m.fileName ? (
+                    <span style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                      <button type="button" disabled={busy} onClick={() => void deleteModel(m.fileName)} style={{
+                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary, #FF5C8A)',
+                        background: 'var(--dsw-alias-state-error-primary, #FF5C8A)', color: '#fff', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                      }}>确认删除</button>
+                      <button type="button" onClick={() => setConfirmDelete(null)} style={{
+                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
+                        background: 'transparent', color: 'var(--dsw-alias-label-secondary)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}>取消</button>
+                    </span>
+                  ) : (
+                    <button type="button" disabled={busy} onClick={e => { e.stopPropagation(); setConfirmDelete(m.fileName) }} style={{
+                      padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
+                      background: 'transparent', color: 'var(--dsw-alias-state-error-primary, #FF5C8A)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                    }}>{busy ? '处理中…' : '删除'}</button>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </div>
+      </Row>
+
+      {/* ── 导入本地模型 ── */}
+      <Row label="导入本地模型" desc="把本机已有的 .safetensors / .gguf 模型文件复制进模型目录">
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            style={{
+              flex: 1, padding: '6px 10px', borderRadius: 8, fontSize: 12,
+              border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)',
+              color: 'var(--dsw-alias-label-primary)', outline: 'none', ...MONO,
+            }}
+            placeholder="模型文件绝对路径（如 /Users/…/model.safetensors）"
+            value={importPath}
+            onChange={e => setImportPath(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void doImport() }}
+          />
+          <button type="button" disabled={importing || importPath.trim() === ''} onClick={() => void doImport()} style={{
+            padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: importing || importPath.trim() === '' ? 'not-allowed' : 'pointer',
+            border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-3)',
+            color: 'var(--dsw-alias-label-primary)', whiteSpace: 'nowrap', opacity: importing || importPath.trim() === '' ? 0.5 : 1,
+          }}>{importing ? '导入中…' : '导入'}</button>
+        </div>
+      </Row>
+
+      {/* ── 在线模型目录 ── */}
+      <Row label="在线模型目录" desc="搜索 HuggingFace 官方/社区 SD 模型，一键下载使用">
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <input
+            style={{
+              flex: 1, padding: '6px 10px', borderRadius: 8, fontSize: 12,
+              border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)',
+              color: 'var(--dsw-alias-label-primary)', outline: 'none',
+            }}
+            placeholder="搜索模型（如 dreamshaper、realistic、anime、flux…）"
+            value={onlineQuery}
+            onChange={e => setOnlineQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void doOnlineSearch() }}
+          />
+          <button type="button" disabled={onlineSearching} onClick={() => void doOnlineSearch()} style={{
+            padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: onlineSearching ? 'wait' : 'pointer',
+            border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-3)',
+            color: 'var(--dsw-alias-label-primary)', whiteSpace: 'nowrap',
+          }}>{onlineSearching ? '搜索中…' : '搜索'}</button>
+        </div>
+        {onlineError !== null && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-warn-primary, #E07A00)', marginBottom: 6, display: 'block' }}>{onlineError}</span>}
+        {onlineResults !== null && onlineResults.length === 0 && onlineError === null && (
+          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>无结果</span>
+        )}
+        {onlineResults !== null && onlineResults.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+            {onlineResults.map(m => {
+              const downloaded = status?.models.some(x => x.fileName === m.fileName) ?? false
+              return (
+                <div key={m.repoId} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
+                  borderRadius: 8, border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)',
+                }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{m.name}</span>
+                      <span style={{ ...MONO, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-tertiary)' }}>{m.architecture}</span>
+                      <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)' }}>↓{m.downloads} · ♥{m.likes}</span>
+                    </div>
+                    <span style={{ ...MONO, fontSize: 10, color: 'var(--dsw-alias-label-dimmed)' }}>{m.repoId} · {m.fileName}</span>
+                  </div>
+                  {downloaded
+                    ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary, #3EE6B0)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
+                    : <button type="button" disabled={dlModel || !engineReady} onClick={() => void downloadOnline(m)} style={{
+                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
+                        background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
+                        cursor: dlModel || !engineReady ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: dlModel || !engineReady ? 0.5 : 1,
+                      }}>{dlModel ? '下载中…' : '下载'}</button>}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Row>
+
       {/* ── 生成测试 ── */}
-      <Row label="生成测试" desc="输入提示词，生成图片预览">
+      <Row label="生成测试" desc={activeModel !== undefined ? `使用模型：${activeModel.displayName}（${activeModel.architecture ?? 'SD'}）` : '请先在「已下载模型」里点选一个模型'}>
         <div style={{
           display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 14px',
           borderRadius: 12, border: '1px solid var(--corum-glass-border)',
@@ -533,7 +733,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
               border: '1px solid var(--corum-glass-border-active)', background: 'var(--dsw-alias-brand-primary)',
               color: 'var(--dsw-alias-label-on-brand, #fff)', whiteSpace: 'nowrap',
               opacity: canGenerate ? 1 : 0.5,
-            }}>{generating ? '生成中…' : '生成'}</button>
+            }}>{generating ? '生成中…' : (activeModel === undefined ? '请先选模型' : '生成')}</button>
           </div>
           {/* 生成进度条 */}
           {generating && (
@@ -554,7 +754,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
                 style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid var(--corum-glass-border)' }} />
               <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>
                 {genDuration !== null && <span>耗时：{(genDuration / 1000).toFixed(1)}s</span>}
-                <span>{size}×{size} · {steps} 步</span>
+                <span>{size}×{size} · {steps} 步{activeModel !== undefined ? ` · ${activeModel.displayName}` : ''}</span>
               </div>
             </div>
           )}
