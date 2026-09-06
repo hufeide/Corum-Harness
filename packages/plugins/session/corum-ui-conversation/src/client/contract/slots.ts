@@ -264,6 +264,12 @@ export interface ConversationInjected {
     listWorkspaces: () => Promise<readonly WorkspaceOption[]>
   }
   /**
+   * 会话内提示词润色（corumAgent/polishConversation）：结合当前 session 最近
+   * 若干条「user 提问 + AI 最终输出」（不含 reasoning/tool），把草稿改写成
+   * Agent 能充分理解意图、良好衔接任务的输入。意图自动判断（推进/新问题/BUG）。
+   */
+  polishDraft: (sessionId: string, text: string) => Promise<string>
+  /**
    * 「新建任务表单」打开信号面（侧栏顶部「新会话」按钮 → 空态联动）。
    * 实现桥到 ctx.layout 的 grid actions（AppFrame 持有监听者集与 pending
    * 标记）：已挂载时 onOpen 监听者被直推；未挂载（在会话视图）时

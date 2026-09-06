@@ -229,7 +229,7 @@ function WidthHandle(props: {
 export function ConversationRoot({
   sessionId, useSession, useSessions, useSessionPendingInteraction,
   useWorkspaces, useConversation, useInput, useComposerBlock, inputActions,
-  renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, t,
+  renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, polishDraft, t,
 }: ConversationRootProps) {
   // 当前主题（深/浅）：空态大 logo 选图（big_brand_dark/light）。DARK_ATTRIBUTE
   // 是 corum-ui-base theme-presenter 写到 body 的标记。
@@ -420,6 +420,22 @@ export function ConversationRoot({
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
+  // ── 会话内提示词润色（结合最近 6 条 user/AI 最终输出，意图自动判断）──
+  const [polishBusy, setPolishBusy] = useState(false)
+  const doPolish = useCallback(async () => {
+    const text = (inputState?.draft ?? '').trim()
+    if (text === '' || sessionId === undefined || polishBusy || polishDraft === undefined) return
+    setPolishBusy(true)
+    try {
+      const polished = await polishDraft(String(sessionId), text)
+      inputActions?.setDraft(polished)
+    } catch (e) {
+      console.error('[conversation] polish failed', e)
+    } finally {
+      setPolishBusy(false)
+    }
+  }, [inputState?.draft, sessionId, polishBusy, polishDraft, inputActions])
+
   // The chip is a selector; label resolution walks the flow top-down:
   //   1. a just-picked workspace (pending) → its title;
   //   2. cold start, no session yet → placeholder ("Choose workspace");
@@ -603,6 +619,18 @@ export function ConversationRoot({
           </span>
         )}
         {renderSlot('conversation.input.left', zone)}
+        {/* 会话内提示词润色（结合最近对话上下文，意图自动判断：推进/新问题/BUG） */}
+        {hasSession && (
+          <button
+            type="button"
+            className={css.polishBtn}
+            title={polishBusy ? '润色中…' : 'AI 润色（结合对话上下文优化本次提问）'}
+            disabled={polishBusy || (inputState?.draft?.trim() ?? '') === ''}
+            onClick={() => void doPolish()}
+          >
+            <Wand2 size={13} />
+          </button>
+        )}
       </>
     ),
     rightItems: zone === undefined ? null : renderSlot('conversation.input.right', zone),

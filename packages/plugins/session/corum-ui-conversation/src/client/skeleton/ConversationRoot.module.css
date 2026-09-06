@@ -603,6 +603,29 @@
 
 /* Agent chip（2026-09-02 用户定调：task 泳道 composer 可选 Agent）——玻璃 chip
    内嵌无框下拉，hover 高亮提示可点。 */
+/* 会话内提示词润色按钮（composer 工具栏；魔杖图标 ghost 小钮） */
+.polishBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  flex: none;
+}
+.polishBtn:hover:not(:disabled) {
+  background: var(--corum-glass-2, transparent);
+  color: var(--dsw-alias-brand-text);
+}
+.polishBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .agentLockChip {
   display: inline-flex;
   align-items: center;

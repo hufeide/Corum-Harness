@@ -445,6 +445,24 @@ export function apply(ctx: Context): void {
           },
         }
       })(),
+      polishDraft: (() => {
+        const connection = ctx.get('connection') as ConnectionHandle
+        const call = makeCorumRpcCall(connection)
+        return async (sid: string, text: string) => {
+          // 拉泳道事件 → 最近 6 条「user 提问 + AI 最终输出」（text 块，不含 reasoning/tool）。
+          const r = await call<{ events: Array<{ type: string; data: unknown }> }>('corumAgent', 'getTaskSessionEvents', { sessionId: sid, fromSeq: 0 })
+          const history: Array<{ role: 'user' | 'assistant'; text: string }> = []
+          for (const e of r.events) {
+            const content = (e.data as { content?: Array<{ type: string; text?: string }> } | undefined)?.content ?? []
+            const text2 = content.filter(c => c.type === 'text').map(c => c.text ?? '').join('\n').trim()
+            if (text2 === '') continue
+            if (e.type === 'user/message') history.push({ role: 'user', text: text2 })
+            else if (e.type === 'assistant/message') history.push({ role: 'assistant', text: text2 })
+          }
+          const out = await call<{ polished: string }>('corumAgent', 'polishConversation', { text, history: history.slice(-6) })
+          return out.polished
+        }
+      })(),
       // 「新建任务表单」打开信号面：桥到 ctx.layout 的 grid actions（AppFrame
       // 持有的监听者集 + pending 标记）。grid actions 尚未 attach（AppFrame
       // 首渲染前）时退化为 no-op——空态此时也不可能已挂载，调用方无可损失。
