@@ -130,6 +130,20 @@ function getSdCliPath(): string {
   return join(SD_BIN_DIR, getSdCliExeName())
 }
 
+/** sd-server 可执行文件路径（常驻服务模式）。 */
+function getSdServerPath(): string {
+  return join(SD_BIN_DIR, process.platform === 'win32' ? 'sd-server.exe' : 'sd-server')
+}
+
+/** sd-server 是否已随引擎下载到本地。 */
+function isSdServerBundled(): boolean {
+  try { return existsSync(getSdServerPath()) } catch { return false }
+}
+
+/** 常驻服务端口（固定 127.0.0.1，仅本机）。 */
+const SD_SERVER_PORT = 1234
+const SD_SERVER_BASE = `http://127.0.0.1:${SD_SERVER_PORT}`
+
 /** 检查 sd-cli 是否已下载。 */
 function isBundled(): boolean {
   try { return existsSync(getSdCliPath()) } catch { return false }
@@ -363,6 +377,8 @@ export class ArtGenService extends TypertRemoteService {
 
   constructor(ctx: Context) {
     super(ctx, 'corumArtGen')
+    // 插件 fiber 卸载时清理常驻 sd-server 进程（防孤儿进程）。
+    ctx.effect(() => () => this.stopSdServer(), 'corumArtGen.stopSdServer')
   }
 
   /** 当前激活的模型名（undefined = 无激活）。 */
@@ -376,6 +392,14 @@ export class ArtGenService extends TypertRemoteService {
     engine: idleSlot(),
     model: idleSlot(),
   }
+
+  // ── 常驻服务模式（sd-server）状态 ──
+  /** 是否启用常驻模式（激活时拉 sd-server，生成走 HTTP，模型常驻内存）。 */
+  private residentMode = false
+  /** 常驻 sd-server 子进程（undefined = 未运行）。 */
+  private sdServerProc: ReturnType<typeof spawn> | undefined
+  /** 常驻服务当前加载的模型文件名。 */
+  private residentModel: string | undefined
 
   // ── RPC 方法 ─────────────────────────────────────────────────────
 
@@ -557,6 +581,29 @@ export class ArtGenService extends TypertRemoteService {
     if ('error' in resolved) throw new Error(resolved.error)
     const modelPath = resolved.path
     const started = Date.now()
+    // 常驻模式：走 sd-server HTTP（模型常驻内存，不 spawn CLI）。
+    if (this.residentMode) {
+      const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const job: { status: 'running' | 'done' | 'error'; percent: number; phase: string; result?: Txt2ImgResult; error?: string } = { status: 'running', percent: 0, phase: 'queued' }
+      this.txt2imgJobs.set(jobId, job)
+      void (async () => {
+        try {
+          job.phase = 'generating'
+          job.percent = 50 // HTTP 无逐步进度，给一个中间态
+          const result = await this.txt2imgViaServer(args, resolved.fileName)
+          job.status = 'done'
+          job.percent = 100
+          job.phase = 'done'
+          job.result = result
+        } catch (e) {
+          job.status = 'error'
+          job.error = e instanceof Error ? e.message : String(e)
+        } finally {
+          setTimeout(() => { this.txt2imgJobs.delete(jobId) }, 5 * 60_000)
+        }
+      })()
+      return { jobId }
+    }
     // 生成输出路径（临时 PNG 文件）。
     const outputDir = join(getCorumHome(), 'tmp', 'artgen')
     try { mkdirSync(outputDir, { recursive: true }) } catch { /* 已存在 */ }
@@ -873,6 +920,11 @@ export class ArtGenService extends TypertRemoteService {
     if (this.activeModel === name) return { ok: true }
     // 单选互斥：直接切换激活标记（激活新模型即取消旧模型，全局唯一）。
     this.activeModel = name
+    // 常驻模式：切换激活模型 → 热替换 sd-server 加载的模型（下次生成生效）。
+    if (this.residentMode && this.sdServerProc !== undefined) {
+      // 后台热替换，不阻塞切换响应。
+      void this.ensureSdServer(name)
+    }
     return { ok: true }
   }
 
@@ -895,6 +947,143 @@ export class ArtGenService extends TypertRemoteService {
     if (requested !== undefined && requested.trim() !== '') return pick(requested.trim())
     if (this.activeModel !== undefined) return pick(this.activeModel)
     return { fileName: models[0]!.fileName, path: join(SD_MODELS_DIR, models[0]!.fileName) }
+  }
+
+  // ── 常驻服务模式（sd-server）生命周期 ─────────────────────────────
+
+  /** 构造 sd-server 启动参数（加载指定模型到内存，常驻）。 */
+  private buildSdServerArgs(modelFileName: string): string[] {
+    const modelPath = join(SD_MODELS_DIR, modelFileName)
+    const isGguf = modelPath.endsWith('.gguf')
+    const args: string[] = []
+    if (isGguf) args.push('--diffusion-model', modelPath)
+    else args.push('-m', modelPath)
+    // Flux 需要配套 VAE。
+    if (inferArchitecture(modelFileName) === 'Flux') {
+      const vae = resolveFluxVae()
+      if (vae !== undefined) args.push('--vae', vae)
+    }
+    args.push('--listen-ip', '127.0.0.1', '--listen-port', String(SD_SERVER_PORT))
+    return args
+  }
+
+  /** 探测常驻服务是否就绪（GET / 返回 200/304 即认为服务起来了）。 */
+  private async probeSdServer(): Promise<boolean> {
+    try {
+      const r = await fetch(`${SD_SERVER_BASE}/v1/models`, { signal: AbortSignal.timeout(2000) })
+      return r.ok
+    } catch {
+      return false
+    }
+  }
+
+  /** 拉起初载指定模型的常驻 sd-server（已跑同模型则复用）。 */
+  private async ensureSdServer(modelFileName: string): Promise<{ ok: boolean; error?: string }> {
+    if (!isSdServerBundled()) return { ok: false, error: 'sd-server 未随引擎下载（重新下载引擎可补齐）' }
+    // 已在跑且加载的是同一模型 → 直接复用。
+    if (this.sdServerProc !== undefined && this.residentModel === modelFileName) {
+      if (await this.probeSdServer()) return { ok: true }
+    }
+    // 模型不同或进程异常 → 先停旧的。
+    this.stopSdServer()
+    const cliPath = getSdServerPath()
+    const args = this.buildSdServerArgs(modelFileName)
+    try {
+      const proc = spawn(cliPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+      this.sdServerProc = proc
+      this.residentModel = modelFileName
+      let stderrTail = ''
+      proc.stderr?.on('data', (d: Buffer) => { stderrTail = (stderrTail + d.toString()).slice(-500) })
+      proc.on('exit', () => {
+        // 进程退出后清标记（后续 ensure 会重启）。
+        if (this.sdServerProc === proc) { this.sdServerProc = undefined; this.residentModel = undefined }
+      })
+      // 等待服务就绪（模型加载进 VRAM 需数秒，大模型更久）。
+      const deadline = Date.now() + 120_000
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 500))
+        if (proc.exitCode !== null) {
+          this.sdServerProc = undefined
+          this.residentModel = undefined
+          return { ok: false, error: `sd-server 启动失败（exit ${proc.exitCode}）：${stderrTail.slice(0, 200)}` }
+        }
+        if (await this.probeSdServer()) return { ok: true }
+      }
+      return { ok: false, error: 'sd-server 启动超时（120s）' }
+    } catch (e) {
+      return { ok: false, error: `启动 sd-server 失败：${e instanceof Error ? e.message : String(e)}` }
+    }
+  }
+
+  /** 停掉常驻 sd-server。 */
+  private stopSdServer(): void {
+    const proc = this.sdServerProc
+    this.sdServerProc = undefined
+    this.residentModel = undefined
+    if (proc !== undefined) {
+      try { proc.kill('SIGTERM') } catch { /* 已退出 */ }
+      // 兜底强杀。
+      setTimeout(() => { try { proc.kill('SIGKILL') } catch { /* 已退出 */ } }, 3000)
+    }
+  }
+
+  /**
+   * 常驻模式生成（sd-server HTTP）：模型常驻内存，省每次冷加载。
+   * 走 OpenAI 兼容端点 POST /v1/images/generations。
+   */
+  private async txt2imgViaServer(args: Txt2ImgArgs, modelFileName: string): Promise<Txt2ImgResult> {
+    const ensured = await this.ensureSdServer(modelFileName)
+    if (!ensured.ok) throw new Error(ensured.error ?? 'sd-server 不可用')
+    const started = Date.now()
+    const arch = inferArchitecture(modelFileName)
+    const body: Record<string, unknown> = {
+      prompt: args.prompt,
+      n: 1,
+      size: `${args.width ?? 512}x${args.height ?? 512}`,
+      output_format: 'png',
+      sample_steps: args.steps ?? 20,
+      cfg_scale: args.cfgScale ?? (arch === 'Flux' ? 1 : 7),
+      seed: args.seed ?? -1,
+    }
+    if (args.negativePrompt !== undefined && args.negativePrompt !== '') body.negative_prompt = args.negativePrompt
+    const r = await fetch(`${SD_SERVER_BASE}/v1/images/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
+    })
+    if (!r.ok) throw new Error(`sd-server 生成失败（HTTP ${r.status}）：${(await r.text()).slice(0, 300)}`)
+    const j = (await r.json()) as { data?: Array<{ b64_json?: string; revised_prompt?: string }> }
+    const imageBase64 = j.data?.[0]?.b64_json ?? ''
+    if (imageBase64 === '') throw new Error('sd-server 返回空图像')
+    return { imageBase64, seed: args.seed ?? -1, durationMs: Date.now() - started }
+  }
+
+  /** 查询常驻模式状态（供设置页展示 + 前端切换）。 */
+  @Remote('getResidentStatus')
+  getResidentStatus(): { enabled: boolean; running: boolean; model?: string; serverBundled: boolean } {
+    return {
+      enabled: this.residentMode,
+      running: this.sdServerProc !== undefined,
+      ...(this.residentModel !== undefined ? { model: this.residentModel } : {}),
+      serverBundled: isSdServerBundled(),
+    }
+  }
+
+  /** 开关常驻模式。开启时若已有激活模型则立即拉起 sd-server；关闭时停掉。 */
+  @Remote('setResidentMode')
+  async setResidentMode(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+    this.residentMode = enabled
+    if (!enabled) {
+      this.stopSdServer()
+      return { ok: true }
+    }
+    // 开启：有激活模型则预拉起（无激活模型则等首次生成再拉起）。
+    if (this.activeModel !== undefined) {
+      const ensured = await this.ensureSdServer(this.activeModel)
+      if (!ensured.ok) return { ok: false, error: ensured.error ?? 'sd-server 启动失败' }
+    }
+    return { ok: true }
   }
 
   /** 返回推荐模型列表（含完整参数 + 本机兼容性判定）。 */

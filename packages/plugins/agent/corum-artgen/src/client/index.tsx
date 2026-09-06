@@ -207,13 +207,35 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
   const [resultImage, setResultImage] = useState<string | null>(null)
   const [genDuration, setGenDuration] = useState<number | null>(null)
 
+  // 常驻模式（sd-server，模型常驻内存）
+  const [resident, setResident] = useState<{ enabled: boolean; running: boolean; model?: string; serverBundled: boolean } | null>(null)
+  const [residentBusy, setResidentBusy] = useState(false)
+
   const refresh = async (): Promise<void> => {
     try {
-      const s = await call<ArtGenStatus>('status', {})
+      const [s, r] = await Promise.all([
+        call<ArtGenStatus>('status', {}),
+        call<{ enabled: boolean; running: boolean; model?: string; serverBundled: boolean }>('getResidentStatus', {}),
+      ])
       setStatus(s)
+      setResident(r)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const toggleResident = async (enabled: boolean): Promise<void> => {
+    setResidentBusy(true)
+    setError(null)
+    try {
+      const r = await call<{ ok: boolean; error?: string }>('setResidentMode', { enabled })
+      if (!r.ok) setError(r.error ?? '切换常驻模式失败')
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setResidentBusy(false)
     }
   }
 
@@ -503,6 +525,32 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
           )}
         </div>
         <DownloadProgressBar progress={dlEngineProgress} />
+        {/* ── 常驻模式开关 ── */}
+        {resident !== null && engineReady && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8,
+            padding: '10px 12px', borderRadius: 10,
+            border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)',
+          }}>
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
+              color: resident.enabled ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--dsw-alias-label-dimmed)',
+              border: `1px solid ${resident.enabled ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--corum-glass-border)'}`,
+            }}>{resident.enabled ? (resident.running ? `● 常驻中 · ${resident.model ?? ''}` : '● 常驻模式') : '○ 进程式'}</span>
+            <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', flex: 1 }}>
+              {resident.enabled
+                ? '模型常驻内存，生成免冷加载（首次拉起需数秒加载）'
+                : resident.serverBundled
+                  ? '开启常驻模式：激活模型常驻内存，省去每次生成的冷加载'
+                  : '常驻模式需要 sd-server（重新下载引擎可补齐）'}
+            </span>
+            <button type="button" disabled={residentBusy || !resident.serverBundled} onClick={() => void toggleResident(!resident.enabled)} style={{
+              padding: '5px 12px', borderRadius: 8, fontSize: 12, cursor: residentBusy || !resident.serverBundled ? 'not-allowed' : 'pointer',
+              border: '1px solid var(--corum-glass-border-active)', background: resident.enabled ? 'transparent' : 'var(--corum-glass-3)',
+              color: resident.enabled ? 'var(--dsw-alias-label-secondary)' : 'var(--dsw-alias-brand-primary)', whiteSpace: 'nowrap',
+              opacity: resident.serverBundled ? 1 : 0.5,
+            }}>{residentBusy ? '切换中…' : resident.enabled ? '关闭常驻' : '开启常驻'}</button>
+          </div>
+        )}
       </Row>
 
       {/* ── 推荐模型（低/中/高配，含参数）── */}
