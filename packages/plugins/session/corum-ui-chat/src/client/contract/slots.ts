@@ -1,24 +1,36 @@
 /** Chat-owned Slot declarations and composed component props. */
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type {
-  ConversationTurnDataMap, MessageImageLoader, MessageImagesOwnerProps, RenderMessageImages, TurnLocation,
+  CommandNode, CompactionSummaryNode, ConversationLocationDataStore, ConversationTurnDataMap,
+  MessageImageLoader, MessageImagesOwnerProps, RenderMessageImages, ToolCallBlock, TurnLocation,
 } from '@corum/corum-ui-conversation/client'
 import type {
-  InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
-  SnapshotSelectorHook,
+  InjectFace, KeyedSnapshotSelectorHook, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
+  SlotHookFactory, SnapshotSelectorHook,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { MarkdownFileMentions } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { createChatStore } from '../stores.ts'
 import type { ToolCallId, SelectionTarget } from './store.ts'
-import type { ChatNode, ChatNodeKind } from './chat-nodes.ts'
-import type { ChatSnapshot, CommandNode, CompactionSummaryNode, ToolCallBlock } from './snapshot.ts'
+import type { ChatConversationViewNode, ChatNode, ChatNodeKind } from './chat-nodes.ts'
+import type {
+  ChatNodeProcessSource, ChatNodeSource, ChatSnapshot, ChatTurnProcessPresentation,
+} from './snapshot.ts'
 import type { TurnProcessSpec } from './turn-process.ts'
 import type { TranscriptViewMode } from '../../chat-settings.ts'
+// fork（corum）：ReviewSource 提升为顶部 type import（替代旧 inline import('../chat/review-source.ts') 瑕疵）。
+import type { ReviewSource } from '../chat/review-source.ts'
 
 /** Selector hook over the current Conversation binding's Chat target. */
 export type UseChat = SnapshotSelectorHook<ChatSnapshot>
+
+/** Per-key selector hook over one Chat Node. */
+export type UseChatNode = KeyedSnapshotSelectorHook<ChatConversationViewNode | undefined>
+
+/** Per-key selector hook over one Chat Node's Turn-process presentation. */
+export type UseChatNodeProcess = KeyedSnapshotSelectorHook<ChatTurnProcessPresentation | undefined>
 
 /** Owner currency of the completed-Turn extension chain. */
 export interface TurnTailOwnerProps {
@@ -66,6 +78,13 @@ export interface ChatNodeOwnerProps {
   openFile: (path: string) => void
   inspectCall: (callId: ToolCallId) => void
   forkAt: (seq: number) => void
+  /**
+   * Session-authorized image loader, down-threaded from the Chat view so a
+   * chat-node renderer can render the attachment presentation slot directly
+   * with only the durable references plus this loader, instead of receiving a
+   * rendering closure.
+   */
+  loadImage: MessageImageLoader
   renderMessageImages: RenderMessageImages
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** Turn-process state when this Node belongs to a projected Turn. */
@@ -115,9 +134,17 @@ export interface ChatViewInjected {
     /** Persisted completed-Turn transcript presentation. */
     transcriptView: SnapshotStore<TranscriptViewMode>
   }
+  keyedHooks: {
+    /** Resolve the stable source for one Chat Node key. */
+    chatNode: (key: string) => ChatNodeSource
+    /** Resolve the stable Turn-process source for one Chat Node key. */
+    chatNodeProcess: (key: string) => ChatNodeProcessSource
+  }
   openDetails: (target: SelectionTarget) => void
   openFile: (path: string) => Promise<void>
   loadOlder: () => void
+  /** Jump loader: page history back through seq; resolves when the window covers it. */
+  loadThrough: (seq: SessionSeq) => Promise<void>
   loadImage: MessageImageLoader
   chatScroll: {
     save: (position: ChatScrollPosition | null) => void
@@ -126,7 +153,7 @@ export interface ChatViewInjected {
   forkAt: (seq: number) => void
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** fork（corum）：Review 卡的 per-session 数据源（文件更改审查 + 全部撤销/保留）。 */
-  review: import('../chat/review-source.ts').ReviewSource
+  review: ReviewSource
   /** 当前会话的 Agent 显示名（nickname/title/id）；查询失败或非 corum Agent 会话返回 undefined。 */
   getAgentName: () => Promise<string | undefined>
 }
@@ -177,7 +204,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'session'
       owner: ChatNodeOwnerProps
       keyProps: { [Kind in ChatNodeKind]: { node: ChatNode<Kind> } }
-      hookContext: string
+      hookContext: ConversationLocationDataStore<ConversationTurnDataMap> | undefined
       inject: ChatNodeTurnDataInjected
     }
     /**

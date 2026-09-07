@@ -8,7 +8,6 @@
   "include": [
     "src/electron/**/*",
     "src/host/**/*",
-    "src/index.ts",
-    "src/invariant.ts"
+    "src/index.ts"
   ]
 }

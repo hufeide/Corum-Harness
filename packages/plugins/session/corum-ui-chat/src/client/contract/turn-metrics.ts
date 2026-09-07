@@ -1,6 +1,8 @@
 // Latency/throughput folds shared by the settled turn footer and StatsLine.
 
-import type { AssistantMessageNode, ConversationNode } from './snapshot.ts'
+import type {
+  AssistantMessageNode, ConversationNode,
+} from '@corum/corum-ui-conversation/client'
 
 /** Latency and decode-throughput readings for one turn's footer. */
 export interface TurnMetrics {
