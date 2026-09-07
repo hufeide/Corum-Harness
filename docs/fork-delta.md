@@ -348,7 +348,7 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 |---|---|
 | fork 包 | `@corum/corum-api-remotes`（`packages/plugins/agent/corum-api-remotes`） |
 | 官方对照包 | `@deepseek-ai/dsh-api-remotes`（`packages/api/remotes`） |
-| 官方基线 | **0.1.2-alpha.2**（源码对照；corum 运行时锁 alpha.1，见 §3.4 同款错位——下方 client/index.ts 有一处按 alpha.1 对齐） |
+| 官方基线 | **0.1.2-alpha.2**（源码对照；corum 运行时锁 alpha.1，见 §3.4 同款错位——下方 client/index.ts 有一处按 alpha.1 对齐）。⚠️ 2026-09 三-4：dsh 检出已 **0.1.3-alpha.1**（`d347e70390`），本节下方「alpha.2→0.1.3-alpha.1 实测漂移面」已登记增量，**本节对照统计仍以 alpha.2 为基线未重 diff**（实际 rebase 是另一项工程） |
 | 文件数 | 8（src/ 6 + package.json + tsdown.config.ts + tsconfig.json） |
 | rebase 风险 | **低**：实质 diff 集中在 allowlist 数组追加段（数组合并级别）+ corum-events.ts（corum 新增，官方升级不影响）；转发循环/client 挂载零改动 |
 
@@ -369,3 +369,17 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 - 官方 alpha.1→alpha.2 该包 src 有漂移（client/index.ts 失败词汇收敛、index.ts/remote-events.ts 微调）——升级时先 `git diff <old>..<new> -- packages/api/remotes/src` 刷新对照，重点核对 client/index.ts 那处 alpha.1 对齐段是否可回退官方写法。
 - `dsh.client` 段的 `inject`/`platform`/`immediately` 是 `ctx.remote` 装配的开关，rebase 时**绝不可删**。
 - corum-events.ts 的 13 个事件名与 allowlist 追加段一一对应；官方若将来内建 corum 同名事件，以官方为准去重。
+
+### §8.1 alpha.2→0.1.3-alpha.1 实测漂移面（2026-09 三-4 登记；**仅台账登记，未实际 rebase**）
+
+> 核实命令：`git -C /Users/kukucai/dsh diff 3f1b46a5db..HEAD -- packages/api/remotes/`（dsh 检出 `d347e70390` = 0.1.3-alpha.1 发布合并）。涉及提交：`15f2997bcb`（invariant 删除）、`8fc9a11c5e`+`3b8245afc3`（fileUploadsRemote）、`33b7123e96`（e2e zod 声明）。漂移面共 10 文件，其中对 fork 有意义的 4 处：
+
+1. **新增 `fileUploadsRemote` 命名空间**（client 半，`8fc9a11c5e`「refactor(attachment): isolate file upload service」）：官方 client/index.ts 新增 `import fileUploadsRemote from '@deepseek-ai/dsh-client-file-upload/remote'` + contribution 数组挂载 + `export type {}`；package.json 新增 `dsh-client-file-upload` workspace 依赖；tsconfig.client.json 新增 file-upload project reference。**corum 全仓无消费方**（grep 无 `fileUploads`/`dsh-client-file-upload` 引用）——rebase 时**可选跟进**（不跟进则 fileUploads 命名空间在 corum renderer 缺席，官方若把附件上传改走该命名空间才需补）。
+2. **删除 invariant companion 机制**（`15f2997bcb`「cleanup: omit unneeded invariant companions」）：官方删 `src/invariant.ts`（24 行）+ package.json `./invariant` export 与 `lib/invariant.js` files 条目 + `dsh-invariants` devDep + tsconfig.host.json files/references 两条 + tsdown.config.ts 入口 `'lib/types/invariant.js'`。**fork 仍全套保留**（src/invariant.ts + `./invariant` export + `dsh-invariants: ^0.1.2-alpha.1` devDep + tsdown node 入口）——rebase 时**随官方删**：invariant.ts、package.json 三处、tsdown.config.ts 入口数组。（另注意 §4 会话域 6 个 fork 的 invariant.ts 也受同一官方清理波及——官方基线升 0.1.3 后那些包的 invariant 模板同样应删。）
+3. **package.json 新增 `zod: ^4.4.3` 依赖**（`33b7123e96`，tests/built-lib.e2e.ts 的 built-lib smoke 用 zod 校验 schema）——纯测试基建面，fork 无 tests 目录（见 P2-②），rebase 时**不需要跟**。
+4. **README.i18n.yaml / README.md / README.zh.md 文案更新**（invariant 删除的连带）——fork 无 README 对照面，忽略。
+
+**P2 记录（非阻塞，rebase 时一并评估）**：
+- ① **tsconfig 双 face 取舍**：官方用 `tsconfig.host.json`（files 仅 index/remote-events/types，无 DOM lib——host 面无 DOM 隔离）+ `tsconfig.client.json` 双工程；fork 是单文件 tsconfig（lib ES2024+DOM 合集，host/client 同一编译面）。fork 写法削弱了「host 面误用 DOM API 编译期拦截」的官方隔离，rebase 时考虑恢复官方双 tsconfig。
+- ② **缺 tests**：官方 `tests/remote-events.host.spec.ts`（232 行，host 半转发行为运行时守护）可移植到 fork——corum 追加的 13 个事件当前只有编译期校验，无运行时守护（审计 P2）。
+- ③ **漂移核实习惯**：本节的漂移面是 `git diff` 实测而非印象——以后每次官方版本 bump 都先跑同样命令刷新本小节，再动 rebase。

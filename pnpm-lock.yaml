@@ -572,6 +572,9 @@ importers:
 
   packages/plugins/agent/corum-agent:
     dependencies:
+      '@corum/corum-api-remotes':
+        specifier: workspace:*
+        version: link:../corum-api-remotes
       '@corum/corum-mcp-manager':
         specifier: workspace:*
         version: link:../corum-mcp-manager
@@ -995,6 +998,9 @@ importers:
 
   packages/plugins/session/corum-ui-chat:
     dependencies:
+      '@corum/corum-api-remotes':
+        specifier: workspace:*
+        version: link:../../agent/corum-api-remotes
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
