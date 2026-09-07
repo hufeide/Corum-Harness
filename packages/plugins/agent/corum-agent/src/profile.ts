@@ -80,6 +80,8 @@ export interface AgentProfile {
   nickname?: string
   /** 岗位 / 职位（显示用，可选）。 */
   title?: string
+  /** 专业领域（自由文本，可选；名片/技术栈映射用——设置表单「领域」输入，如「软件开发 / 制造业」）。 */
+  domain?: string
   /** 岗位维度（名片筛选，可选）。 */
   dimension?: AgentDimension
   /** 名片履历（可选，手动编辑；如「参与 6 个项目 · 完成 128 次任务」）。 */
