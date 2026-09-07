@@ -12,6 +12,17 @@ import type {} from '@corum/corum-ide-ui/client'
 import { FileExplorer, type FsEntry } from './FileExplorer.tsx'
 import type { FileExplorerInjected } from './FileExplorer.tsx'
 
+// fork（corum）：本插件 2026-09-03 已解挂（cordis.ide.patch.yml——资源管理器并入
+// corum.editor 槽内嵌 ExplorerPane，由 desktop client 接管），代码保留备查。
+// `corum.explorer` 槽从未进 corum-ide-ui 的 SlotMap（壳层已无独立资源管理器槽），
+// 故此处本地补声明使本备份代码自洽过类型检查；重新挂载时壳层无需再补。
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /** 独立资源管理器区域（已退役, 备份备查——现并入 corum.editor 内嵌面板）。 */
+    'corum.explorer': { kind: 'single'; scope: 'root' }
+  }
+}
+
 export type { FileExplorerInjected } from './FileExplorer.tsx'
 
 /** Required services: the slots registry + the connection rpc face + the layout face (ctx.layout.closeRegion)。 */
