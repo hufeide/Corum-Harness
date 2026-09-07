@@ -22,9 +22,17 @@
  *
  * 本文件保持 cordis-free（纯库纪律）：无任何 cordis import，Context 合并由
  * apply.ts 侧声明。
+ *
+ * 统一事件中心三-3：SubagentCard 的进度数据源从 2s 定时轮询迁移到
+ * `ctx.remote.$on('corum/subagent/progress')` 推送（host corumAgent 在
+ * `session/event` 追加点对 origin='subagent' 会话做 O(1) 增量折叠并 emit）。
+ * 本服务的 remote 面引用 + 订阅登记（`subagentProgressSubscribe` 见下）即
+ * 该推送通道进入本 bundle 的入口；订阅句柄记录活性供组件做降级判定。
  */
 
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ClientRemote } from '@corum/corum-api-remotes/client'
+import type { SubagentProgressEvent } from '@corum/corum-api-remotes/corum-events'
 
 /** uSES 源契约（getSnapshot 稳定引用 + subscribe）。 */
 export interface SessionIdSource {
@@ -38,8 +46,10 @@ export interface ChatRuntimeService {
   sessionIdSnapshot(): SessionIdSource
   /** 订阅会话 id 变化（uSES subscribe 契约；返回退订函数）。 */
   onSessionIdChange(listener: () => void): () => void
-  /** RPC connection 只读引用（子会话进度轮询的数据源；可能尚未挂载）。 */
+  /** RPC connection 只读引用（子会话进度基线/兜底拉取的数据源；可能尚未挂载）。 */
   readonly connection: ConnectionHandle | undefined
+  /** Remote 事件面只读引用（'corum/subagent/progress' 推送订阅入口）。 */
+  readonly remote: ClientRemote | undefined
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
   openSession(id: string): void
 }
@@ -48,6 +58,7 @@ export interface ChatRuntimeService {
 class ChatRuntimeImpl implements ChatRuntimeService {
   #sessionId: string | undefined
   #connection: ConnectionHandle | undefined
+  #remote: ClientRemote | undefined
   #openSessionFn: (id: string) => void = () => {}
   readonly #listeners = new Set<() => void>()
   /** uSES 源对象（稳定引用——getSnapshot/subscribe 闭包绑定本实例，值经 #sessionId 读）。 */
@@ -69,8 +80,17 @@ class ChatRuntimeImpl implements ChatRuntimeService {
     return this.#connection
   }
 
+  get remote(): ClientRemote | undefined {
+    return this.#remote
+  }
+
   openSession(id: string): void {
     this.#openSessionFn(id)
+  }
+
+  /** apply 挂载时注入 remote 事件面（'corum/subagent/progress' 订阅入口，幂等）。 */
+  setRemote(remote: ClientRemote): void {
+    this.#remote = remote
   }
 
   /** apply 挂载时更新当前会话 id + connection（view 挂载即调；id 变化才广播）。 */
@@ -99,4 +119,54 @@ export function createChatRuntime(): ChatRuntimeImpl {
   const impl = new ChatRuntimeImpl()
   chatRuntimeRef.current = impl
   return impl
+}
+
+// ── 子 Agent 进度推送（'corum/subagent/progress'）订阅登记 ──────────────────
+//
+// 单例 listener 集 + 懒挂底层 $on 订阅：SubagentCard 每张卡注册自己的帧监听，
+// 首个订阅者挂载时才真正 `ctx.remote.$on`（remote 面由 apply 提前 setRemote
+// 注入，组件挂载晚于 slot 激活，必然非空；防御性保留未挂判空），最后一个
+// 退订时 dispose。帧计数经订阅句柄的 framesSeen() 暴露，供组件做「推送通道
+// 活性」降级判定（宽限期内零帧 → 旧 host 不 emit → 回退 RPC 轮询）。
+
+/** 订阅句柄：退订 + 活性读数（订阅存活期内全通道见过的推送帧数）。 */
+export interface SubagentProgressSubscription {
+  readonly unsubscribe: () => void
+  readonly framesSeen: () => number
+}
+
+const subagentProgressListeners = new Set<(frame: SubagentProgressEvent) => void>()
+let subagentProgressDispose: (() => void) | null = null
+let subagentProgressFrames = 0
+
+/**
+ * 注册一个 'corum/subagent/progress' 帧监听（SubagentCard 每卡一个）。
+ * @param listener - 帧回调（自行按 frame.sessionId 过滤本卡子会话）。
+ * @returns 订阅句柄（退订 + 本订阅存活期内的推送帧计数）。
+ */
+export function subagentProgressSubscribe(
+  listener: (frame: SubagentProgressEvent) => void,
+): SubagentProgressSubscription {
+  let framesAtStart = subagentProgressFrames
+  subagentProgressListeners.add(listener)
+  if (subagentProgressDispose === null) {
+    const remote = chatRuntimeRef.current?.remote
+    if (remote !== undefined) {
+      subagentProgressDispose = remote.$on('corum/subagent/progress', (frame) => {
+        subagentProgressFrames += 1
+        for (const fn of subagentProgressListeners) fn(frame)
+      })
+    }
+  }
+  return {
+    framesSeen: () => subagentProgressFrames - framesAtStart,
+    unsubscribe: () => {
+      subagentProgressListeners.delete(listener)
+      framesAtStart = Number.POSITIVE_INFINITY // 退订后 framesSeen 不再误导降级判定。
+      if (subagentProgressListeners.size === 0 && subagentProgressDispose !== null) {
+        subagentProgressDispose()
+        subagentProgressDispose = null
+      }
+    },
+  }
 }

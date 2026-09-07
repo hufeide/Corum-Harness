@@ -64,13 +64,33 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** 子 Agent 卡的当前会话 id + RPC connection + 跳子会话桥（cordis 服务）。 */
     chatRuntime: ChatRuntimeService
+    /**
+     * 「在编辑器打开」可编程入口的服务面镜像（统一事件中心三-2）：实现由
+     * desktop client（@corum/corum-desktop，另一 bundle）provide——chat 不依赖
+     * desktop 包（desktop 是壳装配根，反向依赖会成环），故 Context 合并在本地
+     * 声明镜像 + 消费侧再用能力接口收窄（dev-conventions §2.4/§3.5：编译期
+     * 保障、零运行时耦合；改面时两侧同步——注释锚定 corum-editor.ts 源）。
+     */
+    corumEditor: EditorOpenCapable
   }
+}
+
+/**
+ * ctx.corumEditor 的能力接口收窄（dev-conventions §2.4 红线 2/3）：服务由
+ * desktop client（@corum/corum-desktop，另一 bundle）provide，chat 只取
+ * openFile 一个方法，可选链防御实现缺席。
+ */
+interface EditorOpenCapable {
+  openFile?: (absolutePath: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 /** Services required by the Chat target and its presentation registrations. */
 export const inject = [
   'slots', 'sessions', 'uiSession', 'uiConversation', 'layout', 'locale',
   'settingsScope', 'remote', 'remote.session',
+  // 统一事件中心三-2：corum:open-in-editor 跨 bundle CustomEvent → corumEditor
+  // cordis 服务（desktop client provide；红线 4 必须 inject 声明）。
+  'corumEditor',
 ]
 
 /**
@@ -98,6 +118,10 @@ export function apply(ctx: Context): void {
   // chat-runtime.ts 模块级 chatRuntimeRef 拿同一实例。服务在 conversation.view 的
   // inject 回调里随会话切换更新（见下方 setSession/setOpenSession）。
   const chatRuntime = createChatRuntime()
+  // 统一事件中心三-3：'corum/subagent/progress' 推送订阅入口（SubagentCard
+  // 经 chatRuntimeRef 模块级引用消费，无 inject 面；remote 面在此注入服务）。
+  // 本插件 inject 数组已含 'remote'（红线 4 声明消费）。
+  chatRuntime.setRemote(ctx.remote)
   ctx.provide('chatRuntime', chatRuntime)
   ctx.uiSession.provide({
     hooks: ['chat'],
@@ -176,10 +200,28 @@ export function apply(ctx: Context): void {
           openFile: async (path) => {
             const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
             const absolute = resolveWorkspacePath(cwd, path)
-            // 用内置编辑器打开（替代 openWorkspacePath 跳系统）。desktop 同 bundle 的
-            // corum:open-in-editor 桥接 CustomEvent 转相对路径 + 点亮编辑器。
-            // fire-and-forget：desktop 侧打开失败自行 console.warn / 通知，chat 侧不再 await 结果。
-            window.dispatchEvent(new CustomEvent('corum:open-in-editor', { detail: { path: absolute } }))
+            // 用内置编辑器打开（替代 openWorkspacePath 跳系统）。统一事件中心
+            // 三-2：原 corum:open-in-editor 跨 bundle CustomEvent（fire-and-forget
+            // 无失败反馈）→ corumEditor cordis 服务直调（desktop client provide，
+            // 内部转相对路径 + 点亮编辑器 + pending 挂载认领）。{ ok, error }
+            // 结构化反馈：error 时 console.warn + 框架通知（用户可见）。
+            const editor = ctx.corumEditor as unknown as EditorOpenCapable
+            if (typeof editor.openFile !== 'function') {
+              console.warn('[ui-chat] openFile: corumEditor service missing openFile face')
+              return
+            }
+            try {
+              const result = await editor.openFile(absolute)
+              if (!result.ok) {
+                console.warn('[ui-chat] openFile failed:', result.error, { path: absolute })
+                // 用户可见反馈：__corumNotify 是一次性只读桥（规范 §1 例外，
+                // CorumNotification 面：tone/title/message）。
+                const notify = (window as unknown as { __corumNotify?: (n: { tone: 'error'; title: string; message?: string | undefined }) => void }).__corumNotify
+                notify?.({ tone: 'error', title: '无法在编辑器打开文件', message: result.error })
+              }
+            } catch (err) {
+              console.warn('[ui-chat] openFile threw:', err, { path: absolute })
+            }
           },
           loadOlder: () => { void session.loadOlder() },
           loadImage: Object.assign(

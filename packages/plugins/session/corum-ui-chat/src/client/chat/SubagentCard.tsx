@@ -6,8 +6,13 @@
 //   step = loader + 「Step n · currentAction」实时行——**常驻**（不收进下拉）
 //   任务详情（展开区）= 父 Agent 注入的提示词全文（host getSubagentSessionMeta 提取
 //   子会话首条 user/message）——仅展开时显示
-// 进度由卡片自闭环轮询子会话事件窗注入（corumAgent/getChildSessionProgress）；
-// 模型行读官方 session/list 行的 modelSelection 投影。
+// 进度数据源（统一事件中心三-3，轮询 → 推送）：
+//   主路径 = 'corum/subagent/progress' $on 推送帧（host corumAgent 在
+//   session/event 追加点 O(1) 增量折叠并 emit，帧即最终进度，client 零 RPC）；
+//   冷启动基线 = 挂载时一次性 RPC getChildSessionProgress（回填推送开始前
+//   的历史）；降级兜底 = 订阅宽限期内零推送帧（旧 host 不 emit）回退 2s 轮询。
+// 模型行读官方 session/list 行的 modelSelection 投影（挂载时读一次——模型在
+// 会话生命周期内基本不变，原 4s 轮询已删）。
 // 跨 bundle 句柄（当前会话 id + RPC connection + 跳子会话桥）经 chatRuntime
 // cordis 服务消费（统一事件中心二期 window 全局迁移；同 bundle 模块级
 // chatRuntimeRef 拿服务实例，见 ../chat-runtime.ts）。
@@ -15,7 +20,7 @@ import { memo, useEffect, useState } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, Loader } from 'lucide-react'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
-import { chatRuntimeRef } from '../chat-runtime.ts'
+import { chatRuntimeRef, subagentProgressSubscribe } from '../chat-runtime.ts'
 import css from './SubagentCard.module.css'
 
 /** 子会话进度 RPC 返回形（与 host getChildSessionProgress 对齐）。 */
@@ -76,30 +81,41 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
         const row = (value.items ?? []).find(item => item.sessionId === childSessionId)
         setLabel(modelLabel(row?.projections?.values?.modelSelection))
       } catch {
-        // 单次失败留空（下轮重试）。
+        // 单次失败留空（模型行缺省不显示）。
       }
     }
+    // 统一事件中心三-3：模型在会话生命周期内基本不变（缺省随父 profile
+    // 编译期注入），原 4s setInterval 轮询已删——挂载时读一次即可。
     void read()
-    // 模型在会话生命周期内可变（用户切换）；挂个轻量轮询跟 session/list 更新。
-    const timer = setInterval(() => { void read() }, 4000)
-    return () => { cancelled = true; clearInterval(timer) }
+    return () => { cancelled = true }
   }, [childSessionId])
   return label
 }
 
-/** 轮询子会话事件窗算精确进度（2s 间隔；仅当卡片已知 childSessionId 时启用）。 */
+/** 推送通道宽限期（ms）：$on 订阅建立后这么久仍零推送帧 → 判定推送未生效（旧 host 不 emit），回退轮询。 */
+const PROGRESS_PUSH_GRACE_MS = 2500
+/** 降级兜底轮询周期（ms）：推送未生效时的拉取节奏（与迁移前一致）。 */
+const PROGRESS_FALLBACK_POLL_MS = 2000
+
+/**
+ * 子会话精确进度（统一事件中心三-3：推送主路径 + 冷启动基线 + 降级轮询）。
+ *
+ * 主路径：$on('corum/subagent/progress') 帧直收（host 已按同口径折叠好，
+ * 零 RPC）；挂载时一次性 RPC 基线回填推送开始前已发生的历史；宽限期内零
+ * 推送帧（旧 host 不 emit）回退 2s RPC 轮询，一旦有帧到达轮询永不起动。
+ */
 function useChildProgress(childSessionId: string | undefined): SubagentProgressSnapshot | undefined {
   const [progress, setProgress] = useState<SubagentProgressSnapshot | undefined>(undefined)
   useEffect(() => {
     if (childSessionId === undefined) return undefined
     let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const poll = async () => {
+    let pollTimer: ReturnType<typeof setTimeout> | undefined
+    let graceTimer: ReturnType<typeof setTimeout> | undefined
+
+    /** RPC 拉一次基线/兜底进度（host getChildSessionProgress 全量折叠）。 */
+    const fetchOnce = async () => {
       const conn = chatRuntimeRef.current?.connection
-      if (conn === undefined) {
-        timer = setTimeout(poll, 2000)
-        return
-      }
+      if (conn === undefined) return
       try {
         const result = await conn.rpc.call('/api', 'corumAgent/getChildSessionProgress', {
           args: { sessionId: childSessionId },
@@ -118,14 +134,42 @@ function useChildProgress(childSessionId: string | undefined): SubagentProgressS
           }
         }
       } catch {
-        // 单次轮询失败静默（下轮重试）；会话不存在时 host 返回 {}，progress 维持 undefined。
+        // 单次拉取失败静默；会话不存在时 host 返回 {}，progress 维持 undefined。
       }
-      if (!cancelled) timer = setTimeout(poll, 2000)
     }
-    void poll()
+
+    // 冷启动基线：推送只覆盖订阅建立之后的事件——卡片晚开（子会话已在跑/
+    // 已完成）时历史进度靠这一次全量折叠回填。
+    void fetchOnce()
+
+    // 主路径：推送帧直收（帧即最终进度，按 sessionId 过滤本卡子会话）。
+    const sub = subagentProgressSubscribe((frame) => {
+      if (cancelled || frame.sessionId !== childSessionId) return
+      setProgress({
+        turn: frame.turn,
+        step: frame.step,
+        ...frame.currentAction === undefined ? {} : { currentAction: frame.currentAction },
+        done: frame.done,
+      })
+    })
+
+    // 降级兜底：宽限期内任何会话的推送帧都没到（旧 host 不 emit / 通道未
+    // 生效）→ 回退 2s 轮询（自循环 setTimeout，拉取失败下轮重试）。
+    graceTimer = setTimeout(() => {
+      graceTimer = undefined
+      if (cancelled || sub.framesSeen() > 0) return
+      const poll = async () => {
+        await fetchOnce()
+        if (!cancelled) pollTimer = setTimeout(() => { void poll() }, PROGRESS_FALLBACK_POLL_MS)
+      }
+      void poll()
+    }, PROGRESS_PUSH_GRACE_MS)
+
     return () => {
       cancelled = true
-      if (timer !== undefined) clearTimeout(timer)
+      sub.unsubscribe()
+      if (pollTimer !== undefined) clearTimeout(pollTimer)
+      if (graceTimer !== undefined) clearTimeout(graceTimer)
     }
   }, [childSessionId])
   return progress
@@ -177,7 +221,7 @@ function runningStepText(
     : `${stepLabel} · ${progress.currentAction}`
 }
 
-/** 一个 delegation 召唤的卡片（进度由子会话事件窗轮询注入）。 */
+/** 一个 delegation 召唤的卡片（进度由 'corum/subagent/progress' 推送注入，见 useChildProgress）。 */
 function SubagentRow({
   description, prompt: delegationPrompt, childSessionId, t,
 }: {

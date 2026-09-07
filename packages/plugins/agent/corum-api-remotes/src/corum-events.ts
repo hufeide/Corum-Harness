@@ -203,6 +203,27 @@ export interface FileChangedEvent {
   readonly changes: FileChangeEntry[]
 }
 
+/**
+ * corum/subagent/progress：子 Agent 会话进度增量推送（统一事件中心三期真实
+ * 迁移；host corumAgent 在官方 `session/event` 追加点对 origin='subagent'
+ * 会话维护 O(1) 折叠状态，仅在折叠快照变化时 emit——取代 SubagentCard 的
+ * 2s 全量重读轮询，折叠口径与 corumAgent/getChildSessionProgress 一致）。
+ */
+export interface SubagentProgressEvent {
+  /** 子会话 id（origin='subagent' 的 UUID id）。 */
+  readonly sessionId: string
+  /** 最新已开启 turn（0 = 尚未开 turn）。 */
+  readonly turn: number
+  /** 当前 turn 已闭合 step 数。 */
+  readonly step: number
+  /** 当前动作（最新工具调用名）；无进行中动作时缺省。 */
+  readonly currentAction?: string
+  /** 最新 turn 已闭合（turn/end）。 */
+  readonly done: boolean
+  /** 触发本帧的源事件时间（ms epoch）。 */
+  readonly lastActive: number
+}
+
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────
 
 declare module '@deepseek-ai/cordis' {
@@ -235,12 +256,14 @@ declare module '@deepseek-ai/cordis' {
     'corum/terminal/output'(data: TerminalOutputEvent): void
     /** corum/file/changed：项目根递归 watch 去抖批量变更推送（统一事件中心二期；文件 watch 轮询迁移的承载事件）。 */
     'corum/file/changed'(data: FileChangedEvent): void
+    /** corum/subagent/progress：子 Agent 会话进度增量推送（统一事件中心三期；SubagentCard 进度轮询迁移的承载事件）。 */
+    'corum/subagent/progress'(data: SubagentProgressEvent): void
   }
 }
 
 // ── Remote 转发选择面（renderer $on 的 key 面）──────────────────────────────
 
-/** 并入转发 allowlist 的 corum 事件名（12 个领域事件 + 终端输出 + 文件变更）。 */
+/** 并入转发 allowlist 的 corum 事件名（12 个领域事件 + 终端输出 + 文件变更 + 子 Agent 进度）。 */
 export type CorumForwardedEvent =
   | 'corum/task/assigned'
   | 'corum/task/started'
@@ -256,6 +279,7 @@ export type CorumForwardedEvent =
   | 'corum/group/member-removed'
   | 'corum/terminal/output'
   | 'corum/file/changed'
+  | 'corum/subagent/progress'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}

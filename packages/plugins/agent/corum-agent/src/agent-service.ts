@@ -44,6 +44,9 @@ import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './
 import { scanSkills } from './skill-catalog.ts'
 import { corumHome } from './home.ts'
 import type { SkillEntry } from './skill-entry.ts'
+// 统一事件中心三-3：'corum/subagent/progress' 的 cordis Events 声明（自包含
+// 在 fork 包 corum-api-remotes；type-only import 只拉编译面，不进运行时依赖图）。
+import type {} from '@corum/corum-api-remotes/corum-events'
 
 // 再导出：保持既有消费方（index.ts / project-service.ts / runtime.ts /
 // contract/agent.ts）的 import 面不变——包内拆分对外的稳定锚。
@@ -256,6 +259,113 @@ export class CorumAgentService extends TypertRemoteService {
       if (entry === undefined) return
       this.flushPendingPermission(entry.agent.session, sid)
     })
+    /**
+     * 统一事件中心三-3：子 Agent 会话进度增量推送（SubagentCard 2s 全量重读
+     * 轮询的迁移承载）。
+     *
+     * 机制：官方 `session/event` 每追加一条事件就是子会话一次状态推进。本
+     * 监听器对 origin='subagent' 的会话维护每会话 O(1) 折叠状态（与
+     * getChildSessionProgress 的全量折叠同口径，但随事件流增量更新，不再
+     * 每 2s `readFrom(sessionId, 0)` 重读整段历史），折叠快照变化即
+     * `ctx.emit('corum/subagent/progress', frame)`，经 fork 包
+     * corum-api-remotes 的转发 allowlist 推给所有 renderer。
+     *
+     * 容量护栏：会话 dispose（`session/disposed`）时清表；再按上限淘汰最久
+     * 未活动条目（防长进程多 delegation 累积）。
+     */
+    ctx.on('session/event', (session, event) => {
+      if (session.header.origin !== 'subagent') return
+      const frame = this.foldSubagentProgress(String(session.id), event)
+      if (frame !== undefined) this.ctx.emit('corum/subagent/progress', frame)
+    })
+    ctx.on('session/disposed', (session) => {
+      this.subagentProgress.delete(String(session.id))
+    })
+  }
+
+  /** 子 Agent 进度折叠的每会话 O(1) 状态（session/event 增量维护）。 */
+  private readonly subagentProgress = new Map<string, {
+    turn: number
+    step: number
+    currentAction?: string
+    done: boolean
+  }>()
+
+  /** 进度折叠表容量上限（超出时淘汰最久未活动条目；dispose 已精确清理）。 */
+  private static readonly SUBAGENT_PROGRESS_CAP = 200
+
+  /**
+   * 把一条子会话事件增量折叠进进度状态；快照变化时返回推送帧，否则 undefined。
+   * 折叠口径与 getChildSessionProgressRemote 的全量扫描一致（同一份事件语义）。
+   */
+  private foldSubagentProgress(sessionId: string, event: SessionEvent): {
+    sessionId: string
+    turn: number
+    step: number
+    currentAction?: string
+    done: boolean
+    lastActive: number
+  } | undefined {
+    let state = this.subagentProgress.get(sessionId)
+    if (state === undefined) {
+      if (this.subagentProgress.size >= CorumAgentService.SUBAGENT_PROGRESS_CAP) {
+        // Map 迭代序 = 插入序，首项即最久未活动（每次变更都 delete+set 置顶）。
+        const oldest = this.subagentProgress.keys().next().value
+        if (oldest !== undefined) this.subagentProgress.delete(oldest)
+      }
+      state = { turn: 0, step: 0, done: false }
+    }
+    const prev = state
+    let turn = prev.turn
+    let step = prev.step
+    let currentAction = prev.currentAction
+    let done = prev.done
+    switch (event.type) {
+      case 'turn/start': {
+        const t = (event.data as { turn?: number }).turn ?? 0
+        if (t > turn) { turn = t; step = 0 }
+        done = false
+        break
+      }
+      case 'step/end': {
+        const t = (event.data as { turn?: number }).turn ?? 0
+        const s = (event.data as { step?: number }).step ?? 0
+        if (t === turn && s >= step) step = s
+        break
+      }
+      case 'tool/call': {
+        const name = (event.data as { name?: string }).name
+        if (name !== undefined && name !== '') currentAction = name
+        break
+      }
+      case 'assistant/message': {
+        // 一条 assistant 正文闭合 = 当前 step 的生成结束，清掉工具动作避免滞留。
+        const content = (event.data as { message?: { content?: Array<{ type: string }> } }).message?.content ?? []
+        if (content.some(b => b.type === 'text' || b.type === 'reasoning')) currentAction = undefined
+        break
+      }
+      case 'turn/end': {
+        done = true
+        currentAction = undefined
+        break
+      }
+      default:
+        return undefined // 非进度事件（user/message、step/start 等）不产生帧。
+    }
+    if (turn === prev.turn && step === prev.step && currentAction === prev.currentAction && done === prev.done) {
+      return undefined // 折叠无变化（如乱序/重复事件），不广播。
+    }
+    // 置顶为最近活动（容量淘汰的 LRU 依据）。
+    this.subagentProgress.delete(sessionId)
+    this.subagentProgress.set(sessionId, { turn, step, ...currentAction === undefined ? {} : { currentAction }, done })
+    return {
+      sessionId,
+      turn,
+      step,
+      ...currentAction === undefined ? {} : { currentAction },
+      done,
+      lastActive: event.time,
+    }
   }
 
   /**
