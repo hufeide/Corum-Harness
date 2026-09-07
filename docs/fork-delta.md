@@ -7,6 +7,7 @@
 > - 参考：`.dbg/audit-B-session.md`（session 群逐文件审计）、`docs/audit/CODE-AUDIT-REPORT.md`（P0-6/11/12/13/15）。
 > - 2026-09-07 增补：第 7 个 fork 包 `@corum/corum-credentials-local`（host 侧，fork 自官方 `@deepseek-ai/dsh-credentials-local`）登记于 **§7 host 域 fork**，升级时同样按 §5 runbook 处理。
 > - 2026-09-07 增补：第 8 个 fork 包 `@corum/corum-api-remotes`（host+client 双面，fork 自官方 `@deepseek-ai/dsh-api-remotes`）登记于 **§8**，升级时同样按 §5 runbook 处理。
+> - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
 
 ---
 
@@ -383,3 +384,56 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 - ① **tsconfig 双 face 取舍**：官方用 `tsconfig.host.json`（files 仅 index/remote-events/types，无 DOM lib——host 面无 DOM 隔离）+ `tsconfig.client.json` 双工程；fork 是单文件 tsconfig（lib ES2024+DOM 合集，host/client 同一编译面）。fork 写法削弱了「host 面误用 DOM API 编译期拦截」的官方隔离，rebase 时考虑恢复官方双 tsconfig。
 - ② **缺 tests**：官方 `tests/remote-events.host.spec.ts`（232 行，host 半转发行为运行时守护）可移植到 fork——corum 追加的 13 个事件当前只有编译期校验，无运行时守护（审计 P2）。
 - ③ **漂移核实习惯**：本节的漂移面是 `git diff` 实测而非印象——以后每次官方版本 bump 都先跑同样命令刷新本小节，再动 rebase。
+
+---
+
+## 9. 0.1.2-alpha.2 → 0.1.3-alpha.1 实测 rebase 全量结论（2026-09-07，已落地 + CDP 验证通过）
+
+> 本次升级的**实战记录**（非预案）。范围：8 fork 包 + desktop + corum-subagent(第 9 fork) + 127 个 `@deepseek-ai/*` 依赖。结果：**全仓 31 包 typecheck 0 错、build 0 错、三层 CDP 实机验证通过**（boot 零报错 / UI 渲染 / 聊天全要素 / format v2 流式发送回答）。
+
+### 9.0 基座落地链（npm 未发 0.1.3，走本地私服）
+
+dsh 0.1.3 未上公共 registry（最新仍 0.1.2-rc.1）。落地路径沿用 0.1.2 机制：**dsh 单仓 `pnpm run build:official`（official client build profile + build record）→ `release:pack --family dsh`（248 tarball）→ `release:publish` 到本地私服 `localhost:4873`（dist-tag `alpha`，幂等）**。corum 侧：
+
+- 127 个依赖 `^0.1.2-alpha.x → ^0.1.3-alpha.1`（301 + desktop 60 处，脚本批量）。
+- `pnpm-workspace.yaml`：`minimumReleaseAge: 0`（私服新包发布时间 < pnpm 默认 1 天 cutoff，持久化放行）+ `overrides`（dsh-authorization/cordis 4.0.2 + vendor 6 件 include/loader/group/hmr/schemastery/timer）+ `minimumReleaseAgeExclude` 0.1.2→0.1.3 全量重写 + 补 53 新包。
+- ⚠️ **环境坑**：shell 残留 dsh 仓 `npm_package_*`/PATH 污染会让 pnpm 行为异常——所有 corum pnpm 命令用 `env -i HOME=$HOME PATH=... pnpm`。
+- ⚠️ **fs-ext**：session-persistence-jsonl 的 `fs-ext` native flock 硬需（无 JS 降级），node-gyp 9 因 Node 26 无 distutils 失败——`allowBuilds: fs-ext: true` + `npx node-gyp@13` 构建 `fs_ext.node`。
+
+### 9.1 三条 0.1.3 主线对 corum 的穿透点（实测）
+
+| 主线 | 穿透 corum | 处理 |
+|---|---|---|
+| **session format v2**（assistant 流内嵌 message/attempt；`session.events` 删→`eventAt`/`snapshotEvents`；persistence handle seam） | corum-agent（events ~19 处 + persistence.readFrom 4 处 + event-projection assistant/chunk）、corum-subagent（assistant-output/continuation）、ui-chat（conversation-nodes chunkrow） | corum 自有代码手工迁移（官方不替你改）；conversation-nodes 官方继承代码随换新自动消解 |
+| **通用文件上传**（新包 dsh-client-file-upload + fileUploadsRemote + 附件泛化 image→file） | ui-conversation（InputBar/service/apply/contract）+ corum-api-remotes（client 挂载 3 行）+ cordis.patch（base bundle 0.1.3 已自带挂载） | InputBar 采纳官方 file-upload 全链路；api-remotes 补 fileUploadsRemote import/挂载 |
+| **invariant companion 清除**（官方删 212 个空 invariant.ts） | corum 8 处空 companion（7 插件包 + desktop） | 全删；corum-subagent 92 行真实校验**保留**（官方保留同名文件） |
+
+### 9.2 逐包 rebase 结果（全部落地）
+
+| 包 | 评级→实际 | 关键改动 |
+|---|---|---|
+| corum-ui-conversation | XL→落地 | apply(emptyActions 190 行移植到官方 Config/fileUploads 骨架)/InputBar(file-upload 链路+sparkle)/ConversationRoot(**新增契约增量 `toolbarLeading`** 承载 corum 工具栏，因官方删 overlay/leftItems/rightItems/footer 槽)/slots(emptyActions 移植)/locales(补官方 20 键)/view-selection(官方新文件) |
+| corum-ui-chat | L→落地 | conversation-nodes 19 文件官方换新+sed（82 错自动消解）+ contract(8 文件) + apply(chatRuntime/corumEditor/review/getAgentName 移植到 keyedHooks/loadThrough 骨架) + ChatView(官方 memo ChatNodeList/turn rail + AgentNameContext/ReviewCard 移植) + ChatNodeSeat(foldable=false 保留，P0 随官方投影器内聚缓解) + TurnNavigator/turn-rail-items(官方新线) |
+| corum-ui-settings-models | M→落地 | JsonValue 5 处改 dsh-util-values + SettingsRemote→ClientRemote['settings'] + settings-conflict→settings/conflict + 合并官方候选模型搜索框(candidateQuery/visibleCandidates/toggleVisibleCandidates) + candidateToolbar CSS 改名 |
+| corum-ui-approval / corum-ui-questions / corum-ui-model-selection / corum-credentials-local / corum-api-remotes | S→落地 | 编译即绿（0.1.3 契约兼容，官方这些包 corum 定制 tsx 均未动）；仅 invariant 清理 + api-remotes 补 fileUploadsRemote 3 行 |
+| corum-subagent(第 9 fork) | M→落地 | driver/spawn 内部 import 改相对路径 + attachments.admitPromptContent 服务方法 + assistant-output expandAssistantStream + continuation persistence.stat |
+| corum-agent | —→落地 | session.events→snapshotEvents(~19) + persistence.readFrom→readPersistedEvents helper(4) + assistant/chunk 死路径 as 窄化（Phase 4 ide-conversation-ui 流式渲染待迁移 expandAssistantStream，**遗留**） |
+| desktop | —→落地 | boot.ts settingsNamespace 回退 + session-archive readRaw→readSessionLogText + invariant 清理 |
+| corum-ide-explorer-ui | —→落地 | corum.explorer 槽本地 SlotMap 声明（已解挂备份代码自洽） |
+
+### 9.3 运行时坑（typecheck/build 不暴露，CDP 才抓）
+
+1. **file-upload 插件 boot 失败**：`ctx.commands.registerFileReceiptResolver is not a function`——host 模块根 `profiles/web/node_modules` 是 8月陈旧 heal 缓存（205 个 0.1.2 包）。**heal 只在缺失时建链接、不更新旧链接**——清除 dev home 的 `profiles/web/node_modules` + `profiles/node_modules` 后 heal 重建为 0.1.3 修复。**教训：基座升级后必须清 host 模块缓存重启**。
+2. **fs_ext.node 缺失**：见 §9.0。
+
+### 9.4 验证记录（三层 CDP，2026-09-07）
+
+boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列表液态玻璃）→ 会话打开（标题+轮次/token 元数据）→ 聊天全要素渲染：userHeader(You+time)、思考卡、工具调用展开(foldable=false)、SubagentCard(Done/查看子会话)、TurnUsageDisclosure(用量/TTFT/tok/s)、**turn rail 轮次导航**、上下文注入卡、composer(sparkle/附件/权限/模型) → **format v2 流式实测**：发送「1+1」→ 流式 → 回答「2」+ TurnUsageDisclosure(9K tok/首token 1.8s/37 tok/s)。截图 `.dbg/`（phase5-boot-ok / chat-render-ok / stream-v2-ok）。
+
+### 9.5 遗留（非阻塞，下轮处理）
+
+- **ide-conversation-ui 流式渲染**：`ConversationArea.tsx` 深度消费 `assistant/chunk` 投影（0.1.3 已删，流内嵌 message/attempt）——corum-agent 侧已 as 窄化保留旧日志死路径，**ide 自主渲染链需迁移到 expandAssistantStream**（独立工程，主对话区 corum-ui-chat 已用官方新机制不受影响）。
+- **MessageItem.module.css 缺 file 附件卡样式**（`.attachmentRow/.fileCard` 等 6 类）：官方 0.1.3 新增，corum css 未同步——file 附件卡运行时无样式（图片走 renderMessageImages 正常）。
+- **skillNames 通路**：官方 0.1.3 skill chip 依赖 UserMessageNode.skillNames，corum fork 类型未加——省略（要跟进需先在 conversation fork records.ts 加字段）。
+- **minimumReleaseAge: 0**：待官方 0.1.3 上公共 registry 后删除该行。
+- **settings-models CSS 预存缺失类**（modelField/input 等，非 0.1.3 新引入）：候选搜索框已补，其余另行。
