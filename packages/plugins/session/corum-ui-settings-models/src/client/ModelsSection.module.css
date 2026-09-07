@@ -678,3 +678,61 @@
 
 /* ── 编辑器卡（嵌在 provider 卡内展开的表单区） ── */
 .editorSection { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── 候选模型拾取弹窗（官方 0.1.3 增量：搜索框 candidateToolbar/Search/Empty
+   + candidateList 全套，corum 此前缺失——合并自官方 ModelsSection.module.css） ── */
+.fetchDialog {
+  max-width: 520px;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.candidateToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.candidateSearch {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.candidateList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  margin: 0;
+  overflow-y: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.candidate {
+  border-radius: 6px;
+}
+
+.candidateLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.candidateId {
+  flex: 1 1 auto;
+  font-family: var(--ds-font-family-code);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.candidateEmpty {
+  margin: 24px 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}

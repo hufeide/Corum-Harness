@@ -1,17 +1,16 @@
-/* fork（corum）：轮次导航 gutter（设计稿 vESwF）——左 gutter 竖列圆点刻度。
-   刻度 = 8×8 圆点：淡点 $label-tertiary（tertiary），当前点 $brand-primary
-   （brand），垂直居中；hover/focus 预览卡翻到右侧（原右侧横线刻度已退役）。
-   Zero-height sticky slot, like the back-to-bottom control: the rail floats
-   over the transcript's left gutter without extending scrollHeight. */
+/* Zero-height sticky slot, like the back-to-bottom control: the rail floats
+   over the transcript's right gutter without extending scrollHeight. */
 .slot {
   position: sticky;
   top: 0;
-  z-index: 6;
+  /* Above transcript CodeBlock banners (z-index 6). The rail band excludes
+     the composer, so its preview never needs to cross the footer. */
+  z-index: 7;
   height: 0;
   pointer-events: none;
 }
 
-.rail {
+.frame {
   /* The band a reader actually sees: the scrollport minus the sticky composer
      stack covering its floor. ConversationRoot publishes both measurements on
      the scrollport; the fallbacks carry the first paint before its observer
@@ -23,13 +22,13 @@
 
   position: absolute;
   top: calc(var(--turn-rail-band) / 2);
-  /* 左 gutter（设计稿 vESwF 在 messages 左侧）：贴滚动容器左缘，8 宽刻度列
-     + 自身 12px 内边距（与右侧 composer side clearance 对称让位）。 */
-  left: calc(12px - (var(--dsh-composer-side-clearance) + 16px));
+  /* Flush with the scrollport edge: the slot sits inside the transcript's side
+     padding, so the rail gives that inset back and keeps 12px of its own. */
+  right: calc(12px - (var(--dsh-composer-side-clearance) + 16px));
   width: 28px;
-  /* Never taller than the band it centers in: a short window (a tall composer,
-     a low viewport) shrinks the rail instead of pushing marks under the
-     composer or above the scrollport. */
+  /* Fixed-pitch marks never compress: a ladder taller than the band scrolls
+     inside this frame instead of pushing marks under the composer or above
+     the scrollport. */
   height: min(
     var(--turn-natural-height),
     max(0px, calc(var(--turn-rail-band) - 64px)),
@@ -41,14 +40,46 @@
   transition: height 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.marks {
+/* The frame's inner scroller: no visible scrollbar, no scroll chaining into
+   the transcript, and gradient fades over the ends that can still scroll. */
+.scroller {
   position: absolute;
-  inset: var(--turn-rail-inset) 0;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.fadeTop {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 24px, #000 100%);
+}
+
+.fadeBottom {
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+.fadeTop.fadeBottom {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+}
+
+.marks {
+  position: relative;
+  height: var(--turn-natural-height);
 }
 
 .markPosition {
   position: absolute;
-  top: min(var(--turn-natural-position), var(--turn-position));
+  top: calc(var(--turn-natural-position) + var(--turn-rail-inset));
   right: 0;
   left: 0;
   height: 10px;
@@ -58,11 +89,13 @@
 }
 
 /* The rail owns pointer input for the whole column, so a mark is a keyboard
-   destination that paints one dot — never a mouse target of its own. */
+   destination that paints one tick — never a mouse target of its own. */
 .mark {
   position: absolute;
-  /* 刻度列水平居中（设计稿 vESwF alignItems center）：28 宽 rail 内圆点居中。 */
-  inset: 0;
+  /* As wide as the longest tick, right-aligned with it: the focus ring below
+     then wraps the tick instead of the rail's full pointer column. */
+  inset: 0 0 0 auto;
+  width: 20px;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -74,64 +107,73 @@
 .mark::before {
   position: absolute;
   top: 50%;
-  left: 50%;
-  width: 8px; /* 设计稿 dot 8×8 圆点 */
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dsw-alias-label-tertiary); /* 淡点 $label-tertiary */
+  right: 0;
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--dsw-alias-border-l4);
   content: '';
-  transform: translate(-50%, -50%);
-  transition: background-color 140ms ease, box-shadow 140ms ease;
+  transform: translateY(-50%);
+  transition: width 140ms ease, background-color 140ms ease;
+}
+
+/* Ordered before hover/active so those states keep their stronger tick. */
+.markUnloaded::before {
+  width: 8px;
+  opacity: 0.6;
 }
 
 .markPreview::before {
-  background: var(--dsw-alias-label-secondary); /* hover 预览：比淡点实一档 */
-  box-shadow: 0 0 0 3px var(--corum-glass-2, rgba(42, 24, 64, 0.55));
+  width: 18px;
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.markBusy::before {
+  animation: dsh-turn-mark-busy 1s ease-in-out infinite;
 }
 
 .markActive::before {
-  background: var(--dsw-alias-brand-primary); /* 当前点 $brand-primary */
-  box-shadow: 0 0 0 3px var(--corum-glass-2, rgba(42, 24, 64, 0.55));
+  width: 20px;
+  background: var(--dsw-alias-label-primary);
 }
 
-/* Keyboard focus outranks both resting states: brand color + hairline ring. */
+/* Keyboard focus outranks both resting states: the tick takes the brand color
+   the rest of the rail never uses, and a hairline ring keeps it legible
+   against a busy transcript. */
 .mark:focus-visible::before {
-  background: var(--dsw-alias-brand-primary);
-  box-shadow: 0 0 0 3px var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
+  width: 20px;
+  background: var(--dsw-alias-state-business-primary);
 }
 
 .mark:focus-visible {
-  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline: 1px solid var(--dsw-alias-state-business-primary);
   outline-offset: 2px;
-  border-radius: 50%;
 }
 
 .preview {
   position: absolute;
-  /* Centered on its mark (mark positions are measured inside the rail inset),
-     then held clear of both rail ends. */
+  /* Centered on its mark. Mark positions live in the scrolled ladder, so the
+     frame-level preview subtracts the scroller's offset, then holds clear of
+     both frame ends. */
   top: clamp(
     0px,
     calc(
-      min(var(--turn-natural-position), var(--turn-position))
-      + var(--turn-rail-inset) - var(--turn-preview-height) / 2
+      var(--turn-natural-position) + var(--turn-rail-inset)
+      - var(--turn-scroll-top, 0px) - var(--turn-preview-height) / 2
     ),
     calc(100% - var(--turn-preview-height))
   );
-  /* 预览卡翻到右侧（gutter 在左，卡片向右展开进消息区上方）。 */
-  left: calc(100% + 10px);
+  right: calc(100% + 10px);
   box-sizing: border-box;
   width: min(300px, calc(100cqw - 120px));
   max-height: var(--turn-preview-height);
   overflow: hidden;
   padding: 10px 12px;
-  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border: 0;
   border-radius: 10px;
   color: var(--dsw-alias-label-primary);
-  background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-elevation-panel);
   pointer-events: none;
   animation: dsh-turn-preview-enter 120ms ease-out;
   transition: top 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -146,14 +188,14 @@
 
 .previewPrompt {
   font: var(--dsw-font-xs-strong-13);
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .previewResponse {
   margin-top: 4px;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-caption);
   font: var(--dsw-font-xxs-12);
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
 }
 
 @keyframes dsh-turn-mark-enter {
@@ -162,8 +204,14 @@
 }
 
 @keyframes dsh-turn-preview-enter {
-  from { opacity: 0; transform: translateX(-4px); }
+  from { opacity: 0; transform: translateX(4px); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes dsh-turn-mark-busy {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 @container (max-width: 900px) {
@@ -173,11 +221,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rail,
+  .frame,
+  .scroller,
   .markPosition,
   .mark::before,
+  .markBusy::before,
   .preview {
     transition: none;
     animation: none;
+    scroll-behavior: auto;
   }
 }

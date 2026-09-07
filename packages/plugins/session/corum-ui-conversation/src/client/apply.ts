@@ -11,10 +11,29 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { UiConversation } from './conversation/assembly.ts'
+import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
+// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only；
+// 服务端改 @Remote 方法名/参数时本文件编译期报错，而非运行时发现）。
+import {
+  CORUM_AGENT_METHODS, CORUM_PROJECT_METHODS,
+  type CreateTaskAgentArgs, type CreateTaskAgentResult,
+  type ListProjectsResult,
+  type OpenProjectArgs, type OpenProjectByPathArgs,
+  type ListProfilesResult, type ListModelsResult, type ListPermissionPresetsResult,
+  type ListTaskAgentsResult,
+} from '@corum/corum-agent/contract'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+// C3a：侧栏模式写（openProject/newProject→project、openTask/newTask→task）收敛进
+// IDE 壳 cordis 服务 ctx.layout.setSidebarMode（跨 bundle 单例）——原 ui-base
+// window 全局 __corumSidebarMode 死写已退役（ui-base sidebar-mode.ts 随之删除）。
+// 类型说明见下方 SidebarModeCapableLayout：本插件 inject 的 ctx.layout 类型来自
+// 官方基座 dsh-client-ui-layout 的窄 ILayout（3 方法），corum IDE 壳的运行时
+// LayoutController 是其超集（另含侧栏模式面）；用局部能力接口收窄，与 C3b 契约
+// 同思路——编译期类型保障、零运行时改动、不强耦合 @corum/corum-ide-ui 包。
 import type { ViewTab } from './contract/views.ts'
 import type {
   ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
-  ConversationSessionInjected, DraftFileUploads,
+  ConversationSessionInjected, DraftFileUploads, NewTaskOptions,
 } from './contract/slots.ts'
 import type { InputNotice } from './contract/input.ts'
 import { createConversationStore, readConversationViewPreference } from './stores.ts'
@@ -44,7 +63,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Services required by the Conversation plugin. */
 export const inject = [
-  'slots', 'sessions', 'fileUpload', 'uiSession', 'uiWorkspace', 'locale', 'settingsScope',
+  // fork（corum）：移除 'uiWorkspace'——kkc IDE 禁用官方 ui-workspace（uiWorkspace 服务
+  // 不存在），工作区导航由 corum 侧栏自研。uiWorkspace 改 ctx.get 可选获取 + 降级。
+  // fork（corum）：移除 'fileUpload'——空态操作卡不需文件上传（仍走 createDrafts 链）。
+  // workspaces 补回：空态操作卡「打开目录」需要 ctx.workspaces.create（2026-08-30）。
+  // layout 补入：「新建任务表单」打开信号面（newTaskForm）桥到 ctx.layout 的
+  // grid actions（AppFrame 持有），替代原 OPEN_NEW_TASK_FORM_EVENT 窗口事件桥。
+  'slots', 'sessions', 'uiSession', 'locale', 'settingsScope', 'workspaces', 'layout',
 ]
 
 /** Conversation runtime configuration. */
@@ -89,6 +114,24 @@ interface WorkspaceNavigation {
   ): Promise<SessionId>
 }
 
+/** 侧栏模式（design mode-switch：任务=默认 / 项目）。 */
+type SidebarMode = 'task' | 'project'
+
+/**
+ * ctx.layout 的侧栏模式能力面（corum IDE 壳 LayoutController 提供，超出官方
+ * 基座窄 ILayout 的部分）。cordis 服务跨 bundle 单例（实证 .dbg/cordis-
+ * singleton-probe.md），本插件经它写模式，侧栏骨架（corum-ide-sidebar-ui）
+ * 经同一服务读——空态操作卡与侧栏 tab 由此联动。
+ */
+interface SidebarModeCapableLayout {
+  setSidebarMode(mode: SidebarMode): void
+}
+
+/** 取 ctx.layout 的侧栏模式面（cordis 服务单例；壳未提供时理论上是装配错误）。 */
+function sidebarModeLayout(ctx: Context): SidebarModeCapableLayout {
+  return ctx.layout as unknown as SidebarModeCapableLayout
+}
+
 /** Resolve the session-scoped Conversation action face, failing loud. */
 function scopedConversation(sessions: ISessions, id: SessionId): IConversation {
   const scoped = sessions.scope(id)
@@ -116,7 +159,9 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const slots = ctx.slots
   // Schemastery's field default is materialized before Cordis calls apply.
   const maxConcurrentFileUploads = config.maxConcurrentFileUploads as number
-  const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation
+  // fork（corum）：uiWorkspace 在 kkc IDE 不存在（已禁 ui-workspace）——可选获取，undefined
+  // 时 selectWorkspace 降级为抛错（kkc 用侧栏自研工作区导航，不经此入口）。
+  const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation | undefined
   const uiConversation = new UiConversation(ctx, sessions)
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-conversation: dictionaries')
@@ -231,6 +276,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
         composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId),
       },
       selectWorkspace: async (workspaceId) => {
+        // fork（corum）：uiWorkspace 缺失时降级（kkc 不经 hero 工作区切换入口）。
+        if (workspaceNavigation === undefined) throw new Error('uiWorkspace unavailable in corum IDE (use sidebar workspace navigation)')
         const nextId = await workspaceNavigation.connectWorkspace(workspaceId)
         if (sessionId !== undefined && nextId !== sessionId) {
           const from = inputHub.shell(sessionId)
@@ -252,6 +299,227 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           }
         }
         sessions.open(nextId)
+      },
+      // 空态操作卡（2026-08-30 圆桌收敛）：最近项目 + 任务/项目两进入动作。
+      emptyActions: (() => {
+        const connection = ctx.get('connection') as ConnectionHandle
+        const call = makeCorumRpcCall(connection)
+        /**
+         * 目录选择（host directoryPicker Remote，native OS 对话框）。
+         *
+         * **坑（2026-08-30 实测）**：`ctx.remote.directoryPicker` 在**本插件的
+         * fiber** 里取不到——dsh 的 Context 代理 getter 对未注入的命名空间抛错
+         * （console: Uncaught (in promise) at get → apply.ts），点「选择」静默
+         * 无反应。侧栏 corum-ide-sidebar-ui 能用的原因是它的 inject 声明了
+         * `connection`（`ctx.remote` 由 connection 服务随 fiber 装配）。本插件的
+         * inject 没有 connection（fork 时按官方形状保留了别的服务名），故
+         * `ctx.remote` 不存在。
+         *
+         * 修法：不碰 `ctx.remote`，直接用官方 `connection.rpc.call` 打同一个
+         * Remote 端点 `directoryPicker/pick`——与 `makeCorumRpcCall` 同通道、
+         * 同 `{args}` 契约，且**不依赖 fiber 上的 remote 命名空间**。实测可正常
+         * 唤起 native 对话框（osascript choose folder）。
+         */
+        const pickDir = async (): Promise<string | null> => {
+          const result = await connection.rpc.call('/api', 'directoryPicker/pick', { args: {} })
+          if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+          return result.value as string | null
+        }
+        /** 当前/最近工作区路径（task 泳道 cwd 寻址，与侧栏 startSession 同源）。 */
+        const currentCwd = (): string | undefined => {
+          const cur = sessions.list.getSnapshot().current
+          if (cur !== undefined) {
+            const cwd = sessions.list.getSnapshot().byId[cur]?.cwd
+            if (cwd !== undefined && cwd !== '') return cwd
+          }
+          return ctx.workspaces.list.getSnapshot().items[0]?.path
+        }
+        const startTaskLane = async (cwd: string, profileId?: string, permission?: string, model?: NewTaskOptions['model']): Promise<void> => {
+          const args: CreateTaskAgentArgs = {
+            cwd,
+            ...(profileId === undefined || profileId === '' ? {} : { profileId }),
+            ...(permission === undefined || permission === '' ? {} : { permission }),
+            ...(model === undefined ? {} : { model }),
+          }
+          const { sessionId } = await call<CreateTaskAgentResult>('corumAgent', CORUM_AGENT_METHODS.createTaskAgent, args)
+          sessions.open(sessionId as SessionId)
+        }
+        return {
+          listProjects: async () => {
+            const result = await call<ListProjectsResult>('corumProject', CORUM_PROJECT_METHODS.listProjects, {})
+            return result.projects ?? []
+          },
+          openProject: async (projectId) => {
+            sidebarModeLayout(ctx).setSidebarMode('project')
+            // C3b 类型保障实证：wire 参数名是 id（不是 projectId）——原裸传
+            // { projectId } 与 host @Remote('openProject')(id) 签名不符（运行时
+            // 静默错位）；契约类型 OpenProjectArgs 在此编译期拦截并纠正。
+            const args: OpenProjectArgs = { id: projectId }
+            await call('corumProject', CORUM_PROJECT_METHODS.openProject, args)
+          },
+          newProject: async () => {
+            sidebarModeLayout(ctx).setSidebarMode('project')
+            const path = await pickDir()
+            if (path === null || path === '') return
+            const args: OpenProjectByPathArgs = { cwd: path }
+            await call('corumProject', CORUM_PROJECT_METHODS.openProjectByPath, args)
+          },
+          openTask: async (sessionId) => {
+            sidebarModeLayout(ctx).setSidebarMode('task')
+            sessions.open(sessionId as SessionId)
+          },
+          newTask: async (options) => {
+            sidebarModeLayout(ctx).setSidebarMode('task')
+            if (options !== undefined) {
+              await startTaskLane(options.cwd, options.profileId, options.permission, options.model)
+              return
+            }
+            // 无表单参数（兼容旧调用）：cwd 取当前/最近工作区，无则先选目录。
+            const cwd = currentCwd()
+            if (cwd === undefined || cwd === '') {
+              const path = await pickDir()
+              if (path === null || path === '') return
+              await ctx.workspaces.create({ path })
+              await startTaskLane(path)
+              return
+            }
+            await startTaskLane(cwd)
+          },
+          listAgents: async () => {
+            const result = await call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {})
+            return (result.profiles ?? []).map((p) => ({
+              id: p.id,
+              name: p.nickname ?? p.title ?? p.id,
+              ...(p.model === undefined ? {} : { defaultModel: p.model }),
+              ...(p.source === undefined ? {} : { source: p.source }),
+              ...(p.trust === undefined ? {} : { trust: p.trust as 'system' | 'user' }),
+              ...(p.title === undefined ? {} : { title: p.title }),
+              ...(p.dimension === undefined ? {} : { dimension: p.dimension }),
+            }))
+          },
+          listModels: async () => {
+            const result = await call<ListModelsResult>('corumAgent', CORUM_AGENT_METHODS.listModels, {})
+            return (result.providers ?? []).map((p) => ({ id: p.id, name: p.name, models: p.models ?? [] }))
+          },
+          listModelCatalog: async () => {
+            // session/modelCatalog（与 composer 模型选择器同源）——含推理元数据。
+            // 用 connection.rpc.call 直打（不依赖 ctx.remote 的 fiber inject，与
+            // pickDir 同通道同契约）。
+            const result = await connection.rpc.call('/api', 'session/modelCatalog', { args: {} })
+            if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+            const catalog = result.value as { groups?: { id: string; name?: string; models?: { id: string; name?: string; reasoning?: { efforts?: { id: string; name: string; description?: string }[]; defaultEffort?: string } }[] }[] }
+            return (catalog.groups ?? []).map((g) => ({
+              id: g.id,
+              name: g.name ?? g.id,
+              models: (g.models ?? []).map((m) => ({
+                id: m.id,
+                name: m.name ?? m.id,
+                ...(m.reasoning === undefined
+                  ? {}
+                  : {
+                    reasoning: {
+                      efforts: (m.reasoning.efforts ?? []).map((e) => ({
+                        id: e.id,
+                        name: e.name,
+                        ...(e.description === undefined ? {} : { description: e.description }),
+                      })),
+                      ...(m.reasoning.defaultEffort === undefined ? {} : { defaultEffort: m.reasoning.defaultEffort }),
+                    },
+                  }),
+              })),
+            }))
+          },
+          listPermissions: async () => {
+            const result = await call<ListPermissionPresetsResult>('corumAgent', CORUM_AGENT_METHODS.listPermissionPresets, {})
+            return { presets: result.presets ?? [], defaultPreset: result.defaultPreset ?? '' }
+          },
+          getTaskAgentName: async (sessionId) => {
+            // task 泳道会话的 Agent 显示名（设计稿副标语「由 X 执行」）：
+            // listTaskAgents 拿 profileId → listProfiles 映射名称。任一步失败回退 undefined。
+            try {
+              const [tasks, profiles] = await Promise.all([
+                call<ListTaskAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listTaskAgents, {}),
+                call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {}),
+              ])
+              const task = (tasks.tasks ?? []).find((x) => x.sessionId === sessionId)
+              if (task === undefined) return undefined
+              const profile = (profiles.profiles ?? []).find((p) => p.id === task.profileId)
+              return profile === undefined ? undefined : (profile.nickname ?? profile.title ?? profile.id)
+            } catch {
+              return undefined
+            }
+          },
+          getTaskAgentProfileId: async (sessionId) => {
+            try {
+              const tasks = await call<ListTaskAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listTaskAgents, {})
+              return (tasks.tasks ?? []).find((x) => x.sessionId === sessionId)?.profileId
+            } catch {
+              return undefined
+            }
+          },
+          getTaskAgentInfo: async (sessionId) => {
+            // task 泳道 Agent 的名片信息（对话起始页按专业方向定制推荐命令）：
+            // listTaskAgents 拿 profileId → listProfiles 映射 name/title/dimension。
+            // 任一步失败回退 undefined（推荐命令回退通用集）。
+            try {
+              const [tasks, profiles] = await Promise.all([
+                call<ListTaskAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listTaskAgents, {}),
+                call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {}),
+              ])
+              const task = (tasks.tasks ?? []).find((x) => x.sessionId === sessionId)
+              if (task === undefined) return undefined
+              const profile = (profiles.profiles ?? []).find((p) => p.id === task.profileId)
+              if (profile === undefined) return undefined
+              return {
+                name: profile.nickname ?? profile.title ?? profile.id,
+                ...(profile.title === undefined ? {} : { title: profile.title }),
+                ...(profile.dimension === undefined ? {} : { dimension: profile.dimension }),
+              }
+            } catch {
+              return undefined
+            }
+          },
+          selectTaskAgent: async (sessionId, profileId) => {
+            await call('corumAgent', 'selectTaskAgentProfile', { sessionId, profileId })
+          },
+          pickDirectory: pickDir,
+          listWorkspaces: async () => {
+            // 官方 ctx.workspaces.list 快照（与侧栏工作区分组同源）。
+            const items = ctx.workspaces.list.getSnapshot().items
+            return items.map((w) => ({ id: String(w.workspaceId), title: w.title, path: w.path }))
+          },
+        }
+      })(),
+      polishDraft: (() => {
+        const connection = ctx.get('connection') as ConnectionHandle
+        const call = makeCorumRpcCall(connection)
+        return async (sid: string, text: string) => {
+          // 拉泳道事件 → 最近 6 条「user 提问 + AI 最终输出」（text 块，不含 reasoning/tool）。
+          const r = await call<{ events: Array<{ type: string; data: unknown }> }>('corumAgent', 'getTaskSessionEvents', { sessionId: sid, fromSeq: 0 })
+          const history: Array<{ role: 'user' | 'assistant'; text: string }> = []
+          for (const e of r.events) {
+            const content = (e.data as { content?: Array<{ type: string; text?: string }> } | undefined)?.content ?? []
+            const text2 = content.filter(c => c.type === 'text').map(c => c.text ?? '').join('\n').trim()
+            if (text2 === '') continue
+            if (e.type === 'user/message') history.push({ role: 'user', text: text2 })
+            else if (e.type === 'assistant/message') history.push({ role: 'assistant', text: text2 })
+          }
+          const out = await call<{ polished: string }>('corumAgent', 'polishConversation', { text, history: history.slice(-6) })
+          return out.polished
+        }
+      })(),
+      // 「新建任务表单」打开信号面：桥到 ctx.layout 的 grid actions（AppFrame
+      // 持有的监听者集 + pending 标记）。grid actions 尚未 attach（AppFrame
+      // 首渲染前）时退化为 no-op——空态此时也不可能已挂载，调用方无可损失。
+      newTaskForm: {
+        onOpen: (listener) => {
+          const grid = (ctx.layout as { gridActions?: () => { onOpenNewTaskForm: (l: () => void) => () => void } | undefined }).gridActions?.()
+          return grid?.onOpenNewTaskForm(listener) ?? (() => {})
+        },
+        consumePending: () => {
+          const grid = (ctx.layout as { gridActions?: () => { consumePendingNewTaskForm: () => boolean } | undefined }).gridActions?.()
+          return grid?.consumePendingNewTaskForm() ?? false
+        },
       },
     }),
   }, ConversationRoot)

@@ -455,7 +455,7 @@ export function ConversationRoot({
   // task 泳道会话：工作区在建会话时已绑定、Agent 已锁定，**不渲染**
   // 「选择工作区」chip + workspace picker + 官方 agentPreset 选择器——整行不出现
   // （2026-08-31 用户走查：新会话界面顶部不该有「选择工作区」）。Agent 锁定
-  // 标识挪进 composer 工具栏（见 inputBar 的 leftItems）。
+  // 标识挪进 composer 工具栏（见下方 composer.bar 的 toolbarLeading）。
   // 子 Agent 会话同样不渲染（① 用户定调：子 Agent 由父 Agent 管控，无工作区选择）。
   const heroWorkspaceRow = isTaskLane || isSubagentSession
     ? null
@@ -577,8 +577,10 @@ export function ConversationRoot({
         // user clears it.
         ? { blocked: composerBlock, placeholder: composerBlock.reason }
         : hasSession ? {} : { placeholder: t('placeholder.hero') }),
-    overlay: sessionId === undefined ? undefined : renderSlot('conversation.input.overlay', {}),
-    leftItems: zone === undefined ? null : (
+    // corum 工具栏扩展（Agent 选择 + AI 润色）走 corum 增量字段 toolbarLeading
+    //（官方 0.1.3 删除了 overlay/leftItems/rightItems/footer owner props，槽由
+    // InputBar 自渲染；corum 工具栏内定制经 toolbarLeading 渲染在 accessSelect 后）。
+    toolbarLeading: zone === undefined ? undefined : (
       <>
         {/* Agent 选择放进 composer 工具栏（2026-09-02 用户定调）：task 泳道 composer
             的 Agent 从只读锁定 chip 改为可选下拉——**只在 blank（未发首条消息）时
@@ -587,9 +589,6 @@ export function ConversationRoot({
         {isTaskLane && summaryBlank === true && (
           <span className={css.agentLockChip} data-select>
             <Bot size={12} />
-            {/* 二级分组选择器（2026-09-07）：预置 25 角色后列表收敛为通用/
-                Corum 内置/用户三组 + 组内展开；面板向右上浮出（chip 在 composer
-                工具栏底部），切换失败仍走 agentSwitchError 提示。 */}
             <AgentTwoLevelSelect
               agents={agentOptions}
               value={agentProfileId}
@@ -618,7 +617,6 @@ export function ConversationRoot({
             />
           </span>
         )}
-        {renderSlot('conversation.input.left', zone)}
         {/* 会话内提示词润色（结合最近对话上下文，意图自动判断：推进/新问题/BUG） */}
         {hasSession && (
           <button
@@ -633,9 +631,6 @@ export function ConversationRoot({
         )}
       </>
     ),
-    rightItems: zone === undefined ? null : renderSlot('conversation.input.right', zone),
-    // Ambient dock under the card shares the composer's width constraint.
-    footer: hasSession && zone !== undefined ? renderSlot('conversation.composer.dock', zone) : null,
   })
 
   // blank 会话（刚建好还没发消息）也按 hero 相位布局：让 scrollBody 垂直居中、

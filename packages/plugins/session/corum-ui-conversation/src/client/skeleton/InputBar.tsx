@@ -46,7 +46,7 @@ export const InputBar = memo(function InputBar({
   renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory,
+  placeholder, accessory, toolbarLeading,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -519,6 +519,7 @@ export const InputBar = memo(function InputBar({
                 菜单（accessSelect），不是静态图标。locked 仅在会话被移除/离线/被
                 block 时禁用，正常情况下可随时切换档位。 */}
             {accessSelect}
+            {toolbarLeading}
             {input === undefined || sessionId === undefined
               ? null
               : renderSlot('conversation.input.left', {})}

@@ -440,6 +440,10 @@ export interface ComposerBarOwnerProps {
   placeholder?: string
   /** Optional content rendered above the composer surface. */
   accessory?: ReactNode
+  /** fork（corum）：工具栏左侧前导内容（Agent 选择下拉 + AI 润色按钮），渲染在
+   * 访问模式选择器之后、`conversation.input.left` 槽之前。官方 0.1.3 删除了
+   * leftItems owner prop，corum 以此增量字段保留工具栏内定制（不改官方字段）。 */
+  toolbarLeading?: ReactNode
 }
 
 /** Package-private operations injected into the resident composer bar. */
