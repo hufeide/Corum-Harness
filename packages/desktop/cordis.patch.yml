@@ -64,6 +64,17 @@
 - id: ui-model-selection
   disabled: true
 
+# The official Plugins settings surface is forked into
+# @corum/corum-ui-settings-plugins: the fork removes the official
+# SubagentModelSelectionCard (the "let the LLM pick the subagent model" switch)
+# — that switch is semantically incompatible with fork #10's model lock
+# (config.model is a mechanism-fixed route with no LLM parameter surface), and
+# keeping it would mislead users. The fixed-route configuration lives in the
+# corum「子 Agent」settings section (corum-subagent namespace). Disable the
+# official row and mount the fork below so only one Plugins section registers.
+- id: ui-settings-plugins
+  disabled: true
+
 # The auto directory picker resolves bind host / SSH / display, then mounts a
 # browse or native backend — the browse backend and the auto row itself inject
 # webServer. The desktop surface pins the native backend (koffi FFI, no HTTP).
@@ -95,6 +106,15 @@
 # （$mount/$on）零感知。
 - id: api-remotes
   disabled: true
+
+# 子 Agent 隔离方案（docs/plan/PLAN-subagent-isolation.md，fork #9/#10）：
+# 官方 dsh-subagent seam 的 SubagentStartRequest 无 cwd 字段——worktree 硬隔离
+# 需要子会话 header.cwd 可指定（fs 写沙箱边界/shell/{{cwd}} 全跟随）。fork 包
+# @corum/corum-subagent 以 **corum-spawn** provider 名注册进官方 seam（与官方
+# spawn 并存、互不抢名）：官方 spawn 行保留（官方 tool-subagent 的 subagent_fork/
+# codex/claude-code 实例与 workflow 只读 fan-out 继续走它），corum preset 的双
+# 实例（subagent/subagent_research，corum-agent compile.ts 生成）指向 corum-spawn。
+# 官方 seam 服务行不动（服务 `subagents` 唯一）；fork 侧只挂 provider + invariant。
 
 # ── desktop persona ─────────────────────────────────────────────────────────
 
@@ -131,6 +151,20 @@
     - id: corum-api-remotes
       name: '@corum/corum-api-remotes'
 
+    # Fork #9 spawn provider（见上方「子 Agent 隔离方案」注释）：注册
+    # 'corum-spawn' provider 进官方 subagents seam——官方 spawn 并存不冲突。
+    # 插件包内部含 seam 全部类型（自包含，不从官方 dsh-subagent import），
+    # 运行时与官方 seam 共享同一 Context 合并声明（同名 Events/服务面）。
+    - id: corum-subagent-spawn
+      name: '@corum/corum-subagent/spawn'
+
+    # Fork #10 工具包本体不单独挂行——工具实例由 corum preset 的 delegation 组
+    # 双实例行（tool-subagent / tool-subagent-research，corum-agent compile.ts
+    # 生成，name '@corum/corum-tool-subagent'）按会话挂载；host 侧只需包可
+    # 解析（desktop deps 已链）。官方 base 的 tool-subagent 行保留：官方
+    # subagent_fork / codex / claude-code 实例与 workflow 只读 fan-out 继续走它。
+    # invariant 不挂（官方组合未挂 subagent-invariant，fork 对齐同纪律）。
+
     # Native-only directory picker (the desktop always sits on the host
     # display); replaces the disabled auto row above. The `-auto` row would
     # have mounted BOTH the host backend and the client surface; pinning the
@@ -153,6 +187,12 @@
     # ui-model-selection row above).
     - id: corum-ui-model-selection
       name: '@corum/corum-ui-model-selection'
+
+    # Forked Plugins settings surface: removes the official
+    # SubagentModelSelectionCard registration (replaces the disabled official
+    # ui-settings-plugins row above).
+    - id: corum-ui-settings-plugins
+      name: '@corum/corum-ui-settings-plugins'
 
     # The desktop bundle's own host + client halves. The host half
     # (corum-desktop-app, src/index.ts) provides the desktop surface prompt +

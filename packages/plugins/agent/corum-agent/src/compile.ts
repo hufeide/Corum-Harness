@@ -27,7 +27,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
-import type { AgentProfile, BaseMode, ProfileModel, PersonaPreset } from './profile.ts'
+import type { AgentProfile, BaseMode, ProfileModel, PersonaPreset, ParallelWorkPolicy } from './profile.ts'
 
 /**
  * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
@@ -75,13 +75,68 @@ export interface CompiledPreset {
  * **官方升级同步**：bump dsh-agent-presets 后，对照官方 standard 源文件逐行
  * diff 本数组（结构一致，机械合并）。
  *
- * @param subagentModel - 子 Agent 默认 LLM 路由（可选）。dsh `tool-subagent`
- *   原生支持 `Config.agentOptions` 作为该 tool 实例 spawn 的所有子 Agent 的
- *   默认 agentOptions（`requestedAgentOptions()` 把它作 baseline，逐次调用
- *   仍可覆盖）；profile.subagentModel 即映射到该 config，缺省则不注入
- *   （子 Agent 走 `resolveChildAgentOptions` 的 parentOptions 兜底 = 同主 Agent）。
+/**
+ * fork #10 双实例行的 config 构造：profile 级覆盖（parallelWork/subagentModel/
+ * researchModel）只写显式键，缺省由 host settings namespace `corum-subagent`
+ * 兜底（三级配置模型，PLAN §1.6）。
  */
-function standardRows(subagentModel?: ProfileModel): CordisRow[] {
+function corumSubagentConfig(
+  role: 'worker' | 'research',
+  profile: { subagentModel?: ProfileModel; researchModel?: ProfileModel; parallelWork?: ParallelWorkPolicy },
+  mcpDenyNames: readonly string[],
+): Record<string, unknown> {
+  const pw = profile.parallelWork
+  const config: Record<string, unknown> = {
+    provider: 'corum-spawn',
+    toolName: role === 'worker' ? 'subagent' : 'subagent_research',
+    modelSelectionSettings: false,
+    backgroundMode: 'continuable',
+  }
+  // 模型锁（机制固化，设什么跑什么；research 缺省同 worker）。
+  const model = role === 'worker' ? profile.subagentModel : (profile.researchModel ?? profile.subagentModel)
+  if (model !== undefined) {
+    config.model = {
+      provider: model.provider,
+      model: model.model,
+      ...(model.reasoningEffort !== undefined && model.reasoningEffort !== ''
+        ? { reasoningEffort: model.reasoningEffort }
+        : {}),
+    }
+  }
+  if (role === 'research') {
+    // 只读研究实例：预 deny 全部写工具 + 已授权 MCP 工具前缀；不可移除（恒输出）。
+    config.readonlyResearch = true
+    config.toolFilter = { deny: [...corumWriteToolsForPlatform(), ...mcpDenyNames] }
+    return config
+  }
+  // worker 实例：isolation 策略（只写显式键）。
+  const isolation: Record<string, unknown> = {}
+  if (pw?.isolation !== undefined) isolation.mode = pw.isolation
+  if (pw?.worktreeRoot !== undefined) isolation.worktreeRoot = pw.worktreeRoot
+  if (pw?.branchPrefix !== undefined) isolation.branchPrefix = pw.branchPrefix
+  if (pw?.autoCleanup !== undefined) isolation.autoCleanup = pw.autoCleanup
+  if (pw?.denyDirectFs !== undefined) isolation.denyDirectFs = pw.denyDirectFs
+  if (Object.keys(isolation).length > 0) config.isolation = isolation
+  if (pw?.maxParallelChildren !== undefined) config.maxParallelChildren = pw.maxParallelChildren
+  if (pw?.integrateChecks !== undefined) config.integrateChecks = pw.integrateChecks
+  if (pw?.merger !== undefined) config.merger = pw.merger
+  return config
+}
+
+/** fork #10：写工具清单（research 实例预 deny；与 fork #10 常量对账，见单测）。 */
+const CORUM_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh']
+
+/**
+ * 平台实际存在的写工具（deny 名单只能包含已注册工具——tools.restrict 对未知名
+ * fail loud。pwsh 仅在 win32 装载，见 standardRows tool-pwsh 行的 !!js 条件）。
+ */
+function corumWriteToolsForPlatform(): readonly string[] {
+  return process.platform === 'win32'
+    ? CORUM_WRITE_TOOLS
+    : CORUM_WRITE_TOOLS.filter(t => t !== 'pwsh')
+}
+
+function standardRows(): CordisRow[] {
   return [
     // ── identity ──
     // agent-instructions 原在 identity 区；corum 把它移进 filesystem 组（与
@@ -155,30 +210,8 @@ function standardRows(subagentModel?: ProfileModel): CordisRow[] {
       children: [
         { id: 'tool-subagent-control', name: '@deepseek-ai/dsh-tool-subagent-control' },
         { id: 'tool-subagent-list-agents', name: '@deepseek-ai/dsh-tool-subagent-control/list-agents' },
-        {
-          id: 'tool-subagent',
-          name: '@deepseek-ai/dsh-tool-subagent',
-          config: {
-            provider: 'spawn',
-            toolName: 'subagent',
-            modelSelectionSettings: true,
-            backgroundMode: 'continuable',
-            // 子 Agent 默认模型（profile.subagentModel）：映射 dsh 原生
-            // Config.agentOptions。reasoningEffort 缺省不注入——dsh 在换路由且
-            // 未显式给 effort 时会丢弃继承值、用新模型默认档（与模型页默认 high 一致）。
-            ...(subagentModel !== undefined
-              ? {
-                  agentOptions: {
-                    provider: subagentModel.provider,
-                    model: subagentModel.model,
-                    ...(subagentModel.reasoningEffort !== undefined && subagentModel.reasoningEffort !== ''
-                      ? { reasoningEffort: subagentModel.reasoningEffort }
-                      : {}),
-                  },
-                }
-              : {}),
-          },
-        },
+        // fork（corum）：tool-subagent 行由 compilePreset 的 fork #10 双实例替换
+        // （corumSubagentRows），此处仅占位注释——行序保持 delegation 组语义。
         {
           id: 'tool-subagent-fork',
           name: '@deepseek-ai/dsh-tool-subagent',
@@ -395,8 +428,30 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
         ...(isComplete ? { complete: true, includeRuntimeContext: false } : {}),
       },
     },
-    ...standardRows(profile.subagentModel),
+    ...standardRows(),
   ]
+
+  // fork（corum）双实例行：worker（subagent，全功能+隔离）+ research
+  // （subagent_research，只读不可移除）——插在 delegation 组 tool-subagent-fork
+  // 之前（原官方 tool-subagent 行位）。MCP deny 名单 = 已授权 MCP 服务工具前缀。
+  const mcpDenyNames = resolveMcpServers(profile.mcpServers).map(m => m.name)
+  const delegation = rows.find(r => r.id === 'delegation')
+  if (delegation?.children !== undefined) {
+    const forkIdx = delegation.children.findIndex(c => c.id === 'tool-subagent-fork')
+    const insertAt = forkIdx >= 0 ? forkIdx : delegation.children.length
+    delegation.children.splice(insertAt, 0,
+      {
+        id: 'tool-subagent',
+        name: '@corum/corum-tool-subagent',
+        config: corumSubagentConfig('worker', profile, mcpDenyNames),
+      },
+      {
+        id: 'tool-subagent-research',
+        name: '@corum/corum-tool-subagent',
+        config: corumSubagentConfig('research', profile, mcpDenyNames),
+      },
+    )
+  }
 
   // corum 覆盖 ①：一次性 tool-bash/tool-pwsh → persistent-shell 持久终端组。
   // sandbox 策略由 host 层提供；profile.terminal.mode 仅记录意图（host 级敏感

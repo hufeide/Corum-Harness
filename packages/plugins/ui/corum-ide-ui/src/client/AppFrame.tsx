@@ -17,6 +17,12 @@ import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+// SessionListState 的结构类型（与 dsh-api-session-controller/client 同名类型同构；
+// 包未直接依赖该 controller——结构窄化避免新增运行时依赖，见 AGENTS.md 红线 3）。
+interface SessionListState {
+  current?: string | undefined
+  byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
+}
 import type { createLayoutStore } from './stores.ts'
 import type { GridActions } from './service.ts'
 import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal } from 'lucide-react'
@@ -350,9 +356,9 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
   const [detailOpen, setDetailOpen] = useState(false)
   const title = sessionTitle || '新会话'
   // 当前会话的统计投影（session/list 行 projectionValues）——真实数据，替代硬编码。
-  const projections = useSessions((s) => {
+  const projections = useSessions((s: SessionListState) => {
     if (currentSessionId === undefined) return undefined
-    return (s.byId as Readonly<Record<string, { projectionValues?: AgentSessionProjections }>>)[currentSessionId]?.projectionValues
+    return (s.byId as unknown as Readonly<Record<string, { projectionValues?: AgentSessionProjections }>>)[currentSessionId]?.projectionValues
   })
 
   // 标题溢出检测（字号/内容/宽度变化时重测）。用 useLayoutEffect 在 paint 前
@@ -579,8 +585,8 @@ export function IdeAppFrame({
   openPluginManager: onOpenPluginManager,
   attachGridActions,
 }: AppFrameProps) {
-  const panels = useStore(s => s)
-  const detailsSession = useSessions((s) => {
+  const panels = useStore((s: unknown) => s)
+  const detailsSession = useSessions((s: SessionListState) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
@@ -588,7 +594,7 @@ export function IdeAppFrame({
   // blank 先判——官方 displayTitle 此刻回落到**工作区目录名**（displayTitleOf
   // 的 workspaceTitleOf(cwd) 兜底），不是空串，故必须按 blank 判断，不能写成
   // `displayTitle || (blank ? '新会话' : …)`——那样永远走不到「新会话」。
-  const currentSessionTitle = useSessions((s) => {
+  const currentSessionTitle = useSessions((s: SessionListState) => {
     const current = s.current
     if (current === undefined) return undefined
     const session = s.byId[current]
@@ -596,10 +602,10 @@ export function IdeAppFrame({
     if (session.blank === true) return '新会话'
     return session.displayTitle || undefined
   })
-  const themePreference = useTheme((p) => p)
+  const themePreference = useTheme((p: ThemePreference) => p)
   // 空态判定（2026-08-30 用户走查：空态时 Agent 标题栏——会话标题/状态胶囊/
   // 轨迹按钮——不该显示，那是会话态信息）。hero = 无当前会话 OR 当前会话 blank。
-  const isHero = useSessions((s) => {
+  const isHero = useSessions((s: SessionListState) => {
     const current = s.current
     return current === undefined || s.byId[current]?.blank === true
   })

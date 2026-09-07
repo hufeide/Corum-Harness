@@ -249,3 +249,79 @@
   50% { margin-left: 60%; }
   100% { margin-left: 0; }
 }
+
+/* 「并行工作区」chip（P0-3；fork #10 台账帧驱动） */
+.ledgerChipWrap {
+  position: relative;
+  margin-top: 6px;
+  display: flex;
+}
+
+.ledgerChipActive,
+.ledgerChipDone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ledgerChipActive {
+  border: 1px solid var(--corum-glass-border-active, #01CDFE);
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  color: var(--dsw-alias-brand-text);
+}
+
+.ledgerChipDone {
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.ledgerPanel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
+  background: var(--corum-glass-1, rgba(24, 14, 40, 0.96));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ledgerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.ledgerBranch {
+  font-family: var(--dsw-font-mono, monospace);
+  color: var(--dsw-alias-label-primary);
+}
+
+.ledgerStatus {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.ledgerStatus[data-status='active'] {
+  color: var(--dsw-alias-brand-text);
+}
+
+.ledgerStatus[data-status='settled'] {
+  color: var(--dsw-alias-state-warning-primary, #e0a93e);
+}
+
+.ledgerStatus[data-status='integrated'] {
+  color: var(--dsw-alias-state-success-primary);
+}

@@ -258,7 +258,22 @@ declare module '@deepseek-ai/cordis' {
     'corum/file/changed'(data: FileChangedEvent): void
     /** corum/subagent/progress：子 Agent 会话进度增量推送（统一事件中心三期；SubagentCard 进度轮询迁移的承载事件）。 */
     'corum/subagent/progress'(data: SubagentProgressEvent): void
+    /** corum/worktree-ledger：子 Agent 隔离台账快照（fork #10 发射；「并行工作区」chip 订阅源）。 */
+    'corum/worktree-ledger'(data: CorumWorktreeLedgerFrameEvent): void
   }
+}
+
+/** corum/worktree-ledger 帧（与 fork #10 CorumWorktreeLedgerFrame 同构，自包含声明）。 */
+export interface CorumWorktreeLedgerFrameEvent {
+  readonly sessionId: string
+  readonly entries: readonly {
+    readonly slug: string
+    readonly branch: string
+    readonly path: string
+    readonly status: 'active' | 'settled' | 'integrated' | 'discarded'
+    readonly runId?: string
+  }[]
+  readonly pending: number
 }
 
 // ── Remote 转发选择面（renderer $on 的 key 面）──────────────────────────────
@@ -280,6 +295,7 @@ export type CorumForwardedEvent =
   | 'corum/terminal/output'
   | 'corum/file/changed'
   | 'corum/subagent/progress'
+  | 'corum/worktree-ledger'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}

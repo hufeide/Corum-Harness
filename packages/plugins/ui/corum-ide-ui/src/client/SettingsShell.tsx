@@ -249,13 +249,13 @@ export function SettingsShell(props: SettingsRootComponentProps) {
     return () => { window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, handler) }
   }, [openSection])
 
-  const rows = useSections(s => s)
-  const onboardingSteps = useOnboardingSteps(s => s)
-  const onboardingActive = useSessions(state =>
+  const rows = useSections((s: unknown) => s)
+  const onboardingSteps = useOnboardingSteps((s: unknown) => s)
+  const onboardingActive = useSessions((state: { phase: string; current?: string; byId: Record<string, { blank?: boolean }> }) =>
     state.phase === 'ready'
     && (state.current === undefined || state.byId[state.current]?.blank === true))
   const onboardingStep = onboardingActive
-    ? onboardingSteps.find(step => !completedOnboarding.has(step.id))
+    ? onboardingSteps.find((step: { id: string }) => !completedOnboarding.has(step.id))
     : undefined
 
   useEffect(() => {

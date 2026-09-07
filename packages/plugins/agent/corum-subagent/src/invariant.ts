@@ -4,10 +4,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import type { SubagentProvider, SubagentRunEndInfo, SubagentRunInfo } from './types.ts'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-subagent'
+const PACKAGE_NAME = '@corum/corum-subagent'
 
 /** Cordis companion plugin name. */
-export const name = 'subagent-invariant'
+export const name = 'corum-subagent-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 

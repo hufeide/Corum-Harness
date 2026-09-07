@@ -109,6 +109,10 @@ export interface ProfileSummary {
   model: { provider: string; model: string; reasoningEffort?: string }
   /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
   subagentModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
+  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
+  parallelWork?: import('./profile.ts').ParallelWorkPolicy
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
@@ -189,6 +193,10 @@ export interface SaveProfileInput {
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
   subagentModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
+  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
+  parallelWork?: import('./profile.ts').ParallelWorkPolicy
   /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
@@ -696,6 +704,8 @@ export class CorumAgentService extends TypertRemoteService {
       prompt: p.prompt,
       model: p.model,
       ...(p.subagentModel !== undefined ? { subagentModel: p.subagentModel } : {}),
+      ...(p.researchModel !== undefined ? { researchModel: p.researchModel } : {}),
+      ...(p.parallelWork !== undefined ? { parallelWork: p.parallelWork } : {}),
       skills: p.skills,
       mcpServers: p.mcpServers,
       terminal: { mode: p.terminal.mode },
@@ -794,6 +804,8 @@ export class CorumAgentService extends TypertRemoteService {
       prompt: input.prompt,
       model: input.model,
       ...(input.subagentModel !== undefined ? { subagentModel: input.subagentModel } : {}),
+      ...(input.researchModel !== undefined ? { researchModel: input.researchModel } : {}),
+      ...(input.parallelWork !== undefined ? { parallelWork: input.parallelWork } : {}),
       skills: input.skills,
       mcpServers: input.mcpServers,
       terminal: input.terminal,
@@ -824,6 +836,8 @@ export class CorumAgentService extends TypertRemoteService {
         prompt: saved.prompt,
         model: saved.model,
         ...(saved.subagentModel !== undefined ? { subagentModel: saved.subagentModel } : {}),
+        ...(saved.researchModel !== undefined ? { researchModel: saved.researchModel } : {}),
+        ...(saved.parallelWork !== undefined ? { parallelWork: saved.parallelWork } : {}),
         skills: saved.skills,
         mcpServers: saved.mcpServers,
         terminal: { mode: saved.terminal.mode },

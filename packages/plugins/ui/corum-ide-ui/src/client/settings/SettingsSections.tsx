@@ -28,6 +28,26 @@ import css from './SettingsSections.module.css'
 /** 全局 RPC 调用函数上下文：SkillsSection 等业务 section 经此调 host 服务。 */
 export const CorumRpcContext = createContext<CorumRpcCall | null>(null)
 
+/** 「子 Agent」section 的 settings 面（describe 镜像读 + mutate 写）。 */
+export interface CorumSettingsFace {
+  /** settings 命名空间镜像（uSES 源：getSnapshot/subscribe/ensure）。 */
+  readonly describe: {
+    getSnapshot(): { status: string; view?: { namespaces: readonly { ns: string; value: unknown; user?: unknown; revision: number }[]; writable: boolean } | undefined; error: string | null }
+    subscribe(listener: () => void): () => void
+    ensure(): Promise<void>
+    acceptView(view: unknown): void
+  }
+  /** remote.settings.mutate 直通（namespace, ops, expectedRevision）。 */
+  readonly mutate: (ns: string, ops: readonly { op: 'set' | 'unset'; path: readonly string[]; value?: unknown }[], revision?: number) => Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>
+}
+
+/** settings 面 Context（与 CorumRpcContext 同构下发；仅「子 Agent」section 消费）。 */
+export const CorumSettingsContext = createContext<CorumSettingsFace | null>(null)
+
+function useCorumSettings(): CorumSettingsFace | null {
+  return useContext(CorumSettingsContext)
+}
+
 /** 取出 RPC 调用函数；未 provide 时返回 null（组件降级为静态占位）。 */
 function useCorumRpc(): CorumRpcCall | null {
   return useContext(CorumRpcContext)
@@ -385,6 +405,195 @@ function HooksSection() {
   )
 }
 
+/* ── 子 Agent（全局默认配置：三级配置第一级；corum-subagent namespace）────────── */
+
+/** corum-subagent 全局设置的用户层形（describe 镜像的 value/user 投影）。 */
+interface SubagentGlobalView {
+  isolationMode?: 'always' | 'write-tasks' | 'off'
+  worktreeRoot?: string
+  branchPrefix?: string
+  autoCleanup?: boolean
+  denyDirectFs?: boolean
+  maxParallelChildren?: number
+  integrateChecks?: string[]
+  merger?: 'parent' | 'merger'
+  defaultModel?: { provider: string; model: string; reasoningEffort?: string }
+  defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
+}
+
+const SUBAGENT_NS = 'corum-subagent'
+
+function SubagentSection() {
+  const settings = useCorumSettings()
+  const [, force] = useState(0)
+  // describe 镜像订阅（uSES 源；snapshot 变更即重渲染）。
+  useEffect(() => {
+    if (settings === null) return undefined
+    void settings.describe.ensure()
+    return settings.describe.subscribe(() => { force(v => v + 1) })
+  }, [settings])
+
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (settings === null) return <p className={css.hintText}>settings 服务未就绪。</p>
+  const snapshot = settings.describe.getSnapshot()
+  const ns = snapshot.view?.namespaces.find(n => n.ns === SUBAGENT_NS)
+  const resolved = (ns?.value ?? {}) as SubagentGlobalView
+  const user = (ns?.user ?? {}) as SubagentGlobalView
+  const writable = snapshot.view?.writable === true
+
+  /** 单键写入（unset 清除回落默认；revision 防并发覆盖）。 */
+  const apply = async (field: keyof SubagentGlobalView, value: unknown): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const ops = value === undefined
+        ? [{ op: 'unset' as const, path: [field] }]
+        : [{ op: 'set' as const, path: [field], value }]
+      const res = await settings.mutate(SUBAGENT_NS, ops, ns?.revision)
+      if (!res.ok) setError(res.error?.message ?? '写入失败')
+      else if (res.value !== undefined) settings.describe.acceptView(res.value)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const loading = snapshot.status === 'loading' || snapshot.status === 'idle'
+
+  return (
+    <>
+      <div className={css.topRow}>
+        <span className={css.topHint}>
+          子 Agent 的全局默认配置（三级配置第一级）。Agent 预设可逐键覆盖；未覆盖的键回落这里的值。
+          留空 = 机制内置默认。research 实例（subagent_research）为只读实例，恒挂载、不可移除。
+        </span>
+      </div>
+      {error !== null && <p className={css.hintText} style={{ color: 'var(--dsw-alias-state-danger-primary)' }}>{error}</p>}
+      <SettingGroup title="隔离与并行">
+        <SettingRow label="隔离模式" desc="子 Agent 写任务自动隔离到独立 git worktree；需 git 工作区。">
+          <SelectField
+            value={user.isolationMode ?? ''}
+            options={[
+              { id: '', label: `默认（${resolved.isolationMode ?? 'write-tasks'}）` },
+              { id: 'write-tasks', label: 'write-tasks · 写任务隔离' },
+              { id: 'always', label: 'always · 凡召唤必隔离' },
+              { id: 'off', label: 'off · 不隔离' },
+            ]}
+            disabled={!writable || busy || loading}
+            onChange={v => { void apply('isolationMode', v === '' ? undefined : v) }}
+          />
+        </SettingRow>
+        <SettingRow label="并行子 Agent 上限" desc="会话级并行召唤数上限（超出拒绝新召唤）。">
+          <input
+            className={css.textInput}
+            defaultValue={user.maxParallelChildren !== undefined ? String(user.maxParallelChildren) : ''}
+            placeholder={String(resolved.maxParallelChildren ?? 4)}
+            disabled={!writable || busy || loading}
+            onBlur={e => {
+              const raw = e.target.value.trim()
+              const n = Number.parseInt(raw, 10)
+              void apply('maxParallelChildren', raw === '' ? undefined : (Number.isInteger(n) && n > 0 ? n : undefined))
+            }}
+          />
+        </SettingRow>
+        <SettingRow label="自动清理" desc="集成或会话结束后自动删除 worktree 与分支。" divider={false}>
+          <Switch
+            checked={user.autoCleanup ?? resolved.autoCleanup ?? true}
+            disabled={!writable || busy || loading}
+            onChange={v => { void apply('autoCleanup', v) }}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="集成">
+        <SettingRow label="合并者" desc="parent=主 Agent 亲自合并（上下文全）；merger=集成专家身份汇报（当前为汇报格式差异，独立编排后续版本）。">
+          <SelectField
+            value={user.merger ?? ''}
+            options={[
+              { id: '', label: `默认（${resolved.merger ?? 'parent'}）` },
+              { id: 'parent', label: 'parent · 主 Agent 合并' },
+              { id: 'merger', label: 'merger · 集成专家汇报' },
+            ]}
+            disabled={!writable || busy || loading}
+            onChange={v => { void apply('merger', v === '' ? undefined : v) }}
+          />
+        </SettingRow>
+        <SettingRow label="集成核查命令（兜底）" desc="每行一条，仅在主 Agent 未声明验证方式时作为最低限度约束。推荐做法：主 Agent 发起 integrate 时按需声明本仓库的编译/运行/验证命令（它最懂这个仓库）；功能性验收由主 Agent 基于原始目标最终裁决。留空 = 按仓库形态自动探测兜底。" divider={false}>
+          <textarea
+            className={css.textInput}
+            rows={3}
+            defaultValue={user.integrateChecks?.join('\n') ?? ''}
+            placeholder="（自动探测）"
+            disabled={!writable || busy || loading}
+            onBlur={e => {
+              const lines = e.target.value.split('\n').map(s => s.trim()).filter(s => s !== '')
+              void apply('integrateChecks', lines.length > 0 ? lines : undefined)
+            }}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="默认模型">
+        <SettingRow label="worker 子 Agent" desc="写任务召唤的固定模型（机制锁，设什么跑什么）；留空 = 跟随主 Agent。" divider={false}>
+          <ModelPairField
+            value={user.defaultModel}
+            disabled={!writable || busy || loading}
+            onChange={v => { void apply('defaultModel', v) }}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="research 子 Agent（只读实例）">
+        <SettingRow label="默认模型" desc="只读研究召唤的固定模型；留空 = 同 worker。" divider={false}>
+          <ModelPairField
+            value={user.defaultResearchModel}
+            disabled={!writable || busy || loading}
+            onChange={v => { void apply('defaultResearchModel', v) }}
+          />
+        </SettingRow>
+      </SettingGroup>
+    </>
+  )
+}
+
+/** 模型对字段（provider/model 两列；空 = 未设置跟随兜底）。 */
+function ModelPairField({ value, disabled, onChange }: {
+  value: { provider: string; model: string; reasoningEffort?: string } | undefined
+  disabled: boolean
+  onChange: (v: { provider: string; model: string } | undefined) => void
+}) {
+  const [provider, setProvider] = useState(value?.provider ?? '')
+  const [model, setModel] = useState(value?.model ?? '')
+  return (
+    <div className={css.selectStack}>
+      <input
+        className={css.textInput}
+        value={provider}
+        placeholder="provider（如 deepseek-official）"
+        disabled={disabled}
+        onChange={e => { setProvider(e.target.value) }}
+        onBlur={() => {
+          const p = provider.trim()
+          const m = model.trim()
+          onChange(p !== '' && m !== '' ? { provider: p, model: m } : undefined)
+        }}
+      />
+      <input
+        className={css.textInput}
+        value={model}
+        placeholder="model（如 deepseek-v4-flash）"
+        disabled={disabled}
+        onChange={e => { setModel(e.target.value) }}
+        onBlur={() => {
+          const p = provider.trim()
+          const m = model.trim()
+          onChange(p !== '' && m !== '' ? { provider: p, model: m } : undefined)
+        }}
+      />
+    </div>
+  )
+}
+
 /* ── Agent 预设（名片式 + 筛选 + 详情编辑）────────────────────────────── */
 
 /** ProfileSummary 投影（与 host agent-service.ts 对齐）。 */
@@ -402,6 +611,10 @@ interface AgentProfileSummary {
   model: { provider: string; model: string; reasoningEffort?: string }
   /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
   subagentModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
+  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
+  parallelWork?: ParallelWorkDraft
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
@@ -410,6 +623,18 @@ interface AgentProfileSummary {
   version: number
   trust: string
   source: 'corum' | 'official'
+}
+
+/** 并行开发策略的 UI 投影（与 host profile.ts ParallelWorkPolicy 逐字段对齐）。 */
+interface ParallelWorkDraft {
+  isolation?: 'always' | 'write-tasks' | 'off'
+  worktreeRoot?: string
+  branchPrefix?: string
+  merger?: 'parent' | 'merger'
+  maxParallelChildren?: number
+  autoCleanup?: boolean
+  denyDirectFs?: boolean
+  integrateChecks?: string[]
 }
 
 const AGENT_DIMENSIONS = ['研发', '产品', '设计', '市场', '自媒体', '创作'] as const
@@ -554,6 +779,15 @@ interface EditDraft {
   subEnabled: boolean
   subProvider: string
   subModel: string
+  /** 研究子 Agent 模型（subagent_research 只读实例；缺省同子 Agent）。 */
+  researchEnabled: boolean
+  researchProvider: string
+  researchModel: string
+  /** 并行开发策略（undefined 段 = 跟随全局/默认）。 */
+  pwIsolation: '' | 'always' | 'write-tasks' | 'off'
+  pwMerger: '' | 'parent' | 'merger'
+  pwMaxParallel: string
+  pwIntegrateChecks: string
   terminal: 'sandbox' | 'host'
   /** 记忆功能开关（设计稿 GHBvv「记忆功能」switch；持久化在 memoryPolicy.scope）。 */
   memoryEnabled: boolean
@@ -567,6 +801,8 @@ function emptyDraft(): EditDraft {
     name: '', nickname: '', title: '', domain: '', dimension: '研发', experience: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
+    researchEnabled: false, researchProvider: 'deepseek-official', researchModel: 'deepseek-v4-flash',
+    pwIsolation: '', pwMerger: '', pwMaxParallel: '', pwIntegrateChecks: '',
     terminal: 'sandbox', memoryEnabled: false, skills: [], mcpServers: [], trust: 'user',
   }
 }
@@ -590,12 +826,31 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     subEnabled: p.subagentModel !== undefined,
     subProvider: p.subagentModel?.provider ?? 'deepseek-official',
     subModel: p.subagentModel?.model ?? 'deepseek-v4-flash',
+    researchEnabled: p.researchModel !== undefined,
+    researchProvider: p.researchModel?.provider ?? 'deepseek-official',
+    researchModel: p.researchModel?.model ?? 'deepseek-v4-flash',
+    pwIsolation: p.parallelWork?.isolation ?? '',
+    pwMerger: p.parallelWork?.merger ?? '',
+    pwMaxParallel: p.parallelWork?.maxParallelChildren !== undefined ? String(p.parallelWork.maxParallelChildren) : '',
+    pwIntegrateChecks: p.parallelWork?.integrateChecks?.join('\n') ?? '',
     terminal: (p.terminal.mode === 'host' ? 'host' : 'sandbox') as 'sandbox' | 'host',
     memoryEnabled: p.memoryEnabled === true,
     skills: p.skills,
     mcpServers: p.mcpServers,
     trust: (p.trust === 'system' ? 'system' : 'user') as 'system' | 'user',
   }
+}
+
+/** 从编辑草稿构造 parallelWork 载荷：全空 → 不带键（跟随全局/默认）。 */
+function buildParallelWork(draft: EditDraft): { parallelWork?: ParallelWorkDraft } {
+  const pw: ParallelWorkDraft = {}
+  if (draft.pwIsolation !== '') pw.isolation = draft.pwIsolation
+  if (draft.pwMerger !== '') pw.merger = draft.pwMerger
+  const maxParallel = Number.parseInt(draft.pwMaxParallel, 10)
+  if (draft.pwMaxParallel.trim() !== '' && Number.isInteger(maxParallel) && maxParallel > 0) pw.maxParallelChildren = maxParallel
+  const checks = draft.pwIntegrateChecks.split('\n').map(s => s.trim()).filter(s => s !== '')
+  if (checks.length > 0) pw.integrateChecks = checks
+  return Object.keys(pw).length > 0 ? { parallelWork: pw } : {}
 }
 
 /* ── 虚位以待占位卡（每行不足 3 张时补齐）───────────────────────────── */
@@ -903,6 +1158,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           prompt: draft.prompt,
           model: { provider: draft.provider, model: draft.model },
           ...(draft.subEnabled ? { subagentModel: { provider: draft.subProvider, model: draft.subModel } } : {}),
+          ...(draft.researchEnabled ? { researchModel: { provider: draft.researchProvider, model: draft.researchModel } } : {}),
+          ...buildParallelWork(draft),
           skills: draft.skills,
           mcpServers: draft.mcpServers,
           terminal: { mode: draft.terminal },
@@ -1157,6 +1414,75 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                   <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} variant="fill" />
                 </div>
               </div>
+            </div>
+            <div className={css.formCol} style={{ gap: 4 }}>
+              <span className={css.formSubLabel}>研究子 Agent（只读实例，不可移除；可选，缺省同子 Agent）</span>
+              <div className={css.selectStack}>
+                <div className={css.formCol} style={{ gap: 3 }}>
+                  <label className={css.fieldLabelSm}>供应商</label>
+                  <SelectField value={draft.researchEnabled ? draft.researchProvider : ''} options={subProviderOptions} onChange={v => { set('researchEnabled', v !== ''); if (v !== '') set('researchProvider', v) }} variant="fill" />
+                </div>
+                <div className={css.formCol} style={{ gap: 3 }}>
+                  <label className={css.fieldLabelSm}>模型</label>
+                  <SelectField value={draft.researchEnabled ? draft.researchModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('researchModel', v) }} disabled={!draft.researchEnabled} variant="fill" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 并行开发（子 Agent 硬隔离编排；空 = 跟随全局/默认。机制：fork #10
+            双实例——worker 召唤写任务自动独立 worktree+分支，integrate 召唤合并） */}
+        <div className={css.formCol} style={{ gap: 6 }}>
+          <div className={css.formGroupTitle}>并行开发</div>
+          <div className={css.formColsStretch}>
+            <div className={css.formCol} style={{ gap: 3 }}>
+              <label className={css.fieldLabelSm}>隔离模式（默认 write-tasks：写任务自动隔离）</label>
+              <SelectField
+                value={draft.pwIsolation}
+                options={[
+                  { id: '', label: '（跟随全局/默认）' },
+                  { id: 'write-tasks', label: 'write-tasks · 写任务隔离' },
+                  { id: 'always', label: 'always · 凡召唤必隔离' },
+                  { id: 'off', label: 'off · 不隔离' },
+                ]}
+                onChange={v => set('pwIsolation', v as EditDraft['pwIsolation'])}
+                variant="fill"
+              />
+            </div>
+            <div className={css.formCol} style={{ gap: 3 }}>
+              <label className={css.fieldLabelSm}>合并者（默认 parent：主 Agent 合并）</label>
+              <SelectField
+                value={draft.pwMerger}
+                options={[
+                  { id: '', label: '（跟随全局/默认）' },
+                  { id: 'parent', label: 'parent · 主 Agent 合并' },
+                  { id: 'merger', label: 'merger · 专职合并子 Agent' },
+                ]}
+                onChange={v => set('pwMerger', v as EditDraft['pwMerger'])}
+                variant="fill"
+              />
+            </div>
+          </div>
+          <div className={css.formColsStretch}>
+            <div className={css.formCol} style={{ gap: 3 }}>
+              <label className={css.fieldLabelSm}>并行子 Agent 上限（默认 4）</label>
+              <input
+                className={css.textInput}
+                value={draft.pwMaxParallel}
+                placeholder="4"
+                onChange={e => set('pwMaxParallel', e.target.value)}
+              />
+            </div>
+            <div className={css.formCol} style={{ gap: 3 }}>
+              <label className={css.fieldLabelSm}>集成核查命令（每行一条，默认 pnpm -r typecheck）</label>
+              <textarea
+                className={css.textInput}
+                rows={2}
+                value={draft.pwIntegrateChecks}
+                placeholder={'pnpm -r typecheck\npnpm lint'}
+                onChange={e => set('pwIntegrateChecks', e.target.value)}
+              />
             </div>
           </div>
         </div>
@@ -1591,7 +1917,7 @@ function McpSection() {
             <Trash2
               size={15}
               className={css.memDel}
-              onClick={e => { e.stopPropagation(); setServers(prev => prev.filter(x => x.id !== s.id)) }}
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); setServers(prev => prev.filter(x => x.id !== s.id)) }}
             />
           </div>
         </button>
@@ -2700,6 +3026,7 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'hooks', order: 90, label: 'Hooks 与自动化', Component: HooksSection },
   { id: 'agent-loop', order: 100, label: '高级 Agent Loop', Component: AgentLoopSection },
   { id: 'agent-presets', order: 110, label: 'Agent 预设', Component: AgentPresetsSection },
+  { id: 'subagent', order: 115, label: '子 Agent', Component: SubagentSection },
   { id: 'account', order: 120, label: '账户与用量', Component: AccountSection },
   { id: 'privacy', order: 130, label: '隐私', Component: PrivacySection },
   { id: 'data', order: 140, label: '数据管理', Component: DataSection },

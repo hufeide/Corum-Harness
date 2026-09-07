@@ -1,5 +1,7 @@
 /**
- * The in-process SPAWN subagent backend: registers a {@link SubagentProvider} on
+ * fork（corum）：in-process SPAWN 后端的 corum 版——provider 默认名 'corum-spawn'
+ * （与官方 'spawn' 并存于同一 registry，互不抢名），其余与官方逐行一致。
+ * 原始模块：@deepseek-ai/dsh-subagent-spawn-in-process。Registers a {@link SubagentProvider} on
  * `ctx.subagents` that runs each child as a fresh child {@link Agent} on the same cordis
  * context (its own session, own system prompt, zero parent context). The cheapest transport,
  * reusing the agent factory's quiescent teardown.
@@ -16,7 +18,7 @@ import type {
 } from '../index.ts'
 import { startInProcessRun } from '../driver/index.ts'
 
-export const name = 'subagent-spawn-in-process'
+export const name = 'corum-subagent-spawn-in-process'
 // `tools` is deliberately not injected: the child factory already provides it during setup,
 // and adding it here would unnecessarily change this provider's apply timing.
 export const inject = ['subagents']
@@ -28,7 +30,7 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
-  providerName: z.string().default('spawn'),
+  providerName: z.string().default('corum-spawn'),
 })
 
 /**

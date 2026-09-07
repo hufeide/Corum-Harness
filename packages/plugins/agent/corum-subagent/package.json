@@ -21,7 +21,8 @@
   },
   "scripts": {
     "build": "tsc -b && tsdown",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
   },
   "dependencies": {
     "@deepseek-ai/dsh-brand": "^0.1.3-alpha.1",
@@ -52,6 +53,7 @@
     "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
   }
 }

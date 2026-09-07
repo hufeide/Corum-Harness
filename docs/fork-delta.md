@@ -7,6 +7,7 @@
 > - 参考：`.dbg/audit-B-session.md`（session 群逐文件审计）、`docs/audit/CODE-AUDIT-REPORT.md`（P0-6/11/12/13/15）。
 > - 2026-09-07 增补：第 7 个 fork 包 `@corum/corum-credentials-local`（host 侧，fork 自官方 `@deepseek-ai/dsh-credentials-local`）登记于 **§7 host 域 fork**，升级时同样按 §5 runbook 处理。
 > - 2026-09-07 增补：第 8 个 fork 包 `@corum/corum-api-remotes`（host+client 双面，fork 自官方 `@deepseek-ai/dsh-api-remotes`）登记于 **§8**，升级时同样按 §5 runbook 处理。
+> - 2026-09-08 增补：子 Agent 召唤机制优化完整交付（fork #9 §10 / #10 §11 / #11 §12 + 全部 CDP 验证记录 §11.5-§11.11）。**交接文档：`docs/HANDOFF-subagent-isolation.md`**——下一个 session 先读它 + `docs/plan/PLAN-subagent-isolation.md`。
 > - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
 
 ---
@@ -447,3 +448,176 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 - **轨迹功能（官方 ui-trajectory 启用，零自研）**：`cordis.ide.patch.yml` 的 `ui-trajectory` 从 `disabled: true` 改为启用——官方插件注册进 `conversation.view` 槽成为「对话/轨迹」选项卡（id `trajectory`），corum-ui-chat 的 ConversationSession 已渲染 tabs（tabs.length>1 时出现），点击即切官方轨迹时间线（过滤/搜索/轮次分组/工具调用行/上下文/附件标记）。数据通路官方 `uiConversation.binding(sessionId).target('trajectory')`，泳道会话在官方对象层可用。**教训：corum-ide-conversation-ui 已退役（B 方案由 corum-ui-chat fork 接管对话区），勿再向其投功能——先查包的激活状态再动手**（本次一度误把轨迹/流式做进退役包并引入 inject 死锁，CDP boot 才抓出）。
 - **流式渲染（ide-conversation-ui 遗留①闭环）**：该包已退役不激活，主流式渲染由 corum-ui-chat 经官方 `assistant/live-chunk`（agent/assistant-stream→session.follow）承载——0.1.3 流式在主对话区**本就正常**，遗留①实质无需做。`corum-agent/event-projection.ts` 保留 `assistant/attempt` 投影补全 + `stream` 透传（0.1.3 format v2 数据通路补全，attempt 是合法终态事件，旧投影会丢）。
 - **CDP 验证**：「对话/轨迹」tab 出现 → 点轨迹 → 官方轨迹时间线完整渲染 → 切回对话正常。截图 `.dbg/phase6-trajectory-view.png`。
+
+---
+
+## 10. 第 9 个 fork 包：`@corum/corum-subagent`（2026-09-07，子 Agent 隔离方案 fork #9）
+
+> 方案：`docs/plan/PLAN-subagent-isolation.md`。fork 自官方 **0.1.3-alpha.1**（git HEAD，`/Users/kukucai/dsh`）三个包：`dsh-subagent`（seam 本体）+ `dsh-subagent-in-process-driver`（one-shot 驱动）+ `dsh-subagent-spawn-in-process`（spawn provider）——后两者以 `src/driver/`、`src/spawn/` 子目录并入同一 fork 包。**基线口径注意**：这是首个直接以 0.1.3 为基线的 fork（既有 §1-§8 fork 基线 0.1.2-alpha.2、依赖锁已随基座升级至 0.1.3）。
+
+### 10.1 总览
+
+| 项 | 值 |
+|---|---|
+| fork 包 | `@corum/corum-subagent`（host 域，`packages/plugins/agent/corum-subagent/`） |
+| 官方对照 | `dsh-subagent` + `dsh-subagent-in-process-driver` + `dsh-subagent-spawn-in-process` @ 0.1.3-alpha.1 |
+| 文件数 | 22（src/ 19 + driver/ 2 + spawn/ 1；0.1.3 HEAD 无 descriptor-seed.ts——format v2 重构 `f99b06eaed` 将其内联进 continuation） |
+| 逐字节相同 | 15 |
+| 实质修改 | 7（types/child-agent/continuation/depth/index/invariant + driver/index）+ spawn/index（改名+import 重定向） |
+
+> ⚠️ **历史包袱说明**：本包在基座升级期曾被前一个会话以 alpha.4 基线 + 自适配
+> 提交（`40bcd08f`/`099bf12f`，含自造 `descriptor-seed.ts` 与 `deliverSubagentPrompt`
+> steer 扩展）。本轮以 **0.1.3 HEAD 完整重建**取代——三方 diff 证实 099 的全部
+> "修复"本质是 alpha.4→0.1.3 的官方演进内容（expandAssistantStream/persistence.stat/
+> deliverSubagentPrompt 均已进官方 HEAD），重建无损；`descriptor-seed.ts` 系 099
+> 从 alpha.4 带来的残留，0.1.3 官方已删除该文件，随之移除。rebase 时以本表为准，
+> 不要回溯 099 的适配注释。
+| corum 新增 | 0（无新文件；`tests/cwd.spec.ts` 为测试资产不计入 src 对照） |
+
+### 10.2 实质 diff 逐处登记
+
+| 文件 | diff 行 | 内容 | rebase 风险 |
+|---|---|---|---|
+| `types.ts` | +7 | `SubagentStartRequest.cwd?: string`（jsdoc 注明硬隔离轴心语义） | 低（纯增量字段，官方未占用该键） |
+| `child-agent.ts` | ±6 | `childSessionMeta` 增第 4 参 `cwd?: string`；`effectiveCwd = cwd ?? parentHeader.cwd` | **中**（官方若改签名/增参需三方合并；调用点 3 处） |
+| `continuation.ts` | ±5 | startContinuable 透传 `request.cwd` + `assertChildCwd(request.cwd)` 校验 + depth import | 低 |
+| `driver/index.ts` | ±6 | one-shot 透传 `request.cwd` + import 重定向 `'@deepseek-ai/dsh-subagent'` → `'../index.ts'` | 低 |
+| `depth.ts` | +17 | `assertChildCwd`（绝对路径 + 已存在校验，`INVALID_CWD`；node:fs/path import） | 低（纯增量函数） |
+| `index.ts` | ±3 | one-shot `start()` 校验调用 + depth import | 低 |
+| `invariant.ts` | ±4 | PACKAGE_NAME → `@corum/corum-subagent`、插件名 → `corum-subagent-invariant` | 低（机械） |
+| `spawn/index.ts` | ±12 | 插件名 `corum-subagent-spawn-in-process`、默认 provider 名 **`corum-spawn`**（与官方 spawn 并存不抢名）、import 重定向（`../index.ts` + `../driver/index.ts`）、文件头 fork 注释 | 低 |
+
+### 10.3 设计要点（升级 runbook 必读）
+
+1. **cwd 透传双路径**：one-shot（driver `agents.create` meta）与 continuable（continuation `materialize` meta）都必须透传——漏任一路径则对应召唤模式丢失隔离。官方若重构这两条路径（如 0.1.2→0.1.3 的 lineageSeedLength→isSeeded 签名变化），对照本表 §10.2 逐处重挂。
+2. **校验时机**：`assertChildCwd` 在 `SubagentRuntime.start` / `ContinuationManager.startContinuable` 入口（fail fast），provider 侧不重复校验。
+3. **官方测试资产**：官方 `tests/`（13 个 spec）未随 fork 拷贝——corum 侧以 `tests/cwd.spec.ts`（7 例：cwd 透传 3 + assertChildCwd 4）覆盖 fork diff；官方行为回归依赖基座自身测试。升级 rebase 后应跑一次官方 tests 目录对 fork src 的适配验证（手动）。
+4. **依赖锁**：全部 `^0.1.3-alpha.1`（与基座同代，无双向差）。
+
+### 10.4 验证记录
+
+`pnpm --filter @corum/corum-subagent run typecheck` 零错误；`run build` 产物 4 文件（lib/index.js + lib/spawn/index.js + lib/invariant.js + types chunk）；`npx vitest run tests/cwd.spec.ts` 7/7 通过（2026-09-07）。
+
+---
+
+## 11. 第 10 个 fork 包：`@corum/corum-tool-subagent`（2026-09-07，子 Agent 隔离方案 fork #10）
+
+> 方案：`docs/plan/PLAN-subagent-isolation.md`。fork 自官方 `dsh-tool-subagent` **0.1.3-alpha.1**（git HEAD）。与 fork #9（§10）配套：#9 提供 `SubagentStartRequest.cwd` 轴心，#10 在其上实现「召唤即隔离」的完整编排。
+
+### 11.1 总览
+
+| 项 | 值 |
+|---|---|
+| fork 包 | `@corum/corum-tool-subagent`（host 域，`packages/plugins/agent/corum-tool-subagent/`） |
+| 官方对照 | `dsh-tool-subagent` @ 0.1.3-alpha.1（6 个 src 文件） |
+| 逐字节相同 | 4（list-models / model-selection-settings / model-selection-state / model-selection） |
+| 实质修改 | 2（index.ts 41 处 fork 注释块；invariant.ts 仅包名/插件名 2 行） |
+| corum 新增 | 0（tests/isolation.spec.ts 为测试资产） |
+
+### 11.2 index.ts 实质 diff 分区登记
+
+| 分区 | 内容 | rebase 风险 |
+|---|---|---|
+| Config schema | `isolation{mode,worktreeRoot,branchPrefix,autoCleanup,denyDirectFs}` / `readonlyResearch` / `maxParallelChildren` / `integrateChecks` / `merger` / `model{provider,model,reasoningEffort?}`——全部 `.default(undefined as unknown as T)` 保留 omission | **中**（官方 Config 演进需三方合并；schema 段与官方同文件） |
+| 模型锁 | config.model 存在时 agentOptions 终值注入、官方 selection/preflight 块整体跳过；parameters 删 provider/model/reasoning_effort 条件展开（LLM 无选模型参数面） | **中**（官方若改模型解析链需重挂） |
+| 隔离 execute 层 | `CORUM_WRITE_TOOLS` 常量、写工具判定（`corumIsWriteTask`/`corumEffectiveToolFilter`/`corumShouldIsolate` 导出纯函数）、worktree 创建（slug=wt-+randomBytes(3)、git worktree add+失败回滚）、request.cwd 注入、toolFilter deny str_replace_editor 合并 | 低（插入式，官方流程不变） |
+| 会话级台账 | `CorumWorktreeEntry`（slug/branch/path/status/runId）、Map<SessionId>、maxParallelChildren 强制（active 口径）、ctx.effect dispose 清理（worktree remove + branch -D，autoCleanup） | 低 |
+| settle 联动 | `ctx.on('subagent/end' as never, (info, parent) => …)` 按 parent.session.id 定位台账；`corumMarkSettled`（runId 精确 + childId 唯一回退）；`as never` 原因注释（Events 合并声明在 corum-subagent 包，类型实例不匹配） | **中**（官方若改 subagent/end payload 签名需跟随） |
+| integrate 编排 | schema `integrate` 参数、准入 `corumPendingIntegration`（active∪settled，空拒绝）、前台限定（background/continuable 拒绝）、cwd=主干、persona+prompt 机制拼装（分支清单+Checks+汇报指令按 merger 分档）、settle 后标 integrated + autoCleanup | 低 |
+| 描述/exports | 工具描述头部隔离语义句；package.json exports 仅 `.` + `./invariant` | 低 |
+
+### 11.3 组合接入（cordis.patch.yml）
+
+- fork #9 provider 行：`- id: corum-subagent-spawn / name: '@corum/corum-subagent/spawn'`（desktop insert 段）——注册 `corum-spawn` 进官方 seam；官方 spawn/spawn-in-process 行**不禁用**（官方 tool-subagent 的 fork/codex/claude-code 实例 + workflow 只读 fan-out 继续走官方 spawn）。
+- fork #10 **无 host 行**：工具实例由 corum preset 的 delegation 组双实例行（compile.ts `corumSubagentConfig` 生成：`tool-subagent` + `tool-subagent-research`，name `@corum/corum-tool-subagent`）按会话挂载；preset 行裸包名经 agent-presets mount 的 harnessBase 解析（desktop deps 已 workspace 链）。
+- invariant 均不挂（官方组合未挂 subagent-invariant，对齐同纪律）。
+- **依赖锁**：全部 `^0.1.3-alpha.1`。
+
+### 11.4 验证记录
+
+`npx tsc --noEmit` 零错误；`pnpm run build` 产物 3 文件（lib/index.js 33.78 kB + lib/invariant.js + 共享 chunk）；`npx vitest run` 17/17 通过（写工具判定 5 / 隔离触发 3 / 临时 git 仓库 worktree add-remove 2 / maxParallel 口径 1 / integrate 准入 2 / settle 联动 4）；4 文件与官方逐字节一致复核为空（2026-09-07，经两阶段子 Agent 实现 + 父 Agent 独立复核）。**CDP 实机验证待 §12 实施单第 10-11 步**。
+
+### 11.5 CDP 实机验证记录（2026-09-07 晚，三层全过）
+
+| 验证项 | 结果 | 证据 |
+|---|---|---|
+| research 只读实例 | ✓ 工具面 24 个无 write/edit/bash/str_replace_editor/pwsh；30 次调用全 glob/grep；模型锁 flash（父 GLM） | 子会话 46b4ef3f request/header |
+| {{model}}/{{cwd}} 插值 | ✓ "powered by the deepseek-v4-flash model. Your working directory is /Users/kukucai/work/ai-lib." | 同上 |
+| worker 隔离触发 | ✓ write 任务 → isolation=true → worktree wt-xxx 自动创建（slug/分支 LLM 不可见） | host log（探针期） |
+| **沙箱硬隔离** | ✓ 子 Agent 尝试写主干绝对路径被 workspace-write 沙箱拒（"仅覆盖该 worktree"） | 子会话 1db7b126 assistant 消息 |
+| 文件落点 | ✓ probe5.txt 落 worktree 内、主干无；子 Agent 经 isolation notice 用相对路径直接写成功 | fs 实证 + 父会话 32_29 |
+| 父 Agent 闭环 | ✓ 正确转述 worktree 路径并提示落盘位置差异 | UI 快照 uid=32_26-32_40 |
+| 平台 fail-loud 修复 | research deny 名单 pwsh 仅 win32（compile + fork #10 判定同步修，单测更新 5/5、17/17） | tests 全绿 |
+
+**isolation notice（新增，fork #10 prompt 注入）**：隔离召唤的 prompt 前缀 `[corum isolation]` 段（分支名 + 相对路径纪律 + commit 指引）——解决"子 Agent 按父 prompt 的主干绝对路径写文件撞沙箱"的实机缺陷（probe4 暴露，probe5 修复验证）。
+
+### 11.6 integrate 编排 CDP 端到端验证（2026-09-07 晚，全链路通过）
+
+| 阶段 | 结果 | 证据 |
+|---|---|---|
+| fan-out 双并行 | ✓ 同消息两 subagent 调用 → wt-962c0f / wt-d300ad 双 worktree 自动建立 | git worktree list |
+| 隔离提交 | ✓ A=2eae000 `feat: part a probe`、B=196f369 `feat: part b probe`（各在自分支，主干 HEAD 不变） | 双 worktree git log |
+| 沙箱异常自愈 | ✓ B 曾误闯主干提交（6726322）→ 子 Agent 自己 reset+清理回滚（主干回 1382367）后继续——隔离违规被沙箱拦住后 LLM 正确恢复 | 父会话 42_188 思考段 |
+| integrate 准入 | ✓ 双 settle 后前台 `integrate:true` 放行；集成者 cwd=主干、无 str_replace_editor deny、persona+prompt 机制拼装 | 子会话 35a4ce0c |
+| **核查门禁** | ✓ 合并无冲突入主干工作树并暂存，但默认核查 `pnpm -r typecheck` 在测试仓库（非 pnpm workspace）失败→**按"核查不过不提交"约束保留脏树未提交**——门禁语义正确（配置与仓库不匹配属基线问题，非机制缺陷） | git status staged + 父会话 42_219 |
+| autoCleanup | ✓ integrate settle 后台账标 integrated、双 worktree+分支全部清理（worktree list 回 1） | fs 实证 |
+| 手动收尾 | ✓ 父 Agent 提交 ad2dc0e `feat: parallel integration probe`（并行集成探针保留于主干作验证存档） | git log |
+
+**结论**：PLAN §1.2 拓扑 B（并行开发 fan-out → integrate fan-in）全链路机制验证通过。遗留产品化项：① integrateChecks 的默认 `pnpm -r typecheck` 对非 pnpm 仓库不友好——Agent 预设可覆盖，全局默认是否改成探测式（存在 pnpm-workspace.yaml 才加该 check）待产品决策；② continuable 背景下 integrate 仍拒绝（骨架边界）。
+
+### 11.7 P0-3「并行工作区」chip（2026-09-07 深夜，CDP 验证通过）
+
+**数据链**：fork #10 台账变更点（创建/settle 翻转/integrate 结算）发射 `corum/worktree-ledger` 帧（cordis 根上下文 emit）→ corum-api-remotes 转发 allowlist +1（`corum-events.ts` 自包含声明 + `CorumForwardedEvent` 并入）→ renderer `worktreeLedgerSubscribe`（chat-runtime，与 subagentProgressSubscribe 同构）→ `WorktreeLedgerChip`（SubagentCard 组末尾，按当前会话 id 过滤）。
+
+**验证**：帧统计表（`__corumEventStats`）证实 `corum/worktree-ledger` frames≥1/listeners=1；chip 渲染「N 个隔离工作区 · 待集成」，点击展开面板显示分支名+状态（active=进行中/settled=待集成/integrated=已集成）。截图 `.dbg/`（展开态 `wt/wt-acf83f · 进行中`）。
+
+**两个 React #310 修复**（hooks 顺序恒定）：① SubagentCard 的 sessionId useState/useEffect 必须在 early return 前且防御 chatRuntime 晚挂载；② WorktreeLedgerChip 的 expanded useState 同样前置。**教训：fork/自研组件新增 hooks 时，任何条件渲染（含 `if (x === undefined) return null`）后的 hooks 声明都是 #310 炸弹——CDP console 才抓得到，typecheck 不报。**
+
+### 11.8 P0-1 探测式默认 integrateChecks（2026-09-07 深夜，单测+手工验证）
+
+**实现**（fork #10，`corumDetectIntegrateChecks`）：integrate 执行点未显式配置时按父 cwd 仓库形态探测——① `pnpm-workspace.yaml` → `pnpm -r typecheck`；② `package.json scripts.typecheck` → `npm run typecheck`；③ 仅 `scripts.test` → `npm test`；④ 均无 → `git diff --check`（保守兜底，永不误拦）。显式 config（preset 的 integrateChecks）恒优先。
+
+**验证**：单测 4 例（探测矩阵全覆盖，22/22 全绿）；ai-lib（无 pnpm-workspace、package.json 仅 scripts.test 于 studio 子目录）探测落 `git diff --check`——手工对 4 个孤儿分支（重启致台账丢失，见 §11.9 遗留）执行 merge + `git diff --check` exit=0，验证保守兜底在当前仓库形态下可用且不误拦。
+
+**遗留**：① ai-lib 的 test script 在 `studio/package.json`（子目录），根探测未下钻——下钻规则（monorepo 子包探测）待产品决策；② 台账持久化（重启/会话恢复后孤儿 worktree 识别，§11.9）。
+
+### 11.9 已知遗留：台账易失性与会话恢复（产品决策待定）
+
+CDP 验证中暴露：fork #10 的 worktree 台账是**模块级内存 Map**——应用重启后丢失，磁盘上的 worktree 成为"孤儿"（harness 无法对它们发起 integrate，报 "no isolated worktrees to integrate"）。本次 5 个 chip 探针 worktree 即如此，最终手工 merge+cleanup。
+
+候选方向：① 台账落盘（会话 meta 或独立 json，恢复时重建并允许对孤儿 integrate）；② integrate 准入放宽为"台账空但 .corum-worktrees 下有本前缀分支时也允许"（牺牲精确性换鲁棒性）；③ 维持现状，文档化"重启前请 integrate 或手工清理"。**影响面：项目模式（团队并行开发是常态，重启恢复必须处理）vs TASK 模式（短会话，影响小）——建议项目模式落地前必须解决①或②。**
+
+### 11.10 P1-4「子 Agent」设置 section（2026-09-07 深夜，CDP 全链路验证通过）
+
+**三级配置第一级（全局默认）落地**：fork #10 注册 host settings namespace `corum-subagent`（schema 全键可选保持 omission；双实例共享模块级单例 scope，防同 namespace 重复注册）；实例解析改为「preset config > 全局设置文档值 > 内置默认」（`corumGlobal()` 每次执行时读，文档更新即时生效）。模型锁同链路（worker←defaultModel、research←defaultResearchModel）。
+
+**设置 UI**（corum 自研设置中心，SECTION_DEFS 新增 `subagent`，order 115）：隔离与并行（隔离模式/并行上限/自动清理）、集成（合并者/核查命令——标注自动探测规则）、默认模型（worker/research 模型对）、research 实例只读标注。写路径 = `remote.settings.mutate`（revision 防并发覆盖）+ describe 镜像 acceptView 折叠；读路径 = describe 镜像 uSES 订阅。ide-ui inject 增 `remote`/`remote.settings`/`settingsScope`，经 `CorumSettingsContext` 下发（与 CorumRpcContext 同构，红线 1/4 合规）。
+
+**CDP 验证**：① 写入落盘 settings.yaml（`isolationMode: always`）；② **三级覆盖实证**——全局 always 时只读调查任务也被强制隔离（wt-c5d437 建成），证明全局设置覆盖 preset 缺省 write-tasks；③ unset 回落（`corum-subagent: {}`）；④ chip 在 always 模式下正确显示「1 个隔离工作区 · 待集成」。**关键机制事实**：namespace 注册在 Agent mount（preset 实例 apply）时触发，非 boot 时——设置 section 的写入在任何 Agent mount 前会报 "namespace not registered"（首次 mount 后正常），属预期行为。
+
+---
+
+## 12. 第 11 个 fork 包：`@corum/corum-ui-settings-plugins`（2026-09-07 深夜，P1-5）
+
+> fork 自官方 `dsh-client-ui-settings-plugins` **0.1.3-alpha.1**（git HEAD）。会话域第 7 个 fork、总第 11 个。
+
+| 项 | 值 |
+|---|---|
+| 文件数 | 22（src/client/ 20 + src/ 2） |
+| 逐字节相同 | 21（含全部 controller/卡组件/样式） |
+| 实质修改 | 1（`client/index.ts`：文件头 fork 注释 + 移除 SubagentModelSelectionCard 注册） |
+| 组合接入 | cordis.patch.yml 禁用官方 `ui-settings-plugins` 行 + insert 段挂 `corum-ui-settings-plugins`（同 Models 接管先例） |
+
+**语义**：官方卡「允许 Agent 为 Subagent 选择模型」开关与 fork #10 模型锁互斥（config.model 机制固定路由、LLM 无参数面）——保留会误导用户。controller 实例保留（host namespace `subagent-model-selection` 仍可读写，存量设置文档不出现未注册段），仅 UI 卡不渲染。固定路由配置由 corum「子 Agent」section（§11.10）承载。
+
+**验证**：「插件配置」tab 只剩终端/Agent 循环/网页搜索三卡，Subagent 卡消失；CDP console 零错误（2026-09-07）。
+
+### 11.11 声明式验证（2026-09-08 定调落地，CDP 全链路验证通过）
+
+**语义转变**（用户定调）：静态穷举（pnpm/typecheck/test/diff--check 四档猜）对千奇百怪的项目不可能完全准确。正确做法 = **主 Agent 在 integrate prompt 的 `verify` 参数里声明本仓库的编译/运行/验证方式**（它最懂这个仓库），机制原样注入并强制执行；**功能性验收由主 Agent 基于原始目标最终裁决**——机制只把「声明的失败」挡在提交前，不臆测验收标准。
+
+**实现**（fork #10）：① schema 增 `verify` 参数（LLM 可见，integrate 时声明）；② `corumIntegratorPersona` 第 4 参 `declared`——有声明则原样注入「How to build, run, and verify（declared by the delegating agent — follow it exactly）」，无声明则标注「minimum bar only」语义；③ 硬约束保留：声明的验证失败 → 不提交、保留现场、报告失败详情。探测式默认（§11.8）降级为未声明时的兜底。「子 Agent」section 的核查命令字段文案同步改为「兜底」定位。
+
+**验证**（CDP）：子 Agent 隔离分支 wt/wt-e4da17（52789a7）→ integrate `verify="node --check studio/main.js"` → 声明的验证执行 exit 0 + 兜底 `git diff --check` exit 0 → 无冲突合并自动提交 `22891e6`。主 Agent 复核报告完整。单测 25/25（persona 声明/未声明/汇报语义 3 例新增）。
+
+**React 19 类型漂移修复**（顺路）：corum-ui-settings-plugins 初版误用 `@types/react@^19.2.2`——pnpm peer 解析把 lucide-react 的 react 类型链到 19.2.18，与 workspace 统一的 18.3.31 冲突（lucide 组件类型不兼容）。已对齐 ^18.2.0 / ~18.3.31 / ^18.3.7；ide-ui 历史 implicit-any 13 处补标注归零（AppFrame/SettingsShell/index/SettingsSections）。

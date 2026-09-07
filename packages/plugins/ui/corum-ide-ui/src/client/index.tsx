@@ -51,7 +51,7 @@ import type {
 } from './shell-contract.ts'
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
 import { GeneralSection } from './SettingsGeneralSection.tsx'
-import { SECTION_DEFS, CorumRpcContext } from './settings/SettingsSections.tsx'
+import { SECTION_DEFS, CorumRpcContext, CorumSettingsContext, type CorumSettingsFace } from './settings/SettingsSections.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
@@ -182,7 +182,7 @@ export interface CorumSidebarOwnerProps {
 
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
-export const inject = ['slots', 'theme', 'locale', 'connection']
+export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -320,7 +320,7 @@ export function apply(ctx: ClientContext): void {
             }
             return rows
           },
-          subscribe: (listener) => {
+          subscribe: (listener: () => void) => {
             const offLedger = ctx.slots.subscribe('settings.section', listener)
             const offLocale = ctx.locale.subscribe(listener)
             return () => {
@@ -343,7 +343,7 @@ export function apply(ctx: ClientContext): void {
             }
             return onboardingSteps
           },
-          subscribe: listener => ctx.slots.subscribe('settings.onboarding', listener),
+          subscribe: (listener: () => void) => ctx.slots.subscribe('settings.onboarding', listener),
         },
       },
     })
@@ -384,6 +384,19 @@ export function apply(ctx: ClientContext): void {
     // connection.rpc.call 通道，与 makeCorumRpcCall 同契约；不用 ctx.remote——
     // 见 PROGRESS §4 「ctx.remote 命名空间代理」坑）。
     const corumRpc = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
+    // 「子 Agent」section 的 settings 面（describe 镜像读 + remote.settings.mutate 写；
+    // 经 CorumSettingsContext 下发——service 消费走 inject 声明（红线 4），
+    // 组件不直接持 ctx，保持与 CorumRpcContext 同构的下发模式）。
+    const corumSettings: CorumSettingsFace = {
+      describe: ctx.settingsScope.describe(),
+      mutate: (ns, ops, revision) => ctx.remote.settings.mutate(
+        ns,
+        ops.map(op => op.op === 'set'
+          ? { op: 'set' as const, path: [...op.path], value: op.value as never }
+          : { op: 'unset' as const, path: [...op.path] }),
+        revision,
+      ),
+    }
     const disposeSections = SECTION_DEFS.map(def =>
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
@@ -393,7 +406,9 @@ export function apply(ctx: ClientContext): void {
         locale: NS,
       }, (props: SettingsSectionOwnerProps) => (
         <CorumRpcContext.Provider value={corumRpc}>
-          <SettingsSectionHost {...props} render={def.Component} />
+          <CorumSettingsContext.Provider value={corumSettings}>
+            <SettingsSectionHost {...props} render={def.Component} />
+          </CorumSettingsContext.Provider>
         </CorumRpcContext.Provider>
       ))),
     )

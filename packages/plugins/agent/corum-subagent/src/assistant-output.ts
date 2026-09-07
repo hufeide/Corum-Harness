@@ -25,8 +25,8 @@ export class AssistantOutputFold {
 
   /**
    * Fold one session event: a non-empty assistant message becomes the
-   * candidate final answer, and a `text-delta` chunk extends the streamed
-   * fallback; every other event contributes nothing.
+   * candidate final answer, while its embedded stream and any log-only attempt
+   * extend the streamed fallback; every other event contributes nothing.
    * @param event - the next observed session event.
    */
   push(event: SessionEvent): void {
@@ -34,8 +34,6 @@ export class AssistantOutputFold {
       const content = event.data.message.content
       if (content.length > 0) this.message = content
     }
-    // fork（corum）：官方 0.1.3 format v2 —— assistant 流内嵌进 message/attempt
-    // 事件（`data.stream`），`assistant/chunk` 独立事件已删除，改经 expandAssistantStream 展开。
     if (event.type === 'assistant/message' || event.type === 'assistant/attempt') {
       for (const { chunk } of expandAssistantStream(event.data.stream)) {
         if (chunk.type === 'text-delta') this.pushText(chunk.text)

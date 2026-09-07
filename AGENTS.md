@@ -41,7 +41,8 @@
 ## Key Documents (read as needed)
 
 - `docs/dev-conventions.md` — **full development conventions** (decision tree,
-  code do/don't examples, evidence index).
+  code do/don't examples, evidence index; §4a = subagent dual-instance discipline
+  for the isolation mechanism).
 - `docs/audit/NEXT-PHASE-DEFERRED.md` — deferred/closed architecture items
   (sidebarMode service done, slot-registry service done).
 - `docs/fork-delta.md` — diff ledger of the 6 session-domain fork packages +

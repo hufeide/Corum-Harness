@@ -61,6 +61,30 @@ export interface SkillBinding {
 /** dsh 四种预设模式，作为 corum Agent 的基础 persona 继承来源。 */
 export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis'
 
+/**
+ * 并行开发策略（多子 Agent 硬隔离编排，docs/plan/PLAN-subagent-isolation.md §4）。
+ * 编译进 fork #10（@corum/corum-tool-subagent）双实例行的 config；缺省键由
+ * host settings namespace `corum-subagent` 兜底（三级配置模型 §1.6）。
+ */
+export interface ParallelWorkPolicy {
+  /** 隔离模式：'always' 凡召唤必隔离；'write-tasks' 按工具面判定（默认）；'off' 不隔离。 */
+  isolation?: 'always' | 'write-tasks' | 'off'
+  /** worktree 根目录（相对会话 cwd 或绝对路径，默认 '.corum-worktrees'）。 */
+  worktreeRoot?: string
+  /** 分支名前缀（默认 'wt/'）。 */
+  branchPrefix?: string
+  /** 合并者：'parent' 父 Agent 合并（默认）；'merger' 专职 merger 子 Agent。 */
+  merger?: 'parent' | 'merger'
+  /** 会话级并行子 Agent 上限（默认 4，超限拒绝新召唤）。 */
+  maxParallelChildren?: number
+  /** 合并后自动清理 worktree+分支（默认 true）。 */
+  autoCleanup?: boolean
+  /** worktree 模式子 Agent deny str_replace_editor（硬隔离补漏，默认 true）。 */
+  denyDirectFs?: boolean
+  /** integrate 召唤的固定核查命令（默认 ['pnpm -r typecheck']；编码规范类核查在此配置）。 */
+  integrateChecks?: string[]
+}
+
 /** Agent 岗位维度（名片筛选维度）。 */
 export type AgentDimension = '研发' | '产品' | '设计' | '市场' | '自媒体' | '创作'
 
@@ -101,8 +125,12 @@ export interface AgentProfile {
   prompt: string
   /** 默认大模型配置。 */
   model: ProfileModel
-  /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
+  /** 子 Agent 模型配置（可选，缺省同主 Agent——机制锁：设什么跑什么，与 LLM 决策无关）。 */
   subagentModel?: ProfileModel
+  /** 研究子 Agent（subagent_research 实例）模型（可选，缺省同 subagentModel）。 */
+  researchModel?: ProfileModel
+  /** 并行开发策略（可选；缺省 = write-tasks 语义由 fork #10 默认兜底）。 */
+  parallelWork?: ParallelWorkPolicy
   /** 技能绑定列表（引用全局 skill + pin 版本）。 */
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */

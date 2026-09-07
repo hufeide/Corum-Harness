@@ -32,7 +32,7 @@
 
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientRemote } from '@corum/corum-api-remotes/client'
-import type { SubagentProgressEvent } from '@corum/corum-api-remotes/corum-events'
+import type { CorumWorktreeLedgerFrameEvent, SubagentProgressEvent } from '@corum/corum-api-remotes/corum-events'
 
 /** uSES 源契约（getSnapshot 稳定引用 + subscribe）。 */
 export interface SessionIdSource {
@@ -166,6 +166,34 @@ export function subagentProgressSubscribe(
       if (subagentProgressListeners.size === 0 && subagentProgressDispose !== null) {
         subagentProgressDispose()
         subagentProgressDispose = null
+      }
+    },
+  }
+}
+
+// ── 'corum/worktree-ledger' 订阅（「并行工作区」chip 数据源；fork #10 发射）──
+let worktreeLedgerDispose: (() => void) | null = null
+const worktreeLedgerListeners = new Set<(frame: CorumWorktreeLedgerFrameEvent) => void>()
+
+/** 注册一个 'corum/worktree-ledger' 帧监听（每 chip 一个；自行按 sessionId 过滤）。 */
+export function worktreeLedgerSubscribe(
+  listener: (frame: CorumWorktreeLedgerFrameEvent) => void,
+): { unsubscribe: () => void } {
+  worktreeLedgerListeners.add(listener)
+  if (worktreeLedgerDispose === null) {
+    const remote = chatRuntimeRef.current?.remote
+    if (remote !== undefined) {
+      worktreeLedgerDispose = remote.$on('corum/worktree-ledger', (frame) => {
+        for (const fn of worktreeLedgerListeners) fn(frame)
+      })
+    }
+  }
+  return {
+    unsubscribe: () => {
+      worktreeLedgerListeners.delete(listener)
+      if (worktreeLedgerListeners.size === 0 && worktreeLedgerDispose !== null) {
+        worktreeLedgerDispose()
+        worktreeLedgerDispose = null
       }
     },
   }
