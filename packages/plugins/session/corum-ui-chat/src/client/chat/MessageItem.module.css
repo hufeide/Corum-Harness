@@ -322,3 +322,61 @@
     animation: none;
   }
 }
+
+/* ── 文件附件卡（官方 0.1.3 附件泛化增量，corum 液态玻璃化） ───────────────
+   非图片文件附件（PDF/代码等）的消息内卡片：文件名 + 图标 + 大小。
+   结构照官方 MessageItem.tsx（attachmentRow > fileCard > fileIcon + fileContent
+   > fileName + fileMeta），token 换 corum glass（容器透光 + 玻璃边框）。 */
+.attachmentRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+  gap: 8px;
+}
+
+.fileCard {
+  display: inline-flex;
+  flex: 0 0 240px;
+  align-items: center;
+  gap: 10px;
+  width: 240px;
+  min-height: 64px;
+  padding: 8px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+
+.fileIcon {
+  flex: none;
+  width: 24px;
+  height: 28px;
+}
+
+.fileContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fileName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.fileMeta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+  line-height: 15px;
+}

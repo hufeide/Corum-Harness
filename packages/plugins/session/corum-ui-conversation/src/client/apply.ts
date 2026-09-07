@@ -65,11 +65,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const inject = [
   // fork（corum）：移除 'uiWorkspace'——kkc IDE 禁用官方 ui-workspace（uiWorkspace 服务
   // 不存在），工作区导航由 corum 侧栏自研。uiWorkspace 改 ctx.get 可选获取 + 降级。
-  // fork（corum）：移除 'fileUpload'——空态操作卡不需文件上传（仍走 createDrafts 链）。
+  // fork（corum 修正 2026-09-07）：'fileUpload' 必须保留——官方 0.1.3 把它作为必需
+  // inject，createDrafts→beginFileUpload 链经 ctx.fileUpload.upload 真上传（此前按
+  // 「空态操作卡不需上传」的旧假设误删，导致文件附件上传 fail，CDP 实测抓出）。
   // workspaces 补回：空态操作卡「打开目录」需要 ctx.workspaces.create（2026-08-30）。
   // layout 补入：「新建任务表单」打开信号面（newTaskForm）桥到 ctx.layout 的
   // grid actions（AppFrame 持有），替代原 OPEN_NEW_TASK_FORM_EVENT 窗口事件桥。
-  'slots', 'sessions', 'uiSession', 'locale', 'settingsScope', 'workspaces', 'layout',
+  'slots', 'sessions', 'fileUpload', 'uiSession', 'locale', 'settingsScope', 'workspaces', 'layout',
 ]
 
 /** Conversation runtime configuration. */
