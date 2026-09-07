@@ -87,8 +87,14 @@ export interface SlotRegistryFace {
  * 顶层注册永久锁进 fallback Map（bind 时 backend 还是 null，之后不再重判）。
  *
  * 解法：后端解析推迟到**每次调用时**——
- *   1. 首选 window.__corumSlotRegistry（壳 apply 提供的一次性桥，合法 window
- *      挂载：written once, read-only，规范 §1 例外）；
+ *   1. 首选 window.__corumSlotRegistry（壳 apply 提供的一次性桥）。
+ *      **这是合法的 window 挂载**（written once, read-only，规范 §1 例外，与
+ *      window.corumDesktop / __DSH_BOOT__ 同类），**不是红线 1 禁止的「可变
+ *      共享状态挂 window」**——本文件是 cordis-free 纯库（零 cordis import，
+ *      被 tsdown 内联进每个 bundle），无法 inject/ctx.get，window 桥是它拿到
+ *      壳 `ctx.slotRegistry` 服务实例的**唯一通道**。删除它会让 registerSlot
+ *      锁进各 bundle 自己的 fallback Map，slotRegistry 跨 bundle 单例立刻退化
+ *      为按 bundle 拆分（回到 C1 之前）。2026-09 统一事件中心二期复核：保留。
  *   2. 桥未挂（无壳组合 / 壳 apply 前的顶层调用）落模块级 fallback Map；
  *   3. 壳 apply 在 provide 后调用 drainPendingSlots() 把 fallback 里的早期
  *      注册合并进服务，保证「顶层早于 apply」的注册最终汇聚到同一实例。

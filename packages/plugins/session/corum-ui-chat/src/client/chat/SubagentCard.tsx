@@ -7,22 +7,16 @@
 //   任务详情（展开区）= 父 Agent 注入的提示词全文（host getSubagentSessionMeta 提取
 //   子会话首条 user/message）——仅展开时显示
 // 进度由卡片自闭环轮询子会话事件窗注入（corumAgent/getChildSessionProgress）；
-// 模型行读官方 session/list 行的 modelSelection 投影（__corumChatRuntime.listSessions）。
+// 模型行读官方 session/list 行的 modelSelection 投影。
+// 跨 bundle 句柄（当前会话 id + RPC connection + 跳子会话桥）经 chatRuntime
+// cordis 服务消费（统一事件中心二期 window 全局迁移；同 bundle 模块级
+// chatRuntimeRef 拿服务实例，见 ../chat-runtime.ts）。
 import { memo, useEffect, useState } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, Loader } from 'lucide-react'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
+import { chatRuntimeRef } from '../chat-runtime.ts'
 import css from './SubagentCard.module.css'
-
-/** 跨 bundle 会话/RPC 句柄（apply.ts 在 conversation.view 挂载时写入）。 */
-interface CorumChatRuntime {
-  sessionId: string | undefined
-  connection: { rpc: { call: (channel: string, endpoint: string, payload: unknown) => Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }> } } | undefined
-}
-
-function runtime(): CorumChatRuntime | undefined {
-  return (window as { __corumChatRuntime?: CorumChatRuntime }).__corumChatRuntime
-}
 
 /** 子会话进度 RPC 返回形（与 host getChildSessionProgress 对齐）。 */
 interface ChildProgressValue {
@@ -72,10 +66,10 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
     if (childSessionId === undefined) { setLabel(undefined); return undefined }
     let cancelled = false
     const read = async () => {
-      const connection = runtime()?.connection
-      if (connection === undefined) return
+      const conn = chatRuntimeRef.current?.connection
+      if (conn === undefined) return
       try {
-        const result = await connection.rpc.call('/api', 'session/list', { args: { _request: { limit: 200 } } })
+        const result = await conn.rpc.call('/api', 'session/list', { args: { _request: { limit: 200 } } })
         if (cancelled) return
         if (!result.ok || result.value === undefined) return
         const value = result.value as { items?: ReadonlyArray<{ sessionId?: string; projections?: { values?: { modelSelection?: ModelSelectionProjection } } }> }
@@ -101,13 +95,13 @@ function useChildProgress(childSessionId: string | undefined): SubagentProgressS
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
-      const connection = runtime()?.connection
-      if (connection === undefined) {
+      const conn = chatRuntimeRef.current?.connection
+      if (conn === undefined) {
         timer = setTimeout(poll, 2000)
         return
       }
       try {
-        const result = await connection.rpc.call('/api', 'corumAgent/getChildSessionProgress', {
+        const result = await conn.rpc.call('/api', 'corumAgent/getChildSessionProgress', {
           args: { sessionId: childSessionId },
         })
         if (cancelled) return
@@ -144,10 +138,10 @@ function useSubagentPrompt(childSessionId: string | undefined, expanded: boolean
     if (childSessionId === undefined || !expanded || prompt !== undefined) return undefined
     let cancelled = false
     void (async () => {
-      const connection = runtime()?.connection
-      if (connection === undefined) return
+      const conn = chatRuntimeRef.current?.connection
+      if (conn === undefined) return
       try {
-        const result = await connection.rpc.call('/api', 'corumAgent/getSubagentSessionMeta', {
+        const result = await conn.rpc.call('/api', 'corumAgent/getSubagentSessionMeta', {
           args: { sessionId: childSessionId },
         })
         if (cancelled) return
@@ -201,8 +195,8 @@ function SubagentRow({
 
   const openChild = () => {
     if (childSessionId === undefined) return
-    const bridge = (window as { __corumOpenSession?: (id: string) => void }).__corumOpenSession
-    bridge?.(childSessionId)
+    // chatRuntime 服务的跳子会话桥（替代 __corumOpenSession window 全局）。
+    chatRuntimeRef.current?.openSession(childSessionId)
   }
 
   return (

@@ -32,6 +32,7 @@ import { en, NS, zh } from './locale.ts'
 import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'
 import { createChatStore } from './stores.ts'
 import { TranscriptViewPolicy } from './transcript-view.ts'
+import { createChatRuntime, type ChatRuntimeService } from './chat-runtime.ts'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../chat-settings.ts'
 
 const CHAT_NODE_INJECT: ChatNodeTurnDataInjected = {
@@ -48,23 +49,21 @@ const CHAT_NODE_INJECT: ChatNodeTurnDataInjected = {
 }
 
 /**
- * fork（corum）：子 Agent 卡的跨 bundle 会话/RPC 句柄。
+ * fork（corum）：子 Agent 卡的跨 bundle 会话/RPC 句柄 → cordis 服务（统一事件
+ * 中心二期 window 全局迁移）。
  *
  * `corum-ide-ui` 壳与 `corum-ui-chat` 渲染层是两个 bundle，模块级状态互不通
  * （tsdown noExternal 各自内联）——cordis 服务实例天然跨 bundle 单例（root
- * reflect.store），所以在 apply 时把「当前会话 id + connection」挂到 window
- * 单例，供 SubagentCard 轮询子会话进度时读取（与 __corumSidebarMode /
- * __corumSlotRegistry 同模式：write-once-per-mount，只读消费）。
+ * reflect.store）。原实现把「当前会话 id + connection + 跳子会话桥」挂 window
+ * 全局（`__corumChatRuntime` / `__corumOpenSession`），跨 bundle 共享可变状态
+ * 违反红线 1。现收敛为 cordis 服务 `ctx.chatRuntime`（provide 于下方 apply）+
+ * uSES 源；SubagentCard（同 bundle 纯组件）经 chat-runtime.ts 的模块级
+ * `chatRuntimeRef` 消费同一实例。服务实现见 chat-runtime.ts。
  */
-interface CorumChatRuntime {
-  sessionId: string | undefined
-  connection: ConnectionHandle | undefined
-}
-declare global {
-  interface Window {
-    __corumChatRuntime?: CorumChatRuntime
-    /** 子 Agent 卡 act-goto 的跳子会话桥（apply.ts 挂载，官方 sessions.open 寻址）。 */
-    __corumOpenSession?: (id: string) => void
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** 子 Agent 卡的当前会话 id + RPC connection + 跳子会话桥（cordis 服务）。 */
+    chatRuntime: ChatRuntimeService
   }
 }
 
@@ -94,6 +93,12 @@ export function apply(ctx: Context): void {
   }
   registerConversationNodes(ctx)
   registerChatNodeRenderers(ctx)
+  // fork（corum）：chatRuntime cordis 服务（替代 __corumChatRuntime/__corumOpenSession
+  // window 全局）。provide 后任何 bundle 可 inject；同 bundle 的 SubagentCard 经
+  // chat-runtime.ts 模块级 chatRuntimeRef 拿同一实例。服务在 conversation.view 的
+  // inject 回调里随会话切换更新（见下方 setSession/setOpenSession）。
+  const chatRuntime = createChatRuntime()
+  ctx.provide('chatRuntime', chatRuntime)
   ctx.uiSession.provide({
     hooks: ['chat'],
     resolve: binding => ({ hooks: { chat: chatSource(binding) } }),
@@ -151,18 +156,15 @@ export function apply(ctx: Context): void {
         const session = binding?.session
         if (binding === undefined || session === undefined) throw new Error(`ui-chat: unknown session "${sessionId}"`)
         // 子 Agent 卡轮询的当前会话/RPC 句柄（view 挂载即更新；cordis 服务跨 bundle 单例）。
-        window.__corumChatRuntime = {
-          sessionId: String(sessionId),
-          connection: ctx.get('connection') as ConnectionHandle,
-        }
+        chatRuntime.setSession(String(sessionId), ctx.get('connection') as ConnectionHandle)
         // 子 Agent 卡 act-goto 的跳子会话桥（官方 sessions.open 寻址，同步幂等）。
-        window.__corumOpenSession = (id: string) => {
+        chatRuntime.setOpenSession((id: string) => {
           try {
             ctx.sessions.open(SessionId(id))
           } catch {
             // 子会话不可寻址（origin=subagent 或被过滤）时静默——卡片仍可展示进度。
           }
-        }
+        })
         return {
           review: reviewSource(binding),
           hooks: { transcriptView: transcriptView.mode },
