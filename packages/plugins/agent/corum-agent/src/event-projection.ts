@@ -95,16 +95,21 @@ export function simplifyEventData(event: SessionEvent): unknown {
       }
       break
     }
-    case 'assistant/message': {
+    case 'assistant/message':
+    case 'assistant/attempt': {
       const data = event.data as {
-        message: { content: Array<{ type: string; text?: string; reasoning?: string }> }
+        message?: { content: Array<{ type: string; text?: string; reasoning?: string }> }
         turn?: number
         step?: number
         usage?: unknown
         interrupted?: boolean
+        // fork（corum）：0.1.3 format v2 —— assistant 流内嵌进 message/attempt 的
+        // `stream`（AssistantStreamRecord[] 压缩包）。投影透传给渲染层，由其经
+        // expandAssistantStream 展开为流式增量（ide-conversation-ui 流式渲染数据源）。
+        stream?: unknown
       }
       raw = {
-        content: data.message.content.map(b => {
+        content: (data.message?.content ?? []).map(b => {
           if (b.type === 'text') return { type: 'text', text: b.text ?? '' }
           if (b.type === 'reasoning') return { type: 'reasoning', text: b.reasoning ?? '' }
           if (b.type === 'tool-call') {
@@ -121,6 +126,8 @@ export function simplifyEventData(event: SessionEvent): unknown {
       if (data.turn !== undefined) raw.turn = data.turn
       if (data.step !== undefined) raw.step = data.step
       if (data.usage !== undefined) raw.usage = data.usage
+      // fork（corum）：format v2 内嵌流透传（渲染层 expandAssistantStream 展开用）。
+      if (data.stream !== undefined) raw.stream = data.stream
       if (data.interrupted !== undefined) raw.interrupted = data.interrupted
       break
     }

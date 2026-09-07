@@ -62,8 +62,13 @@
 - id: ui-goal
   disabled: true
 
+# 官方轨迹视图 ui-trajectory：**启用**（2026-09-07，0.1.3 轨迹功能）。它注册进
+# conversation.view 槽成为「对话 / 轨迹」选项卡（id 'trajectory'），corum-ui-chat
+# 的 ConversationSession 已渲染 tabs（tabs.length>1 时出现），点击即切轨迹时间线。
+# 与 ui-workflow-run/ui-deliverables/ui-goal 不同——那些面板硬 inject uiConversation
+# 且 IDE 用不到；ui-trajectory 是 conversation.view 的一个 view，数据通路走官方
+# uiConversation.binding(sessionId).target('trajectory')，泳道会话在官方对象层可用。
 - id: ui-trajectory
-  disabled: true
 
 # 官方 Agent 预设设置面板：IDE 模式由 @corum/corum-ide-ui 自建的 AgentPresetsSection
 # 替代（1:1 复刻 design.pen 设置中心）。官方 section 注册 id 'agent-presets'，
