@@ -17,10 +17,10 @@
  *   explorerWidth/explorerCollapsed/expandedDirs，刷新恢复）。
  * - 文件树↔编辑器双向同步：激活 tab → 树选中 + 自动展开父级 + scrollIntoView；
  *   关闭 tab → 同步清树选中；树选中变化 → 通知 EditorColumn。
- * - fs watch：host @Remote watch 启动递归 watch；变更通知主路径走
- *   ctx.remote.$on('corum/file/changed') 推送（统一事件中心二期），降级兜底
- *   2s 轮询 pollChanges（host 端点保留）；变更 → 文件树局部刷新；已打开 tab
- *   内容外部变更 → 未 dirty 自动重载 / 已 dirty 状态栏警告「磁盘已更改」。
+ * - fs watch：host @Remote watch 启动递归 watch；变更通知走
+ *   ctx.remote.$on('corum/file/changed') 推送（统一事件中心二期；三期删
+ *   2s poll 兜底——host/renderer 同生同死永不触发）；变更 → 文件树局部刷新；
+ *   已打开 tab 内容外部变更 → 未 dirty 自动重载 / 已 dirty 状态栏警告「磁盘已更改」。
  * - 新建文件/文件夹：tree-header 两钮 + 右键菜单接通（mkdirp/write 空文件 +
  *   自动刷新 + 新文件直接打开）。
  * - 右键菜单：文件（打开/重命名/删除）+ 目录（新建文件/新建文件夹/重命名/
@@ -97,8 +97,10 @@ type SaveFeedback =
   | { kind: 'failed'; message: string }
   | null
 
-/** 编辑器可编程入口（openFile 提升暴露，供 index.ts 桥接 corum:open-in-editor）。
- *  由 index.ts 创建并经 inject 面传入；EditorColumn 挂载时把 openFile 写入。 */
+/** 编辑器可编程入口（openFile 提升暴露，供 index.ts 的 corumEditor cordis 服务
+ *  调用——统一事件中心三-2 服务化，原 corum:open-in-editor CustomEvent + 3s
+ *  轮询已退役）。由 index.ts 创建并经 inject 面传入；EditorColumn 挂载时把
+ *  openFile 写入（写入即触发服务 pending 认领）。 */
 export interface EditorApiRef {
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
 }
@@ -133,8 +135,6 @@ export interface EditorColumnInjected {
   addToConversation: (path: string) => { ok: boolean; error?: string }
   /** 启动项目根递归 watch（幂等）。 */
   startWatch: () => Promise<{ ok: boolean; error?: { message?: string } }>
-  /** 取走累积的变更事件（降级兜底轮询数据源；host pollChanges 端点保留）。 */
-  pollChanges: () => Promise<{ ok: boolean; error?: { message?: string }; value?: { changes: { path: string; kind: 'rename' | 'change' }[] } }>
   /**
    * 订阅文件变更推送（统一事件中心二期主路径：ctx.remote.$on
    * 'corum/file/changed'）。listener 收到去抖批量 { changes } 帧；返回 dispose
@@ -193,7 +193,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges, onFileChanged }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, onFileChanged }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   const persisted = useMemo(loadPersisted, [])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
@@ -367,7 +367,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
     }
   }, [tabs, readFile, showEditor])
 
-  // 把 openFile 暴露给 index.ts（corum:open-in-editor 桥接 CustomEvent 的回调入口）。
+  // 把 openFile 暴露给 index.ts（corumEditor 服务的调用入口；写入触发 pending 认领）。
   // 同 bundle 内 ref 直通，非跨 bundle 共享可变状态，不违反 cordis 红线。
   useEffect(() => {
     editorApi.openFile = openFile
@@ -548,7 +548,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   tabsRef.current = tabs
   useEffect(() => {
     void startWatch()
-    // 变更处理（推送帧与降级轮询共用）：树局部刷新 + 已打开 tab 的外部变更检测
+    // 变更处理（$on 推送帧）：树局部刷新 + 已打开 tab 的外部变更检测
     // （未 dirty 自动重载 / 已 dirty 状态栏标「磁盘已更改」）。
     const applyChanges = (changes: { path: string; kind: 'rename' | 'change' }[]): void => {
       if (changes.length === 0) return
@@ -576,40 +576,21 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       }
     }
 
-    // 统一事件中心二期主路径：host corumFs 在 watcher 去抖回调 emit 批量
+    // 统一事件中心推送路径（唯一）：host corumFs 在 watcher 去抖回调 emit 批量
     // changes → 官方 forwarded-Remote-event 通道 → 本 listener（真实推送）。
-    let pushLive = false
+    // 三期删 2s poll 降级兜底（host/renderer 同一构建产物，「旧 host 不 emit」
+    // 永不发生；观测面 window.__corumEventStats）。
     let disposed = false
-    let pollTimer: ReturnType<typeof setInterval> | null = null
     const disposePush = onFileChanged(({ changes }) => {
       if (disposed) return
-      pushLive = true
       applyChanges(changes)
     })
-
-    // 降级兜底：$on 订阅建立后 PUSH_GRACE_MS 内零推送帧（推送通道未生效，如
-    // host 是旧版本不 emit），回退 2s poll 轮询（host pollChanges 端点保留）。
-    // 一旦推送帧到达（pushLive），轮询永不起动。
-    const graceTimer = setTimeout(() => {
-      if (pushLive || disposed) return
-      pollTimer = setInterval(async () => {
-        try {
-          const result = await pollChanges()
-          if (!result.ok || result.value === undefined) return
-          applyChanges(result.value.changes)
-        } catch {
-          // 轮询失败静默（下轮重试）
-        }
-      }, 2000)
-    }, 800)
 
     return () => {
       disposed = true
       disposePush()
-      clearTimeout(graceTimer)
-      if (pollTimer !== null) clearInterval(pollTimer)
     }
-  }, [startWatch, pollChanges, readFile, onFileChanged])
+  }, [startWatch, readFile, onFileChanged])
 
   // Sash drag (resource manager width).
   const sashDragWidth = useRef(EXPLORER_DEFAULT_WIDTH)

@@ -141,6 +141,63 @@ declare module '@deepseek-ai/cordis' {
 /** Required service: the typed Client Remote contribution mount. */
 export const inject = ['remote']
 
+// ── fork（corum）三-1：事件可观测性计数面 ────────────────────────────────
+// renderer 端此前零调试面，排查「事件没到」只能重新埋探针。本段在 $mount 全部
+// 完成后包一层 ctx.remote.$on：每事件名维护 { frames, lastAt, listeners }
+// 只读计数，挂 window.__corumEventStats（write-once-read-only 桥——规范 §1
+// 例外：只暴露 getter，JSON.stringify 即可取快照，外部无法写入内部表）。
+// localStorage `corum.debug.events=1` 时逐帧 console.debug。
+// CDP 排查用法：JSON.stringify(window.__corumEventStats) 看帧到没到 renderer。
+/** 单事件计数行（frames 累计帧数 / lastAt 最近一帧 ms 时间戳 / listeners 当前订阅数）。 */
+interface CorumEventStatRow { frames: number; lastAt: number; listeners: number }
+const corumEventStatsTable = new Map<string, CorumEventStatRow>()
+
+/** 安装 $on 统计包装（apply 内调用一次；返回的 facade 只含 getter）。 */
+function installCorumEventStats(ctx: Context): void {
+  const remote = ctx.remote
+  const raw$on = remote.$on.bind(remote)
+  const debugOn = (): boolean => {
+    try { return globalThis.localStorage?.getItem('corum.debug.events') === '1' } catch { return false }
+  }
+  // 类型面上保持 ClientRemote 不变（$on 签名经泛型原样透传）。
+  remote.$on = function $onWithStats(event: string, listener: (...args: never[]) => unknown): () => void {
+    let row = corumEventStatsTable.get(event)
+    if (row === undefined) {
+      row = { frames: 0, lastAt: 0, listeners: 0 }
+      corumEventStatsTable.set(event, row)
+    }
+    row.listeners++
+    const wrapped = (...args: unknown[]): unknown => {
+      row.frames++
+      row.lastAt = Date.now()
+      if (debugOn()) console.debug('[corum-event]', event, ...args)
+      return listener(...(args as never[]))
+    }
+    const dispose = raw$on(event as never, wrapped as never)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      row.listeners--
+      dispose()
+    }
+  } as ClientRemote['$on']
+  // write-once-read-only：只读 facade（getters 每次调用取最新值，返回快照副本）。
+  Object.defineProperty(globalThis, '__corumEventStats', {
+    configurable: false,
+    enumerable: false,
+    writable: false,
+    value: Object.freeze({
+      get events(): Record<string, CorumEventStatRow> {
+        const out: Record<string, CorumEventStatRow> = {}
+        for (const [name, row] of corumEventStatsTable) out[name] = { ...row }
+        return out
+      },
+      toJSON(): Record<string, CorumEventStatRow> { return this.events },
+    }),
+  })
+}
+
 /**
  * Mount the Host capabilities explicitly selected for this Client assembly.
  * @param ctx - Client Cordis root carrying the typed API service.
@@ -160,6 +217,9 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
     for (const dispose of disposers.reverse()) await dispose()
     throw error
   }
+  // fork（corum）三-1：$mount 就绪后装事件计数面（immediately:true 装配 →
+  // 后续所有插件的 $on 订阅都走统计包装）。
+  installCorumEventStats(ctx)
   // Unwound in reverse mount order, so a namespace never outlives one mounted
   // after it.
   return async () => {

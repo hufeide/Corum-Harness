@@ -6,9 +6,10 @@
  * (reopen from the plugin manager's 视图管理); no window-event bridge remains.
  *
  * 真实终端（0.1.2 换真）：BottomPanel 的 xterm.js 经 host corumTerminal RPC
- * 驱动 node-pty 登录 shell（create/write/resize/poll/kill），数据走官方
- * ctx.connection.rpc（`call('/api', 'corumTerminal/xxx', { args: {...} })`，与
- * corumFs 同理，见 corum-desktop/src/host/corum-terminal.ts）。
+ * 驱动 node-pty 登录 shell（create/write/resize/kill + 输出走 $on 推送），
+ * 数据走官方 ctx.connection.rpc（`call('/api', 'corumTerminal/xxx',
+ * { args: {...} })`，与 corumFs 同理，见 corum-desktop/src/host/corum-terminal.ts）。
+ * 三期：poll 降级兜底已删（host/renderer 同生同死，永不触发）。
  */
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { type Context as ClientContext } from '@deepseek-ai/cordis'
@@ -57,13 +58,9 @@ export function apply(ctx: ClientContext): void {
             const result = await connection.rpc.call('/api', 'corumTerminal/resize', { args: { id, cols, rows } })
             return result as Envelope<{ resized: boolean }>
           },
-          poll: async (id) => {
-            const result = await connection.rpc.call('/api', 'corumTerminal/poll', { args: { id } })
-            return result as Envelope<{ data: string; exited: boolean; exitCode?: number }>
-          },
-          // 统一事件中心一期：终端输出改走官方 forwarded-Remote-event 通道
-          // （host corumTerminal 在 proc.onData 里 emit；真实推送，取代 60ms poll
-          // 主路径）。$on 返回的 dispose 由组件 unmount 时调用。
+          // 统一事件中心：终端输出走官方 forwarded-Remote-event 通道
+          // （host corumTerminal 在 proc.onData 里 emit；真实推送——三期已删
+          // 60ms poll 兜底）。$on 返回的 dispose 由组件 unmount 时调用。
           onTerminalOutput: (listener) => ctx.remote.$on('corum/terminal/output', listener),
           kill: async (id) => {
             const result = await connection.rpc.call('/api', 'corumTerminal/kill', { args: { id } })

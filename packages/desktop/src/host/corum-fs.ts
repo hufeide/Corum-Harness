@@ -107,9 +107,7 @@ function languageFromPath(path: string): string {
 export class CorumFsService extends TypertRemoteService {
   /** 当前活跃的根 watcher（host cwd 递归）。 */
   private watcher: FSWatcher | null = null
-  /** 累积的变更事件（client 经 pollChanges 取走后清空）。 */
-  private changeLog: { path: string; kind: 'rename' | 'change' }[] = []
-  /** 去抖窗口内累积的本批变更（统一事件中心二期：到点一次性进 changeLog + emit 一帧）。 */
+  /** 去抖窗口内累积的本批变更（统一事件中心：到点一次性 emit 一帧）。 */
   private pendingChanges: { path: string; kind: 'rename' | 'change' }[] = []
   /** watcher 启动时的去抖定时器。 */
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -127,7 +125,7 @@ export class CorumFsService extends TypertRemoteService {
 
   /**
    * 切换项目根（client 跟随当前会话 cwd / 工作区 path 调用）。空串/未传 =
-   * 回退 host 进程 cwd。切换后 watcher 重启到新根，changeLog 清空。
+   * 回退 host 进程 cwd。切换后 watcher 重启到新根，pendingChanges 清空。
    * @param cwd - 新根的绝对路径（必须在磁盘上存在；不在校验时不切）。
    */
   @Remote('setRoot')
@@ -150,7 +148,6 @@ export class CorumFsService extends TypertRemoteService {
       this.debounceTimer = null
     }
     this.pendingChanges = []
-    this.changeLog = []
     return { root: real }
   }
 
@@ -433,11 +430,11 @@ export class CorumFsService extends TypertRemoteService {
   }
 
   /**
-   * 启动项目根递归 watch（幂等）。变更事件在去抖窗口内累积、到点一次性进
-   * changeLog（client 经 `pollChanges` 取走，降级兜底）并 emit
-   * `corum/file/changed` 一帧推送（统一事件中心二期，renderer $on 直收主路径）。
-   * 过滤 .git / node_modules / 点开头的隐藏项（与 list 同规则）。500ms 去抖
-   * （编辑器保存一顿连写只报一次）。
+   * 启动项目根递归 watch（幂等）。变更事件在去抖窗口内累积、到点一次性
+   * emit `corum/file/changed` 一帧推送（统一事件中心，renderer $on 直收
+   * 唯一路径——三期删 pollChanges 端点 + changeLog 缓冲，host/renderer 同生
+   * 同死「旧 host 不 emit」永不发生）。过滤 .git / node_modules / 点开头的
+   * 隐藏项（与 list 同规则）。500ms 去抖（编辑器保存一顿连写只报一次）。
    */
   @Remote('watch')
   async startWatch(): Promise<{ watching: boolean }> {
@@ -449,10 +446,10 @@ export class CorumFsService extends TypertRemoteService {
         const parts = filename.split(sep)
         // 与 list 同规则：过滤 .git / node_modules / 点开头的隐藏段。
         if (parts.some(p => p === '.git' || p === 'node_modules' || p.startsWith('.'))) return
-        // 统一事件中心二期：去抖窗口内累积本批 changes（原实现每事件重启定时器、
+        // 统一事件中心：去抖窗口内累积本批 changes（原实现每事件重启定时器、
         // 到点只记最后一条——批量编辑器保存/外部改动会丢中间帧）。到点把整个
-        // batch 一次性进 changeLog（pollChanges 降级兜底取走）并 emit 一帧推送
-        // （renderer $on 直收；一个去抖窗口一帧，不每 fs 事件一帧）。
+        // batch 一次性 emit 一帧推送（renderer $on 直收；一个去抖窗口一帧，
+        // 不每 fs 事件一帧）。
         this.pendingChanges.push({ path: `/${filename.split(sep).join('/')}`, kind: eventType === 'rename' ? 'rename' : 'change' })
         if (this.debounceTimer !== null) clearTimeout(this.debounceTimer)
         this.debounceTimer = setTimeout(() => {
@@ -460,7 +457,6 @@ export class CorumFsService extends TypertRemoteService {
           if (this.pendingChanges.length === 0) return
           const changes = this.pendingChanges
           this.pendingChanges = []
-          this.changeLog.push(...changes)
           this.ctx.emit('corum/file/changed', { changes })
         }, 500)
       })
@@ -471,16 +467,6 @@ export class CorumFsService extends TypertRemoteService {
     } catch (error) {
       throw new Error(`cannot watch project root: ${String(error)}`)
     }
-  }
-
-  /**
-   * 取走累积的变更事件（client 轮询）。返回后清空 changeLog。
-   */
-  @Remote('pollChanges')
-  async pollChanges(): Promise<{ changes: { path: string; kind: 'rename' | 'change' }[] }> {
-    const changes = this.changeLog
-    this.changeLog = []
-    return { changes }
   }
 
   /**

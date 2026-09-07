@@ -2,15 +2,15 @@
  * corum-desktop/corum-terminal — 真实终端 Host 半（Typert Remote，service 名
  * `corumTerminal`）。把 IDE 底部面板（corum.panel 槽）的假 TERM_LINES 换成
  * node-pty 驱动的真实登录 shell：renderer 的 xterm.js 经本服务 spawn / 输入 /
- * resize / kill / 轮询输出。
+ * resize / kill，输出走统一事件中心推送。
  *
- * 输出回流（统一事件中心一期，2026-09 迁移）：pty.onData 除累积进环形缓冲外，
- * 同步 `ctx.emit('corum/terminal/output', { id, data })`——该事件经 fork 包
+ * 输出回流（统一事件中心一期，2026-09 迁移）：pty.onData 同步
+ * `ctx.emit('corum/terminal/output', { id, data })`——该事件经 fork 包
  * @corum/corum-api-remotes 的官方 forwarded-Remote-event 通道实时推给
- * renderer（client `ctx.remote.$on('corum/terminal/output', ...)` 直收，
- * 不再依赖 60ms poll）。`poll` 端点与缓冲暂保留作降级兜底（确认 $on 稳定后
- * 二期删除；原「缓冲区 + 轮询拉取」注释见 git 历史）。缓冲钳制
- * `MAX_BUFFER_CHARS`（溢出从头截断保尾部，终端语义取最新输出）。
+ * renderer（client `ctx.remote.$on('corum/terminal/output', ...)` 直收）。
+ * 三期（2026-09）：`poll` 端点 + 会话环形缓冲已删——host 与 renderer 同一
+ * 构建产物、同生同死，「host 旧版不 emit」永不发生（审计
+ * .dbg/event-bus-audit-2026-09.md P1-1；一期 CDP 实测 pollStarts=0）。
  *
  * @Remote 方法直接 return value（信封自动包成 `{ ok: true, value }`），失败
  * throw（包成 `{ ok: false, error }`）。
@@ -33,14 +33,9 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** 单会话环形缓冲上限（字符数）。溢出从头截断保尾部。 */
-const MAX_BUFFER_CHARS = 256 * 1024
-
-/** 一个终端会话：pty 句柄 + 待取走的输出缓冲 + 退出状态。 */
+/** 一个终端会话：pty 句柄 + 退出状态。 */
 interface TerminalSession {
   proc: pty.IPty
-  /** onData 累积的输出（client poll 拉走即清）。 */
-  buffer: string
   /** 子进程退出码（未退出为 undefined）。 */
   exitCode?: number
   /** 是否已退出（exitCode 可能在异常路径下缺席，故独立标记）。 */
@@ -85,14 +80,10 @@ export class CorumTerminalService extends TypertRemoteService {
     } catch (error) {
       throw new Error(`cannot spawn shell ${shell}: ${String(error)}`)
     }
-    const session: TerminalSession = { proc, buffer: '', exited: false }
+    const session: TerminalSession = { proc, exited: false }
     proc.onData((data) => {
-      session.buffer += data
-      if (session.buffer.length > MAX_BUFFER_CHARS) {
-        session.buffer = session.buffer.slice(session.buffer.length - MAX_BUFFER_CHARS)
-      }
-      // 统一事件中心：pty 输出实时推给 renderer（client $on 直收；poll 端点
-      // 保留作降级兜底）。emit 先于缓冲清理无关——载荷是本帧原始数据。
+      // 统一事件中心：pty 输出实时推给 renderer（client $on 直收，唯一路径；
+      // 三期删 poll 兜底 + 会话缓冲）。
       this.ctx.emit('corum/terminal/output', { id, data })
     })
     proc.onExit(({ exitCode }) => {
@@ -130,31 +121,6 @@ export class CorumTerminalService extends TypertRemoteService {
     // pty.resize 对非法尺寸（0/负）抛错；钳到最小 1。
     session.proc.resize(Math.max(1, Math.floor(cols)), Math.max(1, Math.floor(rows)))
     return { resized: true }
-  }
-
-  /**
-   * 拉走累积的输出（client 轮询循环的数据源）。返回后清空缓冲；附带退出
-   * 状态让 client 在 shell 退出后停轮询。
-   * @param id - 会话 id。
-   * @returns data（本周期新输出，可能为空串）+ exited/exitCode。
-   */
-  @Remote('poll')
-  async poll(id: string): Promise<{ data: string; exited: boolean; exitCode?: number }> {
-    const session = this.sessions.get(id)
-    if (session === undefined) {
-      // 会话不存在（已 kill 或从未创建）：按已退出回报，client 停轮询。
-      return { data: '', exited: true }
-    }
-    const data = session.buffer
-    session.buffer = ''
-    if (session.exited) {
-      // 退出状态的会话最后一次 poll 后即清理（client 拿到 exited 停轮询，
-      // 不会再回来；id 残留会让 Map 单调增长）。
-      this.sessions.delete(id)
-      // exactOptionalPropertyTypes：exitCode 缺席时用条件展开而非显式 undefined。
-      return { data, exited: true, ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}) }
-    }
-    return { data, exited: false }
   }
 
   /**
