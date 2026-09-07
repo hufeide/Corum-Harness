@@ -12,7 +12,10 @@ import type {
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsDescribeFace, SettingsRemote } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsDescribeFace } from '@deepseek-ai/dsh-client-ui-settings/client'
+// fork（corum）：官方 0.1.3 删除 SettingsRemote 导出，settings Remote 命名空间
+// 类型改从 ClientRemote 索引（含 mutate/replace/update，见 dsh-api-settings-controller remote face）。
+type SettingsRemote = ClientRemote['settings']
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { ModelCard } from './model-cards.ts'
 

@@ -23,7 +23,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import type { JsonValue } from '@deepseek-ai/dsh-api-remotes/client'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { validateDeepSeekModels } from './DeepSeekModelsEditor.tsx'
@@ -146,7 +146,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
       }
       // `taken` is a snapshot too, so the id check alone cannot see a route
       // declared after this card opened; the revision makes that race a
-      // `settings-conflict` instead of a write over the other profile.
+      // `settings/conflict` instead of a write over the other profile.
       const response = await api.settings.mutate(
         NS,
         [{ op: 'set', path: ['providers', route], value: profile as JsonValue }],
@@ -155,7 +155,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
       if (!response.ok) return response.error.message
       // The provider now exists. A retry after the key write below fails must
       // not re-run this mutate: the revision it holds is the one this write
-      // just superseded, so the Host would answer `settings-conflict` and the
+      // just superseded, so the Host would answer `settings/conflict` and the
       // key could never be stored from this card at all.
       setCommitted(true)
     }

@@ -9,7 +9,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import type { JsonValue } from '@deepseek-ai/dsh-api-remotes/client'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { messageOf } from './store.ts'
 import type { ModelsSettingsStore, ModelsWire } from './store.ts'

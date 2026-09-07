@@ -62,7 +62,7 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
         : []
       const res = await api.settings.mutate(
         provider.settingsNs,
-        [{ op: 'set', path: [...provider.settingsPath, 'models'], value: arr as unknown as import('@deepseek-ai/dsh-api-remotes/client').JsonValue }],
+        [{ op: 'set', path: [...provider.settingsPath, 'models'], value: arr as unknown as import('@deepseek-ai/dsh-util-values').JsonValue }],
         namespace?.revision,
       )
       if (!res.ok) { setFailure(res.error.message); return }
