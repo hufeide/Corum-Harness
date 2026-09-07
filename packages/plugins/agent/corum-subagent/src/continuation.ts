@@ -470,11 +470,13 @@ export class SubagentContinuationManager {
       this.assertAdmitting(parent)
       this.assertChildIdAvailable(childId)
       if (spec.childId !== undefined) {
-        const persisted = await persistence.listSnapshots(spec.signal)
+        // fork（corum）：官方 0.1.3 session-persistence handle seam —— listSnapshots
+        // 删除，按 childId 直接 stat 判存（undefined = 不存在）。
+        const persisted = await persistence.stat(childId, { signal: spec.signal })
         spec.signal.throwIfAborted()
         this.assertAdmitting(parent)
         this.assertChildIdAvailable(childId)
-        if (persisted.some(snapshot => snapshot.header.id === childId)) {
+        if (persisted !== undefined) {
           throw new SubagentError(`subagent "${childId}" already exists`, 'DUPLICATE_CHILD')
         }
       }

@@ -10,7 +10,7 @@
  * @module @deepseek-ai/dsh-subagent/assistant-output
  */
 
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { expandAssistantStream, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /**
@@ -33,8 +33,13 @@ export class AssistantOutputFold {
     if (event.type === 'assistant/message') {
       const content = event.data.message.content
       if (content.length > 0) this.message = content
-    } else if (event.type === 'assistant/chunk' && event.data.chunk.type === 'text-delta') {
-      this.pushText(event.data.chunk.text)
+    }
+    // fork（corum）：官方 0.1.3 format v2 —— assistant 流内嵌进 message/attempt
+    // 事件（`data.stream`），`assistant/chunk` 独立事件已删除，改经 expandAssistantStream 展开。
+    if (event.type === 'assistant/message' || event.type === 'assistant/attempt') {
+      for (const { chunk } of expandAssistantStream(event.data.stream)) {
+        if (chunk.type === 'text-delta') this.pushText(chunk.text)
+      }
     }
   }
 
