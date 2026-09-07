@@ -22,7 +22,7 @@ onlyBuiltDependencies:
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': true
-  fs-ext: set this to true or false
+  fs-ext: true
   koffi: true
   node-pty: true
   protobufjs: true
