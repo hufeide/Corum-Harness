@@ -22,6 +22,7 @@ import type {} from '@corum/corum-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { EditorColumn } from './editor/EditorColumn.tsx'
 import type { EditorApiRef, EditorColumnInjected } from './editor/EditorColumn.tsx'
+import { createCorumEditor, createEditorReadySource, type CorumEditorService } from './editor/corum-editor.ts'
 import type { FsEntry } from './editor/ExplorerPane.tsx'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
@@ -41,6 +42,12 @@ interface ShowRegionCapableLayout {
 declare module '@deepseek-ai/cordis' {
   interface Context {
     notifications: NotificationStore
+    /**
+     * 「在编辑器打开」可编程入口（统一事件中心三-2：corum:open-in-editor
+     * 跨 bundle CustomEvent 服务化）。chat 等消费端用局部能力接口收窄注入
+     * （dev-conventions §2.4 红线 2/3）。
+     */
+    corumEditor: CorumEditorService
   }
 }
 
@@ -130,11 +137,22 @@ export function apply(ctx: Context): void {
       unsubWorkspaces?.()
     }, 'corum-desktop: workspace root tracking')
 
-    // ── 「在编辑器打开」可编程入口（corum:open-in-editor CustomEvent 桥接）──
-    // chat 插件 dispatch 一次性 CustomEvent（detail = { path: 绝对路径 }），
-    // 此处监听 → 转 corumFs 相对路径 → 点亮编辑器 → 调 EditorColumn openFile。
-    // 同 bundle 内 CustomEvent + ref，合法的一次性信号（非共享可变状态）。
-    const editorApiRef: EditorApiRef = { openFile: null }
+    // ── 「在编辑器打开」可编程入口（corumEditor cordis 服务）──
+    // 统一事件中心三-2：原 chat → desktop 的 corum:open-in-editor 跨 bundle
+    // CustomEvent（fire-and-forget + 100ms 轮询 3s 等 EditorColumn 挂载）服务化。
+    // chat 经 inject 'corumEditor' + 局部能力接口收窄调 openFile(absolute)，拿到
+    // { ok, error } 结构化反馈；EditorColumn 未挂载时请求挂起，挂载经
+    // readySource 通知认领（pending 模式，替代轮询）。
+    const rawEditorApiRef: EditorApiRef = { openFile: null }
+    const editorReady = createEditorReadySource()
+    // openFile 写入/清空时通知就绪源（EditorColumn 挂载/卸载）→ 认领 pending。
+    const editorApiRef: EditorApiRef = {
+      get openFile() { return rawEditorApiRef.openFile },
+      set openFile(fn) {
+        rawEditorApiRef.openFile = fn
+        editorReady.notify()
+      },
+    }
 
     /** 绝对路径 → corumFs 相对路径（去掉 lastRoot 前缀，保证 / 开头）。 */
     const toRelativePath = (absolute: string): string | null => {
@@ -148,53 +166,28 @@ export function apply(ctx: Context): void {
       return rel
     }
 
-    const onOpenInEditor = (e: Event): void => {
-      const detail = (e as CustomEvent<{ path?: string }>).detail
-      const absolute = detail?.path
-      if (typeof absolute !== 'string' || absolute === '') {
-        console.warn('[corum-desktop] corum:open-in-editor: missing or invalid path in detail')
-        return
-      }
-      const rel = toRelativePath(absolute)
-      if (rel === null) {
-        console.warn('[corum-desktop] corum:open-in-editor: path not under current workspace root', { absolute, lastRoot })
-        return
-      }
-      // 点亮编辑器区域（两层隐藏一次清）：
-      // ① 树 leaf.hidden 持久化标记 → setRegionHidden('corum.editor', false)；
-      // ② AppFrame userShown 运行时隐藏集（DEFAULT_HIDDEN 场景，① 管不到）→
-      //    layout.showRegion（LayoutController 新增面，AppFrame showRegion 的单槽
-      //    包装，同时清 ①+②；保留 ① 让语义显式且防御未来实现变化）。
-      // 跨 bundle 窄接口收窄（dev-conventions §2.4 红线 3）：editorCtx.layout 的
-      // 类型面是官方基线 ILayout（无 showRegion），用局部能力接口 + 可选链
-      // 防御——实现缺该面时静默跳过（编辑器仍可由用户手动点亮），不强耦合
-      // ide-ui 实现包。原「setTimeout 50ms + 读 localStorage 字符串匹配 + 模拟
-      // 点按钮」hack（6c43655c 引入）随本接口落地删除。
-      editorCtx.layout.setRegionHidden('corum.editor', false)
-      const layoutShowCapable = editorCtx.layout as unknown as ShowRegionCapableLayout
-      layoutShowCapable.showRegion?.('corum.editor')
-      // EditorColumn 挂载后 openFile 才写入 editorApiRef；未挂载时轮询等待
-      if (editorApiRef.openFile !== null) {
-        void editorApiRef.openFile(rel, { pin: true })
-        return
-      }
-      // 轮询等待 EditorColumn 挂载（最多 3s）
-      let attempts = 0
-      const poll = (): void => {
-        attempts++
-        if (editorApiRef.openFile !== null) {
-          void editorApiRef.openFile(rel, { pin: true })
-          return
-        }
-        if (attempts < 30) {
-          setTimeout(poll, 100)
-        } else {
-          console.warn('[corum-desktop] corum:open-in-editor: editor mount timeout', { path: rel })
-        }
-      }
-      setTimeout(poll, 100)
-    }
-    window.addEventListener('corum:open-in-editor', onOpenInEditor)
+    const corumEditor = createCorumEditor(editorApiRef, editorReady, {
+      toRelativePath,
+      currentRoot: () => lastRoot,
+      showEditorRegion: () => {
+        // 点亮编辑器区域（两层隐藏一次清）：
+        // ① 树 leaf.hidden 持久化标记 → setRegionHidden('corum.editor', false)；
+        // ② AppFrame userShown 运行时隐藏集（DEFAULT_HIDDEN 场景，① 管不到）→
+        //    layout.showRegion（LayoutController 新增面，AppFrame showRegion 的单槽
+        //    包装，同时清 ①+②；保留 ① 让语义显式且防御未来实现变化）。
+        // 跨 bundle 窄接口收窄（dev-conventions §2.4 红线 3）：editorCtx.layout 的
+        // 类型面是官方基线 ILayout（无 showRegion），用局部能力接口 + 可选链
+        // 防御——实现缺该面时静默跳过（编辑器仍可由用户手动点亮），不强耦合
+        // ide-ui 实现包。原「setTimeout 50ms + 读 localStorage 字符串匹配 + 模拟
+        // 点按钮」hack（6c43655c 引入）随本接口落地删除。
+        editorCtx.layout.setRegionHidden('corum.editor', false)
+        const layoutShowCapable = editorCtx.layout as unknown as ShowRegionCapableLayout
+        layoutShowCapable.showRegion?.('corum.editor')
+      },
+    })
+    // cordis 服务 provide（跨 bundle 单例，root reflect.store 保证）；fiber
+    // dispose 时自动撤销注册。
+    editorCtx.provide('corumEditor', corumEditor)
 
     const dispose = editorCtx.slots.inject('corum.editor', () => editorCtx.slots.register(
       {
@@ -247,13 +240,9 @@ export function apply(ctx: Context): void {
             const result = await connection.rpc.call('/api', 'corumFs/watch', { args: {} })
             return result as { ok: boolean; error?: { message?: string } }
           },
-          pollChanges: async () => {
-            const result = await connection.rpc.call('/api', 'corumFs/pollChanges', { args: {} })
-            return result as { ok: boolean; error?: { message?: string }; value?: { changes: { path: string; kind: 'rename' | 'change' }[] } }
-          },
-          // 统一事件中心二期：文件变更改走官方 forwarded-Remote-event 通道（host
-          // corumFs 在 watcher 去抖回调里 emit 批量 changes；真实推送，取代 2s poll
-          // 主路径）。$on 返回的 dispose 由组件 unmount 时调用。
+          // 统一事件中心：文件变更走官方 forwarded-Remote-event 通道（host
+          // corumFs 在 watcher 去抖回调里 emit 批量 changes；真实推送——三期已删
+          // 2s pollChanges 兜底 + host 端点）。$on 返回的 dispose 由组件 unmount 时调用。
           onFileChanged: (listener) => editorCtx.remote.$on('corum/file/changed', listener),
           addToConversation: (path: string) => {
             // 方案 A（子代理调查结论）：@path 追加进当前会话草稿，与手打
@@ -285,7 +274,6 @@ export function apply(ctx: Context): void {
       EditorColumn,
     ))
     return () => {
-      window.removeEventListener('corum:open-in-editor', onOpenInEditor)
       dispose()
     }
   })
