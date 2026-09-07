@@ -8,7 +8,7 @@ import type {
   ConversationSessionHeaderSlotProps, ConversationSessionSlotProps,
 } from '../contract/slots.ts'
 import { conversationPhase } from '../contract/snapshot.ts'
-import type { ViewTab } from '../contract/views.ts'
+import { resolveActiveView } from '../view-selection.ts'
 import css from './ConversationRoot.module.css'
 
 /** Full props composed from the strict session body contract. */
@@ -21,14 +21,6 @@ interface Breadcrumb {
   readonly id: SessionId
   readonly displayTitle: string
   readonly subagent: boolean
-}
-
-const DEFAULT_VIEW_ID = 'chat'
-
-/** Resolve a persisted selection, then registered Chat, without choosing another View. */
-function resolveActiveView(tabs: readonly ViewTab[], selectedId: string | null): ViewTab | undefined {
-  const selected = selectedId === null ? undefined : tabs.find(view => view.id === selectedId)
-  return selected ?? tabs.find(view => view.id === DEFAULT_VIEW_ID)
 }
 
 function deriveAncestry(list: SessionListState, id: SessionId): readonly Breadcrumb[] {
@@ -65,8 +57,8 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  * @returns the hidden blank-session header or visible title and tabs.
  */
 export function ConversationSessionHeader({
-  sessionId, useSession, useSessions, useConversation, useConversationViews, useStore, actions,
-  renderSlot, open, t,
+  sessionId, useSession, useSessions, useConversation, useConversationViews, useStore,
+  renderSlot, open, selectView, t,
 }: ConversationSessionHeaderProps) {
   const tabs = useConversationViews(value => value)
   const selectedId = useStore(s => s.view)
@@ -75,6 +67,9 @@ export function ConversationSessionHeader({
   const session = useSession(s => s)
   const conversation = useConversation(s => s)
   const hideChrome = session.blank && conversationPhase(session, conversation) === 'blank'
+  // corum：ancestry/open 仅为 titleRow 面包屑服务；titleRow 已删（见下），保留推导避免破坏注入面。
+  void ancestry
+  void open
 
   return (
     <header
@@ -84,7 +79,8 @@ export function ConversationSessionHeader({
       {!hideChrome && (
         <>
           {/* 标题行已移除（2026-08-29）：Agent 标题栏已显示会话标题，避免重复。
-              保留 tabs（对话/轨迹选项卡）和 header 结构。 */}
+              保留 tabs（对话/轨迹选项卡）和 header 结构。官方 0.1.3 的 titleRow
+              （crumbs 面包屑 + lineage/actions/utilities 槽）整块不渲染。 */}
           {tabs.length > 1 && (
             <div className={css.tabs} role="tablist">
               {tabs.map(viewTab => (
@@ -94,7 +90,7 @@ export function ConversationSessionHeader({
                   role="tab"
                   aria-selected={viewTab.id === active?.id}
                   className={clsx(css.tab, viewTab.id === active?.id && css.tabActive)}
-                  onClick={() => { actions.setView(viewTab.id) }}
+                  onClick={() => { selectView(viewTab.id) }}
                 >
                   {viewTab.label}
                 </button>
@@ -115,7 +111,7 @@ export function ConversationSessionHeader({
  */
 export function ConversationSession({
   useSession, useConversation, useConversationViews, useInput, inputActions, useStore, actions,
-  renderSlot, bindDraftMirror,
+  renderSlot, bindDraftMirror, openView,
 }: ConversationSessionProps) {
   const tabs = useConversationViews(value => value)
   const selectedId = useStore(s => s.view)
@@ -139,7 +135,7 @@ export function ConversationSession({
     <div className={css.viewArea}>
       {active !== undefined && renderSlot('conversation.view', {
         viewRequest,
-        openView: actions.openView,
+        openView,
         completeViewRequest: actions.completeViewRequest,
       }, { only: active.id })}
     </div>
