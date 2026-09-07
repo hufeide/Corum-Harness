@@ -39,7 +39,7 @@ import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 
 const NAME = 'corum-desktop'
 
@@ -418,7 +418,7 @@ export async function bootDesktop(): Promise<Context> {
             register: (ns: unknown, schema: unknown) => void
           } | undefined
           if (settings === undefined) return
-          settings.register(settingsNamespace(ONBOARDING_NAMESPACE), OnboardingSettingsSchema)
+          settings.register(ONBOARDING_NAMESPACE, OnboardingSettingsSchema)
           process.stderr.write('[corum-desktop] ui-onboarding namespace registered\n')
         }
         const poll = setInterval(() => {

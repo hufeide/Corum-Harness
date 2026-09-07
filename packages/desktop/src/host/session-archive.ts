@@ -31,6 +31,7 @@ import type { SessionStore } from '@deepseek-ai/dsh-session'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   flushLiveSessionLog,
+  readSessionLogText,
   sessionLogExportDeps,
   streamSessionLogZip,
 } from '@deepseek-ai/dsh-session-log-export'
@@ -177,11 +178,11 @@ export class CorumSessionArchive extends Service {
     if (deps.sessionQuery === undefined || deps.sessionPersistence === undefined || deps.attachments === undefined) {
       throw new Error('export failed: session log export is unavailable (missing session-query, session-persistence, or attachments service)')
     }
-    if (!deps.sessionPersistence.supportsRawArtifacts) {
-      throw new Error('export failed: the persistence backend does not expose per-session raw artifacts')
-    }
     await flushLiveSessionLog(deps, id, signal)
-    const root = await deps.sessionPersistence.readRaw(id, signal)
+    // fork（corum）：官方 0.1.3 session-persistence handle seam —— readRaw/
+    // supportsRawArtifacts 已删，导出改由调用方先 readSessionLogText 读+序列化
+    // root（read handle 链），再交 streamSessionLogZip 流式打包。
+    const root = await readSessionLogText(deps.sessionPersistence, id, signal)
     if (root === undefined) throw new Error(`export failed: session not found: ${sessionId}`)
     const stream = streamSessionLogZip(
       { sessionQuery: deps.sessionQuery, sessionPersistence: deps.sessionPersistence, attachments: deps.attachments, sessions: deps.sessions },
