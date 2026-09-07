@@ -441,3 +441,9 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 - **file 附件卡样式（原 §9.5 遗留②）**：`MessageItem.module.css` 补 6 类（attachmentRow/fileCard/fileIcon/fileContent/fileName/fileMeta，corum glass 化）。**CDP 实测**：上传 `corum-upload-probe.txt` → fileCard 渲染 `display:flex / border-radius:16px / 玻璃背景` → Agent 读取附件内容回答。
 - **skillNames 通路（原 §9.5 遗留③）**：UserStyleBubble 加 `skillNames` prop + `projectUserText` 3 参 + `UserMessageNodeView.data.skillNames` 透传。官方 skill chip 数据投影（chat-snapshot-builder SkillNameProjector）/类型/渲染三层已对齐，host skill-invocation 场景到达时自然呈现。
 - **运行时坑③（新增）**：`corum-ui-conversation/apply.ts` inject **误删 `fileUpload`**（合并时沿用「空态操作卡不需上传」的旧假设）——官方 0.1.3 把它作为必需 inject，`createDrafts→beginFileUpload` 链经 `ctx.fileUpload.upload` 真上传，缺失致文件上传静默 fail（typecheck 不报，因 `ctx.fileUpload` 类型经 Context 合并存在但运行时 undefined）。**教训：fork inject 数组的「删减」必须逐一对照官方 0.1.3 新版，尤其新增必需服务**。已补回并 CDP 验证上传链路全通。
+
+### 9.7 轨迹功能 + 流式渲染结论（2026-09-07 三轮）
+
+- **轨迹功能（官方 ui-trajectory 启用，零自研）**：`cordis.ide.patch.yml` 的 `ui-trajectory` 从 `disabled: true` 改为启用——官方插件注册进 `conversation.view` 槽成为「对话/轨迹」选项卡（id `trajectory`），corum-ui-chat 的 ConversationSession 已渲染 tabs（tabs.length>1 时出现），点击即切官方轨迹时间线（过滤/搜索/轮次分组/工具调用行/上下文/附件标记）。数据通路官方 `uiConversation.binding(sessionId).target('trajectory')`，泳道会话在官方对象层可用。**教训：corum-ide-conversation-ui 已退役（B 方案由 corum-ui-chat fork 接管对话区），勿再向其投功能——先查包的激活状态再动手**（本次一度误把轨迹/流式做进退役包并引入 inject 死锁，CDP boot 才抓出）。
+- **流式渲染（ide-conversation-ui 遗留①闭环）**：该包已退役不激活，主流式渲染由 corum-ui-chat 经官方 `assistant/live-chunk`（agent/assistant-stream→session.follow）承载——0.1.3 流式在主对话区**本就正常**，遗留①实质无需做。`corum-agent/event-projection.ts` 保留 `assistant/attempt` 投影补全 + `stream` 透传（0.1.3 format v2 数据通路补全，attempt 是合法终态事件，旧投影会丢）。
+- **CDP 验证**：「对话/轨迹」tab 出现 → 点轨迹 → 官方轨迹时间线完整渲染 → 切回对话正常。截图 `.dbg/phase6-trajectory-view.png`。
