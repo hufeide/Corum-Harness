@@ -17,9 +17,10 @@
  *   explorerWidth/explorerCollapsed/expandedDirs，刷新恢复）。
  * - 文件树↔编辑器双向同步：激活 tab → 树选中 + 自动展开父级 + scrollIntoView；
  *   关闭 tab → 同步清树选中；树选中变化 → 通知 EditorColumn。
- * - fs watch：host @Remote watch + client 2s 轮询 pollChanges；变更 → 文件树
- *   局部刷新；已打开 tab 内容外部变更 → 未 dirty 自动重载 / 已 dirty 状态栏
- *   警告「磁盘已更改」。
+ * - fs watch：host @Remote watch 启动递归 watch；变更通知主路径走
+ *   ctx.remote.$on('corum/file/changed') 推送（统一事件中心二期），降级兜底
+ *   2s 轮询 pollChanges（host 端点保留）；变更 → 文件树局部刷新；已打开 tab
+ *   内容外部变更 → 未 dirty 自动重载 / 已 dirty 状态栏警告「磁盘已更改」。
  * - 新建文件/文件夹：tree-header 两钮 + 右键菜单接通（mkdirp/write 空文件 +
  *   自动刷新 + 新文件直接打开）。
  * - 右键菜单：文件（打开/重命名/删除）+ 目录（新建文件/新建文件夹/重命名/
@@ -132,8 +133,14 @@ export interface EditorColumnInjected {
   addToConversation: (path: string) => { ok: boolean; error?: string }
   /** 启动项目根递归 watch（幂等）。 */
   startWatch: () => Promise<{ ok: boolean; error?: { message?: string } }>
-  /** 取走累积的变更事件（client 2s 轮询）。 */
+  /** 取走累积的变更事件（降级兜底轮询数据源；host pollChanges 端点保留）。 */
   pollChanges: () => Promise<{ ok: boolean; error?: { message?: string }; value?: { changes: { path: string; kind: 'rename' | 'change' }[] } }>
+  /**
+   * 订阅文件变更推送（统一事件中心二期主路径：ctx.remote.$on
+   * 'corum/file/changed'）。listener 收到去抖批量 { changes } 帧；返回 dispose
+   * （组件 unmount 时调用）。
+   */
+  onFileChanged: (listener: (frame: { changes: { path: string; kind: 'rename' | 'change' }[] }) => void) => () => void
 }
 
 /** Full composed props of the root-scope editor slot. */
@@ -186,7 +193,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, pollChanges, onFileChanged }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   const persisted = useMemo(loadPersisted, [])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
@@ -535,46 +542,74 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
 
-  // ── fs watch：启动 + 2s 轮询；变更 → 树刷新 + tab 外部变更检测 ──
-  // tabsRef 避免 setInterval 闭包捕获陈旧 tabs
+  // ── fs watch：启动 + 主路径 $on 推送；变更 → 树刷新 + tab 外部变更检测 ──
+  // tabsRef 避免闭包捕获陈旧 tabs
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
   useEffect(() => {
     void startWatch()
-    const timer = setInterval(async () => {
-      try {
-        const result = await pollChanges()
-        if (!result.ok || result.value === undefined) return
-        const changes = result.value.changes
-        if (changes.length === 0) return
-        setTreeRefreshGen(g => g + 1)
-        // 已打开 tab 的外部变更检测
-        for (const change of changes) {
-          const p = change.path
-          const tab = tabsRef.current.find(t => t.path === p)
-          if (tab === undefined) continue
-          if (tab.content === tab.savedContent) {
-            // 未 dirty → 自动重载磁盘内容（图片/视频 tab 无文本内容，跳过）
-            if (tab.kind === 'image' || tab.kind === 'video') continue
-            readFile(p).then((r) => {
-              if (r.ok && r.value !== undefined) {
-                setTabs(prev => prev.map(t => t.path === p
-                  ? { ...t, content: r.value!.content, savedContent: r.value!.content, language: r.value!.language || t.language, externalChanged: false }
-                  : t,
-                ))
-              }
-            }).catch(() => { /* 文件可能已被删除，忽略 */ })
-          } else {
-            // dirty → 标记外部变更（状态栏警告，不覆盖用户编辑）
-            setTabs(prev => prev.map(t => t.path === p ? { ...t, externalChanged: true } : t))
-          }
+    // 变更处理（推送帧与降级轮询共用）：树局部刷新 + 已打开 tab 的外部变更检测
+    // （未 dirty 自动重载 / 已 dirty 状态栏标「磁盘已更改」）。
+    const applyChanges = (changes: { path: string; kind: 'rename' | 'change' }[]): void => {
+      if (changes.length === 0) return
+      setTreeRefreshGen(g => g + 1)
+      // 已打开 tab 的外部变更检测
+      for (const change of changes) {
+        const p = change.path
+        const tab = tabsRef.current.find(t => t.path === p)
+        if (tab === undefined) continue
+        if (tab.content === tab.savedContent) {
+          // 未 dirty → 自动重载磁盘内容（图片/视频 tab 无文本内容，跳过）
+          if (tab.kind === 'image' || tab.kind === 'video') continue
+          readFile(p).then((r) => {
+            if (r.ok && r.value !== undefined) {
+              setTabs(prev => prev.map(t => t.path === p
+                ? { ...t, content: r.value!.content, savedContent: r.value!.content, language: r.value!.language || t.language, externalChanged: false }
+                : t,
+              ))
+            }
+          }).catch(() => { /* 文件可能已被删除，忽略 */ })
+        } else {
+          // dirty → 标记外部变更（状态栏警告，不覆盖用户编辑）
+          setTabs(prev => prev.map(t => t.path === p ? { ...t, externalChanged: true } : t))
         }
-      } catch {
-        // 轮询失败静默（下轮重试）
       }
-    }, 2000)
-    return () => clearInterval(timer)
-  }, [startWatch, pollChanges, readFile])
+    }
+
+    // 统一事件中心二期主路径：host corumFs 在 watcher 去抖回调 emit 批量
+    // changes → 官方 forwarded-Remote-event 通道 → 本 listener（真实推送）。
+    let pushLive = false
+    let disposed = false
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+    const disposePush = onFileChanged(({ changes }) => {
+      if (disposed) return
+      pushLive = true
+      applyChanges(changes)
+    })
+
+    // 降级兜底：$on 订阅建立后 PUSH_GRACE_MS 内零推送帧（推送通道未生效，如
+    // host 是旧版本不 emit），回退 2s poll 轮询（host pollChanges 端点保留）。
+    // 一旦推送帧到达（pushLive），轮询永不起动。
+    const graceTimer = setTimeout(() => {
+      if (pushLive || disposed) return
+      pollTimer = setInterval(async () => {
+        try {
+          const result = await pollChanges()
+          if (!result.ok || result.value === undefined) return
+          applyChanges(result.value.changes)
+        } catch {
+          // 轮询失败静默（下轮重试）
+        }
+      }, 2000)
+    }, 800)
+
+    return () => {
+      disposed = true
+      disposePush()
+      clearTimeout(graceTimer)
+      if (pollTimer !== null) clearInterval(pollTimer)
+    }
+  }, [startWatch, pollChanges, readFile, onFileChanged])
 
   // Sash drag (resource manager width).
   const sashDragWidth = useRef(EXPLORER_DEFAULT_WIDTH)

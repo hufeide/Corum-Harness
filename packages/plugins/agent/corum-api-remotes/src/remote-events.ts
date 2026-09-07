@@ -50,4 +50,6 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'corum/group/member-added', mode: 'emit' },
   { event: 'corum/group/member-removed', mode: 'emit' },
   { event: 'corum/terminal/output', mode: 'emit' },
+  // ── fork（corum）：统一事件中心二期——文件 watch 变更推送并入转发 ──
+  { event: 'corum/file/changed', mode: 'emit' },
 ] as const satisfies readonly TypertForwardableEventEntry[]

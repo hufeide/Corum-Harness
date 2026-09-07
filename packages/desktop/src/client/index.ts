@@ -15,6 +15,10 @@ import { mountNotificationHost } from './mount-notifications.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/corum-ide-ui).
 import type {} from '@corum/corum-ide-ui/client'
+// Type-only: 拉入 fork 装配面的 ctx.remote Context 合并 + corum 事件 $on 类型投影
+// （'corum/file/changed' listener 签名由此而来；fork 包在 cordis.patch.yml 以
+// immediately:true 装配，remote 服务在本 bundle ctx.inject 回调运行时已就绪）。
+import type {} from '@corum/corum-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { EditorColumn } from './editor/EditorColumn.tsx'
 import type { EditorApiRef, EditorColumnInjected } from './editor/EditorColumn.tsx'
@@ -68,7 +72,7 @@ export function apply(ctx: Context): void {
   // inject 面 closeRegion 直通 ctx.layout.closeRegion（原 CLOSE_REGION_EVENT
   // 窗口事件桥已退役）；explorer 面（listDir + generation）内嵌资源管理器
   // 子面板的数据源——原独立插件 @corum/corum-ide-explorer-ui 已并入本卡。
-  ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation', 'workspaces'], (editorCtx) => {
+  ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation', 'workspaces', 'remote'], (editorCtx) => {
     const connection = editorCtx.get('connection') as ConnectionHandle
 
     // ── 资源管理器根目录跟随当前工作区/会话（2026-09-04 用户定调：空态不该
@@ -247,6 +251,10 @@ export function apply(ctx: Context): void {
             const result = await connection.rpc.call('/api', 'corumFs/pollChanges', { args: {} })
             return result as { ok: boolean; error?: { message?: string }; value?: { changes: { path: string; kind: 'rename' | 'change' }[] } }
           },
+          // 统一事件中心二期：文件变更改走官方 forwarded-Remote-event 通道（host
+          // corumFs 在 watcher 去抖回调里 emit 批量 changes；真实推送，取代 2s poll
+          // 主路径）。$on 返回的 dispose 由组件 unmount 时调用。
+          onFileChanged: (listener) => editorCtx.remote.$on('corum/file/changed', listener),
           addToConversation: (path: string) => {
             // 方案 A（子代理调查结论）：@path 追加进当前会话草稿，与手打
             // @-mention 完全同构（发送时发路径文本，agent 侧工具自行读文件）。

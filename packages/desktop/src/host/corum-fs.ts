@@ -23,6 +23,10 @@ import { spawn } from 'node:child_process'
 import { dirname, extname, isAbsolute, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+// 拉入 corum 领域事件的 cordis Events 声明（'corum/file/changed' 等）——声明在
+// fork 包 @corum/corum-api-remotes 自包含（UNIFIED-EVENT-BUS §2.2 类型安全三段式
+// 之一），type-only import 编译期即擦除，无运行时依赖。
+import type {} from '@corum/corum-api-remotes/corum-events'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -105,6 +109,8 @@ export class CorumFsService extends TypertRemoteService {
   private watcher: FSWatcher | null = null
   /** 累积的变更事件（client 经 pollChanges 取走后清空）。 */
   private changeLog: { path: string; kind: 'rename' | 'change' }[] = []
+  /** 去抖窗口内累积的本批变更（统一事件中心二期：到点一次性进 changeLog + emit 一帧）。 */
+  private pendingChanges: { path: string; kind: 'rename' | 'change' }[] = []
   /** watcher 启动时的去抖定时器。 */
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
   /** 当前项目根（默认 host 进程 cwd；client 经 setRoot 跟随当前会话/工作区切换）。 */
@@ -143,6 +149,7 @@ export class CorumFsService extends TypertRemoteService {
       clearTimeout(this.debounceTimer)
       this.debounceTimer = null
     }
+    this.pendingChanges = []
     this.changeLog = []
     return { root: real }
   }
@@ -426,9 +433,11 @@ export class CorumFsService extends TypertRemoteService {
   }
 
   /**
-   * 启动项目根递归 watch（幂等）。变更事件累积进 changeLog，client 经
-   * `pollChanges` 取走。过滤 .git / node_modules / 点开头的隐藏项（与 list 同
-   * 规则）。500ms 去抖（编辑器保存一顿连写只报一次）。
+   * 启动项目根递归 watch（幂等）。变更事件在去抖窗口内累积、到点一次性进
+   * changeLog（client 经 `pollChanges` 取走，降级兜底）并 emit
+   * `corum/file/changed` 一帧推送（统一事件中心二期，renderer $on 直收主路径）。
+   * 过滤 .git / node_modules / 点开头的隐藏项（与 list 同规则）。500ms 去抖
+   * （编辑器保存一顿连写只报一次）。
    */
   @Remote('watch')
   async startWatch(): Promise<{ watching: boolean }> {
@@ -440,10 +449,19 @@ export class CorumFsService extends TypertRemoteService {
         const parts = filename.split(sep)
         // 与 list 同规则：过滤 .git / node_modules / 点开头的隐藏段。
         if (parts.some(p => p === '.git' || p === 'node_modules' || p.startsWith('.'))) return
+        // 统一事件中心二期：去抖窗口内累积本批 changes（原实现每事件重启定时器、
+        // 到点只记最后一条——批量编辑器保存/外部改动会丢中间帧）。到点把整个
+        // batch 一次性进 changeLog（pollChanges 降级兜底取走）并 emit 一帧推送
+        // （renderer $on 直收；一个去抖窗口一帧，不每 fs 事件一帧）。
+        this.pendingChanges.push({ path: `/${filename.split(sep).join('/')}`, kind: eventType === 'rename' ? 'rename' : 'change' })
         if (this.debounceTimer !== null) clearTimeout(this.debounceTimer)
         this.debounceTimer = setTimeout(() => {
-          this.changeLog.push({ path: `/${filename.split(sep).join('/')}`, kind: eventType === 'rename' ? 'rename' : 'change' })
           this.debounceTimer = null
+          if (this.pendingChanges.length === 0) return
+          const changes = this.pendingChanges
+          this.pendingChanges = []
+          this.changeLog.push(...changes)
+          this.ctx.emit('corum/file/changed', { changes })
         }, 500)
       })
       this.watcher.on('error', (err) => {

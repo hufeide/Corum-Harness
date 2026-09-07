@@ -189,6 +189,20 @@ export interface TerminalOutputEvent {
   readonly data: string
 }
 
+/** corum/file/changed 单条变更（与 host corum-fs changeLog 条目同构）。 */
+export interface FileChangeEntry {
+  /** 相对项目根的路径（/ 开头）。 */
+  readonly path: string
+  /** fs watch 事件类型：rename（创建/删除/改名）或 change（内容变更）。 */
+  readonly kind: 'rename' | 'change'
+}
+
+/** corum/file/changed：项目根递归 watch 的去抖批量变更推送（统一事件中心二期真实迁移；host corumFs 在 watcher 去抖回调里 emit——一个去抖窗口发一帧，载荷是该窗口累积的 changes 数组）。 */
+export interface FileChangedEvent {
+  /** 本去抖窗口累积的变更（批量；与 pollChanges 取走的 changeLog 同构）。 */
+  readonly changes: FileChangeEntry[]
+}
+
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────
 
 declare module '@deepseek-ai/cordis' {
@@ -219,12 +233,14 @@ declare module '@deepseek-ai/cordis' {
     'corum/group/member-removed'(data: GroupMemberRemovedEvent): void
     /** corum/terminal/output：终端 pty 输出推送（统一事件中心一期；终端轮询迁移的承载事件）。 */
     'corum/terminal/output'(data: TerminalOutputEvent): void
+    /** corum/file/changed：项目根递归 watch 去抖批量变更推送（统一事件中心二期；文件 watch 轮询迁移的承载事件）。 */
+    'corum/file/changed'(data: FileChangedEvent): void
   }
 }
 
 // ── Remote 转发选择面（renderer $on 的 key 面）──────────────────────────────
 
-/** 并入转发 allowlist 的 corum 事件名（12 个领域事件 + 终端输出）。 */
+/** 并入转发 allowlist 的 corum 事件名（12 个领域事件 + 终端输出 + 文件变更）。 */
 export type CorumForwardedEvent =
   | 'corum/task/assigned'
   | 'corum/task/started'
@@ -239,6 +255,7 @@ export type CorumForwardedEvent =
   | 'corum/group/member-added'
   | 'corum/group/member-removed'
   | 'corum/terminal/output'
+  | 'corum/file/changed'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}
