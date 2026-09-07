@@ -163,7 +163,14 @@ export function simplifyEventData(event: SessionEvent): unknown {
       raw = { turn: (event.data as { turn?: number }).turn ?? 0, step: (event.data as { step?: number }).step ?? 0 }
       break
     }
-    case 'assistant/chunk': {
+    // fork（corum）：`assistant/chunk` 在官方 0.1.3 format v2 已删除（assistant 流
+    // 内嵌进 assistant/message + assistant/attempt 的 `data.stream`，不再有独立
+    // chunk 事件）。本 case 对 0.1.3 持久化日志是死路径（该事件类型永不出现），
+    // 仅为读 0.1.2 及更早的旧日志保留；`as` 窄化绕开 0.1.3 类型判别（该 type 已
+    // 从 SessionEvent 联合中移除）。
+    // TODO(Phase 4 ide-conversation-ui)：流式渲染需改从 message/attempt 的
+    // data.stream 经 expandAssistantStream 展开，届时同步删除本死 case。
+    case 'assistant/chunk' as 'assistant/message': {
       // 流式增量（官方 StreamChunk）：投影 chunk 判别字段 + 增量内容，
       // 供 UI 聚合同 turn+step 的连续 chunk 为「流式增量」块。
       const data = event.data as {

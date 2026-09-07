@@ -27,7 +27,7 @@ import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 // 空类型 import：让 ctx.llm 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 // 空类型 import：让 ctx.sessionPersistence 的 Context 合并生效（resume 用）。
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-permission-presets'
@@ -41,6 +41,25 @@ import { loadProject } from './project-store.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID, TASK_PROJECT_ID } from './builtin-profiles.ts'
 import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './event-projection.ts'
+
+/**
+ * fork（corum）：官方 0.1.3 session-persistence 改 handle seam —— 顶层
+ * `readFrom(id, fromSeq)` 已删，读取须先 `open(id, 'read')` 拿 SessionHandle，
+ * `handle.read(offset)` 读区间，用完 `close()` 释放。本 helper 收敛这一固定三步，
+ * 替代旧 readFrom 的「读全历史/读 fromSeq 起」语义（length 缺省 = 读到日志尾）。
+ */
+async function readPersistedEvents(
+  persistence: Context['sessionPersistence'],
+  sessionId: SessionId,
+  fromSeq: number,
+): Promise<readonly SessionEvent[]> {
+  const handle = await persistence.open(sessionId, 'read')
+  try {
+    return await handle.read(fromSeq)
+  } finally {
+    await handle.close()
+  }
+}
 import { scanSkills } from './skill-catalog.ts'
 import { corumHome } from './home.ts'
 import type { SkillEntry } from './skill-entry.ts'
@@ -647,7 +666,7 @@ export class CorumAgentService extends TypertRemoteService {
     }))
     await agent.whenIdle()
     await this.ctx.sessions.flush(agent.session)
-    return summarizeText(agent.session.events, firstSeq)
+    return summarizeText(agent.session.snapshotEvents(), firstSeq)
   }
 
   // ── TypertRemoteService @Remote 端点（/api/corumAgent/*） ──────────
@@ -733,9 +752,9 @@ export class CorumAgentService extends TypertRemoteService {
     }))
     await agent.whenIdle()
     await this.ctx.sessions.flush(agent.session)
-    const reply = summarizeText(agent.session.events, firstSeq)
+    const reply = summarizeText(agent.session.snapshotEvents(), firstSeq)
     const events: SessionEventDto[] = []
-    for (const event of agent.session.events) {
+    for (const event of agent.session.snapshotEvents()) {
       if (event.seq < firstSeq) continue
       events.push({
         seq: event.seq,
@@ -745,7 +764,7 @@ export class CorumAgentService extends TypertRemoteService {
       })
     }
     // 从 request/header 事件提取最终装配的 system prompt + 工具列表
-    const { systemPrompt, tools } = extractHeader(agent.session.events, firstSeq)
+    const { systemPrompt, tools } = extractHeader(agent.session.snapshotEvents(), firstSeq)
     return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
   }
 
@@ -836,7 +855,7 @@ export class CorumAgentService extends TypertRemoteService {
     const agent = this.agents.get(profileId)
     if (agent === undefined) return { events: [] }
     const events: SessionEventDto[] = []
-    for (const event of agent.session.events) {
+    for (const event of agent.session.snapshotEvents()) {
       if (event.seq < fromSeq) continue
       events.push({
         seq: event.seq,
@@ -876,13 +895,13 @@ export class CorumAgentService extends TypertRemoteService {
     }))
     await agent.whenIdle()
     await this.ctx.sessions.flush(agent.session)
-    const reply = summarizeText(agent.session.events, firstSeq)
+    const reply = summarizeText(agent.session.snapshotEvents(), firstSeq)
     const events: SessionEventDto[] = []
-    for (const event of agent.session.events) {
+    for (const event of agent.session.snapshotEvents()) {
       if (event.seq < firstSeq) continue
       events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
     }
-    const { systemPrompt, tools } = extractHeader(agent.session.events, firstSeq)
+    const { systemPrompt, tools } = extractHeader(agent.session.snapshotEvents(), firstSeq)
     return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
   }
 
@@ -900,7 +919,7 @@ export class CorumAgentService extends TypertRemoteService {
     const agent = this.getAgentForType(projectId, profileId, type)
     if (agent === undefined) return { events: [] }
     const events: SessionEventDto[] = []
-    for (const event of agent.session.events) {
+    for (const event of agent.session.snapshotEvents()) {
       if (event.seq < fromSeq) continue
       events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
     }
@@ -1071,7 +1090,7 @@ export class CorumAgentService extends TypertRemoteService {
       const session = this.ctx.sessions.list().find((s) => String(s.id) === sid)
       // 会话不在对象层时保守不复用（宁可新建一个，也不要复用一个可能有历史的会话）。
       if (session === undefined) continue
-      if (!session.events.some((e) => e.type === 'turn/start')) return sid
+      if (!session.snapshotEvents().some((e) => e.type === 'turn/start')) return sid
     }
     return undefined
   }
@@ -1116,7 +1135,7 @@ export class CorumAgentService extends TypertRemoteService {
    * 服务未挂载（无 ctx.permissionPresets）或档位名不在预设表里时**静默沿用默认**，
    * 不阻断会话创建——权限是增强项，不是创建的前置条件。
    */
-  private applyTaskPermission(session: { events: readonly SessionEvent[] }, permission?: string): void {
+  private applyTaskPermission(session: Session, permission?: string): void {
     if (permission === undefined || permission === '') return
     const presets = this.ctx.get('permissionPresets')
     if (presets === undefined) {
@@ -1155,7 +1174,7 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /** 落盘前兑现待定的权限档位（有则写入并清除，无则跳过）。 */
-  private flushPendingPermission(session: { events: readonly SessionEvent[] }, sessionId: string): void {
+  private flushPendingPermission(session: Session, sessionId: string): void {
     const pending = this.pendingPermissions.get(sessionId)
     if (pending === undefined) return
     this.pendingPermissions.delete(sessionId)
@@ -1270,13 +1289,13 @@ export class CorumAgentService extends TypertRemoteService {
     agent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'user' } }))
     await agent.whenIdle()
     await this.ctx.sessions.flush(agent.session)
-    const reply = summarizeText(agent.session.events, firstSeq)
+    const reply = summarizeText(agent.session.snapshotEvents(), firstSeq)
     const events: SessionEventDto[] = []
-    for (const event of agent.session.events) {
+    for (const event of agent.session.snapshotEvents()) {
       if (event.seq < firstSeq) continue
       events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
     }
-    const { systemPrompt, tools } = extractHeader(agent.session.events, firstSeq)
+    const { systemPrompt, tools } = extractHeader(agent.session.snapshotEvents(), firstSeq)
     return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
   }
 
@@ -1284,7 +1303,7 @@ export class CorumAgentService extends TypertRemoteService {
    * 读 task 会话的历史事件（从 fromSeq 开始，只读不发消息；切会话回填用）。
    *
    * 数据源：**持久化**（`ctx.sessionPersistence.readFrom`，全历史）而非
-   * `agent.session.events` 窗口——后者冷 resume 后只含会话种子事件（permission/
+   * `agent.session.snapshotEvents()` 窗口——后者冷 resume 后只含会话种子事件（permission/
    * sandbox/approval/end-seed），历史消息不在窗口（2026-08-28 实测：冷泳道 resume
    * 仅 4 条种子、无 user/message）。持久化读全历史，冷/活泳道一致。
    */
@@ -1292,7 +1311,7 @@ export class CorumAgentService extends TypertRemoteService {
   async getTaskSessionEventsRemote(sessionId: string, fromSeq: number): Promise<{ events: SessionEventDto[] }> {
     const index = this.readTaskSessionIndex()
     if (index[sessionId] === undefined) return { events: [] }
-    const { events: stored } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), fromSeq)
+    const stored = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), fromSeq)
     const events: SessionEventDto[] = []
     for (const event of stored) {
       events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
@@ -1320,7 +1339,7 @@ export class CorumAgentService extends TypertRemoteService {
   }> {
     let stored: readonly SessionEvent[]
     try {
-      const { events } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), 0)
+      const events = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)
       stored = events
     } catch {
       return {}
@@ -1388,7 +1407,7 @@ export class CorumAgentService extends TypertRemoteService {
   }> {
     let stored: readonly SessionEvent[]
     try {
-      const { events } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), 0)
+      const events = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)
       stored = events
     } catch {
       return {}
@@ -1427,7 +1446,7 @@ export class CorumAgentService extends TypertRemoteService {
       let title = ''
       let lastActive = 0
       try {
-        const { events } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), 0)
+        const events = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)
         title = taskTitleOf(events)
         if (events.length > 0) lastActive = events[events.length - 1].time
       } catch { /* 单个会话读取失败不阻塞列表 */ }

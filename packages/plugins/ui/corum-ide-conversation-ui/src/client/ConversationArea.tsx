@@ -1,7 +1,7 @@
 /**
  * ConversationArea — the IDE conversation column (design.pen ② Agent 对话区
  * yoxDi, vertical gap6). task 模式走 corum 泳道数据通路：host corum-agent-dev
- * 的 task 泳道（corum-task-* session id，agent.session.events → simplifyEventData
+ * 的 task 泳道（corum-task-* session id，agent.session.snapshotEvents() → simplifyEventData
  * 投影）经自家 RPC（createTaskAgent / runPromptForTask / getTaskSessionEvents）
  * 拉 SessionEventDto[]，按事件 type 映射到对应设计卡片：
  *   user/message → user 品牌气泡卡；assistant/message → ai 卡（text=Markdown /

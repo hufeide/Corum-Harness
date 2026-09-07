@@ -176,7 +176,7 @@ export class AgentRuntime extends TypertRemoteService {
 
   /** 泳道会话最后活动时间（无事件/无会话取当前任务派发时间）。 */
   private lastActivityAt(rt: ProfileRuntime): number {
-    const events = rt.agent?.session.events
+    const events = rt.agent?.session.snapshotEvents()
     const last = events !== undefined && events.length > 0 ? events[events.length - 1].time : undefined
     return last ?? rt.currentStartedAt ?? Date.now()
   }
@@ -1037,7 +1037,7 @@ export class AgentRuntime extends TypertRemoteService {
     if (agent === undefined) return { events: [], lastSeq: fromSeq }
     const events: RuntimeEventDto[] = []
     let lastSeq = fromSeq
-    for (const event of agent.session.events) {
+    for (const event of agent.session.snapshotEvents()) {
       if (event.seq < fromSeq) continue
       events.push({
         seq: event.seq,
