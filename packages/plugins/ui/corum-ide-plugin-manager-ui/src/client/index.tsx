@@ -3,8 +3,10 @@
  * （业务 chrome 拆出壳，NEXT-PHASE-DEFERRED §3）。
  *
  * 职责：
- *   - 监听壳 LayoutController 经 `layout.openPluginManager()` 广播的
- *     `corum:open-plugin-manager` 事件，打开 modal 面板；
+ *   - 经 `ctx.layout.onOpenPluginManager(...)` 订阅壳的「打开插件中心」信号
+ *     （统一事件中心三-2 服务化：原 corum:open-plugin-manager 跨 bundle
+ *     CustomEvent + 双份字面量镜像已退役——订阅面有编译期联动），打开 modal
+ *     面板；
  *   - 面板三区（已安装清单 / npm 检索 / 视图管理），数据走 pluginManager RPC
  *     （0.1.2 起官方 connection.rpc）+ ctx.layout 网格面（hidden 集投影 +
  *     setRegionHidden + isInGrid）。
@@ -23,8 +25,8 @@ import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the shell's Context merge (ctx.layout) into scope. 壳的
 // client bundle 不可被静态值 import（B1-pre：dsh 内联每个消费 bundle 一份，
-// 静态值 import 经 tsdown 解析 lib/client.js 失败）——事件名与 ctx.layout
-// 扩展面用本地镜像（C3a/C3b 能力接口收窄模式：编译期保障、零运行时耦合）。
+// 静态值 import 经 tsdown 解析 lib/client.js 失败）——ctx.layout 扩展面用
+// 能力接口收窄（C3a/C3b 模式：编译期保障、零运行时耦合）。
 import type {} from '@corum/corum-ide-ui/client'
 import { registerSlot } from '@corum/corum-ui-base/client'
 import { createRoot, type Root } from 'react-dom/client'
@@ -36,21 +38,18 @@ import css from './PluginManagerPanel.module.css'
 export const PLUGIN_MANAGER_SLOT = '@corum/corum-ide-plugin-manager-ui'
 
 /**
- * 插件中心触发事件名（= 壳 service.ts 的 OPEN_PLUGIN_MANAGER_EVENT）。
- * 壳广播、本插件监听；字符串字面量本地镜像（壳 bundle 不可静态值 import，
- * 见上 import 注释）——改壳侧事件名时同步此处（编译期无联动，靠注释锚定）。
+ * ctx.layout 的网格读面 + 插件中心订阅面能力接口（C3b 收窄，dev-conventions
+ * §2.4 红线 2/3）：官方基线 ILayout 窄接口不含网格面/订阅面，corum 运行时
+ * LayoutController 是超集。只取本插件用的方法，可选链防御实现缺席。
  */
-const OPEN_PLUGIN_MANAGER_EVENT = 'corum:open-plugin-manager'
-
-/**
- * ctx.layout 的网格读面能力接口（C3b 收窄）：官方基线 ILayout 窄接口不含
- * 网格面，corum 运行时 LayoutController 是超集。只取本插件用的 4 个方法。
- */
-interface GridCapableLayout {
+interface PluginManagerCapableLayout {
   setRegionHidden(slot: string, hidden: boolean): void
   hiddenSlotsSnapshot(): readonly string[]
   onGridChange(listener: () => void): () => void
   isInGrid(slot: string): boolean
+  /** 订阅「打开插件中心」信号（壳 openPluginManager → grid actions 订阅面；
+   *  挂载即认领 pending——三-2 pending 模式）。 */
+  onOpenPluginManager?: (listener: () => void) => () => void
 }
 
 /** Required services: slots registry + connection rpc + layout grid face. */
@@ -66,8 +65,8 @@ export function apply(ctx: ClientContext): void {
   registerSlot(PLUGIN_MANAGER_SLOT, { label: '插件中心', defaultWeight: 400, visibility: 'hidden' })
 
   const connection = ctx.get('connection') as ConnectionHandle
-  // ctx.layout 收窄为网格读面（C3b 能力接口模式）。
-  const layout = ctx.layout as unknown as GridCapableLayout
+  // ctx.layout 收窄为网格读面 + 插件中心订阅面（C3b 能力接口模式）。
+  const layout = ctx.layout as unknown as PluginManagerCapableLayout
 
   // pluginManager RPC caller（0.1.2 起官方 connection.rpc）。
   const callRemote = async <T,>(method: string, args: Record<string, unknown>): Promise<T> => {
@@ -114,14 +113,30 @@ export function apply(ctx: ClientContext): void {
     }
     document.addEventListener('keydown', onKeyDown)
 
-    // 壳触发器（标题栏/侧栏轨按钮）→ layout.openPluginManager() → 本事件。
-    const onOpen = (): void => { open() }
-    window.addEventListener(OPEN_PLUGIN_MANAGER_EVENT, onOpen)
+    // 壳触发器（标题栏/侧栏轨按钮 / 设置「发现更多插件」）→
+    // layout.openPluginManager() → grid actions 订阅面 → 本 listener（统一事件
+    // 中心三-2 服务化：cordis 服务方法订阅，替代原 window CustomEvent 监听 +
+    // 字面量镜像；挂载即认领 pending 信号，不丢触发）。
+    //
+    // 迟解析订阅（boot 顺序修正）：cordis 插件 apply 序先于 AppFrame 挂载
+    // （LayoutController.attachGrid 在 AppFrame useEffect 里反向桥接），apply
+    // 同步直调 onOpenPluginManager 会命中「grid actions not wired」。改为
+    // microtask 首调——此时 React 已完成首 commit + effects，grid 操作面必然
+    // 已挂；dispose 抢先于 microtask 时不订阅（disposed 短路）。
+    let offOpen: (() => void) | null = null
+    let disposed = false
+    queueMicrotask(() => {
+      if (disposed) return
+      offOpen = layout.onOpenPluginManager?.(() => { open() }) ?? (() => {
+        console.warn('[ide-plugin-manager] ctx.layout missing onOpenPluginManager face (shell too old?)')
+      })
+    })
 
     return () => {
-      window.removeEventListener(OPEN_PLUGIN_MANAGER_EVENT, onOpen)
+      disposed = true
+      offOpen?.()
       document.removeEventListener('keydown', onKeyDown)
       close()
     }
-  }, 'ide-plugin-manager: modal panel + open listener')
+  }, 'ide-plugin-manager: modal panel + open subscription')
 }

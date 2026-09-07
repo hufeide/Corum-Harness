@@ -15,12 +15,6 @@ import type { createLayoutStore } from './stores.ts'
 export type SidebarMode = 'task' | 'project'
 
 /**
- * 插件中心触发事件名（壳 openPluginManager 广播，corum-ide-plugin-manager-ui
- * 插件监听）。一次性触发信号，跨 bundle 经 window CustomEvent 传递。
- */
-export const OPEN_PLUGIN_MANAGER_EVENT = 'corum:open-plugin-manager'
-
-/**
  * 「打开设置中心某 section」触发事件名（壳 openSettingsSection 广播，SettingsShell
  * 监听并 openSection）。插件中心入口改版后：点插件中心 → 打开设置「扩展面板」。
  * 一次性触发信号（detail 带 section id），同 bundle 经 window CustomEvent 传递。
@@ -69,6 +63,15 @@ export interface GridActions {
   onOpenNewTaskForm(listener: () => void): () => void
   /** 认领 pending 的「新建任务表单」标记（EmptyStateHero 挂载时调一次）。 */
   consumePendingNewTaskForm(): boolean
+  /**
+   * 打开插件中心：通知已挂载的插件中心监听者；插件未挂载时置 pending 标记，
+   * 插件（corum-ide-plugin-manager-ui）apply 订阅时认领（与 openNewTaskForm
+   * 同一 pending 模式——统一事件中心三-2，原 corum:open-plugin-manager 跨
+   * bundle CustomEvent + 双份字面量镜像已退役）。
+   */
+  openPluginManager(): void
+  /** 订阅「打开插件中心」信号（插件 apply 时；挂载即认领 pending）。返回退订函数。 */
+  onOpenPluginManager(listener: () => void): () => void
   /** 判定某槽位当前是否在网格树里（视图管理的区域过滤）。 */
   isInGrid(slot: string): boolean
   /** 当前 hidden 槽位集合（稳定引用，变更后换引用；uSES getSnapshot 契约）。 */
@@ -105,10 +108,16 @@ export interface ILayout {
    */
   openNewTaskForm(): void
   /**
-   * 打开插件中心（2026-09 改版）：不再开独立浮层，改为打开设置中心「扩展面板」
-   * section（默认停插件市场 tab）。
+   * 打开插件中心：信号经 grid actions 的订阅面送达 corum-ide-plugin-manager-ui
+   * 插件（该插件打开自己的 modal 面板；未挂载时 pending 由订阅认领——
+   * 统一事件中心三-2 服务化，原 CustomEvent 广播已退役）。
    */
   openPluginManager(): void
+  /**
+   * 订阅「打开插件中心」信号（corum-ide-plugin-manager-ui 经能力接口收窄 +
+   * 可选链消费，dev-conventions §2.4 红线 2/3）。返回退订函数。
+   */
+  onOpenPluginManager(listener: () => void): () => void
   /**
    * 打开设置中心某 section：广播 OPEN_SETTINGS_SECTION_EVENT，SettingsShell 监听后
    * openSection(id)（打开面板并选中该 section）。
@@ -146,6 +155,8 @@ export class LayoutController implements ILayout {
   #sidebarMode: SidebarMode = 'task'
   /** 侧栏模式监听者集（setSidebarMode 写值变化时广播）。 */
   #sidebarModeListeners = new Set<() => void>()
+  /** AppFrame 接线前到达的插件中心订阅（attachGrid 时补进 grid actions）。 */
+  #pendingPluginManagerListeners = new Set<() => void>()
 
   /**
    * Adopt the root entry's bound store actions. Called from the root
@@ -164,6 +175,12 @@ export class LayoutController implements ILayout {
    */
   attachGrid(actions: GridActions): void {
     this.#grid = actions
+    // 补订阅：接线前到达的插件中心 listener 全部挂进 grid actions（pending
+    // 认领逻辑在 grid actions 的 onOpenPluginManager 内部，补订阅即继承）。
+    if (this.#pendingPluginManagerListeners.size > 0) {
+      for (const listener of this.#pendingPluginManagerListeners) actions.onOpenPluginManager(listener)
+      this.#pendingPluginManagerListeners.clear()
+    }
   }
 
   toggleSidebar(): void {
@@ -201,13 +218,24 @@ export class LayoutController implements ILayout {
   }
 
   /**
-   * 插件中心触发：广播 OPEN_PLUGIN_MANAGER_EVENT，由 corum-ide-plugin-manager-ui
-   * 插件监听并打开插件市场浮层（搜索/精选/卡片网格）。一次性触发信号，合法 window 用法。
+   * 插件中心触发：经 grid actions 订阅面通知 corum-ide-plugin-manager-ui 插件
+   * 打开插件市场浮层（搜索/精选/卡片网格）。插件未挂载时由 grid actions 置
+   * pending，插件 apply 订阅时认领（三-2 服务化，原 CustomEvent 广播 + 双份
+   * 字面量镜像已退役——编译期联动恢复：本面改名则消费端类型报错）。
    */
   openPluginManager(): void {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(OPEN_PLUGIN_MANAGER_EVENT))
+    this.#requireGrid().openPluginManager()
+  }
+
+  onOpenPluginManager(listener: () => void): () => void {
+    // AppFrame 未挂载（grid actions 未接线）时队列缓冲：插件 apply 早于
+    // AppFrame 挂载是合法时序（cordis 激活序不定），接线后补订阅并照常
+    // 认领 pending——不能让 #requireGrid 把插件 activate 打崩。
+    if (this.#grid === undefined) {
+      this.#pendingPluginManagerListeners.add(listener)
+      return () => { this.#pendingPluginManagerListeners.delete(listener) }
     }
+    return this.#grid.onOpenPluginManager(listener)
   }
 
   /**

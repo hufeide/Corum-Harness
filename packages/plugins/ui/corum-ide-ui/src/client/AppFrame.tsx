@@ -555,8 +555,9 @@ export type AppFrameProps =
     setTheme: (p: ThemePreference) => void
     /**
      * 插件中心触发（壳不持面板——业务 chrome 已拆出为
-     * corum-ide-plugin-manager-ui 插件）：经 LayoutController 广播
-     * pluginManager/open 事件，该插件监听并打开自己的 FloatingLayer 面板。
+     * corum-ide-plugin-manager-ui 插件）：经 LayoutController.openPluginManager
+     * → grid actions 订阅面通知，该插件认领并打开自己的 modal 面板（三-2
+     * 服务化，原 CustomEvent 广播已退役）。
      */
     openPluginManager: () => void
     /**
@@ -828,6 +829,19 @@ export function IdeAppFrame({
     }
     for (const fn of newTaskListeners.current) fn()
   }, [])
+  // 「打开插件中心」信号（统一事件中心三-2：原 corum:open-plugin-manager 跨
+  // bundle CustomEvent + 双份字面量镜像服务化）：与 openNewTaskForm 同一
+  // pending 模式——corum-ide-plugin-manager-ui 插件 apply 订阅时挂载认领，
+  // 未挂载（插件禁用/尚未激活）时置 pending 不丢信号。
+  const pluginManagerListeners = useRef(new Set<() => void>())
+  const pendingPluginManager = useRef(false)
+  const openPluginManagerSignal = useCallback(() => {
+    if (pluginManagerListeners.current.size === 0) {
+      pendingPluginManager.current = true
+      return
+    }
+    for (const fn of pluginManagerListeners.current) fn()
+  }, [])
   const gridActions = useMemo<GridActions>(() => ({
     setRegionHidden,
     closeRegion: onCloseSlot,
@@ -846,10 +860,21 @@ export function IdeAppFrame({
       pendingNewTaskForm.current = false
       return pending
     },
+    openPluginManager: openPluginManagerSignal,
+    onOpenPluginManager: (listener) => {
+      pluginManagerListeners.current.add(listener)
+      // 挂载认领（与 EmptyStateHero consumePendingNewTaskForm 同语义，认领点
+      // 收敛进订阅本身——消费端一个调用点，不会忘认领）。
+      if (pendingPluginManager.current) {
+        pendingPluginManager.current = false
+        queueMicrotask(listener)
+      }
+      return () => { pluginManagerListeners.current.delete(listener) }
+    },
     isInGrid: (slot) => findLeafBySlot(gridRef.current, slot) !== null,
     hiddenSlotsSnapshot: getHiddenSnapshot,
     onGridChange: gridSubscribe,
-  }), [setRegionHidden, onCloseSlot, showRegion, resetLayout, toggleSidebarLeaf, openNewTaskForm, getHiddenSnapshot, gridSubscribe])
+  }), [setRegionHidden, onCloseSlot, showRegion, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, getHiddenSnapshot, gridSubscribe])
   // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
   // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
   // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
@@ -941,8 +966,8 @@ export function IdeAppFrame({
   }, [saveGridDebounced])
 
   // 插件中心面板已拆出壳（corum-ide-plugin-manager-ui 插件）：触发经 props
-  // 的 openPluginManager（→ LayoutController 事件广播 → 该插件开自己的
-  // FloatingLayer）。本组件不再 import/渲染 PluginManagerPanel。
+  // 的 openPluginManager（→ LayoutController → grid actions 订阅面 → 该插件
+  // 开自己的 modal）。本组件不再 import/渲染 PluginManagerPanel。
   const openPluginManager = onOpenPluginManager
 
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
@@ -1064,6 +1089,9 @@ export function IdeAppFrame({
     openNewTaskForm: () => {},
     onOpenNewTaskForm: (_listener: () => void) => () => {},
     consumePendingNewTaskForm: () => false,
+    // 浮窗无插件中心触发语义（主窗标题栏才有入口）——no-op 兜底（防 #requireGrid 抛错）。
+    openPluginManager: () => {},
+    onOpenPluginManager: (_listener: () => void) => () => {},
     isInGrid: (_slot: string) => false,
     hiddenSlotsSnapshot: () => [],
     onGridChange: (_listener: () => void) => () => {},

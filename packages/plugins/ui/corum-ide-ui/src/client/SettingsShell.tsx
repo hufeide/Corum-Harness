@@ -94,6 +94,8 @@ type PanelProps = {
   activeId: string | undefined
   onSelect: (id: string) => void
   onClose: () => void
+  /** 「发现更多插件」触发（inject 面下发，直通 LayoutController.openPluginManager）。 */
+  onOpenPluginManager: () => void
   t: (key: string) => string
 }
 
@@ -101,7 +103,7 @@ type PanelProps = {
  * The modal layer: full-viewport mask + centered panel.
  * Close paths: header button, mask click, Escape (mounted only while open).
  */
-function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, t }: PanelProps) {
+function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, onOpenPluginManager, t }: PanelProps) {
   // Entries can unmount underneath the requested id, so the render-time
   // projection falls back to the first row when the id is gone.
   const active = rows.find(r => r.id === activeId)?.id ?? rows[0]?.id
@@ -205,7 +207,7 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, t }: Pan
           <div className={css.body}>
             {/* section 操作面（openSection 切换 + close 关面板）经 context 下发，
                 不走 slot owner props（slot 契约不含这些）。 */}
-            <SectionNavContext.Provider value={{ openSection: onSelect, close: onClose }}>
+            <SectionNavContext.Provider value={{ openSection: onSelect, close: onClose, openPluginManager: onOpenPluginManager }}>
               {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
             </SectionNavContext.Provider>
           </div>
@@ -223,7 +225,7 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, t }: Pan
  * @returns the settings shell element tree.
  */
 export function SettingsShell(props: SettingsRootComponentProps) {
-  const { wide, useSections, useOnboardingSteps, useSessions, renderSlot } = props
+  const { wide, useSections, useOnboardingSteps, useSessions, renderSlot, openPluginManager } = props
   const [open, setOpen] = useState(false)
   const [activeId, setActiveId] = useState<string | undefined>(undefined)
   const [completedOnboarding, setCompletedOnboarding] = useState<ReadonlySet<string>>(() => new Set())
@@ -290,6 +292,7 @@ export function SettingsShell(props: SettingsRootComponentProps) {
           activeId={activeId}
           onSelect={setActiveId}
           onClose={close}
+          onOpenPluginManager={openPluginManager}
           t={t}
         />,
         document.body,

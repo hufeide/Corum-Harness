@@ -38,6 +38,12 @@ export type SettingsRootInjected = {
   }
   /** Locale binder for the settings namespace (search/scope/close labels). */
   t: (key: string) => string
+  /**
+   * 打开插件中心市场浮层（直通 LayoutController.openPluginManager → grid
+   * actions 订阅面；「发现更多插件」入口经 SectionNavContext 下发到 section
+   * 组件——统一事件中心三-2 服务化，原 CustomEvent 广播已退役）。
+   */
+  openPluginManager: () => void
 }
 
 /**

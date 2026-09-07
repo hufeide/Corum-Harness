@@ -20,7 +20,6 @@ import { KbdKey } from './KbdKey.tsx'
 import { ColorChips } from './ColorChips.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { useDeveloperMode, setDeveloperMode } from './developer-mode.ts'
-import { OPEN_PLUGIN_MANAGER_EVENT } from '../service.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from './SettingsSections.module.css'
 
@@ -40,6 +39,13 @@ function useCorumRpc(): CorumRpcCall | null {
 export interface SectionActions {
   openSection: (id: string) => void
   close: () => void
+  /**
+   * 打开插件中心市场浮层（「发现更多插件」入口）：经 LayoutController → grid
+   * actions 订阅面通知 corum-ide-plugin-manager-ui 插件（统一事件中心三-2
+   * 服务化，原 OPEN_PLUGIN_MANAGER_EVENT CustomEvent 广播已退役——同 bundle
+   * 内由 SettingsShell 经 inject 面下发，编译期联动）。
+   */
+  openPluginManager: () => void
 }
 
 /** 设置壳的 section 操作上下文（如 Agent 预设 footer「记忆管理」→ memory；插件管理「发现更多插件」→ 关面板+开市场）。 */
@@ -2353,10 +2359,12 @@ function ExtensionsSection() {
   const installed = (entries ?? []).filter(e => e.kind === 'plugin')
   const system = (entries ?? []).filter(e => e.kind === 'runtime')
 
-  // 「发现更多插件」：关闭设置面板 + 广播打开插件中心市场浮层。
+  // 「发现更多插件」：关闭设置面板 + 经 section 操作面打开插件中心市场浮层
+  //（三-2 服务化：同 bundle 内 context 下发 → ctx.layout.openPluginManager
+  // → grid actions 订阅面，原跨 bundle CustomEvent 广播已退役）。
   const discoverMore = useCallback(() => {
     sectionNav?.close()
-    window.dispatchEvent(new CustomEvent(OPEN_PLUGIN_MANAGER_EVENT))
+    sectionNav?.openPluginManager()
   }, [sectionNav])
 
   const detailEntry = detailId !== null ? (entries ?? []).find(e => e.entryId === detailId) ?? null : null

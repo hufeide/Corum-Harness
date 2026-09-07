@@ -60,7 +60,7 @@ import type {
 import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
-export { LayoutController, OPEN_PLUGIN_MANAGER_EVENT } from './service.ts'
+export { LayoutController } from './service.ts'
 export type { ILayout, SidebarMode, SidebarModeSource } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/corum-ui-base/client'
 export type { SlotMeta } from '@corum/corum-ui-base/client'
@@ -242,8 +242,8 @@ export function apply(ctx: ClientContext): void {
           setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
           attachGridActions: (a: GridActions) => { layout.attachGrid(a) },
           // 插件中心触发：壳不持面板（业务 chrome 已拆出），经 LayoutController
-          // 广播 pluginManager/open 事件，corum-ide-plugin-manager-ui 插件监听
-          // 并打开自己的 FloatingLayer 面板。
+          // → grid actions 订阅面通知，corum-ide-plugin-manager-ui 插件认领并
+          // 打开自己的 modal 面板（三-2 服务化，原 CustomEvent 广播已退役）。
           openPluginManager: () => { layout.openPluginManager() },
           hooks: {
             theme: {
@@ -299,6 +299,9 @@ export function apply(ctx: ClientContext): void {
     let onboardingSteps: readonly SettingsOnboardingStep[] = []
     const shellInjected = (): SettingsRootInjected => ({
       t: t as (key: string) => string,
+      // 「发现更多插件」触发面：直通 LayoutController → grid actions 订阅面
+      //（三-2 服务化；SettingsShell 经 SectionNavContext 下发到 section 组件）。
+      openPluginManager: () => { layout.openPluginManager() },
       hooks: {
         sections: {
           getSnapshot: () => {
