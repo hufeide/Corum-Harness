@@ -30,7 +30,7 @@ export default defineConfig(() => [
   // Node library entries (tsc-emitted from lib/types).
   {
     name: CLIENT_ID,
-    entry: ['lib/types/index.js', 'lib/types/invariant.js'],
+    entry: ['lib/types/index.js'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',

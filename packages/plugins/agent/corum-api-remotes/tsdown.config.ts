@@ -1,10 +1,10 @@
 /**
  * @corum/corum-api-remotes build: standalone tsdown config mirroring the
  * official `clientBundle('@deepseek-ai/dsh-api-remotes', ['lib/types/index.js',
- * 'lib/types/invariant.js'], { hostPhase: true })` shape without depending on
+ * ], { hostPhase: true })` shape without depending on
  * dsh's private `packages/client/tsdown.client.ts` helper.
  *
- * Node library half: `lib/types/index.js` + `lib/types/invariant.js` (tsc output),
+ * Node library half: `lib/types/index.js` (tsc output),
  * production dependencies stay imports (the host runs from a real install).
  * Browser bundle half: closure-factory artifact — calls
  * `window.__ModuleLoader__.load({id, factory})` and resolves the loader module
@@ -35,7 +35,7 @@ export default defineConfig(() => [
   // Node library entries (tsc-emitted from lib/types).
   {
     name: PACKAGE_ID,
-    entry: ['lib/types/index.js', 'lib/types/invariant.js'],
+    entry: ['lib/types/index.js'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',
