@@ -27,6 +27,9 @@ allowBuilds:
   node-pty: true
   protobufjs: true
 linkWorkspacePackages: true
+# dsh 0.1.3 由本地私服刚发布（发布时间 < pnpm 默认 minimumReleaseAge 1 天 cutoff），
+# 升级期间显式放行新包；待官方 0.1.3 上公共 registry 后可删除本行。
+minimumReleaseAge: 0
 overrides:
   '@deepseek-ai/dsh-authorization': '0.1.3-alpha.1'
   '@deepseek-ai/cordis': '4.0.2'
