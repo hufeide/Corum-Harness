@@ -1,0 +1,57 @@
+{
+  "name": "@corum/corum-subagent",
+  "version": "0.1.0",
+  "description": "corum 定制版子 Agent 委派 seam（fork 官方 dsh-subagent 0.1.3-alpha.1 + dsh-subagent-in-process-driver + dsh-subagent-spawn-in-process）：实质 diff = SubagentStartRequest.cwd 字段 + childSessionMeta 透传 + assertChildCwd 校验（绝对路径/已存在，INVALID_CWD）+ spawn provider 改名 corum-subagent-spawn-in-process（provider 名 'corum-spawn'）。硬隔离轴心：子会话 header.cwd 可指定 → fs 写沙箱边界/shell/{{cwd}} 全跟随（docs/plan/PLAN-subagent-isolation.md）。",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./spawn": {
+      "types": "./lib/types/spawn/index.d.ts",
+      "default": "./lib/spawn/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-brand": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-util-values": "^0.1.3-alpha.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-attachment": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-invariants": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-jobs": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-llm": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-sandbox": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-sandbox-policy": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-scope": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session-projection": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session-projection-cache": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session-query": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-user-approval": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-util-time": "^0.1.3-alpha.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3"
+  }
+}
