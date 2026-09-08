@@ -92,17 +92,6 @@ export const corumOrchestrationDomainSpec = defineDomain({
 /** fork（corum）：写工具清单——按工具面判定写任务（§2 逐字核实）。 */
 const CORUM_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh']
 
-/**
- * fork（corum）：平台实际存在的写工具（deny 名单只能包含已注册工具——
- * tools.restrict 对未知名 fail loud。pwsh 仅在 win32 装载）。与 corum-agent
- * compile.ts 的 corumWriteToolsForPlatform 逐字对账（research 实例预 deny 同款）。
- */
-export function corumWriteToolsForPlatform(): readonly string[] {
-  return process.platform === 'win32'
-    ? CORUM_WRITE_TOOLS
-    : CORUM_WRITE_TOOLS.filter(tool => tool !== 'pwsh')
-}
-
 /** fork（corum）：git 命令同步执行（父会话 header.cwd 下）。 */
 export function corumGit(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' })
