@@ -63,6 +63,7 @@ import {
   corumMarkSettled,
   corumPendingIntegration,
   corumShouldIsolate,
+  corumWriteToolsForPlatform,
 } from './orchestration.ts'
 import type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 
@@ -448,6 +449,7 @@ export {
   corumMarkSettled,
   corumPendingIntegration,
   corumShouldIsolate,
+  corumWriteToolsForPlatform,
 } from './orchestration.ts'
 export type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 export { CorumOrchestration } from './orchestration.ts'
@@ -668,6 +670,18 @@ export function apply(ctx: Context, config: Config): void {
       const effIsolationMode = args.taskIsolation ?? corumIsolationMode
       const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, corumDenyDirectFs)
       const corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch)
+
+      // fork（corum）：任务级 research 的只读硬约束——research 实例的「编译期预
+      // deny 写工具」语义在 orchestrate 的 tasks[i].research 由运行期补上：当任务
+      // 声明 research 且实例 config 未显式 deny 写工具时，给 request.toolFilter 补
+      // deny 全部写工具（与 compile.ts 的 research 实例同款口径）。
+      if (effReadonlyResearch && (config.toolFilter?.deny === undefined || !corumWriteToolsForPlatform().every(t => config.toolFilter!.deny!.includes(t)))) {
+        const researchDeny = new Set([...(config.toolFilter?.deny ?? []), ...corumWriteToolsForPlatform()])
+        request.toolFilter = {
+          ...config.toolFilter?.allow !== undefined ? { allow: config.toolFilter.allow } : {},
+          deny: [...researchDeny],
+        }
+      }
 
       // fork（corum）：integrate 召唤（fan-in/Manager）——骨架阶段仅前台路径。
       if (args.integrate === true) {
