@@ -10,7 +10,8 @@
 > - 2026-09-08 增补：子 Agent 召唤机制优化完整交付（fork #9 §10 / #10 §11 / #11 §12 + 全部 CDP 验证记录 §11.5-§11.11）。**交接文档：`docs/HANDOFF-subagent-isolation.md`**——下一个 session 先读它 + `docs/plan/PLAN-subagent-isolation.md`。
 > - ⚠️ **方案 SUPERSEDED（2026-09-09）**：子 Agent 机制的**方案层面**已被
 >   `docs/plan/PLAN-subagent-orchestration.md` 取代（fork #9 转正为完整 seam 服务 +
->   方案甲结构化编排）。**本章 §10/§11/§12 的文件台账与升级 runbook 仍有效**（fork
+>   方案甲结构化编排；**双实例保留为两个 subagent 预设，orchestrate 是增强不取代**）。
+>   **本章 §10/§11/§12 的文件台账与升级 runbook 仍有效**（fork
 >   包升级仍按 §5 runbook 执行），但「provider-only 挂载」「fork #10 工具隔离层」
 >   的架构形态不再作为实施基准。后续实施以新方案为准。
 > - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
@@ -761,14 +762,12 @@ orchestrate 工具无关。
 true }` 保留（空 realm 无害，移除 realm 隔离会连带改 delegation 组其他行的 realm 归属，
 属无谓风险）。
 
-**待决策（subagent 工具退役）**：方案甲 §7 的「subagent 工具被 orchestrate 取代」是
-语义变更（worker 实例 toolName 从 `subagent` 改为只注册 orchestrate + research 只读实例
-去留），依赖 orchestrate 的 `tasks[i].research` 路径端到端验证。**当前落定：保留
-「subagent 单发薄壳 + orchestrate 多任务」并列**（两者共用 spawnOne），作为「彻底移除」
-前的过渡——research 只读实例（subagent_research）是「不可移除」的只读研究入口，其语义
-由 orchestrate 的 `research` 字段替代需端到端验证（当前测试环境 EPERM 阻碍 worktree
-验证）。「彻底移除 subagent 只留 orchestrate」留待 orchestrate research 路径验证后作为
-后续独立改动。
+**⚠️ 澄清（纠正此前错误理解）**：此前把「彻底移除 subagent 只留 orchestrate」当作
+待决策方向，这是**错误的**。用户设想是「fork 官方 subagent 包继承全部能力 → 双实例
+（两个 subagent 预设）默认配置所有 Agent → 之上叠加 orchestrate 增强」。**subagent
+双实例（worker + research）是基础，永不退役；orchestrate 是增强，两者并存。** 当前
+实现（subagent + subagent_research 双实例 + worker 内 orchestrate）正是最终形态，
+不存在「彻底移除」的后续工作。
 
 **验证**（2026-09-09）：corum-agent typecheck 零错误 + compile-subagent.spec 5 例全绿。
 
