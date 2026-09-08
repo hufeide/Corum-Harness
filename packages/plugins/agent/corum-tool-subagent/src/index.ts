@@ -62,7 +62,9 @@ import {
   corumIsWriteTask,
   corumMarkSettled,
   corumPendingIntegration,
+  corumResearchToolFilter,
   corumShouldIsolate,
+  corumWriteToolsForPlatform,
 } from './orchestration.ts'
 import type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 
@@ -447,7 +449,9 @@ export {
   corumIsWriteTask,
   corumMarkSettled,
   corumPendingIntegration,
+  corumResearchToolFilter,
   corumShouldIsolate,
+  corumWriteToolsForPlatform,
 } from './orchestration.ts'
 export type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 export { CorumOrchestration } from './orchestration.ts'
@@ -668,6 +672,12 @@ export function apply(ctx: Context, config: Config): void {
       const effIsolationMode = args.taskIsolation ?? corumIsolationMode
       const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, corumDenyDirectFs)
       const corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch)
+
+      // fork（corum）：任务级 research 的只读硬约束——orchestrate 的 tasks[i].research
+      // 名实相符：research=true 的任务预 deny 全部写工具（与 subagent_research 只读
+      // 实例同款口径），不因「实例 config 未显式 deny」而带写工具直接写主工作区。
+      const researchFilter = corumResearchToolFilter(config.toolFilter, effReadonlyResearch)
+      if (researchFilter !== undefined) request.toolFilter = researchFilter
 
       // fork（corum）：integrate 召唤（fan-in/Manager）——骨架阶段仅前台路径。
       if (args.integrate === true) {

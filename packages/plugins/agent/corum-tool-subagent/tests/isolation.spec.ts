@@ -22,7 +22,9 @@ import {
   corumIsWriteTask,
   corumMarkSettled,
   corumPendingIntegration,
+  corumResearchToolFilter,
   corumShouldIsolate,
+  corumWriteToolsForPlatform,
   CorumOrchestration,
   type CorumWorktreeEntry,
 } from '../src/index.ts'
@@ -245,5 +247,35 @@ describe('corumIntegratorPersona — fork（corum）声明式验证（2026-09-08
     expect(persona).toContain('final acceptance call')
     const mergerPersona = corumIntegratorPersona(entries, [], 'merger')
     expect(mergerPersona).toContain('verification results')
+  })
+})
+
+describe('corumResearchToolFilter — fork（corum）research 只读硬约束', () => {
+  it('readonlyResearch=false 返回 undefined（不补 deny）', () => {
+    expect(corumResearchToolFilter(undefined, false)).toBeUndefined()
+    expect(corumResearchToolFilter({ deny: ['bash'] }, false)).toBeUndefined()
+  })
+
+  it('research=true + 无 toolFilter → 补 deny 全部写工具', () => {
+    const filter = corumResearchToolFilter(undefined, true)
+    expect(filter?.deny).toEqual(expect.arrayContaining(corumWriteToolsForPlatform()))
+  })
+
+  it('research=true + 部分 deny → 补全缺失的写工具', () => {
+    const filter = corumResearchToolFilter({ deny: ['bash'] }, true)
+    for (const tool of corumWriteToolsForPlatform()) {
+      expect(filter?.deny).toContain(tool)
+    }
+    expect(filter?.deny).toContain('bash')
+  })
+
+  it('research=true + 已全 deny → 返回 undefined（幂等，不重复）', () => {
+    const allDeny = { deny: [...corumWriteToolsForPlatform()] }
+    expect(corumResearchToolFilter(allDeny, true)).toBeUndefined()
+  })
+
+  it('allow 保持 config 原值（只读任务不扩权）', () => {
+    const filter = corumResearchToolFilter({ allow: ['grep', 'glob'], deny: ['bash'] }, true)
+    expect(filter?.allow).toEqual(['grep', 'glob'])
   })
 })

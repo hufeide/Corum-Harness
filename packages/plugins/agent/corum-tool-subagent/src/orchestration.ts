@@ -92,9 +92,38 @@ export const corumOrchestrationDomainSpec = defineDomain({
 /** fork（corum）：写工具清单——按工具面判定写任务（§2 逐字核实）。 */
 const CORUM_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh']
 
+/**
+ * fork（corum）：平台实际存在的写工具（deny 名单只能包含已注册工具——
+ * tools.restrict 对未知名 fail loud。pwsh 仅在 win32 装载）。与 corum-agent
+ * compile.ts 的 corumWriteToolsForPlatform 逐字对账（dev-conventions §4a 第 2 条
+ * 两处对账）。orchestrate 任务级 research 的只读硬约束用它预 deny 写工具。
+ */
+export function corumWriteToolsForPlatform(): readonly string[] {
+  return process.platform === 'win32'
+    ? CORUM_WRITE_TOOLS
+    : CORUM_WRITE_TOOLS.filter(tool => tool !== 'pwsh')
+}
+
 /** fork（corum）：git 命令同步执行（父会话 header.cwd 下）。 */
 export function corumGit(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' })
+}
+
+/**
+ * fork（corum）：research 任务的 toolFilter——当任务声明只读（research=true）且
+ * 实例 config 未显式 deny 全部写工具时，补 deny 全部写工具（与 subagent_research
+ * 只读实例同款口径）。allow 保持 config 原值（只读任务不扩权）。
+ */
+export function corumResearchToolFilter(
+  toolFilter: { allow?: string[]; deny?: string[] } | undefined,
+  readonlyResearch: boolean,
+): { allow?: string[]; deny?: string[] } | undefined {
+  if (!readonlyResearch) return undefined
+  if (corumWriteToolsForPlatform().every(t => toolFilter?.deny?.includes(t) === true)) return undefined
+  return {
+    ...toolFilter?.allow !== undefined ? { allow: toolFilter.allow } : {},
+    deny: [...new Set([...(toolFilter?.deny ?? []), ...corumWriteToolsForPlatform()])],
+  }
 }
 
 /**
