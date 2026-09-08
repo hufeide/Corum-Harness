@@ -50,6 +50,21 @@ import {
   subagentModelSelectionProjectionDefinition,
   subagentModelSelectionPolicy,
 } from './model-selection-state.ts'
+// fork（corum）：隔离编排纯函数从 orchestration.ts 引入（含 re-export 到下游）。
+import {
+  CorumOrchestration,
+  corumCleanupLedgerEntries,
+  corumCleanupWorktree,
+  corumDetectIntegrateChecks,
+  corumEffectiveToolFilter,
+  corumGit,
+  corumIntegratorPersona,
+  corumIsWriteTask,
+  corumMarkSettled,
+  corumPendingIntegration,
+  corumShouldIsolate,
+} from './orchestration.ts'
+import type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 
 export const name = 'corum-tool-subagent'
 export const inject = ['tools', 'subagents', 'systemPrompt', 'sessionProjections']
@@ -418,210 +433,24 @@ function resolveDelegationRun(
   }
 }
 
-// fork（corum）：写工具清单——按工具面判定写任务（§2 逐字核实）。
-// eslint 保持只读：本文件其余位置不修改它。
-const CORUM_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh']
-
-// fork（corum）：会话级隔离台账条目。
-// settled=子 Agent 已完工（不占 maxParallelChildren 额度），worktree 等 integrate。
-export interface CorumWorktreeEntry {
-  readonly slug: string
-  readonly branch: string
-  readonly path: string
-  status: 'active' | 'settled' | 'integrated' | 'discarded'
-  // fork（corum）：settle 关联键——subagent/start|end 事件的 runId（session 级去重）。
-  runId?: string
-}
-
-// fork（corum）：会话级隔离台账（key=父 session id）。模块级单例按 cordis
-// 根上下文唯一性成立；仅托管本进程登记的条目。导出仅供单测直接操作。
-export const corumWorktreeLedger = new Map<string, CorumWorktreeEntry[]>()
-
-// fork（corum）：台账 session → 父会话 cwd（dispose 清理时定位 git 主干）。
-const corumLedgerCwds = new Map<string, string>()
-
-// fork（corum）：台账快照事件（renderer「并行工作区」chip 的订阅源）。
-// cordis Events 合并声明自包含（与 corum-api-remotes 的转发 allowlist 配套）。
-declare module '@deepseek-ai/cordis' {
-  interface Events {
-    'corum/worktree-ledger': (frame: CorumWorktreeLedgerFrame) => void
-  }
-}
-
-/** 台账快照的一帧：某父会话的 worktree 条目全量投影（renderer 直接渲染）。 */
-export interface CorumWorktreeLedgerFrame {
-  /** 父会话 id（台账键）。 */
-  readonly sessionId: string
-  /** 条目投影（状态/分支/路径；路径仅供调试展示，renderer 主显分支+状态）。 */
-  readonly entries: readonly CorumWorktreeEntry[]
-  /** 聚合计数（chip 文案用）：待集成 = active+settled。 */
-  readonly pending: number
-}
-
-/** 发射某会话的台账快照（台账每次变更后调用；cordis 根上下文 emit）。 */
-function emitLedgerFrame(ctx: Context, sessionId: string): void {
-  const entries = corumWorktreeLedger.get(sessionId) ?? []
-  const pending = entries.filter(e => e.status === 'active' || e.status === 'settled').length
-  ctx.emit('corum/worktree-ledger', {
-    sessionId,
-    entries: entries.map(e => ({ ...e })),
-    pending,
-  } satisfies CorumWorktreeLedgerFrame)
-}
-
-// fork（corum）：有效 toolFilter——config.toolFilter 与 denyDirectFs 的 deny 并集
-// （denyDirectFs=false 时不附加；config.toolFilter 缺省时并集只有附加项）。
-export function corumEffectiveToolFilter(
-  toolFilter: { allow?: string[]; deny?: string[] } | undefined,
-  denyDirectFs: boolean,
-): { allow?: string[]; deny: string[] } {
-  return {
-    ...toolFilter?.allow !== undefined ? { allow: toolFilter.allow } : {},
-    deny: [...toolFilter?.deny ?? [], ...denyDirectFs ? ['str_replace_editor'] : []],
-  }
-}
-
-// fork（corum）：写工具判定——readonlyResearch 恒只读；否则看有效 toolFilter
-// 是否已把全部写工具 deny。
-export function corumIsWriteTask(
-  toolFilter: { allow?: string[]; deny?: string[] } | undefined,
-  readonlyResearch: boolean,
-  denyDirectFs = true,
-): boolean {
-  if (readonlyResearch) return false
-  const deny = corumEffectiveToolFilter(toolFilter, denyDirectFs).deny
-  // 平台实际装载的写工具口径（pwsh 仅 win32——未装载的工具不会被 deny，
-  // 也不应参与「全 deny 即只读」的判定，否则非 win32 恒判写任务）。
-  const presentWriteTools = process.platform === 'win32'
-    ? CORUM_WRITE_TOOLS
-    : CORUM_WRITE_TOOLS.filter(tool => tool !== 'pwsh')
-  return !presentWriteTools.every(tool => deny.includes(tool))
-}
-
-// fork（corum）：隔离触发判定（readonlyResearch 实例恒不隔离）。
-export function corumShouldIsolate(
-  mode: 'always' | 'write-tasks' | 'off',
-  isWriteTask: boolean,
-  readonlyResearch: boolean,
-): boolean {
-  if (readonlyResearch) return false
-  return mode === 'always' || (mode === 'write-tasks' && isWriteTask)
-}
-
-// fork（corum）：integrate 准入——active 或 settled 的待集成条目（空则拒绝；
-// 修复第一阶段"无 active 即拒绝"挡住"全部完工后合并"的语义缺陷）。
-export function corumPendingIntegration(entries: CorumWorktreeEntry[]): CorumWorktreeEntry[] {
-  return entries.filter(entry => entry.status === 'active' || entry.status === 'settled')
-}
-
-// fork（corum）：subagent/end settle 联动——按 runId 精确翻转 active→settled；
-// runId 未登记时回退匹配唯一 active 条目（continuable 登记的是 childId）。
-export function corumMarkSettled(
-  entries: CorumWorktreeEntry[],
-  settle: { runId?: string; childId?: string },
-): boolean {
-  if (settle.runId !== undefined) {
-    const byRunId = entries.find(entry => entry.status === 'active' && entry.runId === settle.runId)
-    if (byRunId !== undefined) {
-      byRunId.status = 'settled'
-      return true
-    }
-  }
-  if (settle.childId === undefined) return false
-  const candidates = entries.filter(entry => entry.status === 'active' && entry.runId === undefined)
-  if (candidates.length === 1) {
-    candidates[0].status = 'settled'
-    candidates[0].runId = settle.runId ?? settle.childId
-    return true
-  }
-  return false
-}
-
-// fork（corum）：git 命令同步执行（父会话 header.cwd 下）。导出供单测驱动。
-export function corumGit(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' })
-}
-
-// fork（corum）：最佳努力回滚/清理（清理失败不掩盖原始错误）。
-function corumCleanupWorktree(cwd: string, entry: Pick<CorumWorktreeEntry, 'path' | 'branch'>): void {
-  try {
-    corumGit(cwd, ['worktree', 'remove', '--force', entry.path])
-  } catch {
-    // Best effort: 台账仍登记，dispose 清理会重试。
-  }
-  try {
-    corumGit(cwd, ['branch', '-D', entry.branch])
-  } catch {
-    // Best effort: 分支可能未建或已删。
-  }
-}
-
-// fork（corum）：删除本实例登记的台账条目（status 过滤）。
-function corumCleanupLedgerEntries(cwd: string, entries: CorumWorktreeEntry[], statuses: readonly CorumWorktreeEntry['status'][]): void {
-  for (const entry of entries) {
-    if (!statuses.includes(entry.status)) continue
-    corumCleanupWorktree(cwd, entry)
-    entry.status = 'discarded'
-  }
-}
-
-/**
- * fork（corum）：探测式默认 integrateChecks（P0-1 b 方向）——按父会话 cwd 的
- * 仓库形态生成可用的核查命令，替代一刀切 'pnpm -r typecheck'（对非 pnpm
- * workspace 必然失败的基线缺陷，CDP §11.6 暴露）：
- *   1. 存在 pnpm-workspace.yaml → 'pnpm -r typecheck'（原默认，TS monorepo 语义）；
- *   2. 根 package.json scripts.typecheck → 'npm run typecheck'；
- *   3. 根 package.json scripts.test → 'npm test'；
- *   4. 均无 → 'git diff --check'（仅验合并补丁格式完整性：冲突标记残留/空白
- *      错误——保守兜底，永不误拦，门禁语义降级为格式校验）。
- * 用户显式配置的 integrateChecks（preset config）恒优先，本函数不参与。
- */
-export function corumDetectIntegrateChecks(cwd: string): string[] {
-  if (existsSync(path.join(cwd, 'pnpm-workspace.yaml'))) return ['pnpm -r typecheck']
-  try {
-    const pkgPath = path.join(cwd, 'package.json')
-    if (existsSync(pkgPath)) {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string> }
-      if (typeof pkg.scripts?.typecheck === 'string') return ['npm run typecheck']
-      if (typeof pkg.scripts?.test === 'string') return ['npm test']
-    }
-  } catch {
-    // package.json 不可读/坏 JSON → 落保守兜底。
-  }
-  return ['git diff --check']
-}
-
-// fork（corum）：integrate 召唤的集成者 persona（机制拼装，非 LLM 自由写）。
-// merger 语义差异（v0.1 仅 persona 层）：真正的 merger 独立子 Agent 编排需要
-// 嵌套 delegation，受当前 maxDepth 限制不做——留待后续阶段。
-export function corumIntegratorPersona(
-  entries: CorumWorktreeEntry[],
-  checks: string[],
-  merger: 'parent' | 'merger' = 'parent',
-  declared?: string,
-): string {
-  const branches = entries.map(entry => `- ${entry.branch} (worktree: ${entry.path})`).join('\n')
-  // fork（corum）：核查语义（2026-09-08 用户定调）——静态穷举（pnpm/typecheck/test
-  // 四档猜）对千奇百怪的项目不可能准确；正确做法是主 Agent 在 integrate prompt 里
-  // 声明本仓库的编译/运行/验证方式（declared，机制原样注入），探测式默认仅作
-  // 主 Agent 未声明时的兜底。功能性验收（改动对不对、功能成不成立）由主 Agent
-  // 基于原始目标最终裁决——机制只把「声明的失败」挡在提交前，不臆测验收标准。
-  const checkLines = checks.length > 0
-    ? checks.map(check => `- ${check}`).join('\n')
-    : '- git diff --check'
-  const declaredBlock = declared !== undefined && declared.trim() !== ''
-    ? `\nHow to build, run, and verify this repository (declared by the delegating agent — follow it exactly):\n${declared.trim()}\n`
-    : '\nThe delegating agent did not declare how to build or verify this repository: run the checks below and treat them as the minimum bar only.\n'
-  return 'You are the integration manager. Merge the branches listed below into the main working tree IN ORDER. Branches:\n'
-    + branches
-    + declaredBlock
-    + '\nChecks (run every one; commit only when all pass):\n'
-    + checkLines
-    + '\nIf any check or declared verification step fails, report and leave the tree dirty — do NOT commit.\n'
-    + (merger === 'merger'
-      ? 'You are a dedicated integration specialist: after completing the merge and verification, report a per-branch summary (merged/conflicts/verification results) as your final answer.'
-      : 'Report the integration outcome (merge result, verification output, and anything that looks off) so the delegating agent can make the final acceptance call against the original goal.')
-}
+// fork（corum）：隔离编排纯函数 + 台账类型已下沉到 orchestration.ts
+// （docs/plan/PLAN-subagent-orchestration.md §5，红线 1：台账状态改 cordis service）。
+// 上方 import 引入局部作用域（apply 内部使用），此处 re-export 保持对外 API
+// 兼容（单测/下游 import 路径不变）。
+export {
+  corumCleanupLedgerEntries,
+  corumCleanupWorktree,
+  corumDetectIntegrateChecks,
+  corumEffectiveToolFilter,
+  corumGit,
+  corumIntegratorPersona,
+  corumIsWriteTask,
+  corumMarkSettled,
+  corumPendingIntegration,
+  corumShouldIsolate,
+} from './orchestration.ts'
+export type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
+export { CorumOrchestration } from './orchestration.ts'
 
 export function apply(ctx: Context, config: Config): void {
   // Direct apply() bypasses Schemastery's numeric constraints. A direct-apply
@@ -634,6 +463,14 @@ export function apply(ctx: Context, config: Config): void {
   const backgroundEnabled = config.enableRunInBackground !== false
   const continuable = (config.backgroundMode ?? 'one-shot') === 'continuable'
   const toolName = config.toolName ?? 'subagent'
+
+  // fork（corum）：编排器 service 幂等 provide 到根上下文（红线 1：跨会话/跨
+  // bundle 单例）。本 apply 在 agent scope（preset delegation 组）运行，台账语义
+  // 是会话级（key=父 session id），必须在根上下文 provide 才能跨会话共享。已
+  // provide 则复用（worker/research 双实例 + 多 Agent 各自 apply 都不重复注册）。
+  const orchestration = ctx.root.get('corumOrchestration', false) as CorumOrchestration | undefined
+    ?? new CorumOrchestration(ctx.root)
+  void orchestration
 
   // fork（corum）：host settings namespace `corum-subagent`（三级配置第一级：
   // 全局默认；「子 Agent」设置 section 读写此面，preset config 逐键覆盖）。
@@ -674,10 +511,8 @@ export function apply(ctx: Context, config: Config): void {
   // @corum/corum-subagent 包，与本包 import 的官方 @deepseek-ai/dsh-subagent
   // 类型面同源但模块实例不同，类型系统认不出。
   ctx.on('subagent/end' as never, ((info: SubagentRunEndInfo, parentAgent: Agent) => {
-    const entries = corumWorktreeLedger.get(String(parentAgent.session.id))
-    if (entries === undefined) return
-    const flipped = corumMarkSettled(entries, { runId: String(info.runId), childId: String(info.id) })
-    if (flipped) emitLedgerFrame(ctx, String(parentAgent.session.id))
+    // fork（corum）：settle 联动已下沉编排器 service（台账实例字段 + 帧发射）。
+    orchestration.settleFromEnd(info, parentAgent)
   }) as never, { global: true })
 
   // fork（corum）：全局设置的 RPC 面（「子 Agent」设置 section 读写；
@@ -687,13 +522,9 @@ export function apply(ctx: Context, config: Config): void {
   // （见 packages/api/settings-controller：document-updated / section 读写
   // 按 namespace 分发，无需本包自建 RPC。）
 
-  // fork（corum）：父 scope dispose 时清理本实例台账中未集成的 worktree。
+  // fork（corum）：父 scope dispose 时清理未集成的 worktree（编排器 service 持有台账）。
   ctx.effect(() => () => {
-    for (const [sessionId, entries] of corumWorktreeLedger) {
-      const cwd = corumLedgerCwds.get(sessionId)
-      if (cwd === undefined) continue
-      corumCleanupLedgerEntries(cwd, entries, ['active', 'settled'])
-    }
+    orchestration.cleanupOnDispose(['active', 'settled'])
   })
 
   const modelSelectionCapable = config.modelSelectionSettings === true
@@ -736,7 +567,209 @@ export function apply(ctx: Context, config: Config): void {
     if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
     // Load order and HMR replacement can change provider availability while
     // this fiber remains active.
-    let mounted: { subagentProvider: SubagentProvider; disposeTool: () => void } | undefined
+    let mounted: { subagentProvider: SubagentProvider; disposeTool: () => void; disposeOrchestrate: () => void } | undefined
+
+    /**
+     * fork（corum）：单任务隔离 spawn——subagent（单发）与 orchestrate（任务清单
+     * fan-out）共用。闭包捕获 install 的配置终值（三级配置已解析）；入参只给
+     * runtimeCtx/exec/task 级差异。返回前台 settle 结果或后台/continuable 句柄。
+     */
+    const spawnOne = async (
+      runtimeCtx: Context,
+      exec: { agent: Agent; signal: AbortSignal },
+      args: {
+        label: string
+        prompt: string
+        run_in_background?: boolean
+        integrate?: boolean
+        verify?: string
+        // fork（corum）：orchestrate 任务级隔离/只读覆盖（subagent 工具不传，用配置终值）。
+        taskIsolation?: 'always' | 'write-tasks' | 'off'
+        taskResearch?: boolean
+      },
+      subagentProvider: SubagentProvider,
+    ): Promise<ForegroundToolResult | { kind: 'continuable'; subagentId: string } | { kind: 'background'; jobId: string }> => {
+      const parent = exec.agent
+      const modelRequest = args as DelegationModelRequest
+      const parentOptions = parentAgentOptionsForDelegation(parent)
+      const providerRouteDefaults = subagentProvider.agentRouteDefaults
+      // fork（corum）：模型锁——preset config.model > 全局默认模型 > 跟随父。
+      const corumGlobalModel = corumReadonlyResearch ? corumGlobal().defaultResearchModel : corumGlobal().defaultModel
+      const corumEffectiveModel = config.model ?? corumGlobalModel
+      const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
+        ? undefined
+        : {
+            provider: corumEffectiveModel.provider,
+            model: corumEffectiveModel.model,
+            ...corumEffectiveModel.reasoningEffort !== undefined
+              ? { reasoningEffort: corumEffectiveModel.reasoningEffort as ReasoningEffortId }
+              : {},
+          }
+      const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
+      const request: {
+        label: string
+        prompt: ContentBlock[]
+        parent: Agent
+        agentOptions?: AgentOptions
+        persona?: string
+        toolFilter?: { allow?: string[]; deny?: string[] }
+        maxDepth?: number
+        cwd?: string
+      } = {
+        label: args.label,
+        prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
+        parent,
+        ...corumLockedOptions !== undefined ? { agentOptions: corumLockedOptions } : {},
+        ...config.persona !== undefined ? { persona: config.persona } : {},
+        ...config.toolFilter !== undefined ? { toolFilter: config.toolFilter } : {},
+        ...maxDepth !== undefined ? { maxDepth } : {},
+      }
+      if (corumLockedOptions === undefined) {
+        const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
+          || hasConfiguredLlmSelection(config.agentOptions)
+        const configuredChildAgentOptions = requiresRoutePreflight && providerRouteDefaults !== undefined
+          ? { ...providerRouteDefaults, ...config.agentOptions }
+          : config.agentOptions
+        const requestedChildAgentOptions = requestedAgentOptions(
+          parentOptions,
+          configuredChildAgentOptions,
+          modelRequest,
+          modelSelectionEnabled,
+        )
+        assertAllowedModelSelection(
+          modelSelectionPolicy,
+          parentOptions,
+          requestedChildAgentOptions,
+          modelRequest,
+        )
+        if (requiresRoutePreflight) {
+          const llm = runtimeCtx.get('llm')
+          if (llm === undefined) {
+            throw new Error('cannot resolve the selected child LLM route because the `llm` service is unavailable')
+          }
+          await preflightChildLlmRoute(
+            llm,
+            parentOptions,
+            requestedChildAgentOptions,
+            exec.signal,
+            providerRouteDefaults === undefined,
+          )
+          if (runtimeCtx.subagents.getProvider(config.provider) !== subagentProvider) {
+            throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
+          }
+        }
+        exec.signal.throwIfAborted()
+        if (requestedChildAgentOptions !== undefined) request.agentOptions = requestedChildAgentOptions
+      } // fork（corum）：end 模型锁缺省分支（官方原逻辑）
+
+      // fork（corum）：写工具判定与隔离触发（纯函数，单测覆盖）。
+      // 任务级覆盖（orchestrate 的 tasks[i].isolation/research）优先于实例配置终值。
+      const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
+      const effIsolationMode = args.taskIsolation ?? corumIsolationMode
+      const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, corumDenyDirectFs)
+      const corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch)
+
+      // fork（corum）：integrate 召唤（fan-in/Manager）——骨架阶段仅前台路径。
+      if (args.integrate === true) {
+        const sessionId = parent.session.id
+        const entries = orchestration.entriesOf(sessionId)
+        const pending = corumPendingIntegration(entries)
+        if (pending.length === 0) {
+          throw new Error('no isolated worktrees to integrate')
+        }
+        const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
+        if (runSpec.runInBackground) {
+          throw new Error('integrate must run in foreground (runInBackground: false)')
+        }
+        const parentCwd = parent.session.header.cwd ?? process.cwd()
+        const effectiveChecks = corumIntegrateChecks ?? corumDetectIntegrateChecks(parentCwd)
+        const declaredVerify = typeof args.verify === 'string' && args.verify.trim() !== '' ? args.verify : undefined
+        const corumIntegrateRequest = {
+          ...request,
+          cwd: parentCwd,
+          persona: corumIntegratorPersona(pending, effectiveChecks, corumMerger, declaredVerify),
+          prompt: [{
+            type: 'text',
+            text: corumIntegratorPersona(pending, effectiveChecks, corumMerger, declaredVerify) + '\n\n' + String(args.prompt),
+          }] as ContentBlock[],
+        }
+        const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
+          ...corumIntegrateRequest,
+          signal: exec.signal,
+        })
+        const outcome = await settleForegroundRun(run)
+        for (const entry of pending) entry.status = 'integrated'
+        if (corumAutoCleanup) corumCleanupLedgerEntries(parentCwd, pending, ['integrated'])
+        orchestration.emitFrame(sessionId)
+        return outcome
+      }
+
+      // fork（corum）：worktree 创建（隔离触发时，父会话 header.cwd 下）。
+      if (corumIsolate) {
+        const parentCwd = parent.session.header.cwd ?? process.cwd()
+        const sessionId = parent.session.id
+        const entries = orchestration.entriesOf(sessionId)
+        if (entries.filter(entry => entry.status === 'active').length >= corumMaxParallelChildren) {
+          throw new Error('parallel child limit reached; wait for one to settle or integrate first')
+        }
+        const slug = `wt-${randomBytes(3).toString('hex')}`
+        const root = path.resolve(parentCwd, corumIsolation?.worktreeRoot ?? '.corum-worktrees')
+        const branch = `${corumIsolation?.branchPrefix ?? 'wt/'}${slug}`
+        const worktreePath = path.join(root, slug)
+        mkdirSync(root, { recursive: true })
+        try {
+          corumGit(parentCwd, ['worktree', 'add', worktreePath, '-b', branch])
+        } catch (error: unknown) {
+          corumCleanupWorktree(parentCwd, { path: worktreePath, branch })
+          throw error
+        }
+        orchestration.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath })
+        request.cwd = worktreePath
+        request.toolFilter = corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs)
+        const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is read-denied by the sandbox. Commit your changes on branch ${branch} inside this worktree; do not attempt to touch paths outside it.\n\n`
+        request.prompt = [{ type: 'text', text: isolationNotice + args.prompt }] as ContentBlock[]
+      }
+
+      const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
+      if (runSpec.runInBackground) {
+        if (continuable) {
+          const started = await runtimeCtx.subagents.startContinuable({
+            provider: config.provider,
+            label: args.label,
+            request,
+            signal: exec.signal,
+          })
+          return { kind: 'continuable' as const, subagentId: started.childId }
+        }
+        const jobs = runtimeCtx.get('jobs')
+        if (jobs === undefined) {
+          throw new Error('background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs')
+        }
+        const id = jobs.start({
+          kind: 'subagent',
+          label: args.label,
+          owner: parent,
+          run: () => {
+            const controller = new AbortController()
+            const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal })
+            return {
+              cancel: (reason?: string) => {
+                controller.abort(reason ?? 'background subagent task killed')
+              },
+              done: settleStart(start, controller.signal),
+            }
+          },
+        })
+        return { kind: 'background' as const, jobId: id }
+      }
+
+      const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
+        ...request,
+        signal: exec.signal,
+      })
+      return settleForegroundRun(run)
+    }
+
     const mount = (subagentProvider: SubagentProvider): void => {
       assertSubagentProviderConfiguration(subagentProvider)
       const wording = providerWording(subagentProvider.inheritsParentContext)
@@ -831,213 +864,172 @@ export function apply(ctx: Context, config: Config): void {
         async execute(args, exec) {
           const parent = exec.agent
           if (!parent) {
-            // Non-agent callers provide no parent for delegation ownership.
             throw new Error('subagent tool requires a calling agent (exec.agent was undefined)')
           }
-
-          const modelRequest = args as DelegationModelRequest
-          const parentOptions = parentAgentOptionsForDelegation(parent)
-          // fork（corum）：模型锁——preset config.model > 全局默认模型（research 实例
-          // 用 defaultResearchModel，worker 用 defaultModel）> 跟随父（官方原逻辑）。
-          const corumGlobalModel = corumReadonlyResearch ? corumGlobal().defaultResearchModel : corumGlobal().defaultModel
-          const corumEffectiveModel = config.model ?? corumGlobalModel
-          const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
-            ? undefined
-            : {
-                provider: corumEffectiveModel.provider,
-                model: corumEffectiveModel.model,
-                ...corumEffectiveModel.reasoningEffort !== undefined
-                  ? { reasoningEffort: corumEffectiveModel.reasoningEffort as ReasoningEffortId }
-                  : {},
-              }
-          const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
-          const request: {
-            label: string
-            prompt: ContentBlock[]
-            parent: Agent
-            agentOptions?: AgentOptions
-            persona?: string
-            toolFilter?: { allow?: string[]; deny?: string[] }
-            maxDepth?: number
-            // fork（corum）：SubagentStartRequest.cwd（@corum/corum-subagent seam 层校验绝对路径）。
-            cwd?: string
-          } = {
+          // fork（corum）：单任务隔离 spawn 已抽取为 spawnOne（install 作用域闭包），
+          // subagent 工具 execute 是它的薄壳。
+          return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
             label: args.description,
-            prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
-            parent,
-            ...corumLockedOptions !== undefined ? { agentOptions: corumLockedOptions } : {},
-            ...config.persona !== undefined ? { persona: config.persona } : {},
-            ...config.toolFilter !== undefined ? { toolFilter: config.toolFilter } : {},
-            ...maxDepth !== undefined ? { maxDepth } : {},
-          }
-          if (corumLockedOptions === undefined) {
-            const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
-              || hasConfiguredLlmSelection(config.agentOptions)
-            const configuredChildAgentOptions = requiresRoutePreflight && providerRouteDefaults !== undefined
-              ? { ...providerRouteDefaults, ...config.agentOptions }
-              : config.agentOptions
-            const requestedChildAgentOptions = requestedAgentOptions(
-              parentOptions,
-              configuredChildAgentOptions,
-              modelRequest,
-              modelSelectionEnabled,
-            )
-            assertAllowedModelSelection(
-              modelSelectionPolicy,
-              parentOptions,
-              requestedChildAgentOptions,
-              modelRequest,
-            )
-            if (requiresRoutePreflight) {
-              const llm = runtimeCtx.get('llm')
-              if (llm === undefined) {
-                throw new Error('cannot resolve the selected child LLM route because the `llm` service is unavailable')
-              }
-              await preflightChildLlmRoute(
-                llm,
-                parentOptions,
-                requestedChildAgentOptions,
-                exec.signal,
-                providerRouteDefaults === undefined,
-              )
-              if (runtimeCtx.subagents.getProvider(config.provider) !== subagentProvider) {
-                throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
-              }
-            }
-            exec.signal.throwIfAborted()
-            if (requestedChildAgentOptions !== undefined) request.agentOptions = requestedChildAgentOptions
-          } // fork（corum）：end 模型锁缺省分支（官方原逻辑）
-
-          // fork（corum）：写工具判定与隔离触发（纯函数，单测覆盖）。
-          const corumIsWrite = corumIsWriteTask(config.toolFilter, corumReadonlyResearch, corumDenyDirectFs)
-          const corumIsolate = corumShouldIsolate(corumIsolationMode, corumIsWrite, corumReadonlyResearch)
-
-          // fork（corum）：integrate 召唤（fan-in/Manager）——骨架阶段仅前台路径。
-          if (args.integrate === true) {
-            const sessionId = parent.session.id
-            const entries = corumWorktreeLedger.get(sessionId) ?? []
-            // fork（corum）：准入=active 或 settled 全量（修复第一阶段只认 active
-            // 挡住"全部完工后合并"的缺陷）。
-            const pending = corumPendingIntegration(entries)
-            if (pending.length === 0) {
-              throw new Error('no isolated worktrees to integrate')
-            }
-            const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
-            if (runSpec.runInBackground) {
-              // 本阶段 continuation/背景路径 settle 时机在工具外，无法执行台账
-              // 结算与清理——integrate 只允许前台。
-              throw new Error('integrate must run in foreground (runInBackground: false)')
-            }
-            const parentCwd = parent.session.header.cwd ?? process.cwd()
-            // fork（corum）：未显式配置时按主干仓库形态探测默认 checks。
-            const effectiveChecks = corumIntegrateChecks ?? corumDetectIntegrateChecks(parentCwd)
-            // fork（corum）：主 Agent 声明的验证方式（schema 的 verify 参数；
-            // 未声明时 persona 标注「最低限度格式校验」语义）。
-            const declaredVerify = typeof args.verify === 'string' && args.verify.trim() !== '' ? args.verify : undefined
-            const corumIntegrateRequest = {
-              ...request,
-              // fork（corum）：集成者回主干、不附加 deny、persona 注入集成者身份、
-              // prompt 机制拼装（台账分支清单+固定 checks 在前，LLM prompt 在后）。
-              cwd: parentCwd,
-              persona: corumIntegratorPersona(pending, effectiveChecks, corumMerger, declaredVerify),
-              prompt: [{
-                type: 'text',
-                text: corumIntegratorPersona(pending, effectiveChecks, corumMerger, declaredVerify) + '\n\n' + String(args.prompt),
-              }] as ContentBlock[],
-            }
-            const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
-              ...corumIntegrateRequest,
-              signal: exec.signal,
-            })
-            const outcome = await settleForegroundRun(run)
-            // fork（corum）：settle 后台账结算 + autoCleanup（仅台账登记的条目）。
-            for (const entry of pending) entry.status = 'integrated'
-            if (corumAutoCleanup) corumCleanupLedgerEntries(parentCwd, pending, ['integrated'])
-            emitLedgerFrame(ctx, sessionId)
-            return outcome
-          }
-
-          // fork（corum）：worktree 创建（隔离触发时，父会话 header.cwd 下）。
-          if (corumIsolate) {
-            const parentCwd = parent.session.header.cwd ?? process.cwd()
-            const sessionId = parent.session.id
-            const entries = corumWorktreeLedger.get(sessionId) ?? []
-            // fork（corum）：maxParallelChildren 强制——超限拒绝新召唤（只计 active）。
-            if (entries.filter(entry => entry.status === 'active').length >= corumMaxParallelChildren) {
-              throw new Error('parallel child limit reached; wait for one to settle or integrate first')
-            }
-            const slug = `wt-${randomBytes(3).toString('hex')}`
-            const root = path.resolve(parentCwd, corumIsolation?.worktreeRoot ?? '.corum-worktrees')
-            const branch = `${corumIsolation?.branchPrefix ?? 'wt/'}${slug}`
-            const worktreePath = path.join(root, slug)
-            mkdirSync(root, { recursive: true })
-            try {
-              corumGit(parentCwd, ['worktree', 'add', worktreePath, '-b', branch])
-            } catch (error: unknown) {
-              // fork（corum）：失败回滚后抛出（清理失败不掩盖原始错误）。
-              corumCleanupWorktree(parentCwd, { path: worktreePath, branch })
-              throw error
-            }
-            entries.push({ slug, branch, path: worktreePath, status: 'active' })
-            corumWorktreeLedger.set(sessionId, entries)
-            corumLedgerCwds.set(sessionId, parentCwd)
-            emitLedgerFrame(ctx, sessionId)
-            request.cwd = worktreePath
-            // fork（corum）：request.toolFilter 合并 deny str_replace_editor。
-            request.toolFilter = corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs)
-            // fork（corum）：隔离告知——子 Agent 只看相对路径行动（防止它按父
-            // prompt 里的主干绝对路径写文件而被沙箱拒；机制语义对齐
-            // SUBAGENT_DELEGATION_CONTEXT 的 runtime-context 形式）。
-            const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is read-denied by the sandbox. Commit your changes on branch ${branch} inside this worktree; do not attempt to touch paths outside it.\n\n`
-            request.prompt = [{ type: 'text', text: isolationNotice + args.prompt }] as ContentBlock[]
-          }
-
-          const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
-          if (runSpec.runInBackground) {
-            if (continuable) {
-              // Resolves at inbox acceptance: the child owns its own turns from
-              // there, so this call neither waits for nor collects a result.
-              const started = await runtimeCtx.subagents.startContinuable({
-                provider: config.provider,
-                label: args.description,
-                request,
-                signal: exec.signal,
-              })
-              return { kind: 'continuable' as const, subagentId: started.childId }
-            }
-            const jobs = runtimeCtx.get('jobs')
-            if (jobs === undefined) {
-              throw new Error('background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs')
-            }
-            // One-shot background child: job preflight finishes before the
-            // starter can spawn, and the task-owned signal covers startup.
-            const id = jobs.start({
-              kind: 'subagent',
-              label: args.description,
-              owner: parent,
-              run: () => {
-                const controller = new AbortController()
-                const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal })
-                return {
-                  cancel: (reason?: string) => {
-                    controller.abort(reason ?? 'background subagent task killed')
-                  },
-                  done: settleStart(start, controller.signal),
-                  // No readOutput: the child session owns intermediate detail.
-                }
-              },
-            })
-            return { kind: 'background' as const, jobId: id }
-          }
-
-          const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
-            ...request,
-            signal: exec.signal,
-          })
-          return settleForegroundRun(run)
+            prompt: args.prompt,
+            ...args.run_in_background !== undefined ? { run_in_background: args.run_in_background } : {},
+            ...args.integrate !== undefined ? { integrate: args.integrate } : {},
+            ...args.verify !== undefined ? { verify: args.verify } : {},
+          }, subagentProvider)
         },
       }))
-      mounted = { subagentProvider, disposeTool }
+      // fork（corum）：orchestrate 工具（方案甲任务清单 fan-out）——仅在 worker 实例
+      // 注册（research 只读实例不提供编排入口，toolName 为 subagent_research 时跳过）。
+      const disposeOrchestrate = corumReadonlyResearch
+        ? (() => {}) as () => void
+        : runtimeCtx.tools.register(defineTool({
+            name: 'orchestrate',
+            description: 'Run a structured multi-task orchestration: delegate a list of independent tasks to isolated subagents in one call, then merge the isolated worktrees back and verify. Use this for parallel development, multi-angle research, or any work that fans out across independent pieces — you declare the task list (what each subagent does, how to isolate it, how to verify the merge), and the mechanism runs them concurrently and collects the results. Each write-capable task gets its own git worktree and branch automatically; read-only research tasks inherit the parent working tree. Prefer this over several separate subagent calls when the tasks are independent and can run in parallel.',
+            parameters: {
+              tasks: {
+                type: 'array',
+                required: true,
+                description: 'The list of tasks to run (1 or more). Each task is an independent subagent delegation.',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    prompt: { type: 'string', required: true, description: 'The complete, self-contained task for this subagent. It does not share this conversation, so include everything it needs.' },
+                    label: { type: 'string', description: 'A short (3-5 word) label for display.' },
+                    isolation: { type: 'string', enum: ['always', 'write-tasks', 'off'], description: 'Override isolation for this task (always=force a worktree; write-tasks=isolate only write tasks; off=never isolate). Defaults to the instance policy.' },
+                    research: { type: 'boolean', description: 'Set true for a read-only research task (write tools denied, no worktree).' },
+                    model: {
+                      type: 'object',
+                      additionalProperties: false,
+                      description: 'Fixed model for this task (mechanism lock). Omit to follow the instance/global default.',
+                      properties: {
+                        provider: { type: 'string', required: true },
+                        model: { type: 'string', required: true },
+                        reasoningEffort: { type: 'string' },
+                      },
+                    },
+                    background: { type: 'boolean', description: 'Run in the background (continuable, steered via send_message). Defaults to foreground one-shot.' },
+                  },
+                },
+              },
+              merge: {
+                type: 'object',
+                additionalProperties: false,
+                description: 'How to integrate the isolated worktrees after all tasks settle.',
+                properties: {
+                  verify: { type: 'string', description: 'How to build, run, and verify this repository after merging (e.g. "cd studio && npm test"). Declare it: you know this repo — the mechanism injects your declaration verbatim and enforces it. Omit to fall back to detected checks (minimal format bar).' },
+                  autoIntegrate: { type: 'boolean', description: 'Set true to merge + commit after all checks pass. Defaults to false (report only; the delegating agent makes the final acceptance call).' },
+                },
+              },
+            },
+            output: {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  results: {
+                    type: 'array',
+                    required: true,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        index: { type: 'integer', required: true },
+                        label: { type: 'string' },
+                        ok: { type: 'boolean', required: true },
+                        output: { type: 'string' },
+                        error: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+              render: (_args, value) => [{
+                type: 'text',
+                text: (value.results as Array<{ index: number; label?: string; ok: boolean; output?: string; error?: string }>)
+                  .map(r => `[task ${r.index}${r.label !== undefined ? ` · ${r.label}` : ''}] ${r.ok ? 'done' : `failed: ${r.error ?? ''}`}\n${r.output ?? ''}`)
+                  .join('\n\n'),
+              }],
+            },
+            // fork（corum）：Phase 3 编排结果面板——presentCall 显示任务清单概要
+            // （标题=任务数），presentResult 显示结果卡（成功/失败计数）。
+            presentCall: (args) => {
+              const tasks = (args as { tasks?: Array<{ label?: string }> }).tasks ?? []
+              return {
+                card: 'generic' as const,
+                title: `orchestrate · ${tasks.length} 任务`,
+                rawInput: tasks.map((t, i) => `[${i}] ${t.label ?? '(未命名)'}`),
+              }
+            },
+            presentResult: (_args, value) => {
+              const results = (value as unknown as { results: Array<{ index: number; ok: boolean; error?: string }> }).results ?? []
+              const done = results.filter(r => r.ok).length
+              const failed = results.length - done
+              return {
+                card: 'generic' as const,
+                title: `orchestrate · ${done} 成功 / ${failed} 失败`,
+                content: [{ type: 'text', text: results.map(r => `[task ${r.index}] ${r.ok ? '✓ done' : `✗ ${r.error ?? 'failed'}`}`).join('\n') }],
+              }
+            },
+            isConcurrencySafe: () => true,
+            async execute(args, exec) {
+              const parent = exec.agent
+              if (!parent) {
+                throw new Error('orchestrate tool requires a calling agent (exec.agent was undefined)')
+              }
+              // fork（corum）：方案甲 fan-out——tasks[] 并发 spawn（spawnOne 复用
+              // 隔离/模型锁/integrate 逻辑），前台等待全部 settle，汇合结果。
+              const tasks = args.tasks as Array<{
+                prompt: string
+                label?: string
+                isolation?: 'always' | 'write-tasks' | 'off'
+                research?: boolean
+                model?: { provider: string; model: string; reasoningEffort?: string }
+                background?: boolean
+              }>
+              if (tasks.length === 0) throw new Error('orchestrate requires at least one task')
+              const run = (index: number): Promise<{ index: number; ok: boolean; output?: string; error?: string; label?: string }> => {
+                const task = tasks[index]
+                const base = { index, ...task.label !== undefined ? { label: task.label } : {} }
+                return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
+                  label: task.label ?? `task ${index}`,
+                  prompt: task.prompt,
+                  // fork（corum）：orchestrate 任务默认前台 one-shot（fan-in 汇合要求）；
+                  // 只有显式 background:true 才走后台。不能沿用 subagent 的
+                  // 「continuable 默认后台」——否则任务落入 continuable 路径，
+                  // orchestrate 无法前台汇合（CDP 端到端验证暴露的 bug）。
+                  run_in_background: task.background === true,
+                  ...task.isolation !== undefined ? { taskIsolation: task.isolation } : {},
+                  ...task.research !== undefined ? { taskResearch: task.research } : {},
+                }, subagentProvider).then((outcome) => {
+                  if (outcome.kind === 'foreground') {
+                    return { ...base, ok: true, output: outputValueText(outcome.output) }
+                  }
+                  // 后台/continuable：本阶段 orchestrate 汇合要求前台（fan-in 语义）。
+                  return { ...base, ok: false, error: `task ${index} ran in ${outcome.kind} mode; orchestrate currently requires foreground tasks` }
+                }).catch((error: unknown) => ({ ...base, ok: false, error: String(error) }))
+              }
+              const results = await Promise.all(tasks.map((_, index) => run(index)))
+              // fork（corum）：merge 联动——autoIntegrate 时，在所有任务 settle 后
+              // 触发 integrate（fan-in：合并台账分支 + 声明的 verify 门禁）。verify
+              // 由 merge.verify 声明（原样注入集成者 persona）；未声明回落探测式默认。
+              // 若任务均未隔离（isolation:off / research），台账无待集成条目——
+              // 静默跳过 integrate（结果已由任务直接产出，无需 fan-in）。
+              const merge = args.merge as { verify?: string; autoIntegrate?: boolean } | undefined
+              if (merge?.autoIntegrate === true) {
+                const pending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
+                if (pending.length > 0) {
+                  await spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
+                    label: 'integrate',
+                    prompt: 'Integrate the isolated worktrees and commit after all checks pass.',
+                    integrate: true,
+                    ...merge.verify !== undefined ? { verify: merge.verify } : {},
+                  }, subagentProvider)
+                }
+              }
+              return { results }
+            },
+          }))
+      mounted = { subagentProvider, disposeTool, disposeOrchestrate }
     }
 
     // Register listeners before checking presence so no synchronous change is missed.
@@ -1052,6 +1044,7 @@ export function apply(ctx: Context, config: Config): void {
     runtimeCtx.on('subagent/provider-removed', (name) => {
       if (name !== config.provider || mounted === undefined) return
       mounted.disposeTool()
+      mounted.disposeOrchestrate()
       mounted = undefined
     })
     const present = runtimeCtx.subagents.getProvider(config.provider)

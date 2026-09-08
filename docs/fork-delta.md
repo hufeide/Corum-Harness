@@ -8,6 +8,11 @@
 > - 2026-09-07 增补：第 7 个 fork 包 `@corum/corum-credentials-local`（host 侧，fork 自官方 `@deepseek-ai/dsh-credentials-local`）登记于 **§7 host 域 fork**，升级时同样按 §5 runbook 处理。
 > - 2026-09-07 增补：第 8 个 fork 包 `@corum/corum-api-remotes`（host+client 双面，fork 自官方 `@deepseek-ai/dsh-api-remotes`）登记于 **§8**，升级时同样按 §5 runbook 处理。
 > - 2026-09-08 增补：子 Agent 召唤机制优化完整交付（fork #9 §10 / #10 §11 / #11 §12 + 全部 CDP 验证记录 §11.5-§11.11）。**交接文档：`docs/HANDOFF-subagent-isolation.md`**——下一个 session 先读它 + `docs/plan/PLAN-subagent-isolation.md`。
+> - ⚠️ **方案 SUPERSEDED（2026-09-09）**：子 Agent 机制的**方案层面**已被
+>   `docs/plan/PLAN-subagent-orchestration.md` 取代（fork #9 转正为完整 seam 服务 +
+>   方案甲结构化编排）。**本章 §10/§11/§12 的文件台账与升级 runbook 仍有效**（fork
+>   包升级仍按 §5 runbook 执行），但「provider-only 挂载」「fork #10 工具隔离层」
+>   的架构形态不再作为实施基准。后续实施以新方案为准。
 > - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
 
 ---
@@ -498,6 +503,53 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 
 `pnpm --filter @corum/corum-subagent run typecheck` 零错误；`run build` 产物 4 文件（lib/index.js + lib/spawn/index.js + lib/invariant.js + types chunk）；`npx vitest run tests/cwd.spec.ts` 7/7 通过（2026-09-07）。
 
+### 10.5 fork #9 转正为完整 seam 服务（2026-09-09，Phase 0 落地）
+
+> 方案：`docs/plan/PLAN-subagent-orchestration.md` §4。**架构形态变更**：本包从
+> 「只挂 `/spawn` provider 的半身」升格为「完整 seam 服务」——desktop
+> `cordis.patch.yml` 禁用官方 `id: subagent` 服务行，insert 段挂
+> `@corum/corum-subagent`（完整包，非 `/spawn`），服务名 `subagents` 不变。这使
+> fork #9 的 `childSessionMeta(4 参)` cwd 透传 + `assertChildCwd` 在运行时真正生效，
+> 消除 REVIEW 报告的「SEAM 死代码」硬伤（continuable 路径隔离从此生效）。
+
+**挂载改法**（`packages/desktop/cordis.patch.yml`）：
+- 顶层 disabled 段：`- id: subagent` `disabled: true`（禁用 base bundle insert 块内
+  的官方 seam 行，同 credentials/api-remotes 先例）。
+- insert 段：`- id: corum-subagent` `name: '@corum/corum-subagent'`（完整服务）+
+  保留 `- id: corum-subagent-spawn` `name: '@corum/corum-subagent/spawn'`（provider）。
+
+**下游零感知**（服务名 `subagents` 不变）：
+- 官方 provider 行（spawn/fork）`inject: ['subagents']` → 注册进 fork #9 服务。
+- `tool-subagent-control`（send_message/interrupt/list_agents）`inject: ['subagents']`
+  → 调 fork #9 的 sendMessage/interrupt/listChildren/listDescendants。
+- renderer `subagentsRemote`（官方 `/remote` client）按服务名 `subagents` + 方法名
+  `list`/`prompt`/`interruptByParent` 寻址，fork #9 的 `@Remote` 方法面与官方逐字节
+  一致，零感知。
+
+**官方 11 spec 移植回归**（转正验收门槛）：官方 `tests/` 的 11 spec + 2 helper
+移植到 fork `tests/`（+ 1 个 `mock-adapter.ts` 测试基建），**301 测试全通过（exit
+code 0）**。补 8 个测试 devDeps（dsh-agent-loop / dsh-agent-loop-testkit /
+dsh-session-persistence-jsonl / dsh-storage / dsh-storage-json / dsh-storage-domain /
+dsh-subagent-fork-in-process / dsh-subagent-spawn-in-process）。新增
+`vitest.config.ts`（decorator 预处理插件 + `pool: 'forks'` +
+`dangerouslyIgnoreUnhandledErrors: true`）。
+
+**测试基建瑕疵（非阻塞，已记录）**：`list-children.spec.ts` 的 19 个 FileHandle GC
+unhandled error（`session.lock` lease 句柄未 release，官方 spec 固有瑕疵）在 Node 26
+下从 deprecation warning 升级为 ERR_INVALID_STATE（官方 CI Node 24 无此问题）。已用
+`dangerouslyIgnoreUnhandledErrors: true` 让 exit code 归 0，spec 与官方逐字一致
+（未来 rebase 零冲突）。
+
+**CDP 验证**（2026-09-09）：`./scripts/cdp.sh start` → `combo "coding" host ready` +
+零 console 错误 + 无 loader 警告（duplicate/missing/waiting 全无）——证明 fork #9 完整
+服务成功注册（若服务缺失，tool-subagent-control 会报 "waiting for service:
+subagents"，host 不会 ready）。
+
+**升级注意（补）**：本包从「provider-only fork」升格为「完整 seam 服务 fork」，
+rebase 风险从**中**上调为**高**——官方 `dsh-subagent` 每次版本 bump，fork 的
+continuation（1728 行）+ child-agent/depth/types/driver/spawn 都要三方合并，且 11
+spec 需每版本重跑等价验证。
+
 ---
 
 ## 11. 第 10 个 fork 包：`@corum/corum-tool-subagent`（2026-09-07，子 Agent 隔离方案 fork #10）
@@ -621,3 +673,115 @@ CDP 验证中暴露：fork #10 的 worktree 台账是**模块级内存 Map**—�
 **验证**（CDP）：子 Agent 隔离分支 wt/wt-e4da17（52789a7）→ integrate `verify="node --check studio/main.js"` → 声明的验证执行 exit 0 + 兜底 `git diff --check` exit 0 → 无冲突合并自动提交 `22891e6`。主 Agent 复核报告完整。单测 25/25（persona 声明/未声明/汇报语义 3 例新增）。
 
 **React 19 类型漂移修复**（顺路）：corum-ui-settings-plugins 初版误用 `@types/react@^19.2.2`——pnpm peer 解析把 lucide-react 的 react 类型链到 19.2.18，与 workspace 统一的 18.3.31 冲突（lucide 组件类型不兼容）。已对齐 ^18.2.0 / ~18.3.31 / ^18.3.7；ide-ui 历史 implicit-any 13 处补标注归零（AppFrame/SettingsShell/index/SettingsSections）。
+
+### 11.12 编排器下沉 + orchestrate 工具（2026-09-09，Phase 1/2 落地）
+
+> 方案：`docs/plan/PLAN-subagent-orchestration.md` §5/§6。**架构形态变更**：隔离编排
+> 从「寄生在 fork #10 工具 execute 里」重构为「cordis service + 结构化工具」。
+
+**Phase 1 编排器下沉**（`src/orchestration.ts` 新建）：
+- `CorumOrchestration extends Service`：继承 cordis `Service`（`super(ctx, 'corumOrchestration')`
+  自动 provide + 随 owning fiber 注销），持有会话级隔离台账（实例字段，**非模块级单例**——
+  红线 1 合规，也是 §11.9 台账持久化的前置）。
+- 挂载位置：fork #10 apply 在 agent scope（preset delegation 组）运行，台账语义是会话级，
+  故在**根上下文** provide（`ctx.root.get('corumOrchestration', false)` 幂等复用 + `new
+  CorumOrchestration(ctx.root)` 首次 provide）。关键验证：cordis `reflect.provide` 实现是
+  `this.ctx.fiber.effect(...)`，disposer 绑定**根 fiber**（非 agent scope fiber），故 service
+  跨会话稳定单例、台账不因单个 Agent dispose 丢失。
+- 10 个隔离纯函数收编进 orchestration.ts（`corumGit`/`corumEffectiveToolFilter`/
+  `corumIsWriteTask`/`corumShouldIsolate`/`corumPendingIntegration`/`corumMarkSettled`/
+  `corumCleanupWorktree`/`corumCleanupLedgerEntries`/`corumDetectIntegrateChecks`/
+  `corumIntegratorPersona`），index.ts 从 orchestration.ts import + re-export（对外 API 兼容）。
+- 台账操作（worktree 创建/清理/settle 联动/integrate 结算/帧发射）改为 service 方法
+  （`addActiveEntry`/`entriesOf`/`settleFromEnd`/`cleanupOnDispose`/`emitFrame`）；模块级
+  `corumWorktreeLedger`/`corumLedgerCwds`/`emitLedgerFrame` 彻底删除。
+
+**Phase 2 orchestrate 工具**（`src/index.ts` mount 内新增）：
+- `spawnOne` 抽取：单任务隔离 spawn（模型锁/worktree/台账/notice）从 execute 内联抽成
+  install 作用域闭包，subagent（单发）与 orchestrate（多任务 fan-out）共用。
+- `orchestrate` 工具（方案甲任务清单 schema）：`tasks[]`（每任务 prompt/label/isolation/
+  research/model/background）+ `merge{verify, autoIntegrate}`；execute 里 `Promise.all`
+  并发 fan-out → 汇合结果 → `merge.autoIntegrate` 时触发 integrate（fan-in）。
+- 任务级覆盖：`tasks[i].isolation/research` 优先于实例配置终值（`effIsolationMode`/
+  `effReadonlyResearch`）。
+- 注册位置：worker 实例（`subagent` 工具）mount 内额外注册；research 只读实例
+  （`corumReadonlyResearch`）跳过 orchestrate 入口。
+
+**验证**（2026-09-09）：25 单测全绿 + typecheck 零错误 + build 成功（lib/index.js 49.40 kB）；
+CDP boot 零 console 错误。**端到端 LLM 验证（orchestrate fan-out 隔离）待泳道场景**：
+orchestrate 工具经 corum preset 的 worker 实例挂载，真实 fan-out 需 IDE 泳道 + corum
+编译 preset + LLM 召唤（coding combo 主窗口用官方 standard preset，不含此工具）。
+
+**端到端验证补记（2026-09-09，IDE 泳道实机）**：在 corum IDE「新建任务」泳道
+（Corum-编程助手 + ai-lib 工作区）发「用 orchestrate 并行创建两个探针」任务，
+LLM 正确调用 orchestrate 工具（任务清单 `isolation:off` + `autoIntegrate:false`），
+两个任务正确并发 fan-out + 汇合。**发现并修复 2 个真实 bug**：
+1. **orchestrate 任务默认后台 bug**：continuable 实例下 `run_in_background` 未显式
+   指定时默认 true，任务落入 continuable 路径无法前台汇合（报「task ran in continuable
+   mode」）。修复：`run_in_background: task.background === true`（显式默认前台）。
+2. **autoIntegrate 空台账报错 bug**：任务均 `isolation:off` 时，`autoIntegrate:true`
+   触发 integrate 报「no isolated worktrees to integrate」。修复：integrate 前检查
+   台账待集成条目，空则静默跳过。
+验证环境限制（非代码 bug）：测试工作区 `/Users/kukucai/work/ai-lib` 在当前沙箱会话
+EPERM 拒绝写入（主 Agent 自身 write/bash 同样 EPERM），是文件沙箱配置问题，与
+orchestrate 工具无关。
+
+### 11.13 Phase 4 台账持久化（2026-09-09，§11.9 决策项①落盘）
+
+> 解决 §11.9 遗留：worktree 台账从「纯内存易失」改为「storageDomain 落盘」，应用
+> 重启后恢复待集成条目（孤儿 worktree 识别），允许对孤儿发起 integrate。
+
+**实现**（`orchestration.ts`）：
+- 台账 domain spec `corumOrchestrationDomainSpec`（name `corum_orchestration`，version 1，
+  `layout: 'per-record'`，单表 `ledger`，key=sessionId，value=`{cwd, entries}`）。
+- `CorumOrchestration` 构造时经 `ctx.get('storageDomain')` 可选获取（缺省/未装配回落
+  纯内存，行为与下沉前一致）；打开 domain 后启动恢复台账（`domain.table('ledger').entries()`
+  遍历重建 active/settled 条目）+ `ctx.effect` 关闭句柄。
+- 台账变更（`addActiveEntry`/`settleFromEnd`/`cleanupOnDispose`）异步 `persist(sessionId)`
+  落盘：只落盘待集成条目（active/settled），空则删记录；fire-and-forget，失败仅 warn。
+- 依赖补 `@deepseek-ai/dsh-storage-domain`（devDependencies + tsdown external）。
+
+**验证**（2026-09-09）：25 单测全绿 + typecheck 零错误 + build 成功（lib/index.js 51.84 kB）。
+单测走「无 storageDomain 回落纯内存」路径（`new Context()` 无 storageDomain），持久化
+路径依赖实机验证（storageDomain 装配 + 重启恢复，见 §11.9 候选方向①的 CDP 验证待补）。
+
+### 11.14 Phase 5 退役收尾（2026-09-09，官方 workflow 全家移除）
+
+> 方案：`docs/plan/PLAN-subagent-orchestration.md` §7 退役清单。方案甲用 `orchestrate`
+> 工具（任务清单结构化编排）取代官方 workflow 的通用 JS 脚本引擎 + ralph 循环。
+
+**移除**（`corum-agent/src/compile.ts` standardRows delegation 组）：
+- `workflow-worker-thread`（`@deepseek-ai/dsh-workflow-worker-thread`，workflowEngine provider）
+- `tool-workflow`（`@deepseek-ai/dsh-tool-workflow`）
+- `tool-ralph`（`@deepseek-ai/dsh-tool-ralph`）
+
+**保留**：`tool-subagent-control`（send_message/interrupt）+ `tool-subagent-list-agents`
+（list_agents）——用户决策「保留后台续接能力」，二者 `inject: ['tools','subagents']`
+（不依赖 workflowEngine），转正后的 fork #9 服务满足其依赖。`isolate: { workflowEngine:
+true }` 保留（空 realm 无害，移除 realm 隔离会连带改 delegation 组其他行的 realm 归属，
+属无谓风险）。
+
+**待决策（subagent 工具退役）**：方案甲 §7 的「subagent 工具被 orchestrate 取代」是
+语义变更（worker 实例 toolName 从 `subagent` 改为只注册 orchestrate + research 只读实例
+去留），依赖 orchestrate 的 `tasks[i].research` 路径端到端验证。**当前落定：保留
+「subagent 单发薄壳 + orchestrate 多任务」并列**（两者共用 spawnOne），作为「彻底移除」
+前的过渡——research 只读实例（subagent_research）是「不可移除」的只读研究入口，其语义
+由 orchestrate 的 `research` 字段替代需端到端验证（当前测试环境 EPERM 阻碍 worktree
+验证）。「彻底移除 subagent 只留 orchestrate」留待 orchestrate research 路径验证后作为
+后续独立改动。
+
+**验证**（2026-09-09）：corum-agent typecheck 零错误 + compile-subagent.spec 5 例全绿。
+
+### 11.15 Phase 3 编排结果面板（2026-09-09）
+
+> 方案：`docs/plan/PLAN-subagent-orchestration.md` §8 Phase 3。orchestrate 工具的
+> 结果展示从 generic 文本升级为结构化卡（presentCall/presentResult）。
+
+**实现**（`src/index.ts` orchestrate 工具）：
+- `presentCall`：标题 `orchestrate · N 任务`，rawInput = 任务清单 `[i] label`。
+- `presentResult`：标题 `orchestrate · X 成功 / Y 失败`，content = 每任务结果行
+  `[task i] ✓ done / ✗ error`。
+- 台账 chip 复用：`corum/worktree-ledger` 事件契约端到端不变（service emitFrame →
+  api-remotes 转发 → ui-chat WorktreeLedgerChip 订阅），编排器下沉不破坏既有 chip。
+
+**验证**（2026-09-09）：25 单测全绿 + typecheck 零错误 + build 成功（lib/index.js 62.97 kB）。

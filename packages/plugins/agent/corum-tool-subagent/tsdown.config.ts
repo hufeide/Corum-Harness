@@ -28,6 +28,7 @@ export default defineConfig(() => [
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-session-projection',
       '@deepseek-ai/dsh-settings',
+      '@deepseek-ai/dsh-storage-domain',
       '@deepseek-ai/dsh-subagent',
       '@deepseek-ai/dsh-tools',
       '@deepseek-ai/dsh-util-values',

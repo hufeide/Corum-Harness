@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   corumDetectIntegrateChecks,
@@ -22,7 +23,7 @@ import {
   corumMarkSettled,
   corumPendingIntegration,
   corumShouldIsolate,
-  corumWorktreeLedger,
+  CorumOrchestration,
   type CorumWorktreeEntry,
 } from '../src/index.ts'
 
@@ -116,18 +117,22 @@ describe('corumGit — fork（corum）worktree 创建/清理', () => {
 describe('maxParallelChildren — fork（corum）并行上限口径', () => {
   it('只计 active；settled/integrated/discarded 不占额度', () => {
     const sessionId = 'spec-session-limit'
-    corumWorktreeLedger.set(sessionId, [
+    // fork（corum）：台账已下沉 CorumOrchestration service（红线 1），单测经
+    // _testLedger() 直接操作 service 台账字段（与 execute 层同口径）。
+    const orchestration = new CorumOrchestration(new Context())
+    const ledger = orchestration._testLedger()
+    ledger.set(sessionId, [
       entry({ slug: 'wt-a', status: 'active' }),
       entry({ slug: 'wt-b', status: 'settled' }),
       entry({ slug: 'wt-c', status: 'integrated' }),
       entry({ slug: 'wt-d', status: 'discarded' }),
     ])
-    const entries = corumWorktreeLedger.get(sessionId)!
+    const entries = ledger.get(sessionId)!
     const activeCount = entries.filter(item => item.status === 'active').length
     // 与 execute 同判定：active >= maxParallelChildren(4) 才拒绝。
     expect(activeCount).toBe(1)
     expect(activeCount >= 4).toBe(false)
-    corumWorktreeLedger.delete(sessionId)
+    ledger.delete(sessionId)
   })
 })
 

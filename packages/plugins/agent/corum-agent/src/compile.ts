@@ -201,7 +201,7 @@ function standardRows(): CordisRow[] {
       ],
     },
 
-    // ── delegation & workflows（subagent 全家 + workflow + ralph；workflowEngine realm）──
+    // ── delegation & workflows（subagent 全家；workflowEngine realm）──
     {
       id: 'delegation',
       name: 'cordis:group',
@@ -229,9 +229,11 @@ function standardRows(): CordisRow[] {
           disabled: true,
           config: { provider: 'claude-code', toolName: 'subagent_claude_code', backgroundMode: 'one-shot', maxDepth: 'provider-managed' },
         },
-        { id: 'workflow-worker-thread', name: '@deepseek-ai/dsh-workflow-worker-thread', config: { provider: 'spawn' } },
-        { id: 'tool-workflow', name: '@deepseek-ai/dsh-tool-workflow' },
-        { id: 'tool-ralph', name: '@deepseek-ai/dsh-tool-ralph', config: { subagentProvider: 'spawn', maxRounds: 64 } },
+        // fork（corum）：Phase 5 退役——官方 workflow 全家（workflow-worker-thread +
+        // tool-workflow + tool-ralph）已移除。方案甲用 orchestrate 工具（任务清单
+        // 结构化编排，非 JS 脚本）取代官方 workflow 的通用脚本引擎；ralph 与
+        // orchestrate 功能重叠，一并退役。workflowEngine realm 保留（isolate 声明
+        // 不依赖具体 provider 行，移除 provider 后 realm 空置无害）。
       ],
     },
 

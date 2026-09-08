@@ -107,14 +107,16 @@
 - id: api-remotes
   disabled: true
 
-# 子 Agent 隔离方案（docs/plan/PLAN-subagent-isolation.md，fork #9/#10）：
+# 子 Agent 编排框架（docs/plan/PLAN-subagent-orchestration.md，fork #9 转正）：
 # 官方 dsh-subagent seam 的 SubagentStartRequest 无 cwd 字段——worktree 硬隔离
 # 需要子会话 header.cwd 可指定（fs 写沙箱边界/shell/{{cwd}} 全跟随）。fork 包
-# @corum/corum-subagent 以 **corum-spawn** provider 名注册进官方 seam（与官方
-# spawn 并存、互不抢名）：官方 spawn 行保留（官方 tool-subagent 的 subagent_fork/
-# codex/claude-code 实例与 workflow 只读 fan-out 继续走它），corum preset 的双
-# 实例（subagent/subagent_research，corum-agent compile.ts 生成）指向 corum-spawn。
-# 官方 seam 服务行不动（服务 `subagents` 唯一）；fork 侧只挂 provider + invariant。
+# @corum/corum-subagent 现以**完整服务**取代官方 seam（服务名 `subagents` 不变，
+# 同 credentials/api-remotes 的「禁官方行 + insert fork 完整包」纪律）：先禁用
+# 官方 subagent 服务行，再在下方 insert 段挂 fork 完整包 + corum-spawn provider。
+# 服务名不变 → 官方 provider 行（spawn/fork）与 tool-subagent-control
+# （send_message/interrupt/list_agents）对 `subagents` 的 inject 零感知。
+- id: subagent
+  disabled: true
 
 # ── desktop persona ─────────────────────────────────────────────────────────
 
@@ -151,10 +153,18 @@
     - id: corum-api-remotes
       name: '@corum/corum-api-remotes'
 
-    # Fork #9 spawn provider（见上方「子 Agent 隔离方案」注释）：注册
-    # 'corum-spawn' provider 进官方 subagents seam——官方 spawn 并存不冲突。
-    # 插件包内部含 seam 全部类型（自包含，不从官方 dsh-subagent import），
-    # 运行时与官方 seam 共享同一 Context 合并声明（同名 Events/服务面）。
+    # Fork #9 完整 seam 服务（取代上方禁用的官方 subagent 行）：
+    # 服务名 'subagents' 不变（fork 的 SubagentRuntime super(ctx,'subagents')
+    # 与官方一致），官方 provider 行（spawn/fork）与 tool-subagent-control
+    # 对 ctx.subagents 的 inject/registerProvider 零感知。这使 fork #9 的
+    # childSessionMeta(4 参) cwd 透传 + assertChildCwd 在运行时真正生效
+    # （消除 REVIEW 的「SEAM 死代码」硬伤：continuable 路径隔离从此生效）。
+    - id: corum-subagent
+      name: '@corum/corum-subagent'
+
+    # Fork #9 spawn provider：注册 'corum-spawn' provider 进 fork 的 subagents
+    # seam——与官方 spawn/fork provider 并存不冲突。provider 行与完整服务行
+    # 分开挂载（与服务注册相同的官方 base bundle 结构）。
     - id: corum-subagent-spawn
       name: '@corum/corum-subagent/spawn'
 
