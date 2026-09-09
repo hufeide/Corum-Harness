@@ -126,19 +126,19 @@ export function corumGit(cwd: string, args: string[]): void {
  * spawnOne 在隔离判定前用本函数侦测父 cwd，非 git 时强制不隔离（git 依赖能力
  * 自动关闭，不再报错）。带 Map 缓存（同一会话反复 spawn 不重复 fork git）。
  */
-const corumGitRepoCache = new Map<string, boolean>()
+const corumGitRepoCache = new Set<string>()
 export function corumIsGitRepo(cwd: string): boolean {
-  const cached = corumGitRepoCache.get(cwd)
-  if (cached !== undefined) return cached
-  let isRepo = false
+  // 2026-09-10：只缓存**肯定结果**。此前负结果也缓存——用户关掉「新工作区自动
+  // git init」后手动 `git init`，同一进程内会一直判非 git（隔离/git 能力永不启用）。
+  // 非 git 的探测成本很低（一次 git rev-parse 失败），且失败路径只在派遣时走一次。
+  if (corumGitRepoCache.has(cwd)) return true
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd, stdio: 'pipe' })
-    isRepo = true
+    corumGitRepoCache.add(cwd)
+    return true
   } catch {
-    isRepo = false
+    return false
   }
-  corumGitRepoCache.set(cwd, isRepo)
-  return isRepo
 }
 
 // ── git 实况探测（机制真值门禁的判定面）─────────────────────────────────────

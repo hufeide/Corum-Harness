@@ -857,9 +857,17 @@ export function apply(ctx: Context, config: Config): void {
       // 仓库（worktree/branch/verify/integrate 全在 git 上），非 git 目录下强制不隔离，
       // 避免 `git worktree add` 报 `fatal: not a git repository`（实测 ai-lab）。即使用户
       // 在「新建工作区」时拒绝了 git 初始化，此降级保证 git 依赖能力自动关闭而非报错。
+      //
+      // 2026-09-10 核查：强制隔离（模式 always / 任务 isolation:'always'）在非 git 工作区
+      // **同样降级**（不 fail loud——用户可能故意不初始化 git），但要让模型知道这次没隔离：
+      // 子 Agent 的直连纪律通知会追加一句说明（见下方 corumIsolationSkipped）。
+      let corumIsolationSkipped = false
       if (corumIsolate) {
         const parentCwdForRepo = parent.session.header.cwd ?? process.cwd()
-        if (!corumIsGitRepo(parentCwdForRepo)) corumIsolate = false
+        if (!corumIsGitRepo(parentCwdForRepo)) {
+          corumIsolate = false
+          corumIsolationSkipped = true
+        }
       }
 
       // fork（corum）：机制追加的 deny 必须收敛到「本 preset 真正注册的工具名」——
@@ -968,7 +976,11 @@ export function apply(ctx: Context, config: Config): void {
       } else if (corumIsWrite && !effReadonlyResearch) {
         // fork（corum）：不隔离的写任务（单发前台，无并发）直接在主工作区改——必须明确
         // 告诉它「不要碰版本控制」（文本见 corumDirectWriteNotice 的单一事实源）。
-        request.prompt = [{ type: 'text', text: corumDirectWriteNotice() + args.prompt }] as ContentBlock[]
+        // 非 git 工作区导致隔离被跳过时追加一句，避免模型误以为自己在隔离环境里。
+        const skipped = corumIsolationSkipped
+          ? 'NOTE: this workspace is not a git repository, so isolation was skipped for this delegation.\n\n'
+          : ''
+        request.prompt = [{ type: 'text', text: skipped + corumDirectWriteNotice() + args.prompt }] as ContentBlock[]
       }
       /** fork（corum）：把 run/child id 绑定到本次 spawn 的台账条目（无隔离时 no-op）。 */
       const corumBindRun = (runId: string): void => {
@@ -1573,7 +1585,7 @@ export function apply(ctx: Context, config: Config): void {
               '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- Write-capable children get ISOLATED git worktrees (own branch; the parent working tree is write-denied to that child) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and leaves git to you. Isolation needs a git repository: in a non-repo workspace it is skipped automatically (no action needed), and a forced `isolation: "always"` on an orchestrate task fails loud.',
+              '- Write-capable children get ISOLATED git worktrees (own branch; the parent working tree is write-denied to that child) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and leaves git to you. Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) — even a forced `isolation: "always"` is skipped rather than failing, and the child is told so. Nothing to do either way.',
               '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Set `merge.autoIntegrate: true` to merge+commit the isolated branches after all checks pass, or false to only report and decide yourself.',
               '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',

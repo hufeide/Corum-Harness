@@ -877,9 +877,11 @@ true }` 保留（空 realm 无害，移除 realm 隔离会连带改 delegation �
 - 实机验证（ai-lab 非 git）：`isolation:always` 写任务**不再报错**，文件直接写主树成功，
   不创建 `.corum-worktrees/`；`corumIsGitRepo` 5/5 验证（仓库/子目录 true，非 git/不存在
   目录 false 不抛错）；30 单测全绿无回归。
-- **⚠️ 新观察（LLM 实测提出，待决策）**：降级是**静默**的——`isolation:always` 在 git
-  缺失时退化为直接写主树而不告警，用户可能「以为隔离了实际改了主树」。是否需要在降级
-  时向主 Agent / 用户显式提示「本任务因非 git 仓库未隔离」（用户决策，记入 §11.17）。
+- **⚠️ 新观察（LLM 实测提出）→ 已处理（2026-09-10）**：降级是**静默**的——`isolation:always`
+  在 git 缺失时退化为直接写主树而不告警，用户可能「以为隔离了实际改了主树」。现在
+  ① 子 Agent 的 prompt 追加 `NOTE: this workspace is not a git repository, so isolation was
+  skipped for this delegation.`；② 机制段措辞更正（此前误写「forced isolation fails loud」，
+  实现是降级不报错）。全量核查见 §11.22。
 
 **P-C · research 只读子代理连带无 bash，无法枚举目录（只读口径连带效果）**
 - 现象：ai-lab 任务A（`research:true`）想用 `ls` 列目录，但 research 实例「预 deny 写工具」
@@ -1683,3 +1685,47 @@ corum-tracked, mode: track }`），`tool-ralph.subagentProvider` 改指它：
 
 **单测**：`corum-subagent/tests/isolated-provider.spec.ts`（9 例：always 模式 5 例 +
 track 模式 4 例——计数/直连纪律/幂等注销/缺服务 fail loud/mode 合法）。
+
+
+### 11.22 非 git 工作区降级机制全量核查（2026-09-10，用户要求）
+
+**触发**：用户在「新建工作区」关掉「始终初始化 git」（`corum-workspace.autoInitGit = false`）
+→ 工作区没有 `.git`。此后所有依赖 git 的机制必须自动关闭而不是报错。
+
+**机制矩阵（核查结论）**：
+
+| 机制 | 需要 git | 降级行为 | 状态 |
+|---|---|---|---|
+| 工具层 worktree 隔离（`subagent` / `subagent_fork` / `orchestrate.tasks[]`） | 是 | `corumIsGitRepo(parentCwd)` → 强制不隔离；子 Agent 收到直连纪律通知 | ✅ 原有（2026-09-09） |
+| 同上，**强制隔离**（模式 `always` / 任务 `isolation:'always'`） | 是 | 同样降级（不 fail loud）；**新增**：子 Agent prompt 追加「因非 git 未隔离」说明 | ✅ 本轮补 |
+| `orchestrate` 脚本模式 `isolate:'always'`（`corum-isolated` provider） | 是 | **本轮修复**：`resolveEffectiveMode` 降级为 `track`（不建 worktree、仍计入并发计数）+ logger 警告 | ✅ 本轮修 |
+| `corum-tracked`（ralph 子 Agent） | 否 | 无 git 依赖（只计数 + 直连纪律） | ✅ |
+| `corum-fork`（`subagent_fork` 子会话） | 否（只需 cwd 存在） | 无 git 依赖（上下文继承与 git 无关） | ✅ 实机验证 |
+| `integrate`（merge / verify / commit） | 是 | 台账为空 → 早退 `no isolated worktrees to integrate`（不执行任何 git 命令） | ✅ 实机验证 |
+| 台账 settle / 死条目剔除 / 分支判定（`corumBranchMerged` 等） | 是 | 仅在有条目时触发；非 git 下条目恒空 | ✅ |
+| `corumDetectIntegrateChecks` 的 `git diff --check` 兜底 | 是 | 只在 integrate 分支执行，非 git 下不可达 | ✅ |
+
+**本轮修复的 4 处**：
+1. **`corumIsGitRepo` 负结果不再缓存**（原实现把 false 也缓存 → 用户关掉自动初始化后手动
+   `git init`，同一进程内永远判非 git，隔离/verify/integrate 全不启用）。现在只缓存肯定结果。
+2. **`corum-isolated` 的 `always` 降级为 `track`**（新增 `resolveEffectiveMode`）——此前非 git
+   工作区里 `orchestrate` 脚本模式默认隔离会直接 `fatal: not a git repository`，整次编排失败。
+3. **强制隔离被跳过时告知子 Agent**（`NOTE: this workspace is not a git repository…`），回应
+   上面 P-B 的「静默降级」观察。
+4. **机制段措辞更正**：原文「a forced `isolation: "always"` on an orchestrate task fails loud」
+   与实现不符（实现是降级不报错），改为「even a forced isolation is skipped rather than failing,
+   and the child is told so」。
+
+**实机验证矩阵**（非 git 工作区 `/Users/kukucai/corum-nogit-probe`，dev 实例）：
+
+| 场景 | 结果 |
+|---|---|
+| 单发前台 `subagent` 写委托 | 文件直落工作区，无报错 |
+| 声明式 `orchestrate` 双任务 | 两个文件落地，**零 worktree/分支** |
+| 脚本 `orchestrate`（默认 `isolate:'always'`） | 降级为 track：`[script · nogit-script] 1 child agent(s) settled`，文件落地，无报错 |
+| `ralph`（`corum-tracked`） | 一轮完成，文件落地，零 git 依赖 |
+| `subagent_fork` | 子会话复述父会话口令 `TEAL-77`（上下文继承与 git 无关） |
+| `subagent integrate: true` | 返回 `no isolated worktrees to integrate`（未执行 git） |
+
+**守卫/单测**：`resolveEffectiveMode` 4 例（非 git → track / git → always / track·off 不变 /
+降级路径不触碰 git）、`corumIsGitRepo` 负缓存 1 例（非 git → false，`git init` 后同进程 → true）。

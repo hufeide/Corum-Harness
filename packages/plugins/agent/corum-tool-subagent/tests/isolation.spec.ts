@@ -9,7 +9,7 @@
  * git 命令面；execute 编排由 CDP 实机验证（PLAN §5 第 10 步）。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -20,6 +20,7 @@ import {
   corumIntegratorPersona,
   corumEffectiveToolFilter,
   corumGit,
+  corumIsGitRepo,
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
@@ -328,6 +329,30 @@ describe('corumEntryDead / entriesOf 死条目剔除（2026-09-09）', () => {
     expect(orchestration._testLedger().get(sessionId)?.length).toBe(1)
     expect(orchestration.entriesOf(sessionId)).toEqual([])
     expect(orchestration._testLedger().get(sessionId)?.length).toBe(0)
+  })
+})
+
+describe('非 git 降级：强制隔离被跳过时告知子 Agent（2026-09-10 核查）', () => {
+  it('工具层：跳过隔离时 prompt 追加说明；机制段不再声称 forced isolation fails loud', async () => {
+    const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8'))
+    expect(src).toContain('corumIsolationSkipped')
+    expect(src).toContain('this workspace is not a git repository, so isolation was skipped for this delegation')
+    // 措辞与实现一致：降级而非报错。
+    expect(src).toContain('even a forced `isolation: "always"` is skipped rather than failing')
+    expect(src).not.toContain('on an orchestrate task fails loud')
+  })
+})
+
+describe('corumIsGitRepo — 非 git 工作区降级 + 手动 git init 后可恢复（2026-09-10 核查）', () => {
+  it('非 git 目录判 false；`git init` 后同进程内再判为 true（负结果不再缓存）', () => {
+    // 注意：scratch 本身在本文件的另一个用例里被 `git init` 过（line ~142），
+    // 所以非 git 场景必须用 scratch 之外的临时目录（git 会向上层查找仓库）。
+    const dir = mkdtempSync(join(tmpdir(), 'corum-late-git-'))
+    // 用户关掉「新工作区自动 git init」→ 首次派遣时判非 git，机制自动降级。
+    expect(corumIsGitRepo(dir)).toBe(false)
+    // 用户随后手动 git init：同进程内必须立刻恢复（此前负结果被永久缓存）。
+    execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'pipe' })
+    expect(corumIsGitRepo(dir)).toBe(true)
   })
 })
 

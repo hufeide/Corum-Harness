@@ -35,7 +35,7 @@ import type {
   SubagentCapabilities,
   SubagentProvider,
 } from '../index.ts'
-import { corumDirectWriteNotice, corumIsolationNotice } from '@corum/corum-orchestration'
+import { corumDirectWriteNotice, corumIsGitRepo, corumIsolationNotice } from '@corum/corum-orchestration'
 import { startInProcessRun } from '../driver/index.ts'
 
 export const name = 'corum-subagent-isolated-in-process'
@@ -82,6 +82,26 @@ interface CorumOrchestrationFace {
   /** track 模式：登记/注销「在跑写子 Agent」（并发感知信号④）。 */
   beginWriteChild: (sessionId: string) => void
   endWriteChild: (sessionId: string) => void
+}
+
+/**
+ * 解析本次委托**实际生效**的隔离模式（非 git 工作区自动降级）。
+ *
+ * 用户可以在「新建工作区」时关掉「始终初始化 git」——那时工作区没有仓库，`git worktree add`
+ * 会直接报 `fatal: not a git repository`。isolated provider 的 `always` 因此必须按
+ * {@link corumIsGitRepo} 降级为 `track`：子 Agent 照常在父工作区里干活（不建 worktree），
+ * 但仍然登记「在跑写子 Agent」计数 + 注入直连纪律——git 依赖能力自动关闭，而不是让整次
+ * 编排失败。
+ * @param mode - provider 配置的模式。
+ * @param parentCwd - 父会话工作目录。
+ * @returns 实际生效的模式（`always` 在非 git 工作区降级为 `track`）。
+ */
+export function resolveEffectiveMode(
+  mode: Config['mode'],
+  parentCwd: string,
+): Config['mode'] {
+  if (mode === 'always' && !corumIsGitRepo(parentCwd)) return 'track'
+  return mode
 }
 
 /** 一个已准备的隔离子会话：可直接交给 driver 的请求 + 绑定/回滚回调。 */
@@ -190,8 +210,14 @@ class IsolatedInProcessProvider implements SubagentProvider {
   ) {}
 
   async start(request: ResolvedSubagentStartRequest) {
-    if (this.config.mode === 'off') return startInProcessRun(request, {})
-    if (this.config.mode === 'track') {
+    const parentCwd = request.parent.session.header.cwd ?? process.cwd()
+    // 非 git 工作区：always 降级为 track（见 resolveEffectiveMode）。
+    const mode = resolveEffectiveMode(this.config.mode, parentCwd)
+    if (mode !== this.config.mode) {
+      this.ctx.logger.warn(`corum-isolated: workspace "${parentCwd}" is not a git repository; degrading isolation mode "${this.config.mode}" → "track"`)
+    }
+    if (mode === 'off') return startInProcessRun(request, {})
+    if (mode === 'track') {
       const tracked = prepareTrackedChild(this.ctx, request)
       try {
         const run = await startInProcessRun(tracked.request, {})
