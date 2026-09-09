@@ -35,12 +35,31 @@ interface ProviderOption {
   models: Array<{ id: string; name: string }>
 }
 
+/** 已部署的本地模型（corum-ollama status.models 的 UI 投影，字段同 PulledModel）。 */
+interface LocalModelView {
+  name: string
+  size?: string
+  sizeBytes?: number
+  quantization?: string
+  paramSize?: string
+  /** 是否已激活（加载到内存）——润色优先用已激活的模型（免冷加载）。 */
+  active?: boolean
+}
+
 interface LocalLlmStatusView {
   installed: boolean
   running: boolean
   totalMemGb: number
   meetsMinMem: boolean
-  models: string[]
+  activeModelCount?: number
+  maxActiveModels?: number
+  models: LocalModelView[]
+}
+
+/** 下拉标签：参数/量化/占用拼成一行，激活态由调用方加前缀。 */
+function localModelLabel(model: LocalModelView): string {
+  const bits = [model.paramSize, model.quantization, model.size].filter((v): v is string => typeof v === 'string' && v !== '')
+  return bits.length === 0 ? model.name : `${model.name} · ${bits.join(' · ')}`
 }
 
 const EFFORT_OPTIONS = [
@@ -109,7 +128,11 @@ export function PolishSection() {
     try {
       const status = await rpc<LocalLlmStatusView>('localLlm', 'status', {})
       setLocal(status)
-      if (localModel === '' && status.models.length > 0) setLocalModel(status.models[0] ?? '')
+      if (localModel === '') {
+        // 默认优先「已部署且已激活」的模型（无需冷加载），其次任一已部署模型。
+        const preferred = status.models.find(m => m.active === true) ?? status.models[0]
+        if (preferred !== undefined) setLocalModel(preferred.name)
+      }
     } catch {
       setLocal(null)
     }
@@ -147,7 +170,13 @@ export function PolishSection() {
   }
 
   const modelOptions = providers.flatMap(p => p.models.map(m => ({ id: `${p.id}::${m.id}`, label: `${p.name} · ${m.name}` })))
-  const localModelOptions = local === null ? [] : local.models.map(m => ({ id: m, label: m }))
+  // 本地模型下拉：只列**本机已部署**的模型（来自 Ollama status），已激活的排在最前并标 ●。
+  // 不允许手填模型 id（用户定调：模型必须来自本机已部署/已激活的集合）。
+  const deployed = local?.models ?? []
+  const localModelOptions = [
+    ...deployed.filter(m => m.active === true).map(m => ({ id: m.name, label: `● 已激活 · ${localModelLabel(m)}` })),
+    ...deployed.filter(m => m.active !== true).map(m => ({ id: m.name, label: `○ 未激活 · ${localModelLabel(m)}` })),
+  ]
   const localReady = local !== null && local.installed && local.running && local.meetsMinMem
 
   if (rpc === null) return <p className={css.hintText}>RPC 未就绪。</p>
@@ -177,7 +206,10 @@ export function PolishSection() {
             disabled={busy}
             onClick={() => {
               setEngine(localReady ? 'auto' : 'online')
-              setLocalModel(localModel === '' && local !== null ? (local.models[0] ?? '') : localModel)
+              if (localModel === '' && local !== null) {
+                const preferred = local.models.find(m => m.active === true) ?? local.models[0]
+                if (preferred !== undefined) setLocalModel(preferred.name)
+              }
               void save()
             }}
           >
@@ -208,23 +240,19 @@ export function PolishSection() {
             }}
           />
         </SettingRow>
-        <SettingRow label="本地模型" desc="本地 Ollama 的模型名；留空用引擎里第一个可用模型。">
-          {localModelOptions.length > 0 ? (
-            <SelectField
-              value={localModel}
-              options={[{ id: '', label: '（自动：第一个可用模型）' }, ...localModelOptions]}
-              disabled={busy || loading}
-              onChange={(id) => { setLocalModel(id); setSaved(false) }}
-            />
-          ) : (
-            <input
-              className={css.textInput}
-              placeholder="qwen3.5:2b"
-              value={localModel}
-              disabled={busy || loading}
-              onChange={(e) => { setLocalModel(e.target.value); setSaved(false) }}
-            />
-          )}
+        <SettingRow
+          label="本地模型"
+          desc="从本机「已部署」的 Ollama 模型里选（● 已激活的免冷加载、优先用）；不提供手填模型 id。"
+        >
+          <SelectField
+            /* 没有可选项时显示占位而不是历史配置值（模型可能已被卸载，别误导） */
+            value={localModelOptions.length > 0 ? localModel : ''}
+            options={localModelOptions.length > 0
+              ? [{ id: '', label: '（自动：优先已激活的模型）' }, ...localModelOptions]
+              : [{ id: '', label: local === null ? '（本地引擎未挂载）' : '（没有已部署的本地模型）' }]}
+            disabled={busy || loading || localModelOptions.length === 0}
+            onChange={(id) => { setLocalModel(id); setSaved(false) }}
+          />
         </SettingRow>
         <SettingRow label="推理档位" desc="透传给模型适配器（low/medium/high）；「默认」= 不指定。">
           <SelectField

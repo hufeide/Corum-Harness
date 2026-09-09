@@ -4,6 +4,20 @@
  * @module @corum/corum-agent/local-llm-face
  */
 
+/** 一个已拉取的本地模型（与 @corum/corum-ollama 的 PulledModel 同形的只读子集）。 */
+export interface LocalPulledModel {
+  /** 模型名（如 'qwen3.5:2b'）。 */
+  name: string
+  /** 磁盘占用（人类可读）。 */
+  size?: string
+  /** 是否已激活（加载到内存）。 */
+  active?: boolean
+  /** 激活后占用的 VRAM（字节）。 */
+  vramBytes?: number
+  /** 参数量（如 '8.0B'）。 */
+  paramSize?: string
+}
+
 /** 本地引擎探测结果（与 @corum/corum-ollama 对齐的只读投影）。 */
 export interface LocalEngineStatus {
   installed: boolean
@@ -11,7 +25,8 @@ export interface LocalEngineStatus {
   totalMemGb: number
   meetsMinMem: boolean
   modelPulled: boolean
-  models: string[]
+  /** 已拉取的模型（含激活态）。⚠️ 是对象数组，不是名字数组（face 曾写错，2026-09-09 修）。 */
+  models: LocalPulledModel[]
   version?: string
 }
 

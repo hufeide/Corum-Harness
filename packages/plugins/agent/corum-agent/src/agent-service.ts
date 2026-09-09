@@ -1721,8 +1721,14 @@ export class CorumAgentService extends TypertRemoteService {
             if (!ensured.ok) {
               throw new Error(ensured.error ?? '本地引擎启动失败')
             }
-            const model = config.localModel ?? status.models[0] ?? ''
-            if (model === '') throw new Error('本地引擎没有可用模型：请在「设置 → 扩展 → Ollama」下载一个模型')
+            // 模型选择：配置值必须仍在**本机已部署**列表里（可能被删过），否则回落
+            // 「已激活优先」——与设置页下拉的语义一致（用户定调：不手填模型 id）。
+            const deployed = status.models
+            const configured = config.localModel === undefined
+              ? undefined
+              : deployed.find(m => m.name === config.localModel)
+            const model = (configured ?? deployed.find(m => m.active === true) ?? deployed[0])?.name ?? ''
+            if (model === '') throw new Error('本地引擎没有已部署模型：请在「设置 → 扩展 → Ollama」下载并激活一个模型')
             const out = await local.chat({ model, prompt: `${system}\n\n${prompt}`, temperature: 0.2, numPredict: 1024 })
             if (out.text.trim() !== '') return out.text
             throw new Error('本地模型返回空结果')
