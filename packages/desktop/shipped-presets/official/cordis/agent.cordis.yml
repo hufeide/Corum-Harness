@@ -239,6 +239,9 @@
 
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'
+      # 2026-09-10 用户定调：workflow 的设计语义并入 orchestrate 的 script 模式
+      # （引擎保留给 orchestrate / ralph），模型面不再有第二个自撰编排语言。
+      disabled: true
 
     - id: tool-ralph
       name: '@deepseek-ai/dsh-tool-ralph'

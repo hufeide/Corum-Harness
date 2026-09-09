@@ -51,7 +51,9 @@ export {
   corumIntegrationFailure,
   corumIntegrationTruth,
   corumIntegratorPersona,
+  corumDirectWriteNotice,
   corumIsGitRepo,
+  corumIsolationNotice,
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
@@ -64,6 +66,8 @@ export {
   corumOrchestrationDomainSpec,
 } from './orchestration.ts'
 export type {
+  CorumWorktreeChild,
+  CorumWorktreeChildOptions,
   CorumCleanupOptions,
   CorumIntegrationTruth,
   CorumWorktreeEntry,

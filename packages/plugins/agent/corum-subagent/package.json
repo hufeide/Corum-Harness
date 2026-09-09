@@ -17,6 +17,10 @@
       "types": "./lib/types/fork/index.d.ts",
       "default": "./lib/fork/index.js"
     },
+    "./isolated": {
+      "types": "./lib/types/isolated/index.d.ts",
+      "default": "./lib/isolated/index.js"
+    },
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"

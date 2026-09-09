@@ -584,8 +584,9 @@ VENDORED_PRESETS="$REPO_ROOT/packages/desktop/shipped-presets/official"
 OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
 # 本仓副本允许出现的「官方没有的行」（新增 corum 实例）。
 PRESET_EXTRA_ROWS="tool-subagent-research"
-# 恢复挂载的官方能力行（必须启用且走 corum provider）。PTC 的 tool-workflow 例外：
-# 官方 PTC 刻意只留引擎给 ralph、不发布第二个模型自撰编排面（与 run_code 重复）。
+# 恢复挂载的官方能力行（必须启用且走 corum provider）。workflow **工具行** 2026-09-10
+# 起在四个 preset 一律 disabled（设计语义并入 orchestrate 的 script 模式，引擎保留）；
+# 引擎行（workflow-worker-thread）与 ralph 仍恢复挂载。
 PRESET_RESTORED_ROWS="tool-subagent-fork workflow-worker-thread tool-ralph"
 if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
   if grep -qE '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
@@ -751,15 +752,15 @@ if [ -d "$VENDORED_PRESETS" ]; then
     if ! row_disabled "$vendored" tool-ralph && ! grep -qF 'subagentProvider: corum-spawn' "$vendored"; then
       fail "${preset}：ralph 未走 corum-spawn provider"
     fi
-    # PTC 官方口径：workflow 引擎保留给 ralph，但 tool-workflow 不发布。
-    if [ "$preset" = "ptc" ]; then
-      if row_disabled "$vendored" tool-workflow; then
-        pass "ptc：tool-workflow 按官方口径保持 disabled（引擎留给 ralph）"
-      else
-        fail "ptc：tool-workflow 被启用——PTC 会出现第二个模型自撰编排面（与 run_code 重复）"
-      fi
-    elif row_disabled "$vendored" tool-workflow; then
-      fail "${preset}：tool-workflow 仍 disabled——官方 workflow 能力未恢复"
+    # workflow 工具行：四个 preset 一律 disabled（语义并入 orchestrate script 模式）；
+    # 引擎行必须保留启用，否则 orchestrate script 模式与 ralph 都没有引擎。
+    if row_disabled "$vendored" tool-workflow; then
+      pass "${preset}：tool-workflow 已退役（语义并入 orchestrate script 模式）"
+    else
+      fail "${preset}：tool-workflow 仍启用——模型面出现第二个自撰编排语言"
+    fi
+    if row_disabled "$vendored" workflow-worker-thread; then
+      fail "${preset}：workflow 引擎行被禁用——orchestrate script 模式/ralph 失去引擎"
     fi
     # codex / claude-code 保持官方默认（provider 未安装）。
     for optional in tool-subagent-codex tool-subagent-claude-code; do
@@ -803,6 +804,31 @@ if [ -d "$VENDORED_PRESETS" ]; then
     pass "host patch 挂载 @corum/corum-subagent/fork"
   else
     fail "desktop/cordis.patch.yml 未挂载 corum-fork provider"
+  fi
+  # ⑦ isolated provider（workflow 语义并入 orchestrate 的隔离机制）：provider 文件保留
+  # worktree/台账/通知三件事，host patch 必须挂它，orchestrate 必须按 run 指定它。
+  CORUM_ISOLATED_PROVIDER="$REPO_ROOT/packages/plugins/agent/corum-subagent/src/isolated/index.ts"
+  if [ -f "$CORUM_ISOLATED_PROVIDER" ] \
+    && grep -qF "providerName: z.string().default('corum-isolated')" "$CORUM_ISOLATED_PROVIDER" \
+    && grep -qF 'createWorktreeChild' "$CORUM_ISOLATED_PROVIDER" \
+    && grep -qF 'bindRunId' "$CORUM_ISOLATED_PROVIDER" \
+    && grep -qF 'discardEntry' "$CORUM_ISOLATED_PROVIDER" \
+    && grep -qF '[corum isolation]' "$CORUM_ISOLATED_PROVIDER"; then
+    pass "corum isolated provider：worktree + 台账绑定 + 失败回滚 + 隔离通知"
+  else
+    fail "corum-subagent/src/isolated/index.ts 缺隔离三件事（worktree/绑定/回滚）或通知文本"
+  fi
+  if grep -qF "name: '@corum/corum-subagent/isolated'" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+    pass "host patch 挂载 @corum/corum-subagent/isolated"
+  else
+    fail "desktop/cordis.patch.yml 未挂载 corum-isolated provider"
+  fi
+  if grep -qF "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC" \
+    && grep -qF "isolate === 'off' ? 'corum-spawn' : 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \
+    && grep -qF "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
+    pass "orchestrate script 模式：引擎 + 按 isolate 选 provider（默认隔离）"
+  else
+    fail "orchestrate 缺 script 模式接线（引擎/隔离 provider 选择）"
   fi
   # ⑤ 改名残留（mode: code）目录不得存在——它会与 mode 枚举冲突、挂载即失败。
   for stale in "$VENDORED_PRESETS"/*/; do

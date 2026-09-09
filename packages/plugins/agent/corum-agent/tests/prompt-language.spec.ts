@@ -90,8 +90,11 @@ describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', (
 
   it('隔离 / 编排机制段与前台 settlement notice 保持英文（回归）', () => {
     const src = source('../../corum-tool-subagent/src/index.ts')
-    expect(src).toContain('[corum isolation]')
     expect(src).toContain('final report:')
     expect(src).not.toMatch(/description:\s*'[^']*[\u4e00-\u9fff]/)
+    // 2026-09-10：隔离通知文本下沉到 @corum/corum-orchestration（工具层 + isolated provider 共用）。
+    const orchestrationSrc = source('../../corum-orchestration/src/orchestration.ts')
+    expect(orchestrationSrc).toContain('[corum isolation]')
+    expect(orchestrationSrc).not.toMatch(/corumIsolationNotice[\s\S]{0,400}[\u4e00-\u9fff]/)
   })
 })

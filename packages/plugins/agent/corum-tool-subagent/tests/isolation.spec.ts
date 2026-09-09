@@ -332,15 +332,23 @@ describe('corumEntryDead / entriesOf 死条目剔除（2026-09-09）', () => {
 })
 
 describe('isolation notice — fork（corum）prompt 前缀', () => {
-  it('隔离召唤的 prompt 前缀包含分支名与相对路径纪律', async () => {
+  it('通知文本单一事实源在编排包，工具层与 isolated provider 都引用它', async () => {
     // 机制验证：实机 CDP（fork-delta §11.5）——probe4 无此前缀撞沙箱、probe5 有则直写成功。
-    // 这里对常量文本做静态断言，防重构时丢失关键语义。
-    const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8'))
-    expect(src).toContain('[corum isolation]')
-    expect(src).toContain('RELATIVE path only')
+    // 2026-09-10：文本下沉到 @corum/corum-orchestration（工具层 + provider 共用），
+    // 这里断言「文本语义 + 两个消费点都走 helper」，防重构时丢失或分叉。
+    const fs = await import('node:fs')
+    const orchestrationSrc = fs.readFileSync(new URL('../../corum-orchestration/src/orchestration.ts', import.meta.url), 'utf8')
+    expect(orchestrationSrc).toContain('[corum isolation]')
+    expect(orchestrationSrc).toContain('RELATIVE path only')
     // 2026-09-09 措辞更正：沙箱只拒写（读仍允许），旧文本的 read-denied 是错的。
-    expect(src).toContain('write-denied by the sandbox')
-    expect(src).toContain('reads are still allowed')
+    expect(orchestrationSrc).toContain('write-denied by the sandbox')
+    expect(orchestrationSrc).toContain('reads are still allowed')
+    expect(orchestrationSrc).toContain('export function corumIsolationNotice')
+    const toolSrc = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+    expect(toolSrc).toContain('corumIsolationNotice(child)')
+    expect(toolSrc).toContain('corumDirectWriteNotice()')
+    const providerSrc = fs.readFileSync(new URL('../../corum-subagent/src/isolated/index.ts', import.meta.url), 'utf8')
+    expect(providerSrc).toContain('isolationNotice(child.branch)')
   })
 })
 

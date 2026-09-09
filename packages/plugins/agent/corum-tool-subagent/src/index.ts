@@ -34,6 +34,8 @@ import {
   settleRun,
 } from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentResult, SubagentRun, SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
+// fork（corum）：orchestrate 任务级结构化输出（吸收 workflow 的 agent({schema}) 语义）。
+import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
 import {
   assertAllowedModelSelection,
@@ -55,6 +57,7 @@ import {
   CorumOrchestration,
   corumCleanupWorktree,
   corumDetectIntegrateChecks,
+  corumDirectWriteNotice,
   corumEffectiveToolFilter,
   corumGit,
   corumGitHead,
@@ -63,6 +66,7 @@ import {
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumIsGitRepo,
+  corumIsolationNotice,
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
@@ -748,6 +752,9 @@ export function apply(ctx: Context, config: Config): void {
         // （subagent 工具注入；orchestrate 任务与 integrate 不注入——结果已由
         // 工具结果汇总，避免 N 条重复通知）。
         notifyParent?: boolean
+        // fork（corum）：orchestrate 任务级结构化输出（对象根 JSON Schema）——子 Agent
+        // 必须提交 schema 合法的结果，工作流式结构化子结果（2026-09-10 吸收 workflow 语义）。
+        taskSchema?: ObjectJsonSchema
       },
       subagentProvider: SubagentProvider,
     ): Promise<ForegroundToolResult | { kind: 'continuable'; subagentId: string } | { kind: 'background'; jobId: string }> => {
@@ -777,6 +784,7 @@ export function apply(ctx: Context, config: Config): void {
         toolFilter?: { allow?: string[]; deny?: string[] }
         maxDepth?: number
         cwd?: string
+        outputSchema?: ObjectJsonSchema
       } = {
         label: args.label,
         prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
@@ -785,6 +793,8 @@ export function apply(ctx: Context, config: Config): void {
         ...config.persona !== undefined ? { persona: config.persona } : {},
         ...config.toolFilter !== undefined ? { toolFilter: config.toolFilter } : {},
         ...maxDepth !== undefined ? { maxDepth } : {},
+        // fork（corum）：结构化子结果（orchestrate 任务级 schema，吸收 workflow 语义）。
+        ...args.taskSchema !== undefined ? { outputSchema: args.taskSchema } : {},
       }
       if (corumLockedOptions === undefined) {
         const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
@@ -941,36 +951,24 @@ export function apply(ctx: Context, config: Config): void {
       // fork（corum）：广播用 worktree 三件套（无隔离时 undefined）。
       let corumEntryInfo: { slug: string; branch: string; path: string } | undefined
       if (corumIsolate) {
+        // fork（corum）：worktree 创建下沉到编排服务（工具层与 isolated provider 共用同一
+        // 实现，见 CorumOrchestration.createWorktreeChild）。通知文本同样是单一事实源。
         const parentCwd = parent.session.header.cwd ?? process.cwd()
         const sessionId = parent.session.id
-        const entries = orchestration.entriesOf(sessionId)
-        if (entries.filter(entry => entry.status === 'active').length >= corumMaxParallelChildren) {
-          throw new Error('parallel child limit reached; wait for one to settle or integrate first')
-        }
-        const slug = `wt-${randomBytes(3).toString('hex')}`
-        const root = path.resolve(parentCwd, corumIsolation?.worktreeRoot ?? '.corum-worktrees')
-        const branch = `${corumIsolation?.branchPrefix ?? 'wt/'}${slug}`
-        const worktreePath = path.join(root, slug)
-        mkdirSync(root, { recursive: true })
-        try {
-          corumGit(parentCwd, ['worktree', 'add', worktreePath, '-b', branch])
-        } catch (error: unknown) {
-          corumCleanupWorktree(parentCwd, { path: worktreePath, branch })
-          throw error
-        }
-        orchestration.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath })
-        corumEntry = { sessionId, slug }
-        corumEntryInfo = { slug, branch, path: worktreePath }
-        request.cwd = worktreePath
+        const child = orchestration.createWorktreeChild(sessionId, parentCwd, {
+          ...corumIsolation?.worktreeRoot !== undefined ? { worktreeRoot: corumIsolation.worktreeRoot } : {},
+          ...corumIsolation?.branchPrefix !== undefined ? { branchPrefix: corumIsolation.branchPrefix } : {},
+          maxParallelChildren: corumMaxParallelChildren,
+        })
+        corumEntry = { sessionId, slug: child.slug }
+        corumEntryInfo = { slug: child.slug, branch: child.branch, path: child.path }
+        request.cwd = child.path
         corumSetMechanismFilter(corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs))
-        const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is write-denied by the sandbox (reads are still allowed for reference). Commit your changes on branch ${branch} inside this worktree; do not attempt to write outside it.\n\n`
-        request.prompt = [{ type: 'text', text: isolationNotice + args.prompt }] as ContentBlock[]
+        request.prompt = [{ type: 'text', text: corumIsolationNotice(child) + args.prompt }] as ContentBlock[]
       } else if (corumIsWrite && !effReadonlyResearch) {
         // fork（corum）：不隔离的写任务（单发前台，无并发）直接在主工作区改——必须明确
-        // 告诉它「不要碰版本控制」：主工作区可能有父 Agent 未提交的无关改动，
-        // 子 Agent 一句 `git add -A` 就会把它们一起卷进自己的提交。
-        const directNotice = '[corum orchestration] This delegation has no concurrent write task, so you work DIRECTLY in the delegating agent\'s working tree (no isolated worktree). Edit files in place and leave version control to the delegating agent: do NOT run git add / commit / checkout / stash / reset, and do not create branches.\n\n'
-        request.prompt = [{ type: 'text', text: directNotice + args.prompt }] as ContentBlock[]
+        // 告诉它「不要碰版本控制」（文本见 corumDirectWriteNotice 的单一事实源）。
+        request.prompt = [{ type: 'text', text: corumDirectWriteNotice() + args.prompt }] as ContentBlock[]
       }
       /** fork（corum）：把 run/child id 绑定到本次 spawn 的台账条目（无隔离时 no-op）。 */
       const corumBindRun = (runId: string): void => {
@@ -1179,12 +1177,30 @@ export function apply(ctx: Context, config: Config): void {
         ? (() => {}) as () => void
         : runtimeCtx.tools.register(defineTool({
             name: 'orchestrate',
-            description: 'Run a structured multi-task orchestration: delegate a list of independent tasks to isolated subagents in one call, then merge the isolated worktrees back and verify. Use this for parallel development, multi-angle research, or any work that fans out across independent pieces — you declare the task list (what each subagent does, how to isolate it, how to verify the merge), and the mechanism runs them concurrently and collects the results. A fan-out of 2+ write tasks gives each task its own git worktree and branch automatically; a single task (and read-only research tasks) runs directly in the parent working tree. Prefer this over several separate subagent calls when the tasks are independent and can run in parallel.',
+            description: [
+              'Orchestrate several subagents in ONE call. Two modes, same isolation and merge machinery:',
+              '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `model`, `schema` (structured output) and `background`.',
+              '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await; hooks `agent`, `parallel`, `pipeline`, `phase`, `log`; end with `return <json-value>`). Use this when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
+              'ISOLATION: scripted children are ISOLATED in their own git worktree + branch by default (`isolate: "always"`), so concurrent writers never touch the same tree; pass `isolate: "off"` for a read-only script that must see the parent tree exactly as it is (isolated children see the branch base, not uncommitted parent edits). Declarative tasks keep the concurrency-aware rule: 2+ concurrent write tasks isolate, a lone foreground write task works directly in the parent tree.',
+              'FINISH: declare `merge.verify` (how to build/run/verify this repo) and set `merge.autoIntegrate: true` to merge + commit after the checks pass; otherwise the call reports the pending branches so you can integrate or discard them yourself.',
+            ].join('\n'),
             parameters: {
+              script: { type: 'string', description: 'SCRIPTED mode: the plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`). Requires `meta`; mutually exclusive with `tasks`.' },
+              meta: {
+                type: 'object',
+                additionalProperties: true,
+                description: 'SCRIPTED mode: the workflow identity block (plain JSON, never code).',
+                properties: {
+                  name: { type: 'string', required: true, description: 'Short kebab-case workflow name.' },
+                  description: { type: 'string', required: true, description: 'One-line description of what the script does.' },
+                  whenToUse: { type: 'string', description: 'Optional guidance on when this script applies.' },
+                },
+              },
+              args: { type: 'object', additionalProperties: true, description: 'SCRIPTED mode: optional JSON input exposed verbatim to the script as the `args` global.' },
+              isolate: { type: 'string', enum: ['always', 'off'], description: 'SCRIPTED mode isolation: `always` (default) gives every scripted child its own worktree + branch so concurrent writes never collide; `off` runs them directly in the parent tree (use for read-only scripts that must see the parent tree as-is).' },
               tasks: {
                 type: 'array',
-                required: true,
-                description: 'The list of tasks to run (1 or more). Each task is an independent subagent delegation.',
+                description: 'DECLARATIVE mode: the list of tasks to run (1 or more). Each task is an independent subagent delegation.',
                 items: {
                   type: 'object',
                   additionalProperties: false,
@@ -1204,6 +1220,11 @@ export function apply(ctx: Context, config: Config): void {
                       },
                     },
                     background: { type: 'boolean', description: 'Run in the background (continuable, steered via send_message). Defaults to foreground one-shot.' },
+                    schema: {
+                      type: 'object',
+                      additionalProperties: true,
+                      description: 'Optional object-rooted JSON Schema: when present the child must commit a schema-valid structured result, returned in `output` instead of free text (workflow-style structured children).',
+                    },
                   },
                 },
               },
@@ -1222,9 +1243,9 @@ export function apply(ctx: Context, config: Config): void {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
+                  mode: { type: 'string', required: true, enum: ['tasks', 'script'] },
                   results: {
                     type: 'array',
-                    required: true,
                     items: {
                       type: 'object',
                       additionalProperties: false,
@@ -1237,19 +1258,60 @@ export function apply(ctx: Context, config: Config): void {
                       },
                     },
                   },
+                  script: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      name: { type: 'string', required: true },
+                      agentsStarted: { type: 'integer', required: true },
+                      value: { type: 'json' },
+                    },
+                  },
+                  integration: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      pendingBranches: { type: 'array', items: { type: 'string' } },
+                      integrated: { type: 'boolean' },
+                    },
+                  },
                 },
               },
-              render: (_args, value) => [{
-                type: 'text',
-                text: (value.results as Array<{ index: number; label?: string; ok: boolean; output?: string; error?: string }>)
-                  .map(r => `[task ${r.index}${r.label !== undefined ? ` · ${r.label}` : ''}] ${r.ok ? 'done' : `failed: ${r.error ?? ''}`}\n${r.output ?? ''}`)
-                  .join('\n\n'),
-              }],
+              render: (_args, value) => {
+                const out = value as {
+                  mode: string
+                  results?: Array<{ index: number; label?: string; ok: boolean; output?: string; error?: string }>
+                  script?: { name: string; agentsStarted: number; value?: unknown }
+                  integration?: { pendingBranches: string[]; integrated: boolean }
+                }
+                const parts: string[] = []
+                if (out.mode === 'script' && out.script !== undefined) {
+                  parts.push(`[script · ${out.script.name}] ${out.script.agentsStarted} child agent(s) settled\nReturn value:\n${JSON.stringify(out.script.value, null, 2)}`)
+                } else {
+                  parts.push((out.results ?? [])
+                    .map(r => `[task ${r.index}${r.label !== undefined ? ` · ${r.label}` : ''}] ${r.ok ? 'done' : `failed: ${r.error ?? ''}`}\n${r.output ?? ''}`)
+                    .join('\n\n'))
+                }
+                if (out.integration !== undefined) {
+                  parts.push(out.integration.integrated
+                    ? '[corum integration] merged + committed into the main tree'
+                    : `[corum integration] ${out.integration.pendingBranches.length} branch(es) pending: ${out.integration.pendingBranches.join(', ')} — call \`subagent\` with integrate: true to merge, or discard them yourself`)
+                }
+                return [{ type: 'text', text: parts.filter(p => p !== '').join('\n\n') }]
+              },
             },
             // fork（corum）：Phase 3 编排结果面板——presentCall 显示任务清单概要
             // （标题=任务数），presentResult 显示结果卡（成功/失败计数）。
             presentCall: (args) => {
-              const tasks = (args as { tasks?: Array<{ label?: string }> }).tasks ?? []
+              const call = args as { tasks?: Array<{ label?: string }>; script?: string; meta?: { name?: string } }
+              if (call.script !== undefined) {
+                return {
+                  card: 'generic' as const,
+                  title: `orchestrate · script ${call.meta?.name ?? '(unnamed)'}`,
+                  rawInput: [call.script.slice(0, 400)],
+                }
+              }
+              const tasks = call.tasks ?? []
               return {
                 card: 'generic' as const,
                 title: `orchestrate · ${tasks.length} task(s)`,
@@ -1257,7 +1319,19 @@ export function apply(ctx: Context, config: Config): void {
               }
             },
             presentResult: (_args, value) => {
-              const results = (value as unknown as { results: Array<{ index: number; ok: boolean; error?: string }> }).results ?? []
+              const out = value as unknown as {
+                mode: string
+                results?: Array<{ index: number; ok: boolean; error?: string }>
+                script?: { name: string; agentsStarted: number }
+              }
+              if (out.mode === 'script') {
+                return {
+                  card: 'generic' as const,
+                  title: `orchestrate · script ${out.script?.name ?? ''} · ${out.script?.agentsStarted ?? 0} agent(s)`,
+                  content: [{ type: 'text', text: 'scripted orchestration settled' }],
+                }
+              }
+              const results = out.results ?? []
               const done = results.filter(r => r.ok).length
               const failed = results.length - done
               return {
@@ -1272,17 +1346,98 @@ export function apply(ctx: Context, config: Config): void {
               if (!parent) {
                 throw new Error('orchestrate tool requires a calling agent (exec.agent was undefined)')
               }
+              /** 合并台账里待集成的隔离分支（声明 merge.autoIntegrate 时调用）。 */
+              const runIntegrate = async (merge: { verify?: string; autoIntegrate?: boolean } | undefined): Promise<{ pendingBranches: string[]; integrated: boolean }> => {
+                const pending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
+                if (pending.length === 0) return { pendingBranches: [], integrated: false }
+                const branches = pending.map(entry => entry.branch)
+                if (merge?.autoIntegrate !== true) return { pendingBranches: branches, integrated: false }
+                // fork（corum）：integrate 结果**必须**被检查（2026-09-09 事故 RC4）
+                // ——此前 `await spawnOne(...)` 丢弃返回值，集成没落地时任务结果照样
+                // 逐条报 `[task N] done`，主 Agent 据此以为全部完成。integrate 恒前台
+                // （机制强制），非 foreground 即装配异常；集成未落地由 spawnOne 抛错
+                // （机制真值门禁），此处让错误向上冒泡，orchestrate 整体报失败。
+                const integrateOutcome = await spawnOne(runtimeCtx, { agent: parent, signal: exec.signal, callId: String(exec.callId) }, {
+                  label: 'integrate',
+                  prompt: 'Integrate the isolated worktrees and commit after all checks pass.',
+                  integrate: true,
+                  ...merge.verify !== undefined ? { verify: merge.verify } : {},
+                }, subagentProvider)
+                if (integrateOutcome.kind !== 'foreground') {
+                  throw new Error(`integrate ran in ${integrateOutcome.kind} mode; integrate must settle in the foreground`)
+                }
+                return { pendingBranches: branches, integrated: true }
+              }
+
+              // fork（corum）：SCRIPTED 模式（2026-09-10 用户定调「把 workflow 的设计语义
+              // 吸收进 orchestrate」）——脚本交给官方 workflow 引擎执行，子 Agent 经
+              // corum-isolated provider 建 worktree + 进台账；跑完按 merge 声明合并。
+              const script = typeof args.script === 'string' && args.script.trim() !== '' ? args.script : undefined
+              if (script !== undefined) {
+                const meta = args.meta as { name: string; description: string; whenToUse?: string } | undefined
+                if (meta === undefined || typeof meta.name !== 'string' || typeof meta.description !== 'string') {
+                  throw new Error('orchestrate script mode requires `meta` with at least { name, description }')
+                }
+                if (args.tasks !== undefined) throw new Error('orchestrate accepts either `tasks` or `script`, not both')
+                const engine = runtimeCtx.get('workflowEngine', false) as {
+                  start: (request: {
+                    script: string
+                    meta: unknown
+                    args?: unknown
+                    subagentProvider?: string
+                    parent: typeof parent
+                    signal?: AbortSignal
+                  }) => Promise<{
+                    result: Promise<{ value: unknown; stopReason: string; error?: string; agentsStarted: number }>
+                    dispose: () => Promise<void>
+                  }>
+                } | undefined
+                if (engine === undefined) {
+                  throw new Error('orchestrate script mode requires the workflow engine; this preset does not mount @deepseek-ai/dsh-workflow-worker-thread')
+                }
+                const isolate = args.isolate === 'off' ? 'off' : 'always'
+                const scriptProvider = isolate === 'off' ? 'corum-spawn' : 'corum-isolated'
+                if (runtimeCtx.subagents.getProvider(scriptProvider) === undefined) {
+                  throw new Error(`orchestrate script mode needs the "${scriptProvider}" subagent provider; it is not registered in this composition`)
+                }
+                const run = await engine.start({
+                  script,
+                  meta,
+                  ...args.args !== undefined ? { args: args.args } : {},
+                  subagentProvider: scriptProvider,
+                  parent,
+                  signal: exec.signal,
+                })
+                let settled: { value: unknown; stopReason: string; error?: string; agentsStarted: number }
+                try {
+                  settled = await run.result
+                } finally {
+                  await run.dispose()
+                }
+                if (settled.stopReason !== 'completed') {
+                  throw new Error(`scripted orchestration "${meta.name}" ${settled.stopReason}${settled.error !== undefined ? `: ${settled.error}` : ''}`)
+                }
+                const integration = await runIntegrate(args.merge as { verify?: string; autoIntegrate?: boolean } | undefined)
+                return {
+                  mode: 'script' as const,
+                  // 引擎的 result.value 已是 JSON-safe（跨 worker realm 物化过）；类型面收窄到 JsonValue。
+                  script: { name: meta.name, agentsStarted: settled.agentsStarted, value: settled.value as JsonValue },
+                  ...integration.pendingBranches.length > 0 || integration.integrated ? { integration } : {},
+                }
+              }
+
               // fork（corum）：方案甲 fan-out——tasks[] 并发 spawn（spawnOne 复用
               // 隔离/模型锁/integrate 逻辑），前台等待全部 settle，汇合结果。
-              const tasks = args.tasks as Array<{
+              const tasks = args.tasks as unknown as Array<{
                 prompt: string
                 label?: string
                 isolation?: 'always' | 'write-tasks' | 'off'
                 research?: boolean
                 model?: { provider: string; model: string; reasoningEffort?: string }
                 background?: boolean
+                schema?: ObjectJsonSchema
               }>
-              if (tasks.length === 0) throw new Error('orchestrate requires at least one task')
+              if (tasks === undefined || tasks.length === 0) throw new Error('orchestrate requires either `tasks` (1 or more) or `script`')
               const run = (index: number): Promise<{ index: number; ok: boolean; output?: string; error?: string; label?: string }> => {
                 const task = tasks[index]
                 const base = { index, ...task.label !== undefined ? { label: task.label } : {} }
@@ -1296,6 +1451,7 @@ export function apply(ctx: Context, config: Config): void {
                   run_in_background: task.background === true,
                   ...task.isolation !== undefined ? { taskIsolation: task.isolation } : {},
                   ...task.research !== undefined ? { taskResearch: task.research } : {},
+                  ...task.schema !== undefined ? { taskSchema: task.schema } : {},
                   // fork（corum）：并发感知隔离的两个入参——① 本次 fan-out 任务数
                   // （≥2 才需要 worktree）；② 不向父会话逐条注入 notice（结果由
                   // orchestrate 的汇总结果承载，避免 N 条重复通知）。
@@ -1315,27 +1471,12 @@ export function apply(ctx: Context, config: Config): void {
               // 由 merge.verify 声明（原样注入集成者 persona）；未声明回落探测式默认。
               // 若任务均未隔离（isolation:off / research），台账无待集成条目——
               // 静默跳过 integrate（结果已由任务直接产出，无需 fan-in）。
-              const merge = args.merge as { verify?: string; autoIntegrate?: boolean } | undefined
-              if (merge?.autoIntegrate === true) {
-                const pending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
-                if (pending.length > 0) {
-                  // fork（corum）：integrate 结果**必须**被检查（2026-09-09 事故 RC4）
-                  // ——此前 `await spawnOne(...)` 丢弃返回值，集成没落地时任务结果照样
-                  // 逐条报 `[task N] done`，主 Agent 据此以为全部完成。integrate 恒前台
-                  // （机制强制），非 foreground 即装配异常；集成未落地由 spawnOne 抛错
-                  // （机制真值门禁），此处让错误向上冒泡，orchestrate 整体报失败。
-                  const integrateOutcome = await spawnOne(runtimeCtx, { agent: parent, signal: exec.signal, callId: String(exec.callId) }, {
-                    label: 'integrate',
-                    prompt: 'Integrate the isolated worktrees and commit after all checks pass.',
-                    integrate: true,
-                    ...merge.verify !== undefined ? { verify: merge.verify } : {},
-                  }, subagentProvider)
-                  if (integrateOutcome.kind !== 'foreground') {
-                    throw new Error(`integrate ran in ${integrateOutcome.kind} mode; integrate must settle in the foreground`)
-                  }
-                }
+              const integration = await runIntegrate(args.merge as { verify?: string; autoIntegrate?: boolean } | undefined)
+              return {
+                mode: 'tasks' as const,
+                results,
+                ...integration.pendingBranches.length > 0 || integration.integrated ? { integration } : {},
               }
-              return { results }
             },
           }))
       mounted = { subagentProvider, disposeTool, disposeOrchestrate }

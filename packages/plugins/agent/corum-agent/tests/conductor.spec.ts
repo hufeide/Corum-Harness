@@ -118,10 +118,12 @@ describe('preset 数据面与代码常量对账', () => {
     expect(composition.match(/name: '@corum\/corum-tool-subagent'/g)?.length).toBe(3)
     expect(composition).toContain('readonlyResearch: true')
     expect(composition).toContain('provider: corum-fork')
-    // 官方能力恢复：workflow 引擎 / ralph / workflow 工具行启用且走 corum provider。
-    for (const restored of ['tool-subagent-fork', 'workflow-worker-thread', 'tool-workflow', 'tool-ralph']) {
-      expect(composition).toMatch(new RegExp(`- id: ${restored}\\n(?![\\s\\S]{0,120}?disabled: true)`))
+    // 官方能力恢复：fork 实例 / workflow 引擎 / ralph 启用且走 corum provider；
+    // workflow **工具行** 2026-09-10 起退役（语义并入 orchestrate script 模式）。
+    for (const restored of ['tool-subagent-fork', 'workflow-worker-thread', 'tool-ralph']) {
+      expect(composition).toMatch(new RegExp(`- id: ${restored}\\n(?![\\s\\S]{0,200}?disabled: true)`))
     }
+    expect(composition).toMatch(/- id: tool-workflow[\s\S]{0,200}?disabled: true/)
     expect(composition).toContain('provider: corum-spawn')
     expect(composition).toContain('subagentProvider: corum-spawn')
   })

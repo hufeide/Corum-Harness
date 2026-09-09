@@ -1,7 +1,7 @@
 /**
  * @corum/corum-subagent build: host-only library（无 client 半）。三入口：
  * lib/types/index.js（seam 服务本体 + cwd 透传）、lib/types/spawn/index.js
- * （corum-spawn provider）、lib/types/fork/index.js（corum-fork provider，2026-09-10）、
+ * （corum-spawn provider）、lib/types/fork/index.js（corum-fork provider，2026-09-10）、lib/types/isolated/index.js（corum-isolated provider，2026-09-10）、
  * lib/types/invariant.js（invariants 伴侣）。
  * 官方 dsh 包全部 external——host 从真实安装解析，与官方 seam 同版本共存。
  */
@@ -10,7 +10,7 @@ import { defineConfig } from 'tsdown'
 export default defineConfig(() => [
   {
     name: '@corum/corum-subagent',
-    entry: ['lib/types/index.js', 'lib/types/spawn/index.js', 'lib/types/fork/index.js', 'lib/types/invariant.js'],
+    entry: ['lib/types/index.js', 'lib/types/spawn/index.js', 'lib/types/fork/index.js', 'lib/types/isolated/index.js', 'lib/types/invariant.js'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',

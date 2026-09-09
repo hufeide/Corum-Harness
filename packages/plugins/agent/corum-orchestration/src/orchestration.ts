@@ -21,7 +21,8 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -592,6 +593,42 @@ export function corumIntegratorPersona(
  * provide + 随 owning fiber 注销）。挂载到**根上下文**（跨会话/跨 bundle 单例，
  * 红线 1 合规）；消费方经 `ctx.root.get('corumOrchestration')` 读取。
  */
+/** fork（corum）：隔离 worktree 子会话的创建选项（工具层与 isolated provider 共用）。 */
+export interface CorumWorktreeChildOptions {
+  /** worktree 根目录（相对父 cwd 或绝对路径，默认 `.corum-worktrees`）。 */
+  worktreeRoot?: string
+  /** 分支名前缀（默认 `wt/`）。 */
+  branchPrefix?: string
+  /** 并发上限（默认 4；达到即抛错，调用方提示模型等待或先集成）。 */
+  maxParallelChildren?: number
+}
+
+/** fork（corum）：已创建的隔离子会话三件套。 */
+export interface CorumWorktreeChild {
+  readonly slug: string
+  readonly branch: string
+  readonly path: string
+}
+
+/**
+ * fork（corum）：隔离子 Agent 的 prompt 前缀（单一事实源——工具层与 isolated
+ * provider 必须给子 Agent 同一套纪律：相对路径、父树只读、在分支内提交）。
+ * @param entry - 已创建的 worktree 条目（只取 branch）。
+ * @returns 注入到子 Agent prompt 最前面的通知文本（含尾随空行）。
+ */
+export function corumIsolationNotice(entry: Pick<CorumWorktreeChild, 'branch'>): string {
+  return `[corum isolation] You are working inside an isolated git worktree (branch ${entry.branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is write-denied by the sandbox (reads are still allowed for reference). Commit your changes on branch ${entry.branch} inside this worktree; do not attempt to write outside it.\n\n`
+}
+
+/**
+ * fork（corum）：非隔离写委托的 prompt 前缀（主工作区直连时禁止 git 操作——父 Agent
+ * 可能留有未提交的无关改动，子 Agent 一句 `git add -A` 会把它一起卷进提交）。
+ * @returns 注入到子 Agent prompt 最前面的通知文本（含尾随空行）。
+ */
+export function corumDirectWriteNotice(): string {
+  return '[corum orchestration] This delegation has no concurrent write task, so you work DIRECTLY in the delegating agent\'s working tree (no isolated worktree). Edit files in place and leave version control to the delegating agent: do NOT run git add / commit / checkout / stash / reset, and do not create branches.\n\n'
+}
+
 export class CorumOrchestration extends Service {
   /** 会话级隔离台账（key=父 session id）。service 实例字段，非模块级单例。 */
   private readonly ledger = new Map<string, CorumWorktreeEntry[]>()
@@ -667,6 +704,43 @@ export class CorumOrchestration extends Service {
     this.ledgerCwds.set(sessionId, cwd)
     this.persist(sessionId)
     this.emitFrame(sessionId)
+  }
+
+  /**
+   * fork（corum）：为一个委托创建隔离 worktree 子会话（工具层与 isolated provider 共用）。
+   *
+   * 步骤与失败语义（与工具层原实现逐条等价）：
+   *   ① 并发上限：active 条目 ≥ maxParallelChildren 即抛错（调用方提示模型等待/先集成）；
+   *   ② `git worktree add <path> -b <branch>`；失败时回滚半成品 worktree 再抛；
+   *   ③ 登记 active 台账条目（run id 待 spawn 后 `bindRunId` 绑定）。
+   * @param sessionId - 父会话 id（台账键）。
+   * @param parentCwd - 父会话工作目录（worktree 根与 git 操作基准）。
+   * @param options - worktree 根/分支前缀/并发上限。
+   * @returns 新建的隔离子会话三件套（slug/branch/path）。
+   */
+  createWorktreeChild(
+    sessionId: string,
+    parentCwd: string,
+    options: CorumWorktreeChildOptions = {},
+  ): CorumWorktreeChild {
+    const maxParallel = options.maxParallelChildren ?? 4
+    const entries = this.entriesOf(sessionId)
+    if (entries.filter(entry => entry.status === 'active').length >= maxParallel) {
+      throw new Error('parallel child limit reached; wait for one to settle or integrate first')
+    }
+    const slug = `wt-${randomBytes(3).toString('hex')}`
+    const root = path.resolve(parentCwd, options.worktreeRoot ?? '.corum-worktrees')
+    const branch = `${options.branchPrefix ?? 'wt/'}${slug}`
+    const worktreePath = path.join(root, slug)
+    mkdirSync(root, { recursive: true })
+    try {
+      corumGit(parentCwd, ['worktree', 'add', worktreePath, '-b', branch])
+    } catch (error: unknown) {
+      corumCleanupWorktree(parentCwd, { path: worktreePath, branch })
+      throw error
+    }
+    this.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath })
+    return { slug, branch, path: worktreePath }
   }
 
   /** 台账变更后发射快照帧（renderer chip 订阅源）。 */

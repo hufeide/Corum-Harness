@@ -525,6 +525,7 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 | `invariant.ts` | ±4 | PACKAGE_NAME → `@corum/corum-subagent`、插件名 → `corum-subagent-invariant` | 低（机械） |
 | `spawn/index.ts` | ±12 | 插件名 `corum-subagent-spawn-in-process`、默认 provider 名 **`corum-spawn`**（与官方 spawn 并存不抢名）、import 重定向（`../index.ts` + `../driver/index.ts`）、文件头 fork 注释 | 低 |
 | `fork/index.ts` | +97（新增文件） | 官方 `dsh-subagent-fork-in-process` 的 corum 版：默认 provider 名 **`corum-fork`**、`completedTurnPrefix` 种子语义逐行保留、`inheritsParentContext = true`、driver 指向 corum 的 `../driver/index.ts`（cwd 透传） | 低（官方改 seed 逻辑时需同步；守卫 §17 断言种子语义） |
+| `isolated/index.ts` | +170（新增文件） | 隔离版 provider：默认名 **`corum-isolated`**、`mode: always|off`、每次 `agent()` 建 worktree + 登记台账 + 注入隔离通知 + 失败回滚；continuable 直接拒绝 | 低（依赖 `corumOrchestration` 服务的能力面，见 §10.10） |
 
 ### 10.3 设计要点（升级 runbook 必读）
 
@@ -1621,3 +1622,52 @@ Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 
 旧判据 `!readonlyResearch`）→ preset mount 直接失败
 （`tool "orchestrate" is already registered in this scope`）。判据收敛为 `isWorkerInstance`
 （`toolName === 'subagent'`），机制段同理。
+
+
+### 10.10 隔离下沉到 provider 层 + workflow 语义并入 orchestrate（2026-09-10）
+
+**用户定调**：「把 workflow 的设计语义吸收进来和 orchestrate 结合，即保证 LLM 灵活，也保证
+当 workflow 编排多 Agent 并发时互不隔离导致并行修改代码」——即：动态控制流要保留，但并发写
+必须有隔离。
+
+**根因**：隔离原本只在 **corum 工具层**（fork #10 的 `spawnOne`）实现。官方 workflow 引擎里的
+`agent()` 由引擎直接调用 subagent provider，**不经过工具层** → 脚本里的并发子 Agent 全在主
+工作区里改（用户实测痛点：主 Agent 不得不反复提醒子 Agent 不要互相踩）。
+
+**方案（两个动作）**：
+
+1. **隔离下沉到 provider 层**：新增 `@corum/corum-subagent/isolated`（provider 默认名
+   `corum-isolated`）。每次 `start()`：
+   - `CorumOrchestration.createWorktreeChild()`（本轮新下沉的服务方法，工具层同样改用它）建
+     worktree + 分支 + 登记 active 台账条目；
+   - `request.cwd` 指向 worktree（fork #9 的 cwd 透传 → 沙箱/shell/`{{cwd}}` 全跟随）；
+   - prompt 前缀注入 `[corum isolation]`（文本单一事实源 = `corumIsolationNotice()`）；
+   - start 成功后 `bindRunId`（`subagent/end` → 编排服务精确 settle）；失败 `discardEntry` 回滚；
+   - `mode: 'off'` 直通（只读脚本要看到父树未提交改动时用）。
+2. **workflow 语义并入 `orchestrate`**：`orchestrate` 现在两种模式，共用同一套隔离/合并机制：
+   - `tasks[]`（声明式，原方案甲）新增每任务 `schema`（对象根 JSON Schema → 结构化子结果，
+     吸收 workflow 的 `agent({schema})`）；
+   - `script` + `meta` + `args`（脚本式）→ 交给官方 workflow 引擎执行（worker-thread、`agent`
+     /`parallel`/`pipeline`/`phase`/`log` 全保留），**按 run 指定 `subagentProvider`**：
+     `isolate: 'always'`（默认）→ `corum-isolated`；`isolate: 'off'` → `corum-spawn`；
+   - 跑完按 `merge.verify` / `merge.autoIntegrate` 收尾：未声明 autoIntegrate 时**报告待合并
+     分支**（`[corum integration] N branch(es) pending: …`），模型再调 `subagent integrate: true`；
+   - 因此 `tool-workflow` 行在四个 preset 一律 `disabled`（模型面单一编排语言），
+     `workflow-worker-thread` 引擎行保留（orchestrate / ralph 都要用）。
+
+**实机验证**（dev 实例，probe 仓）：
+- 脚本式 `orchestrate`：`parallel([agent(A), agent(B)])` → `[script · two-files] 2 child
+  agent(s) settled`，两个子会话各自 commit 在 `wt/wt-f1bec6` / `wt/wt-c45278`（**隔离生效**），
+  工具结果报告 `[corum integration] 2 branch(es) pending`；
+- 随后 `subagent integrate: true`（verify `ls -1`）→ 两条分支并入主树（`script-a.txt` /
+  `script-b.txt` 落地，worktree 清理，主分支出现 merge commit）；
+- `isolate: 'off'`：只读脚本的 child 直接读主树（能看到未提交的 `script-a.txt`），
+  **零 worktree**；
+- 工具面：standard 27（`workflow` 已消失，`orchestrate`/`subagent`/`subagent_research`/
+  `subagent_fork`/`ralph` 在）。
+
+**守卫**：§17 断言「四 preset 的 `tool-workflow` 一律 disabled」「引擎行仍启用」「isolated
+provider 具备 worktree/绑定/回滚/通知四件事」「host patch 挂 `@corum/corum-subagent/isolated`」
+「orchestrate 按 `isolate` 选 provider 且取 `workflowEngine`」。
+**单测**：`corum-subagent/tests/isolated-provider.spec.ts`（5 例：建 worktree/通知注入/
+bind+rollback/缺服务 fail loud/默认配置）。

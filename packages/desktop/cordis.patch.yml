@@ -194,6 +194,13 @@
     - id: corum-subagent-fork
       name: '@corum/corum-subagent/fork'
 
+    # Fork #9 isolated provider（2026-09-10 用户定调「把 workflow 的设计语义吸收进
+    # orchestrate」）：注册 'corum-isolated'——把工具层的隔离机制搬到 provider 层，
+    # 让 workflow 引擎里的 agent() 子会话也建 worktree + 进台账 + 注入隔离纪律。
+    # orchestrate 的 script 模式按 run 指定它（subagentProvider 覆盖）。
+    - id: corum-subagent-isolated
+      name: '@corum/corum-subagent/isolated'
+
     # Fork #10 编排器独立包（docs/plan/PLAN-refactor-orchestration-package-and-
     # settings-center.md 重构 1）：新包自己挂 cordis 行 provide（独立性最彻底），
     # apply 在根上下文幂等 provide `corumOrchestration`。行序**必须**在下方
