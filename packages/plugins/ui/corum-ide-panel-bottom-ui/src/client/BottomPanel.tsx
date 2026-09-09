@@ -45,18 +45,23 @@ export interface BottomPanelInjected {
   /** 终止会话（幂等）。 */
   kill: (id: string) => Promise<RpcEnvelope<{ killed: boolean }>>
   /**
+   * 断链补帧：取会话在 afterSeq 之后的缓冲输出（host 环形缓冲 256KB）。
+   * 收到 seq 跳号的帧时调用，把断链窗口错过的输出补写进 xterm。
+   */
+  snapshot: (id: string, afterSeq?: number) => Promise<RpcEnvelope<{ seq: number; data: string; truncated: boolean }>>
+  /**
    * 订阅终端输出推送（统一事件中心主路径：ctx.remote.$on
-   * 'corum/terminal/output'）。listener 收到 { id, data } 帧；返回 dispose
+   * 'corum/terminal/output'）。listener 收到 { id, data, seq } 帧；返回 dispose
    * （组件 unmount 时调用）。
    */
-  onTerminalOutput: (listener: (frame: { id: string; data: string }) => void) => () => void
+  onTerminalOutput: (listener: (frame: { id: string; data: string; seq: number }) => void) => () => void
 }
 
 /** Composed props: the shell's owner share + 本插件注入面。 */
 export type BottomPanelProps = PropsRuntime<'corum.panel'> & BottomPanelInjected
 
 /** The IDE terminal panel (real xterm.js driven by host node-pty; see module doc). */
-export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, onTerminalOutput }: BottomPanelProps) {
+export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, onTerminalOutput, snapshot }: BottomPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -88,6 +93,8 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
 
     // 会话 id 与 $on 订阅 dispose（create 成功后填充）。
     let sessionId: string | null = null
+    /** 断链补帧：本会话已知的最新输出帧序号。 */
+    let lastSeq: number | null = null
     let disposeOutput: (() => void) | null = null
     let disposed = false
     // 未 attach 前的 kill 防护：unmount 若抢在 create resolve 前，记录后补杀。
@@ -130,11 +137,23 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
         return
       }
       sessionId = res.value.id
+      // 断链补帧：已知的最新帧序号（null = 尚未收到任何帧）。
+      lastSeq = null
       // 统一事件中心：host proc.onData → ctx.emit → forwarded Remote
       // event → 本 listener。多终端面板并存时按帧 id 过滤本会话。
-      disposeOutput = onTerminalOutput(({ id, data }) => {
+      // 断链补帧：帧 seq 跳号（连接闪断窗口丢帧）→ 先补拉缓冲再写，避免空洞。
+      disposeOutput = onTerminalOutput(({ id, data, seq }) => {
         if (disposed || id !== sessionId) return
+        if (lastSeq !== null && seq > lastSeq + 1) {
+          void snapshot(sessionId, lastSeq).then((res) => {
+            if (disposed || !res.ok || res.value === undefined) return
+            term.write(res.value.data)
+            lastSeq = res.value.seq
+          }).catch(() => { /* 补帧失败不阻塞实时输出 */ })
+          return
+        }
         term.write(data)
+        lastSeq = seq
       })
       applyFit()
     }).catch((error) => {

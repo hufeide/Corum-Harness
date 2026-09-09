@@ -187,6 +187,11 @@ export interface TerminalOutputEvent {
   readonly id: string
   /** 本帧 pty 输出（原始字节串，含 ANSI 控制序列）。 */
   readonly data: string
+  /**
+   * 帧序号（会话内单调递增；断链补帧用）。renderer 发现 `seq > lastSeq + 1`
+   * 即判定断链窗口丢帧，经 `corumTerminal/snapshot(id, lastSeq)` 补拉。
+   */
+  readonly seq: number
 }
 
 /** corum/file/changed 单条变更（与 host corum-fs changeLog 条目同构）。 */

@@ -62,6 +62,11 @@ export function apply(ctx: ClientContext): void {
           // （host corumTerminal 在 proc.onData 里 emit；真实推送——三期已删
           // 60ms poll 兜底）。$on 返回的 dispose 由组件 unmount 时调用。
           onTerminalOutput: (listener) => ctx.remote.$on('corum/terminal/output', listener),
+          // 断链补帧：帧 seq 跳号时补拉缓冲（host 环形缓冲 256KB）。
+          snapshot: async (id, afterSeq) => {
+            const result = await connection.rpc.call('/api', 'corumTerminal/snapshot', { args: { id, ...(afterSeq !== undefined ? { afterSeq } : {}) } })
+            return result as Envelope<{ seq: number; data: string; truncated: boolean }>
+          },
           kill: async (id) => {
             const result = await connection.rpc.call('/api', 'corumTerminal/kill', { args: { id } })
             return result as Envelope<{ killed: boolean }>

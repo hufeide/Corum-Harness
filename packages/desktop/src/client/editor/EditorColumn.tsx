@@ -588,11 +588,27 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       applyChanges(changes)
     })
 
+    // 断链补帧（文件侧）：连接 generation 变化（重连）后，把「断链窗口内错过的
+    // corum/file/changed 帧」用一次全量补读替代——整树刷新 + 重读所有已打开文本
+    // tab（dirty 的只标外部变更，不覆盖编辑）。generation 是官方连接服务的
+    // 握手代际源（每次重连 +1）。
+    let lastGeneration = explorer.generation.getSnapshot()
+    const disposeGeneration = explorer.generation.subscribe(() => {
+      const next = explorer.generation.getSnapshot()
+      if (next === lastGeneration) return
+      lastGeneration = next
+      if (disposed) return
+      applyChanges(tabsRef.current
+        .filter(t => t.kind !== 'image' && t.kind !== 'video')
+        .map(t => ({ path: t.path, kind: 'change' as const })))
+    })
+
     return () => {
       disposed = true
       disposePush()
+      disposeGeneration()
     }
-  }, [startWatch, readFile, onFileChanged])
+  }, [startWatch, readFile, onFileChanged, explorer.generation])
 
   // Sash drag (resource manager width).
   const sashDragWidth = useRef(EXPLORER_DEFAULT_WIDTH)

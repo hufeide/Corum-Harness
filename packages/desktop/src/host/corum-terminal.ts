@@ -33,13 +33,28 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** 一个终端会话：pty 句柄 + 退出状态。 */
+/** 缓冲的一帧输出（断链补帧用；seq 单调递增，renderer 据此发现缺帧）。 */
+interface BufferedFrame {
+  seq: number
+  data: string
+}
+
+/** 断链补帧缓冲上限（字符；超出从最旧帧起整帧裁剪，不切碎 ANSI 序列）。 */
+const TERMINAL_BUFFER_LIMIT = 256 * 1024
+
+/** 一个终端会话：pty 句柄 + 退出状态 + 输出缓冲。 */
 interface TerminalSession {
   proc: pty.IPty
   /** 子进程退出码（未退出为 undefined）。 */
   exitCode?: number
   /** 是否已退出（exitCode 可能在异常路径下缺席，故独立标记）。 */
   exited: boolean
+  /** 已发出的输出帧序号（每帧 +1）。 */
+  seq: number
+  /** 最近输出帧（环形裁剪到 TERMINAL_BUFFER_LIMIT；断链补帧的数据源）。 */
+  frames: BufferedFrame[]
+  /** frames 的字符总长（避免每帧重算）。 */
+  buffered: number
 }
 
 /**
@@ -80,11 +95,19 @@ export class CorumTerminalService extends TypertRemoteService {
     } catch (error) {
       throw new Error(`cannot spawn shell ${shell}: ${String(error)}`)
     }
-    const session: TerminalSession = { proc, exited: false }
+    const session: TerminalSession = { proc, exited: false, seq: 0, frames: [], buffered: 0 }
     proc.onData((data) => {
-      // 统一事件中心：pty 输出实时推给 renderer（client $on 直收，唯一路径；
-      // 三期删 poll 兜底 + 会话缓冲）。
-      this.ctx.emit('corum/terminal/output', { id, data })
+      // 统一事件中心：pty 输出实时推给 renderer（client $on 直收，唯一路径）。
+      // 帧带单调 seq + 进环形缓冲——renderer 发现 seq 跳号（断链窗口丢帧）时经
+      // snapshot(id, lastSeq) 补拉，见 docs/fork-delta.md 事件总线「断链补帧」。
+      session.seq += 1
+      session.frames.push({ seq: session.seq, data })
+      session.buffered += data.length
+      while (session.buffered > TERMINAL_BUFFER_LIMIT && session.frames.length > 1) {
+        const dropped = session.frames.shift()
+        session.buffered -= dropped?.data.length ?? 0
+      }
+      this.ctx.emit('corum/terminal/output', { id, data, seq: session.seq })
     })
     proc.onExit(({ exitCode }) => {
       session.exited = true
@@ -139,5 +162,27 @@ export class CorumTerminalService extends TypertRemoteService {
       // pty 已死亡（子进程先退出）时 kill 抛错——幂等语义下吞掉。
     }
     return { killed: true }
+  }
+
+  /**
+   * 断链补帧：取某会话在 afterSeq 之后的缓冲输出（含当前缓冲内全部帧）。
+   * renderer 收到 seq 跳号的帧时调用（或重连后主动调一次），把断链窗口里错过的
+   * 输出补写进 xterm；`truncated=true` 表示缺失部分已超出缓冲上限（只能接受空洞）。
+   * @param id - create 返回的会话 id。
+   * @param afterSeq - 已知的最新帧序号（省略 = 取全部缓冲）。
+   */
+  @Remote('snapshot')
+  snapshot(id: string, afterSeq?: number): { seq: number; data: string; truncated: boolean } {
+    const session = this.sessions.get(id)
+    if (session === undefined) throw new Error(`unknown terminal session: ${id}`)
+    const from = afterSeq ?? 0
+    const frames = session.frames.filter(frame => frame.seq > from)
+    const oldest = session.frames[0]?.seq
+    return {
+      seq: session.seq,
+      data: frames.map(frame => frame.data).join(''),
+      // 缓冲里最旧的帧已晚于「已知序号 + 1」→ 中间有一段永久丢失。
+      truncated: oldest !== undefined && oldest > from + 1,
+    }
   }
 }
