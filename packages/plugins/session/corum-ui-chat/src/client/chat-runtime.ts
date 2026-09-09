@@ -209,6 +209,8 @@ let subagentChildDispose: (() => void) | null = null
 const subagentChildListeners = new Set<(frame: SubagentChildEvent) => void>()
 /** callId → childSessionId 进程内缓存（本 bundle 单例；页面刷新后由 summary 兜底）。 */
 const subagentChildByCall = new Map<string, string>()
+/** 缓存上限（超限按插入序淘汰最旧——长会话里 delegation 可能很多，防无界增长）。 */
+const SUBAGENT_CHILD_CACHE_MAX = 1000
 
 /**
  * 已观测到的精确子会话 id（'corum/subagent/child' 广播过即命中）。
@@ -232,6 +234,10 @@ export function subagentChildSubscribe(
     if (remote !== undefined) {
       subagentChildDispose = remote.$on('corum/subagent/child', (frame) => {
         subagentChildByCall.set(frame.callId, frame.childSessionId)
+        if (subagentChildByCall.size > SUBAGENT_CHILD_CACHE_MAX) {
+          const oldest = subagentChildByCall.keys().next().value
+          if (oldest !== undefined) subagentChildByCall.delete(oldest)
+        }
         for (const fn of subagentChildListeners) fn(frame)
       })
     }
