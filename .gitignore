@@ -32,3 +32,6 @@ packages/desktop/.corum-ide-home/
 .dbg/*.png
 .dbg/*.jpg
 .dbg/*.jpeg
+
+# 编排器隔离 worktree（运行时产物；可能是**用户 app 里正在跑的任务**，勿提交勿清理）
+.corum-worktrees/
