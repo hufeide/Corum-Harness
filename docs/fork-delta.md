@@ -176,6 +176,7 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 - **官方有但 corum 删除（8 个）**：`QuestionComposer.tsx`(441) + css、`PlanReviewPanel.tsx`(87) + css、`draft-store.ts`(57)、`contract/slots.ts`(224)、`index.ts`(107)、`invariant.ts`。删除理由（index.tsx 头注 :1-12）：官方接管整个 composer 遮盖对话，corum 改挂 `conversation.composer.dock` 卡片不遮盖输入；**代价：官方 PlanReviewPanel（计划待审卡）功能在 corum 缺失**——官方 ui-user-questions 的 plan-review 种类 corum 未实现（PendingQuestion.kind 声明了 'plan-review' 但无渲染器）。rebase 时官方若增强 plan-review，corum 无法自动获得。
 - **实质修改（3 个）**：`client/locales.ts`（69 diff 行：NS 从 'question' 改 'corum-question'，键集全换——⚠️ 但组件硬编码中文 t() 未用，词典形同虚设，审计 P1）；`index.ts`（host 半注释精简）；`css-modules.d.ts`（去掉 Readonly + 加 `declare module '*.css'`）。
 - 数据通路复用官方 `user-questions/request` waterfall，answer/cancel/delegate 语义一致。⚠️ P0-11：QuestionCard「跳过本题」wired 到 `cancel()` 取消整组，与官方 skip 语义不符——修此 bug 时注意别被 rebase 覆盖回滚。
+- **交互语义对账（2026-09-10，用户实测）**：单选选中即自动翻到下一题——官方 `QuestionComposer.choose()` 在单选时把 progress index 写成 `index + 1`（`:188-198`），corum 重写版只写 draft、停在原题。已在 `QuestionCard.onToggle` 补回，边界保持：多选 / 取消选中 / 最后一题不翻。**rebase 注意**：官方 `choose()` 若改翻页规则，这里要同步；渲染层重写的其余语义（跳过、提交跳未答题、键盘 Enter 续答）仍与官方有差，逐条见 `LESSONS.md` §4.14。
 
 ### 4.5 corum-ui-model-selection（对照 ui-model-selection）
 

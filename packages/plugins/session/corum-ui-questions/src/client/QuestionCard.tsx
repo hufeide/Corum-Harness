@@ -8,6 +8,9 @@
  * 结构（提取表）：q-head（题型图标 + 组名 + 标题 + 收起/放弃）→ 作答区
  * （单选 radio / 多选 checkbox / 直接回答多行文本）→ q-foot（左下角翻页
  * ◀ x/n ▶ + 右侧跳过本题 + 提交）。全部走 --corum-* 与 --dsw-alias-* 变量，零硬编码。
+ *
+ * 交互：**单选选中即自动翻到下一题**（官方 `QuestionComposer.choose()` 的
+ * `index + 1` 语义；多选/自由文本/最后一题不翻）。翻页器仍可手动来回改答案。
  */
 import { useMemo, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, ChevronUp, MessageCircle, PenLine, X } from 'lucide-react'
@@ -162,8 +165,13 @@ export function QuestionCard({ pending }: QuestionCardProps) {
                     description={opt.description}
                     checked={checked}
                     onToggle={() => {
-                      if (kind === 'single') setDraft({ single: draft.single === opt.label ? undefined : opt.label })
-                      else setDraft({ multi: checked ? draft.multi.filter(l => l !== opt.label) : [...draft.multi, opt.label] })
+                      if (kind === 'single') {
+                        const next = draft.single === opt.label ? undefined : opt.label
+                        setDraft({ single: next })
+                        // 单选「选中」即自动翻到下一题（对齐官方 QuestionComposer.choose 的
+                        // `index + 1` 语义）：取消选中、最后一题、多选都不翻页。
+                        if (next !== undefined && index < total - 1) setIndex(index + 1)
+                      } else setDraft({ multi: checked ? draft.multi.filter(l => l !== opt.label) : [...draft.multi, opt.label] })
                     }}
                   />
                 )
