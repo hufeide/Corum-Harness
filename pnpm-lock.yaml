@@ -26,6 +26,9 @@ importers:
       '@corum/corum-api-remotes':
         specifier: workspace:*
         version: link:../plugins/agent/corum-api-remotes
+      '@corum/corum-artgen':
+        specifier: workspace:*
+        version: link:../plugins/agent/corum-artgen
       '@corum/corum-credentials-local':
         specifier: workspace:*
         version: link:../plugins/agent/corum-credentials-local
@@ -65,6 +68,9 @@ importers:
       '@corum/corum-mcp-manager':
         specifier: workspace:*
         version: link:../plugins/agent/corum-mcp-manager
+      '@corum/corum-ollama':
+        specifier: workspace:*
+        version: link:../plugins/agent/corum-ollama
       '@corum/corum-orchestration':
         specifier: workspace:*
         version: link:../plugins/agent/corum-orchestration

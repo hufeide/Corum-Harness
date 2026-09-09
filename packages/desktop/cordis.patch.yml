@@ -214,6 +214,25 @@
     - id: corum-ui-settings-plugins
       name: '@corum/corum-ui-settings-plugins'
 
+    # 本地 LLM（Ollama）：host 半 provide cordis 服务 `localLlm`（探测/管理引擎 +
+    # OpenAI 兼容推理）并给官方 `llm` 服务注册 `ollama` provider（本地模型可当
+    # Agent 驱动 LLM / 润色引擎）；client 半在「设置 → 扩展」注册「本地 LLM（Ollama）」
+    # section。⚠️ 行 id 必须用**短 id**（不含 `/`）：client bundle 的 URL 是
+    # `/plugins/<行 id>/client.js`，用包名当 id 会 404。也不要再把它加进 combo
+    # `plugins`（combo 只放纯 host 插件），否则与本节构成双 mount。
+    # ⚠️ 2026-09-09 回归：本行与下一条 corum-artgen 行曾只存在于**未提交的工作树**
+    # （package.json deps / 本文件 insert 行都没进 git），0.1.3 基座升级期间工作树
+    # 被重置后两个插件的设置页一起消失（用户报障）。现已提交，并加
+    # scripts/verify-fork-drift.sh §8 断言守护。
+    - id: corum-ollama
+      name: '@corum/corum-ollama'
+
+    # 本地文生图：host 半 provide cordis 服务 `corumArtGen`（sd-cli 引擎/模型下载 +
+    # txt2img，长任务走事件推送）；client 半在「设置 → 扩展」注册「本地文生图」
+    # section。装配规则同 corum-ollama（短 id + 只在此处 mount）。
+    - id: corum-artgen
+      name: '@corum/corum-artgen'
+
     # The desktop bundle's own host + client halves. The host half
     # (corum-desktop-app, src/index.ts) provides the desktop surface prompt +
     # DSH_CORUM_DESKTOP shell variable; the client half (src/client/index.ts)

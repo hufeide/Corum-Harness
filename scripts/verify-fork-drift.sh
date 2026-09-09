@@ -244,6 +244,52 @@ else
   pass "源码 CSS 无 -webkit-backdrop-filter 声明（Chromium 150 已不支持该别名）"
 fi
 
+# ── 8. 客户端插件必须挂在某个组合里（防「挂载只存在于未提交的工作树」）──────
+# 背景：@corum/corum-ollama / @corum/corum-artgen 的挂载（cordis.patch.yml 的
+# insert 行 + desktop package.json 依赖）当时只写在**未提交的工作树**里，0.1.3
+# 基座升级期间工作树被重置 → 两个插件的设置页一起消失（2026-09-09 用户报障）。
+# 断言：凡带 dsh.client 的包，必须①出现在某个挂载点，②是 desktop 的 workspace
+# 依赖（否则 host 解析不到包）。有意不挂的包登记在 ALLOW_UNMOUNTED 并写清原因。
+section "[8] 客户端插件挂载点覆盖（dsh.client → 挂载行 + desktop 依赖）"
+MOUNT_FILES=(
+  "$REPO_ROOT/packages/desktop/cordis.patch.yml"
+  "$REPO_ROOT/packages/desktop/cordis.ide.patch.yml"
+  "$REPO_ROOT/cordis.patch.yml"
+  "$REPO_ROOT/packages/desktop/src/electron/combos.ts"
+)
+# 有意不挂载（新增请写清原因，别默默放进来）
+ALLOW_UNMOUNTED=(
+  "@corum/corum-ide-test-conversation-ui"  # 测试插件：仅按需手工挂载
+  "@corum/corum-ide-test-sidebar-ui"       # 同上
+  "@corum/corum-ide-test-statusbar-ui"     # 同上
+)
+desktop_deps=$(node -e "console.log(Object.keys(require('$REPO_ROOT/packages/desktop/package.json').dependencies||{}).join('\n'))" 2>/dev/null)
+for pkg_json in "$REPO_ROOT"/packages/plugins/*/*/package.json; do
+  [ -f "$pkg_json" ] || continue
+  pkg_name=$(node -e "try{const p=require('$pkg_json');console.log(p.dsh&&p.dsh.client?p.name:'')}catch(e){console.log('')}" 2>/dev/null)
+  [ -z "$pkg_name" ] && continue
+  allowed=''
+  for a in "${ALLOW_UNMOUNTED[@]}"; do [ "$pkg_name" = "$a" ] && allowed='yes'; done
+  if [ -n "$allowed" ]; then
+    skip "${pkg_name} 有意不挂载（allowlist）"
+    continue
+  fi
+  mount_hit=''
+  for f in "${MOUNT_FILES[@]}"; do
+    [ -f "$f" ] || continue
+    if grep -qF "$pkg_name" "$f"; then mount_hit="$f"; break; fi
+  done
+  if [ -z "$mount_hit" ]; then
+    fail "${pkg_name} 有 dsh.client 但没有任何挂载点——插件不会加载（设置页/功能整体消失）"
+    continue
+  fi
+  if printf '%s\n' "$desktop_deps" | grep -qxF "$pkg_name"; then
+    pass "${pkg_name} 已挂载（$(basename "$mount_hit")）+ desktop 依赖"
+  else
+    fail "${pkg_name} 挂在 $(basename "$mount_hit") 但不在 packages/desktop/package.json 依赖里——host 解析不到包（pnpm install 后仍 404）"
+  fi
+done
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then
