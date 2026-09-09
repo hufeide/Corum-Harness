@@ -1374,3 +1374,44 @@ fork 扩大非 worktree 会话的面。
 `scripts/verify-fork-drift.sh` §15 + `tests/profiles.spec.ts`（10 例）：断言可写根里
 **不含** `hooks/config/config.worktree/info/modules/packed-refs 之外的配置面`、**不含**
 整个 `.git`、主仓与子目录会话返回空、Seatbelt/bwrap/Landlock 三平台参数一致。
+
+---
+
+### 10.6 官方 preset 仍挂官方 subagent 工具——会不会与 fork #9 行为不一致？（2026-09-09 用户提问）
+
+**问题**：官方四种基础模式（standard/ptc/cordis）的 preset 文件仍挂官方
+`@deepseek-ai/dsh-tool-subagent`（provider `spawn`/`fork`），而**服务层**已被 fork #9
+取代——官方工具的提示词与 fork #9 的实际行为会不会偏差？
+
+**结论：不会。fork #9 的增量是 opt-in 的**——实机 diff 全量登记如下（官方基线
+`/Users/kukucai/dsh/packages/subagent/subagent/src`，2026-09-09）：
+
+| 文件 | diff | 内容 |
+|---|---|---|
+| `types.ts` | +7 行 | 新增可选字段 `SubagentStartRequest.cwd?: string` |
+| `child-agent.ts` | 6 行 | `effectiveCwd = cwd ?? parentHeader.cwd`（**缺省与官方逐字等价**） |
+| `continuation.ts` | 5 行 | continuable 入口 `assertChildCwd(request.cwd)` + 透传 cwd |
+| `depth.ts` | +17 行 | 新增 `assertChildCwd`（绝对路径 + 目录存在） |
+| `index.ts` | 3 行 | one-shot 入口 `assertChildCwd(request.cwd)` |
+| `invariant.ts` | 4 行 | 包名/插件名改名（模板） |
+| 其余 13 个文件 | 0 | **逐字节一致**（含 list-children / lifecycle / descriptor / control / out-of-process / projection / run-settlement） |
+| fork 独有文件 | — | 无 |
+
+官方工具**从不传 `cwd`** → 走的就是官方路径。官方 11 个 spec 已全部移植进
+`corum-subagent/tests/`（+ fork 的 `cwd.spec.ts`），2026-09-09 实跑 **301/301 通过**
+（19 条 FileHandle-GC 噪音来自 Node 26 测试宿主，非断言失败）。
+
+**实机核对**（official `standard` preset 会话，同一 cwd）：
+- 前台 `subagent`（provider spawn）→ 子 Agent 执行并回传结果；
+- 后台 `subagent`（continuable）→ 返回 subagent id，settle 后收到官方措辞通知
+  「Background subagent <id> finished and will do no further work unless you send it more.」；
+- `subagent_fork`（provider fork）→ 子 Agent 带父会话上下文执行成功。
+三条路径全通，无 console 报错。
+
+**因此**：官方 preset 的提示词 ↔ 官方工具 ↔ fork #9 服务三者行为一致。官方模式缺的
+是 **fork #10 工具层**的能力（隔离 / 模型锁 / orchestrate / orchestrator 工具裁剪）——
+那是刻意的产品边界（官方模式=原味 dsh），不是偏差。
+
+**守卫**：`scripts/verify-fork-drift.sh` §16（已做负向测试）——官方 src 除上表登记文件
+外必须逐字节一致、登记文件必须确有差异、`cwd` 缺省必须仍是 `cwd ?? parentHeader.cwd`、
+两个入口都必须 `assertChildCwd`。任何人在非 cwd 路径上改 fork #9 都会 fail loud。

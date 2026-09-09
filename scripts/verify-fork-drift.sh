@@ -507,6 +507,63 @@ else
   fail "desktop-host/package.json 缺 @corum/corum-sandbox-local——正式包 host 闭包会缺包（本轮教训：新插件必须同时进 desktop 与 desktop-host 依赖）"
 fi
 
+# ── 16. fork #9（subagent seam）增量必须「opt-in」────────────────────────────
+# 用户 2026-09-09 提问：官方 preset（standard/ptc/cordis）仍挂官方 dsh-tool-subagent，
+# 而服务层已被 fork #9 取代——两者会不会行为不一致？答案取决于 fork #9 的增量是否
+# **只在调用方显式传 cwd 时生效**（官方工具从不传 cwd）。本节把这条不变量机器化：
+#   ① 官方 src 的每个文件，除下表登记的文件外必须逐字节一致；
+#   ② 登记文件必须确实有差异（防静默回退成官方）；
+#   ③ cwd 缺省路径必须仍是「继承父会话 cwd」（官方语义）；
+#   ④ 两个入口（one-shot start / continuable）都必须做 assertChildCwd。
+section "[16] fork #9（corum-subagent）：增量 opt-in（官方 preset 行为等价）"
+SUBAGENT_FORK="$REPO_ROOT/packages/plugins/agent/corum-subagent"
+OFFICIAL_SUBAGENT="$DSH_CHECKOUT/packages/subagent/subagent"
+# 允许有差异的文件（全部围绕 cwd 透传；invariant 是模板改名）
+SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts depth.ts index.ts invariant.ts"
+if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
+  drift=0
+  for official_file in "$OFFICIAL_SUBAGENT"/src/*.ts; do
+    base="$(basename "$official_file")"
+    fork_file="$SUBAGENT_FORK/src/$base"
+    if [ ! -f "$fork_file" ]; then
+      fail "fork #9 缺官方文件 src/$base"
+      drift=1
+      continue
+    fi
+    case " $SUBAGENT_DELTA_FILES " in
+      *" $base "*)
+        if cmp -s "$official_file" "$fork_file"; then
+          fail "src/$base 与官方逐字节一致——登记为增量文件却无差异（cwd 透传被静默回退？）"
+          drift=1
+        fi
+        ;;
+      *)
+        if ! cmp -s "$official_file" "$fork_file"; then
+          fail "src/$base 与官方有差异——未登记的增量（opt-in 不变量被破坏，官方 preset 行为可能偏移）"
+          drift=1
+        fi
+        ;;
+    esac
+  done
+  [ "$drift" = 0 ] && pass "官方 src 文件：登记文件有差异、其余逐字节一致"
+  for extra in "$SUBAGENT_FORK"/src/*.ts; do
+    base="$(basename "$extra")"
+    [ -f "$OFFICIAL_SUBAGENT/src/$base" ] || fail "fork #9 新增 src/$base 未登记（请同步本节台账与 fork-delta §10）"
+  done
+else
+  skip "官方检出缺 packages/subagent/subagent/src（跳过 fork #9 逐字节断言）"
+fi
+if grep -qF 'cwd ?? parentHeader.cwd' "$SUBAGENT_FORK/src/child-agent.ts"; then
+  pass "cwd 缺省仍继承父会话 cwd（官方语义）"
+else
+  fail "child-agent.ts 的 cwd 缺省路径被改——官方工具不传 cwd，会偏离官方行为"
+fi
+if grep -qF 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/index.ts" && grep -qF 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/continuation.ts"; then
+  pass "两个入口（start / continuable）都做 cwd 校验"
+else
+  fail "缺 assertChildCwd 入口（one-shot 或 continuable 之一漏校验）"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then
