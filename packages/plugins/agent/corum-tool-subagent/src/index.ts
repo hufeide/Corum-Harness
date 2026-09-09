@@ -563,6 +563,12 @@ export function apply(ctx: Context, config: Config): void {
   const backgroundEnabled = config.enableRunInBackground !== false
   const continuable = (config.backgroundMode ?? 'one-shot') === 'continuable'
   const toolName = config.toolName ?? 'subagent'
+  // fork（corum）：orchestrate 是**全局唯一**工具名，只能由 worker 实例注册。2026-09-10
+  // 恢复 subagent_fork 实例（toolName 'subagent_fork'）后，原判据 `!corumReadonlyResearch`
+  // 会让 fork 实例也去注册 orchestrate → 挂载直接失败（"tool \"orchestrate\" is already
+  // registered in this scope"，实机 preset mount 报错）。判据收敛为「worker 实例」=
+  // toolName 是 'subagent'（compile 恒定产物；research/fork 实例各有自己的 toolName）。
+  const isWorkerInstance = toolName === 'subagent'
 
   // fork（corum）：编排器 service 只读消费（红线 1：跨会话/跨 bundle 单例）。
   // 台账语义是会话级（key=父 session id），必须在根上下文共享。provide 职责已
@@ -1169,7 +1175,7 @@ export function apply(ctx: Context, config: Config): void {
       }))
       // fork（corum）：orchestrate 工具（方案甲任务清单 fan-out）——仅在 worker 实例
       // 注册（research 只读实例不提供编排入口，toolName 为 subagent_research 时跳过）。
-      const disposeOrchestrate = corumReadonlyResearch
+      const disposeOrchestrate = !isWorkerInstance
         ? (() => {}) as () => void
         : runtimeCtx.tools.register(defineTool({
             name: 'orchestrate',
@@ -1394,7 +1400,7 @@ export function apply(ctx: Context, config: Config): void {
     // 这一点，让 LLM 灵活指派」：只读搜索子 Agent 的指引**不再依赖 orchestrate
     // 可见性**——只要 worker 实例可见就注入；orchestrate 段落按可见性条件拼接
     // （PTC 模式经 run_code SDK 呈现，同样可见）。
-    if (!corumReadonlyResearch) {
+    if (isWorkerInstance) {
       runtimeCtx.systemPrompt.section({
         name: 'corum:subagent-orchestration',
         order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 1,
@@ -1402,7 +1408,13 @@ export function apply(ctx: Context, config: Config): void {
           if (mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined) return ''
           const hasOrchestrate = runtimeCtx.tools.get('orchestrate', context.scope) !== undefined
           const hasResearch = runtimeCtx.tools.get('subagent_research', context.scope) !== undefined
-          if (!hasOrchestrate && !hasResearch) return ''
+          // 2026-09-10：官方 workflow / ralph / subagent_fork 按 corum 机制恢复挂载，
+          // 机制段按可见性补一段「怎么选」——官方能力与 corum 机制并存，模型要知道
+          // 哪些路径有隔离/台账/notice，哪些没有。
+          const hasFork = runtimeCtx.tools.get('subagent_fork', context.scope) !== undefined
+          const hasWorkflow = runtimeCtx.tools.get('workflow', context.scope) !== undefined
+          const hasRalph = runtimeCtx.tools.get('ralph', context.scope) !== undefined
+          if (!hasOrchestrate && !hasResearch && !hasFork && !hasWorkflow && !hasRalph) return ''
           const lines = [
             `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
             '',
@@ -1411,6 +1423,9 @@ export function apply(ctx: Context, config: Config): void {
           ]
           if (hasResearch) {
             lines.push('- ANY read-only work — searching the codebase, reading files, tracing a call path, summarizing a module, gathering facts, answering "how does X work" → call `subagent_research`. This read-only child is pre-denied every write tool, so it can never modify the repo: delegate exploration to it freely instead of spending your own context, and fan out several such searches when you need answers from different angles.')
+          }
+          if (hasFork) {
+            lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → call `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')
           }
           if (hasOrchestrate) {
             lines.push(
@@ -1428,6 +1443,17 @@ export function apply(ctx: Context, config: Config): void {
               'How the mechanism works (rely on it, do not re-implement):',
               '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
             )
+          }
+          if (hasWorkflow || hasRalph) {
+            lines.push('')
+            if (hasWorkflow) {
+              lines.push('- A model-authored orchestration SCRIPT — loops, conditionals, retries, aggregation in code — → call `workflow` (only when the user asks for a workflow or the fan-out genuinely needs program logic).')
+            }
+            if (hasRalph) {
+              lines.push('- Fresh-agent iteration toward ONE immutable objective → call `ralph` (sequential, bounded rounds).')
+            }
+            const engineTools = [hasWorkflow ? '`workflow`' : '', hasRalph ? '`ralph`' : ''].filter(Boolean).join(' and ')
+            lines.push(`IMPORTANT: ${engineTools} children are created by their own engine${hasWorkflow && hasRalph ? 's' : ''} — they do NOT get isolated worktrees, ledger entries or settlement notices, and nothing merges their work. Use them for read-only audits or work that does not need merging; for parallel WRITES that need isolation + merge, use \`orchestrate\` instead.`)
           }
           lines.push('', 'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.')
           return lines.join('\n')

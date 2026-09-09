@@ -113,12 +113,17 @@ describe('preset 数据面与代码常量对账', () => {
     expect(rows(composition)).toBe(rows(readFileSync(join(PRESET_DIR, 'standard', 'agent.cordis.yml'), 'utf8')))
   })
 
-  it('挂 corum 双实例 + 退役 fork/workflow/ralph（与标准模式同款）', () => {
-    expect(composition.match(/name: '@corum\/corum-tool-subagent'/g)?.length).toBe(2)
+  it('挂 corum 三实例 + 官方 workflow/ralph 经 corum provider 恢复（与标准模式同款）', () => {
+    // 2026-09-10：worker + research + fork 三实例（fork 用 corum-fork provider）。
+    expect(composition.match(/name: '@corum\/corum-tool-subagent'/g)?.length).toBe(3)
     expect(composition).toContain('readonlyResearch: true')
-    for (const retired of ['tool-subagent-fork', 'tool-workflow', 'tool-ralph', 'workflow-worker-thread']) {
-      expect(composition).toMatch(new RegExp(`- id: ${retired}[\\s\\S]{0,200}?disabled: true`))
+    expect(composition).toContain('provider: corum-fork')
+    // 官方能力恢复：workflow 引擎 / ralph / workflow 工具行启用且走 corum provider。
+    for (const restored of ['tool-subagent-fork', 'workflow-worker-thread', 'tool-workflow', 'tool-ralph']) {
+      expect(composition).toMatch(new RegExp(`- id: ${restored}\\n(?![\\s\\S]{0,120}?disabled: true)`))
     }
+    expect(composition).toContain('provider: corum-spawn')
+    expect(composition).toContain('subagentProvider: corum-spawn')
   })
 
   it('陈旧工具指引段名单覆盖 write/edit（裁工具后提示词不得仍教模型使用）', () => {

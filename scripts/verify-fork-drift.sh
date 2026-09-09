@@ -568,20 +568,25 @@ fi
 # 用户 2026-09-09 拍板「给官方换上」：官方四模式（standard/ptc/cordis/minimal）
 # 也必须走 corum 编排（并发感知隔离 / 模型锁 / settlement notice / orchestrate），
 # 因此本仓 `shipped-presets/official/` 是官方 preset 的**本地副本**，standard/
-# ptc/cordis 的 subagent 行被替换为 @corum/corum-tool-subagent 双实例。
-# 两条静默失效路径必须机器化守住：
+# ptc/cordis/conductor 的 subagent 行被替换为 @corum/corum-tool-subagent **三实例**
+# （worker + research + fork）；官方 workflow/ralph 恢复挂载但子 Agent 走 corum provider
+# （2026-09-10 用户要求「三个工具按 corum 机制改造，保证官方能力被包含」）。
+# 三条静默失效路径必须机器化守住：
 #   ① `agent-presets` 服务把**包内置** `presets/` 根无条件排在最前，本仓副本会被
 #      遮蔽 → 运行时毫无变化（2026-09-09 实机踩过）。故 boot.ts 必须带
 #      `includeShippedRoot: false`；
 #   ② 官方升级后本地副本与新版官方漂移（新行/改行没跟）→ 本节断言「官方行 id
-#      一个不少、退役行显式 disabled、新增行在登记表内」。
-section "[17] 官方 preset 本地副本：corum 编排替换 + 退役行显式 disabled"
+#      一个不少、新增行在登记表内」；
+#   ③ 恢复的三个官方能力必须走 corum provider（fork → corum-fork、workflow/ralph →
+#      corum-spawn），否则子 Agent 绕过 fork #9 的 cwd 透传（台账说隔离、实际没隔离）。
+section "[17] 官方 preset 本地副本：corum 编排替换 + 官方能力经 corum provider 恢复"
 VENDORED_PRESETS="$REPO_ROOT/packages/desktop/shipped-presets/official"
 OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
 # 本仓副本允许出现的「官方没有的行」（新增 corum 实例）。
 PRESET_EXTRA_ROWS="tool-subagent-research"
-# 本仓副本显式退役的行（disabled: true）。
-PRESET_RETIRED_ROWS="tool-subagent-fork workflow-worker-thread tool-workflow tool-ralph"
+# 恢复挂载的官方能力行（必须启用且走 corum provider）。PTC 的 tool-workflow 例外：
+# 官方 PTC 刻意只留引擎给 ralph、不发布第二个模型自撰编排面（与 run_code 重复）。
+PRESET_RESTORED_ROWS="tool-subagent-fork workflow-worker-thread tool-ralph"
 if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
   if grep -qE '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
     pass "boot.ts 关闭包内置 preset 根（否则 shipped-presets/official 被遮蔽、改动无效）"
@@ -706,11 +711,11 @@ if [ -d "$VENDORED_PRESETS" ]; then
       fi
       continue
     fi
-    # ① corum 编排替换：双实例 + provider + 只读研究实例。
-    if [ "$(grep -cF "name: '@corum/corum-tool-subagent'" "$vendored")" -eq 2 ]; then
-      pass "${preset}：subagent 双实例（worker + research）指向 @corum/corum-tool-subagent"
+    # ① corum 编排替换：三实例（worker + research + fork）+ provider + 只读研究实例。
+    if [ "$(grep -cF "name: '@corum/corum-tool-subagent'" "$vendored")" -eq 3 ]; then
+      pass "${preset}：corum 三实例（worker + research + fork）指向 @corum/corum-tool-subagent"
     else
-      fail "${preset}：未找到 corum subagent 双实例（官方替换丢失？）"
+      fail "${preset}：corum subagent 实例数不是 3（worker + research + fork）"
     fi
     grep -qF 'provider: corum-spawn' "$vendored" \
       && pass "${preset}：provider corum-spawn" \
@@ -729,12 +734,37 @@ if [ -d "$VENDORED_PRESETS" ]; then
     else
       pass "${preset}：官方 subagent 工具行已退役（disabled 或改挂 corum 实例）"
     fi
-    # ③ 退役行显式 disabled（机制成本：不 disabled 就与 orchestrate 双编排面）。
-    for retired in $PRESET_RETIRED_ROWS; do
-      if row_disabled "$vendored" "$retired"; then
-        :
-      elif grep -qE "^[[:space:]]*- id: $retired[[:space:]]*$" "$vendored"; then
-        fail "${preset}：退役行 $retired 未标 disabled: true（编排面重复）"
+    # ③ 恢复挂载的官方能力行必须启用且走 corum provider（2026-09-10）。
+    for restored in $PRESET_RESTORED_ROWS; do
+      if ! grep -qE "^[[:space:]]*- id: $restored[[:space:]]*$" "$vendored"; then
+        fail "${preset}：恢复行 $restored 消失（官方能力被丢掉）"
+      elif row_disabled "$vendored" "$restored"; then
+        fail "${preset}：恢复行 $restored 仍是 disabled: true"
+      fi
+    done
+    if ! row_disabled "$vendored" tool-subagent-fork && ! grep -qF 'provider: corum-fork' "$vendored"; then
+      fail "${preset}：subagent_fork 未走 corum-fork provider（子会话会绕过 fork #9 的 cwd 透传）"
+    fi
+    if ! row_disabled "$vendored" workflow-worker-thread && ! grep -qF 'provider: corum-spawn' "$vendored"; then
+      fail "${preset}：workflow 引擎未走 corum-spawn provider"
+    fi
+    if ! row_disabled "$vendored" tool-ralph && ! grep -qF 'subagentProvider: corum-spawn' "$vendored"; then
+      fail "${preset}：ralph 未走 corum-spawn provider"
+    fi
+    # PTC 官方口径：workflow 引擎保留给 ralph，但 tool-workflow 不发布。
+    if [ "$preset" = "ptc" ]; then
+      if row_disabled "$vendored" tool-workflow; then
+        pass "ptc：tool-workflow 按官方口径保持 disabled（引擎留给 ralph）"
+      else
+        fail "ptc：tool-workflow 被启用——PTC 会出现第二个模型自撰编排面（与 run_code 重复）"
+      fi
+    elif row_disabled "$vendored" tool-workflow; then
+      fail "${preset}：tool-workflow 仍 disabled——官方 workflow 能力未恢复"
+    fi
+    # codex / claude-code 保持官方默认（provider 未安装）。
+    for optional in tool-subagent-codex tool-subagent-claude-code; do
+      if grep -qE "^[[:space:]]*- id: $optional[[:space:]]*$" "$vendored" && ! row_disabled "$vendored" "$optional"; then
+        fail "${preset}：可选 provider 行 $optional 被启用（官方默认 disabled）"
       fi
     done
     # ④ 官方行 id 一个不少（升级漂移检测）+ 新增行在登记表内。
@@ -757,6 +787,23 @@ if [ -d "$VENDORED_PRESETS" ]; then
       skip "官方检出缺 $preset preset（跳过行 id 对账）"
     fi
   done
+  # ⑥ fork #9 的 corum fork provider：官方语义（completed-turn seed）保留，driver 换成
+  # corum 的（cwd 透传），provider 名不与官方 'fork' 抢名；host patch 必须挂它。
+  CORUM_FORK_PROVIDER="$REPO_ROOT/packages/plugins/agent/corum-subagent/src/fork/index.ts"
+  if [ -f "$CORUM_FORK_PROVIDER" ] \
+    && grep -qF "providerName: z.string().default('corum-fork')" "$CORUM_FORK_PROVIDER" \
+    && grep -qF "from '../driver/index.ts'" "$CORUM_FORK_PROVIDER" \
+    && grep -qF 'completedTurnPrefix' "$CORUM_FORK_PROVIDER" \
+    && grep -qF 'inheritsParentContext = true' "$CORUM_FORK_PROVIDER"; then
+    pass "corum fork provider：官方 seed 语义 + corum driver（cwd 透传）"
+  else
+    fail "corum-subagent/src/fork/index.ts 缺 corum-fork provider 或偏离官方语义"
+  fi
+  if grep -qF "name: '@corum/corum-subagent/fork'" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+    pass "host patch 挂载 @corum/corum-subagent/fork"
+  else
+    fail "desktop/cordis.patch.yml 未挂载 corum-fork provider"
+  fi
   # ⑤ 改名残留（mode: code）目录不得存在——它会与 mode 枚举冲突、挂载即失败。
   for stale in "$VENDORED_PRESETS"/*/; do
     [ -d "$stale" ] || continue

@@ -187,6 +187,13 @@
     - id: corum-subagent-spawn
       name: '@corum/corum-subagent/spawn'
 
+    # Fork #9 fork provider（2026-09-10 用户要求「三个工具按 corum 机制改造，保证
+    # 官方能力被包含」）：注册 'corum-fork'——官方 fork 语义（子会话以父会话已完成
+    # 轮次为种子 / KV cache 复用）不变，但 driver 换成 corum 的（cwd 透传 + 校验），
+    # 否则官方 provider 会忽略 request.cwd：台账以为隔离、子 Agent 实际仍在主工作区。
+    - id: corum-subagent-fork
+      name: '@corum/corum-subagent/fork'
+
     # Fork #10 编排器独立包（docs/plan/PLAN-refactor-orchestration-package-and-
     # settings-center.md 重构 1）：新包自己挂 cordis 行 provide（独立性最彻底），
     # apply 在根上下文幂等 provide `corumOrchestration`。行序**必须**在下方

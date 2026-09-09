@@ -524,6 +524,7 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 | `index.ts` | ±3 | one-shot `start()` 校验调用 + depth import | 低 |
 | `invariant.ts` | ±4 | PACKAGE_NAME → `@corum/corum-subagent`、插件名 → `corum-subagent-invariant` | 低（机械） |
 | `spawn/index.ts` | ±12 | 插件名 `corum-subagent-spawn-in-process`、默认 provider 名 **`corum-spawn`**（与官方 spawn 并存不抢名）、import 重定向（`../index.ts` + `../driver/index.ts`）、文件头 fork 注释 | 低 |
+| `fork/index.ts` | +97（新增文件） | 官方 `dsh-subagent-fork-in-process` 的 corum 版：默认 provider 名 **`corum-fork`**、`completedTurnPrefix` 种子语义逐行保留、`inheritsParentContext = true`、driver 指向 corum 的 `../driver/index.ts`（cwd 透传） | 低（官方改 seed 逻辑时需同步；守卫 §17 断言种子语义） |
 
 ### 10.3 设计要点（升级 runbook 必读）
 
@@ -1473,8 +1474,11 @@ fork 扩大非 worktree 会话的面。
   `modelSelectionSettings: false`（模型锁）；
 - 新增 `- id: tool-subagent-research`（同包，`toolName: subagent_research`，
   `readonlyResearch: true`）——只读研究实例；
-- `- id: tool-subagent-fork` / `workflow-worker-thread` / `tool-workflow` / `tool-ralph`
-  显式 `disabled: true`（单一编排面：orchestrate 取代 workflow/ralph；A 案退役 fork）；
+- `- id: tool-subagent-fork` → **corum 第三实例**（`@corum/corum-tool-subagent`，`provider: corum-fork`）；
+  `workflow-worker-thread` / `tool-workflow` / `tool-ralph` **恢复挂载**但子 Agent 走
+  `corum-spawn`（2026-09-10 用户要求「三个工具按 corum 机制改造，保证官方能力被包含」；
+  此前 2026-09-09 的 A 案退役已撤销）。PTC 例外：`tool-workflow` 保持 `disabled`
+  （官方口径——引擎留给 ralph，不发布第二个模型自撰编排面）；
 - 其余行与官方逐行一致（守卫按「官方行 id 一个不少 + 新增行登记表」对账）。
 
 **两条静默失效路径**（都已机器化守卫）：
@@ -1574,3 +1578,46 @@ Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 
 `CONDUCTOR_PRESET_ID`/`CONDUCTOR_MODE_LABEL` 与目录/显示名对账、`BaseMode` 含
 `'conductor'`、内置角色 `conductor-lead` 存在且用 `baseMode: 'conductor'`、旧 id 仅在
 退役清理项里、UI 下拉含指挥模式。
+
+
+### 10.9 fork #9 增补：`corum-fork` provider（2026-09-10，官方 fork 能力按 corum 机制恢复）
+
+**背景**：用户要求「三个工具（workflow / ralph / subagent_fork）按 corum 机制改造，保证
+官方能力被包含」。`subagent_fork` 的改造必须落在 provider 层：官方
+`@deepseek-ai/dsh-subagent-fork-in-process` 用**官方 driver** 建子会话，它不认识 fork #9
+新增的 `SubagentStartRequest.cwd`——直接挂官方 provider 会让「工具层把 cwd 指向 worktree、
+台账登记 isolated，子 Agent 实际仍在主工作区」，即**台账说隔离、实际没隔离**的静默错位。
+
+**落地**：
+- 新增 `src/fork/index.ts`（导出子路径 `@corum/corum-subagent/fork`，provider 默认名
+  `corum-fork`）：官方 `completedTurnPrefix()` 种子语义逐行保留（`turn/end` 前的平衡前缀、
+  一次性快照、`inheritsParentContext = true`、能力声明全同），**唯一差异** = `startInProcessRun`
+  来自 corum driver（`../driver/index.ts`）→ `cwd` 透传 + `assertChildCwd`；
+- host patch 挂行 `corum-subagent-fork`（`@corum/corum-subagent/fork`）；
+- 四个替换过的官方 preset 把 `tool-subagent-fork` 从「官方行 disabled」改为
+  **corum 工具实例**（`provider: corum-fork`、`toolName: subagent_fork`、
+  `backgroundMode: continuable`、`modelSelectionSettings: false`）——模型选择保持关闭是
+  **官方 fork 语义的一部分**（子 Agent 与父同路由才能复用 KV cache）。
+
+**同批恢复的 workflow / ralph**：官方工具行 + 引擎行恢复挂载，`provider` /
+`subagentProvider` 改指 `corum-spawn`。它们的子 Agent 由引擎直接创建，**不经过 corum
+工具层**（不建 worktree、不进台账、不发 settlement notice）；机制段明示「并行写要隔离+合并
+请用 orchestrate」。PTC 的 `tool-workflow` 按官方口径保持 disabled。
+
+**实机验证**（dev 实例，probe 仓）：
+- `subagent_fork`：主 Agent 记口令 `MAGENTA-42` → fork 子 Agent 复述出 `MAGENTA-42`
+  （种子生效 = 官方上下文继承能力保留）；
+- `workflow`：`workflow "list-files" completed (1 agent)` + 脚本返回值；
+- `ralph`：`maxRounds: 1` 完成一轮，`ralph6.txt` 落盘；
+- 工具面：standard 25→**28**、cordis 32→**35**、指挥模式 22→**25**；PTC 仍 1 个 `run_code`
+  （SDK 含 ralph/fork/orchestrate/research，不含 workflow）。
+
+**守卫**：§17 断言「恢复行必须启用且走 corum provider」「PTC 的 tool-workflow 必须 disabled」
+「`fork/index.ts` 保留官方 seed 语义且 driver 指向 corum」「host patch 已挂 corum-fork」。
+**单测**：`corum-subagent/tests/fork-provider.spec.ts`（5 例：默认名/继承声明/能力面/种子
+边界/无已完成轮次）。
+
+**踩坑（本轮亲历）**：恢复 fork 实例后 `orchestrate` 被注册两次（worker 与 fork 实例都满足
+旧判据 `!readonlyResearch`）→ preset mount 直接失败
+（`tool "orchestrate" is already registered in this scope`）。判据收敛为 `isWorkerInstance`
+（`toolName === 'subagent'`），机制段同理。

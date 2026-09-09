@@ -1,8 +1,8 @@
 # fork（corum）：本文件 = 官方 preset 的本地副本 + corum 编排替换。
-# 替换内容：① 官方 subagent 工具行 → @corum/corum-tool-subagent 双实例
-# （worker + research，并发感知隔离/模型锁/orchestrate/notice）；② 官方 fork
-# provider 工具行退役；③ 官方 workflow/ralph 编排面退役（方案甲用 orchestrate
-# 取代，见 docs/plan/PLAN-subagent-orchestration.md §7；与 corum preset 一致）。
+# 替换内容：① 官方 subagent 工具行 → @corum/corum-tool-subagent 三实例
+# （worker + research + fork，并发感知隔离/模型锁/orchestrate/notice）；
+# ② 官方 workflow/ralph 恢复挂载，但子 Agent 走 corum provider（2026-09-10
+# 用户要求「三个工具按 corum 机制改造，保证官方能力被包含」）。
 # 其余与官方逐行一致；基座升级按 docs/fork-delta.md §5 runbook 重放，
 # scripts/verify-fork-drift.sh §17 守护。
 # The `ptc` agent preset: the standard coding agent, presented as PTC mode.
@@ -210,15 +210,19 @@
         backgroundMode: continuable
         modelSelectionSettings: false
         readonlyResearch: true
-    # fork（corum）：官方 fork provider 工具行退役（2026-09-09 用户拍板 A 案，
-    # 见 docs/PROMPT-INVENTORY.md §4）——不走 corum 机制且提示词与 subagent 重复。
+    # fork（corum）：官方 fork provider 工具行 → **corum fork 工具实例**（2026-09-10
+    # 用户要求「三个工具按 corum 机制改造，保证官方能力被包含」）。官方能力保留：
+    # 子会话以父会话已完成轮次为种子（上下文继承 + KV cache 复用，故模型选择保持
+    # 关闭，子 Agent 与父同路由）。corum 增量：provider 'corum-fork' 走 fork #9 的
+    # cwd 透传（隔离 worktree 真正生效）+ 隔离/模型锁/台账/结算 notice 与其它
+    # corum 委托同一条路径。
     - id: tool-subagent-fork
-      name: '@deepseek-ai/dsh-tool-subagent'
-      disabled: true
+      name: '@corum/corum-tool-subagent'
       config:
-        provider: fork
+        provider: corum-fork
         toolName: subagent_fork
         backgroundMode: continuable
+        modelSelectionSettings: false
 
     # Production dsh does not install these optional providers. Install the
     # matching Bundle in this Profile and restart the Host, then copy this
@@ -242,11 +246,15 @@
         backgroundMode: one-shot
         maxDepth: provider-managed
 
+    # fork（corum）：官方 workflow 引擎 + ralph 恢复挂载，子 Agent 走 corum provider
+    # （2026-09-10「保证官方能力被包含」）。官方能力保留：模型写 JS 编排脚本 fan-out、
+    # worker-thread 隔离执行、前台全有或全无。注意：workflow/ralph 的子 Agent 由引擎
+    # 直接创建，**不经过 corum 工具层**——它们不建 worktree、不进台账、不发 settle
+    # notice；需要隔离+合并的并行写请用 orchestrate（机制段有说明）。
     - id: workflow-worker-thread
       name: '@deepseek-ai/dsh-workflow-worker-thread'
-      disabled: true
       config:
-        provider: spawn
+        provider: corum-spawn
 
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'
@@ -256,10 +264,8 @@
 
     - id: tool-ralph
       name: '@deepseek-ai/dsh-tool-ralph'
-      disabled: true
       config:
-        subagentProvider: spawn
-        maxRounds: 64
+        subagentProvider: corum-spawn
 
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
