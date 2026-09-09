@@ -25,7 +25,7 @@ import { useConnTest } from './useConnTest.ts'
 import { catalogFallbackModels, isNoDiscoveryError, wizardProfilePath } from './catalog-fallback.ts'
 
 import {
-  BackRow, GlassButton, IconCheck, IconPlus, IconZap, SelectField, SettingGroup,
+  BackRow, GlassButton, IconCheck, IconZap, SelectField, SettingGroup,
 } from './controls.tsx'
 import styles from './ModelsSection.module.css'
 
@@ -499,15 +499,15 @@ function DetectResult({ models, picked, onToggle, customId, onCustomId }: {
             </button>
           )
         })}
-        <span className={styles['chipAdd']} style={{ alignSelf: 'flex-start' }}>
-          <IconPlus size={13} />
+        <label className={styles['customIdField']}>
+          <span className={styles['customIdLabel']}>自定义模型 id</span>
           <input
-            className={styles['chipInput']}
+            className={styles['customIdInput']}
             value={customId}
-            placeholder="自定义输入模型 id…"
+            placeholder="输入模型 id，例如 my-model-v1"
             onChange={e => { onCustomId(e.target.value) }}
           />
-        </span>
+        </label>
       </div>
     </SettingGroup>
   )
