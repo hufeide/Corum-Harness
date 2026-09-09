@@ -188,7 +188,7 @@ export interface CorumSidebarOwnerProps {
 
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
-export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope']
+export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -248,6 +248,8 @@ export function apply(ctx: ClientContext): void {
         return {
           // 子 Agent 花名册订阅源（会话条胶囊 + 统计浮层的子 Agent 区）。
           remote: ctx.remote as unknown as RemoteEventFace,
+          // 浮层子 Agent 行点击 → 直接进入该子会话（用户 2026-09-10 定调）。
+          openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
           setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
           attachGridActions: (a: GridActions) => { layout.attachGrid(a) },
           // 插件中心触发：壳不持面板（业务 chrome 已拆出），经 LayoutController

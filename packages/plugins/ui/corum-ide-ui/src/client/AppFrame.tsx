@@ -218,13 +218,15 @@ function TrendLine({ color, width = 170, height = 40 }: { color: string; width?:
 /** 状态栏详情卡（设计稿 GpfJh，×1.25 放大 + 长方形三列 chart）：hover/点击
  *  status-pill 展开的会话统计浮层。长方形 = 左（上下文 donut+图例）右（命中率/
  *  累计费用两个趋势曲线）三列撑宽。 */
-function AgentStatusDetail({ title, projections: p, anchor, roster }: {
+function AgentStatusDetail({ title, projections: p, anchor, roster, openSession }: {
   title: string
   projections: AgentSessionProjections | undefined
   /** 会话区在视口中的水平锚点（left/width），详情卡据此在会话区水平居中（用户定调）。 */
   anchor: { left: number; width: number }
   /** 子 Agent 花名册（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。 */
   roster: readonly SubagentRosterEntry[]
+  /** 打开会话（子 Agent 行点击 → 进入该子会话）。 */
+  openSession?: ((sessionId: string) => void) | undefined
 }) {
   const stats = p?.sessionStats
   const usage = p?.tokenUsage
@@ -353,15 +355,24 @@ function AgentStatusDetail({ title, projections: p, anchor, roster }: {
             </span>
           </div>
           {rankRoster(roster).map((entry) => (
-            <div key={entry.childSessionId} className={css.statusDetailAgentRow} data-done={entry.done || undefined}>
+            <button
+              key={entry.childSessionId}
+              type="button"
+              className={css.statusDetailAgentRow}
+              data-done={entry.done || undefined}
+              title={`进入子会话 ${entry.childSessionId}`}
+              aria-label={`进入子会话 ${entry.label}`}
+              onClick={() => { openSession?.(entry.childSessionId) }}
+            >
               <span className={css.statusDetailAgentDot} data-done={entry.done || undefined} />
-              <span className={css.statusDetailAgentLabel} title={entry.label}>{entry.label}</span>
+              <span className={css.statusDetailAgentLabel}>{entry.label}</span>
               <span className={css.statusDetailAgentStep}>
                 {entry.done ? '已完成' : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
               </span>
               {entry.isolated && <span className={css.statusDetailAgentBadge}>隔离</span>}
               {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
-            </div>
+              <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
+            </button>
           ))}
         </div>
       )}
@@ -466,7 +477,7 @@ function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentR
   return [...entries].sort((a, b) => (Number(a.done) - Number(b.done)) || (b.lastActive - a.lastActive))
 }
 
-function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor, onOpenTrajectory, remote }: {
+function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor, onOpenTrajectory, remote, openSession }: {
   sessionTitle?: string | undefined
   /** 当前会话 id（AppFrame 从 useSessions 取 current 下发；空态/blank 为 undefined）。 */
   currentSessionId?: string | undefined
@@ -478,6 +489,8 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
   onOpenTrajectory: () => void
   /** 统一事件中心 remote 面（子 Agent 花名册订阅源；缺省不渲染胶囊）。 */
   remote?: RemoteEventFace | undefined
+  /** 打开会话（浮层子 Agent 行点击 → 进入子会话）。 */
+  openSession?: ((sessionId: string) => void) | undefined
 }) {
   const titleRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
@@ -566,7 +579,15 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
           )}
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${css.agentChev}${detailOpen ? ` ${css.agentChevOpen}` : ''}`}><path d="m6 9 6 6 6-6" /></svg>
         </button>
-        {detailOpen && <AgentStatusDetail title={title} projections={projections} anchor={sessionAnchor} roster={roster} />}
+        {detailOpen && (
+          <AgentStatusDetail
+            title={title}
+            projections={projections}
+            anchor={sessionAnchor}
+            roster={roster}
+            {...(openSession === undefined ? {} : { openSession })}
+          />
+        )}
       </span>
       <span className={css.agentSpacer} />
       {/* fork（corum）：轨迹按钮是开发者功能——仅在「设置 → 高级 → 开发者模式」
@@ -778,6 +799,8 @@ export type AppFrameProps =
     useTheme: <S>(sel: (p: ThemePreference) => S, eq?: (a: S, b: S) => boolean) => S
     /** 统一事件中心 remote 面（子 Agent 花名册订阅源；由 index.tsx 注入）。 */
     remote?: RemoteEventFace | undefined
+    /** 打开一个会话（浮层子 Agent 行点击 → 进入子会话；由 index.tsx 注入）。 */
+    openSession?: ((sessionId: string) => void) | undefined
     /** 主题偏好写入（直通 theme 服务）。 */
     setTheme: (p: ThemePreference) => void
     /**
@@ -806,6 +829,7 @@ export function IdeAppFrame({
   openPluginManager: onOpenPluginManager,
   attachGridActions,
   remote,
+  openSession,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   const detailsSession = useSessions((s: SessionListState) => {
@@ -1408,6 +1432,7 @@ export function IdeAppFrame({
               sessionAnchor={{ left: convoBox.x, width: convoBox.width }}
               onOpenTrajectory={onOpenTrajectory}
               {...(remote === undefined ? {} : { remote })}
+              {...(openSession === undefined ? {} : { openSession })}
             />
           )}
         </div>

@@ -1291,7 +1291,21 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
+.statusDetailAgentRow:hover { background: var(--corum-glass-2); }
+.statusDetailAgentGo {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.statusDetailAgentRow:hover .statusDetailAgentGo { color: var(--dsw-alias-brand-primary); }
 .statusDetailAgentDot {
   flex: none;
   width: 6px;
