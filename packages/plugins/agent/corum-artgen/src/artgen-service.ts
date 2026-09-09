@@ -63,6 +63,11 @@ function getCorumHome(): string {
 
 /** SD 模型目录。 */
 const SD_MODELS_DIR = join(getCorumHome(), 'engines', 'sd-models')
+/** Flux 官方 VAE（ae.safetensors）—— Flux GGUF 只含 diffusion 权重，必须另配 VAE 才能解码。 */
+const FLUX_VAE_FILE = 'ae.safetensors'
+/** 文本编码器固定文件名（多个 Flux 档位共用一份，避免重复下载）。 */
+const CLIP_L_FILE = 'clip_l.safetensors'
+const T5XXL_FILE = 't5-v1_1-xxl-encoder-Q3_K_S.gguf'
 /** sd-cli 二进制目录。 */
 const SD_BIN_DIR = join(getCorumHome(), 'bin')
 
@@ -264,12 +269,20 @@ function inferDisplayName(fileName: string): string {
 }
 
 /** 列出 SD_MODELS_DIR 下的模型文件（.safetensors / .gguf），含推断元数据。 */
+/**
+ * 配套文件（不是可激活的生成模型）：Flux 的 VAE / 文本编码器与主模型同目录，
+ * 必须从「模型列表」里排除——否则它们会出现在「已下载模型」里、甚至被自动选成
+ * 「使用中」，生成时拿 VAE 当 diffusion 模型（2026-09-09 实测踩到）。
+ */
+const COMPANION_FILES = new Set<string>([FLUX_VAE_FILE, CLIP_L_FILE, T5XXL_FILE])
+
 function listLocalModels(): SdModel[] {
   try {
     if (!existsSync(SD_MODELS_DIR)) return []
     const files = readdirSync(SD_MODELS_DIR)
     const models: SdModel[] = []
     for (const f of files) {
+      if (COMPANION_FILES.has(f)) continue
       if (f.toLowerCase().endsWith('.safetensors') || f.toLowerCase().endsWith('.gguf')) {
         try {
           const stat = statSync(join(SD_MODELS_DIR, f))
@@ -331,7 +344,21 @@ interface ModelDownloadCfg {
   /** Flux 等模型需要的配套 VAE 下载地址（可选）。 */
   vaeUrl?: string
   vaeFileName?: string
+  /**
+   * 文本编码器（可选；Flux GGUF 只含 diffusion 权重，缺编码器时 sd-cli 报
+   * 「No text encoders provided, cannot process prompts!」并段错误退出——
+   * 2026-09-09 用户实测 exit 139）。SD1.5/SDXL 单文件 checkpoint 自带编码器，不填。
+   */
+  textEncoders?: {
+    clipL: { url: string; fileName: string }
+    t5xxl: { url: string; fileName: string }
+  }
 }
+
+const FLUX_TEXT_ENCODERS = {
+  clipL: { url: 'https://hf-mirror.com/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors', fileName: CLIP_L_FILE },
+  t5xxl: { url: 'https://hf-mirror.com/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q3_K_S.gguf', fileName: T5XXL_FILE },
+} as const
 
 const MODEL_DOWNLOADS: Record<'low' | 'mid' | 'high', ModelDownloadCfg> = {
   low: {
@@ -361,6 +388,7 @@ const MODEL_DOWNLOADS: Record<'low' | 'mid' | 'high', ModelDownloadCfg> = {
     description: 'Flux 蒸馏加速版，1-4 步出图，质量远超 SD1.5',
     vaeUrl: 'https://hf-mirror.com/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors',
     vaeFileName: 'ae.safetensors',
+    textEncoders: FLUX_TEXT_ENCODERS,
   },
   high: {
     url: 'https://hf-mirror.com/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q3_K_S.gguf',
@@ -376,15 +404,20 @@ const MODEL_DOWNLOADS: Record<'low' | 'mid' | 'high', ModelDownloadCfg> = {
     description: 'Flux 蒸馏加速版更高量化，细节更好，高配推荐',
     vaeUrl: 'https://hf-mirror.com/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors',
     vaeFileName: 'ae.safetensors',
+    textEncoders: FLUX_TEXT_ENCODERS,
   },
 }
 
-/** Flux 官方 VAE（ae.safetensors）—— Flux GGUF 只含 diffusion 权重，必须另配 VAE 才能解码。 */
-const FLUX_VAE_FILE = 'ae.safetensors'
 
 /** 解析 Flux 模型所需的 VAE 路径（存在才返回，否则 undefined）。 */
 function resolveFluxVae(): string | undefined {
   const p = join(SD_MODELS_DIR, FLUX_VAE_FILE)
+  return existsSync(p) ? p : undefined
+}
+
+/** 解析文本编码器路径（模型目录内，不存在返回 undefined）。 */
+function resolveTextEncoder(fileName: string): string | undefined {
+  const p = join(SD_MODELS_DIR, fileName)
   return existsSync(p) ? p : undefined
 }
 
@@ -640,6 +673,10 @@ export class ArtGenService extends TypertRemoteService {
       enginePath: engineBundled ? getSdCliPath() : '',
       models,
       partials,
+      textEncoders: {
+        clipL: existsSync(join(SD_MODELS_DIR, CLIP_L_FILE)),
+        t5xxl: existsSync(join(SD_MODELS_DIR, T5XXL_FILE)),
+      },
       platform: process.platform,
       ...(this.activeModel !== undefined ? { activeModel: this.activeModel } : {}),
       totalMemGb,
@@ -837,13 +874,21 @@ export class ArtGenService extends TypertRemoteService {
       '--sampling-method', args.sampler ?? 'euler',
       '--seed', String(args.seed ?? -1),
     ]
-    // Flux 需要配套 VAE（GGUF 只含 diffusion 权重）。
+    // Flux 需要配套 VAE + 文本编码器（GGUF 只含 diffusion 权重）。
+    // 缺文本编码器时 sd-cli 会打印「No text encoders provided, cannot process prompts!」
+    // 然后段错误（exit 139）——提前拦住并给出可操作的提示（2026-09-09 用户实测）。
     if (arch === 'Flux') {
       const vae = resolveFluxVae()
       if (vae === undefined) {
-        throw new Error('Flux 模型需要配套 VAE（ae.safetensors）。请重新下载该模型（会自动带上 VAE），或把 ae.safetensors 导入模型目录')
+        throw new Error('Flux 模型需要配套 VAE（ae.safetensors）。请在推荐模型里点「补齐依赖」，或把 ae.safetensors 导入模型目录')
       }
       cliArgs.push('--vae', vae)
+      const clipL = resolveTextEncoder(CLIP_L_FILE)
+      const t5xxl = resolveTextEncoder(T5XXL_FILE)
+      if (clipL === undefined || t5xxl === undefined) {
+        throw new Error(`Flux 需要文本编码器（${CLIP_L_FILE} + ${T5XXL_FILE}，约 2.2 GB）。请在推荐模型里点「补齐依赖」下载，或把两个文件导入模型目录`)
+      }
+      cliArgs.push('--clip_l', clipL, '--t5xxl', t5xxl)
     }
     // 有反向提示词则加 -n 参数。
     if (args.negativePrompt !== undefined && args.negativePrompt !== '') {
@@ -1041,48 +1086,64 @@ export class ArtGenService extends TypertRemoteService {
     const key = (tier === 'mid' || tier === 'high') ? tier : 'low'
     const cfg = MODEL_DOWNLOADS[key]
     const destPath = join(SD_MODELS_DIR, cfg.fileName)
-    if (existsSync(destPath)) return { started: false, already: true }
+    // 主模型已存在时，若配套（VAE / 文本编码器）缺失仍要能补下——否则 Flux 下载完主模型
+    // 也生成不了（缺编码器 sd-cli 直接段错误）。
+    const missingCompanion = (cfg.vaeUrl !== undefined && cfg.vaeFileName !== undefined && !existsSync(join(SD_MODELS_DIR, cfg.vaeFileName)))
+      || (cfg.textEncoders !== undefined && (!existsSync(join(SD_MODELS_DIR, cfg.textEncoders.clipL.fileName)) || !existsSync(join(SD_MODELS_DIR, cfg.textEncoders.t5xxl.fileName))))
+    if (existsSync(destPath) && !missingCompanion) return { started: false, already: true }
     if (this.downloadSlots.model.status === 'downloading') return { started: true }
-    // 后台跑（不 await），进度写 downloadSlots.model；Flux 等模型下载后自动补配套 VAE。
+    // 后台跑（不 await），进度写 downloadSlots.model；Flux 等模型下载后自动补配套 VAE/编码器。
     // URL 可经 CORUM_ARTGEN_MODEL_URL 覆盖（换镜像；也用于端到端验证续传/停滞）。
     const override = process.env.CORUM_ARTGEN_MODEL_URL
     const url = override !== undefined && override.trim() !== '' ? override.trim() : cfg.url
-    void this.runModelDownload(url, cfg.fileName, destPath, cfg.vaeUrl, cfg.vaeFileName)
+    void this.runModelDownload(url, cfg.fileName, destPath, cfg)
     return { started: true }
   }
 
-  /** 后台下载模型到 destPath，进度写 downloadSlots.model；可选配套 VAE（Flux）。 */
-  private async runModelDownload(url: string, fileName: string, destPath: string, vaeUrl?: string, vaeFileName?: string): Promise<void> {
+  /** 下载一个配套文件（VAE / 文本编码器）：可续传；已存在则跳过；失败不阻塞主流程。 */
+  private async downloadCompanion(url: string, fileName: string): Promise<boolean> {
+    const dest = join(SD_MODELS_DIR, fileName)
+    if (existsSync(dest)) return true
+    const part = `${dest}.part`
+    const dl = await this.downloadToFile(url, part, 'model')
+    if (!dl.ok) return false
+    renameSync(part, dest)
+    try { rmSync(`${part}.json`, { force: true }) } catch { /* 忽略 */ }
+    return true
+  }
+
+  /**
+   * 后台下载模型到 destPath，进度写 downloadSlots.model；再补配套 VAE + 文本编码器。
+   * 主模型已存在时跳过主下载，只补缺的配套（用户已有模型时「补齐」路径）。
+   */
+  private async runModelDownload(url: string, fileName: string, destPath: string, cfg: ModelDownloadCfg): Promise<void> {
     this.setDownloadSlot('model', { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
     try {
-      // 可续传下载（半截文件留在 <dest>.part，重试/重启后 Range 续传）。
-      const partPath = `${destPath}.part`
-      // 迁移旧版残片：早期实现写 `<dest>.tmp`（截断写、失败即留），字节同样从 0 连续，
-      // 直接改名为 .part 并补 sidecar（记录当前 URL）即可继续用，避免重下几 GB。
-      if (!existsSync(partPath) && existsSync(`${destPath}.tmp`)) {
-        try {
-          renameSync(`${destPath}.tmp`, partPath)
-          writeFileSync(`${partPath}.json`, JSON.stringify({ url }, null, 2))
-        } catch { /* 迁移失败就从零开始 */ }
-      }
-      const dl = await this.downloadToFile(url, partPath, 'model')
-      if (!dl.ok) return
-      renameSync(partPath, destPath)
-      try { rmSync(`${partPath}.json`, { force: true }) } catch { /* 忽略 */ }
-      this.setDownloadSlot('model', { percent: 100, downloadedBytes: dl.bytes, totalBytes: dl.totalBytes > 0 ? dl.totalBytes : dl.bytes, status: 'downloading' })
-      // 配套 VAE（Flux GGUF 必需）—— 主模型下载完成后补下，失败仅记错误不影响主模型。
-      if (vaeUrl !== undefined && vaeFileName !== undefined) {
-        const vaeDest = join(SD_MODELS_DIR, vaeFileName)
-        if (!existsSync(vaeDest)) {
+      if (!existsSync(destPath)) {
+        // 可续传下载（半截文件留在 <dest>.part，重试/重启后 Range 续传）。
+        const partPath = `${destPath}.part`
+        // 迁移旧版残片：早期实现写 `<dest>.tmp`（截断写、失败即留），字节同样从 0 连续，
+        // 直接改名为 .part 并补 sidecar（记录当前 URL）即可继续用，避免重下几 GB。
+        if (!existsSync(partPath) && existsSync(`${destPath}.tmp`)) {
           try {
-            const vpart = `${vaeDest}.part`
-            const vdl = await this.downloadToFile(vaeUrl, vpart, 'model')
-            if (vdl.ok) {
-              renameSync(vpart, vaeDest)
-              try { rmSync(`${vpart}.json`, { force: true }) } catch { /* 忽略 */ }
-            }
-          } catch { /* VAE 下载失败不阻塞主模型 */ }
+            renameSync(`${destPath}.tmp`, partPath)
+            writeFileSync(`${partPath}.json`, JSON.stringify({ url }, null, 2))
+          } catch { /* 迁移失败就从零开始 */ }
         }
+        const dl = await this.downloadToFile(url, partPath, 'model')
+        if (!dl.ok) return
+        renameSync(partPath, destPath)
+        try { rmSync(`${partPath}.json`, { force: true }) } catch { /* 忽略 */ }
+        this.setDownloadSlot('model', { percent: 100, downloadedBytes: dl.bytes, totalBytes: dl.totalBytes > 0 ? dl.totalBytes : dl.bytes, status: 'downloading' })
+      }
+      // 配套 VAE（Flux GGUF 必需）
+      if (cfg.vaeUrl !== undefined && cfg.vaeFileName !== undefined) {
+        await this.downloadCompanion(cfg.vaeUrl, cfg.vaeFileName)
+      }
+      // 文本编码器（Flux GGUF 必需；缺了 sd-cli 报「No text encoders provided」并段错误）
+      if (cfg.textEncoders !== undefined) {
+        await this.downloadCompanion(cfg.textEncoders.clipL.url, cfg.textEncoders.clipL.fileName)
+        await this.downloadCompanion(cfg.textEncoders.t5xxl.url, cfg.textEncoders.t5xxl.fileName)
       }
       this.setDownloadSlot('model', { ...this.downloadSlots.model, percent: 100, status: 'done' })
     } catch (e) {
@@ -1158,10 +1219,14 @@ export class ArtGenService extends TypertRemoteService {
     const args: string[] = []
     if (isGguf) args.push('--diffusion-model', modelPath)
     else args.push('-m', modelPath)
-    // Flux 需要配套 VAE。
+    // Flux 需要配套 VAE + 文本编码器（常驻模式同样要传，否则服务起来也处理不了提示词）。
     if (inferArchitecture(modelFileName) === 'Flux') {
       const vae = resolveFluxVae()
       if (vae !== undefined) args.push('--vae', vae)
+      const clipL = resolveTextEncoder(CLIP_L_FILE)
+      const t5xxl = resolveTextEncoder(T5XXL_FILE)
+      if (clipL !== undefined) args.push('--clip_l', clipL)
+      if (t5xxl !== undefined) args.push('--t5xxl', t5xxl)
     }
     args.push('--listen-ip', '127.0.0.1', '--listen-port', String(SD_SERVER_PORT))
     return args
@@ -1431,7 +1496,12 @@ export class ArtGenService extends TypertRemoteService {
     const destPath = join(SD_MODELS_DIR, fn)
     if (existsSync(destPath)) return { started: false, already: true }
     if (this.downloadSlots.model.status === 'downloading') return { started: false, error: '已有模型下载在进行中，请等待完成' }
-    void this.runModelDownload(u, fn, destPath)
+    // 任意 URL 下载：无推荐配置 → 只下主文件（不补 VAE/编码器，由用户自备）。
+    const cfg: ModelDownloadCfg = {
+      url: u, fileName: fn, name: fn, architecture: 'unknown', quantization: '',
+      size: '', vramGb: 0, minMemGb: 0, recommendedSteps: 20, recommendedSize: 512, description: '',
+    }
+    void this.runModelDownload(u, fn, destPath, cfg)
     return { started: true }
   }
 }

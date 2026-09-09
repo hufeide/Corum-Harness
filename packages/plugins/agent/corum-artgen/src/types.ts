@@ -54,6 +54,11 @@ export interface ArtGenStatus {
    * 引擎残片用固定名 'sd-cli-download.zip'。
    */
   partials: Array<{ fileName: string; bytes: number }>
+  /**
+   * Flux 文本编码器是否就位（缺了 sd-cli 无法处理提示词，会段错误退出）。
+   * 非 Flux 模型也用同一目录，故这是全局状态。
+   */
+  textEncoders: { clipL: boolean; t5xxl: boolean }
   /** 物理内存（GB）。 */
   totalMemGb: number
   /** 是否达到最低硬件门槛（8GB 内存）。 */

@@ -73,6 +73,8 @@ interface ArtGenStatus {
   models: SdModel[]
   /** 断点残片（fileName → 已下载字节；>0 = 可继续下载）。 */
   partials: Array<{ fileName: string; bytes: number }>
+  /** Flux 文本编码器是否就位（缺了 sd-cli 处理不了提示词 → 生成必失败）。 */
+  textEncoders: { clipL: boolean; t5xxl: boolean }
   /** 运行平台（process.platform）。 */
   platform: string
   /** 物理内存（GB）。 */
@@ -633,6 +635,10 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
             const downloaded = status?.models.some(x => x.fileName === m.fileName) ?? false
             const thisDownloading = dlModelKey === m.tier || dlModelKey === m.fileName
             const anyDownloading = dlModelKey !== null
+            // Flux 行：主模型在、但配套（VAE/文本编码器）缺 → 「补齐依赖」（否则生成必失败）
+            const isFlux = m.architecture === 'Flux'
+            const enc = status?.textEncoders ?? { clipL: true, t5xxl: true }
+            const needsCompanion = downloaded && isFlux && (!enc.clipL || !enc.t5xxl)
             const disabled = anyDownloading || !engineReady || downloaded || m.compatible === false
             return (
               <div key={m.fileName} style={{
@@ -654,9 +660,10 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                   </div>
                   <span style={{ fontSize: 11, color: m.compatible === false ? 'var(--dsw-alias-state-warn-primary, #E07A00)' : 'var(--dsw-alias-label-tertiary)' }}>
                     {m.description}{m.incompatibleReason !== undefined ? ` · ⚠ ${m.incompatibleReason}` : ''}
+                    {needsCompanion ? ' · ⚠ 缺少文本编码器（Flux 必需，否则生成失败）' : ''}
                   </span>
                 </div>
-                {downloaded
+                {downloaded && !needsCompanion
                   ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary, #3EE6B0)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
                   : <button type="button" disabled={disabled} onClick={() => void downloadModel(m.tier)} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
@@ -666,7 +673,9 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                       ? '下载中…'
                       : partialOf(m.fileName) > 0
                         ? `继续下载（${formatBytesClient(partialOf(m.fileName))}）`
-                        : '下载'}</button>}
+                        : downloaded
+                          ? '补齐依赖（约 2.2 GB）'
+                          : '下载'}</button>}
               </div>
             )
           })}
