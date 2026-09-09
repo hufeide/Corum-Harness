@@ -21,6 +21,7 @@ import {
   CONDUCTOR_STALE_SECTIONS,
   conductorExecutionDeny,
   conductorModeOf,
+  effectiveExecutionTools,
 } from '../src/conductor.ts'
 
 const PRESET_DIR = join(import.meta.dirname, '../../../../desktop/shipped-presets/official')
@@ -118,5 +119,27 @@ describe('preset 数据面与代码常量对账', () => {
 
   it('陈旧工具指引段名单覆盖 write/edit（裁工具后提示词不得仍教模型使用）', () => {
     expect([...CONDUCTOR_STALE_SECTIONS]).toEqual(['tool:write', 'tool:edit'])
+  })
+})
+
+
+describe('effectiveExecutionTools — baseMode conductor 继承指挥语义', () => {
+  it('baseMode conductor 且未声明 executionTools → orchestrator（继承指挥模式）', () => {
+    expect(effectiveExecutionTools({ baseMode: 'conductor' })).toBe('orchestrator')
+  })
+
+  it('显式 executionTools 优先（作者可让 conductor 角色亲手执行）', () => {
+    expect(effectiveExecutionTools({ baseMode: 'conductor', executionTools: 'full' })).toBe('full')
+  })
+
+  it('其他 baseMode 不受影响', () => {
+    for (const baseMode of ['standard', 'ptc', 'minimal', 'cordis']) {
+      expect(effectiveExecutionTools({ baseMode })).toBeUndefined()
+    }
+  })
+
+  it('conductor 角色（baseMode conductor）经 conductorModeOf 走 profile 形态', () => {
+    const profile = { baseMode: 'conductor', executionTools: undefined }
+    expect(conductorModeOf('conductor-lead', false, effectiveExecutionTools(profile))).toBe('profile')
   })
 })

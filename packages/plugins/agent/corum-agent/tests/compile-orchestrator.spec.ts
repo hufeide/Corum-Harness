@@ -83,3 +83,22 @@ describe('compile full / 缺省模式 — 无回归', () => {
     expect(workerRow).not.toContain('maxDepth')
   })
 })
+
+
+describe("compile baseMode 'conductor' — 继承指挥模式（2026-09-10）", () => {
+  const yml = compilePreset(profile({ baseMode: 'conductor' })).cordisYml
+
+  it('preset 仍全量（工具面同标准模式，裁剪在运行时）', () => {
+    expect(yml).toContain('id: persistent-shell')
+    expect(yml).toContain('id: filesystem')
+    expect(yml).toContain('id: tool-fs\n')
+    expect(yml).toContain('id: tool-subagent\n')
+    expect(yml).toContain('id: tool-subagent-research')
+  })
+
+  it('人格含指挥者核心身份（compile 的 MODE_CORE_IDENTITY.conductor）', () => {
+    expect(yml).toContain('绝不亲手')
+    expect(yml).toContain('拆解')
+    expect(yml).toContain('裁决')
+  })
+})

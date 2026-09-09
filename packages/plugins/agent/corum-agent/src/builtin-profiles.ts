@@ -14,7 +14,7 @@
  */
 
 import type { AgentProfile } from './profile.ts'
-import { loadProfile, saveProfile } from './profile-store.ts'
+import { deleteProfile, loadProfile, saveProfile } from './profile-store.ts'
 
 /** 冒烟测试固定提示词。 */
 export const SMOKE_PROMPT = 'Reply with exactly the single word "ok".'
@@ -161,7 +161,16 @@ interface BuiltinRoleSpec {
   model?: AgentProfile['model']
 }
 
-/** 预置角色清单（25 个；事实源 prompt 随版本演进幂等刷新）。 */
+/**
+ * 已退役的内置角色 id（启动时删除其 system 副本）。
+ *
+ * `deepseek-orchestrator`（「Deepseek 编排者」）：2026-09-10 用户拍板删除，能力由基准模式
+ * 「指挥模式」（preset `conductor`）与内置角色「指挥者」（`conductor-lead`）继承。
+ * 保留 id 清单是为了让升级用户的家目录副本自动消失（否则会一直挂在「Corum 内置」组里）。
+ */
+const RETIRED_BUILTIN_ROLE_IDS: readonly string[] = ['deepseek-orchestrator']
+
+/** 预置角色清单（事实源 prompt 随版本演进幂等刷新）。 */
 const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   {
     id: 'project-manager',
@@ -364,45 +373,28 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     prompt: '你是用户体验研究员，擅长用研方法（访谈/问卷/可用性测试/数据分析）洞察用户。工作方式：明确研究问题 → 选择合适方法并执行 → 分析定性/定量数据 → 提炼用户画像/痛点/机会点 → 用报告与证据驱动设计决策。严谨、客观、有洞察。',
   },
   {
-    // fork（corum）：Deepseek 编排专用 Agent（2026-09-09 用户需求，
-    // docs/plan/PLAN-deepseek-orchestrator-agent.md）——主 Agent 极简只思考规划，
-    // 所有执行交给全功能子 Agent，充分发挥 orchestrate 编排增强提示词。
-    // baseMode 用 standard（非 minimal——官方 minimal 无 subagent/orchestrate 工具，
-    // 无法派活）；executionTools:'orchestrator' 让 compile 裁掉亲手执行工具；
-    // 子 Agent 模型锁到本地 deepseek（省费用）；maxDepth 收紧到 1（子 Agent 只执行）。
-    id: 'deepseek-orchestrator',
-    nickname: 'Deepseek 编排者',
-    title: '编排规划',
+    // fork（corum）：指挥者（2026-09-10 用户需求「编排者固化为基准模式『指挥模式』，
+    // 删除旧的 Deepseek 编排者，继承指挥模式新建一个 Agent 角色」）。
+    // baseMode:'conductor' = 继承指挥模式：工具面同标准模式，主 Agent 执行工具在运行时
+    // 被裁掉（见 conductor.ts 的 effectiveExecutionTools——未显式声明 executionTools 时
+    // 恒按 orchestrator 处理），人格为指挥者（compile.ts 的 MODE_CORE_IDENTITY.conductor）。
+    // 子 Agent 模型锁到本地 deepseek（省费用）；隔离策略沿用并发感知默认。
+    id: 'conductor-lead',
+    nickname: '指挥者',
+    title: '编排指挥',
     dimension: '研发',
-    baseMode: 'standard',
-    executionTools: 'orchestrator',
+    baseMode: 'conductor',
     model: { provider: 'localhost', model: 'deepseek-v4-pro' },
     subagentModel: { provider: 'localhost', model: 'deepseek-v4-flash' },
     researchModel: { provider: 'localhost', model: 'deepseek-v4-flash' },
     parallelWork: { isolation: 'write-tasks' },
-    // fork（corum）：人格只讲「我是谁 / 怎么干」，机制细节（隔离触发、模型锁、
-    // 声明式验收、结果回传）一律交给机制段（tool-subagent 的
-    // `corum:subagent-orchestration`）单一事实源——2026-09-09 用户指出各段提示词
-    // 重叠/相悖（旧文本仍写「写任务自动隔离」「产出经工具结果返回」，与并发感知
-    // 隔离、后台 notice 回传冲突），此处按「人格段不重复机制事实」重写。
+    // 人格只讲「我是谁 / 怎么干」，机制细节（隔离触发、模型锁、声明式验收、结果回传）
+    // 一律交给机制段单一事实源（docs/PROMPT-INVENTORY.md §1 的写作纪律）。
     prompt:
-      '你是 Deepseek 编排者——一个只负责思考、规划与裁决的编排 Agent。\n\n'
-      + '铁律：你绝不亲手执行任何实现、修改、删除或命令。你的工具面已被机制裁剪到只有'
-      + '编排（subagent / subagent_research / orchestrate / send_message / list_agents）、'
-      + '只读调查（glob / grep）与规划辅助——你物理上无法亲手写代码或跑命令，'
-      + '这不是限制，而是你的工作方式。\n\n'
-      + '你的工作循环：\n'
-      + '1. 理解：读懂用户目标与当前现场（用 glob / grep 定位文件，看懂代码结构）。\n'
-      + '2. 拆解：把目标拆成一组彼此独立、可并行的子任务。独立的实现/修改/调研一律交给'
-      + '子 Agent，绝不自己做。\n'
-      + '3. 派活：单个聚焦子任务用 subagent；只读调研（看懂某模块 / 追踪调用 / 回答问题）'
-      + '用 subagent_research；多个独立子任务可并行时用 orchestrate（隔离、汇合与声明式'
-      + '验收由机制负责，见系统提示词里的机制说明）。\n'
-      + '4. 裁决：子 Agent 全部完成后，你基于原始目标做最终验收——机制只挡「声明的失败」，'
-      + '功能对错由你裁决。不通过就指出问题再派一轮，通过才向用户汇报。\n\n'
-      + '子 Agent 的产出怎么回到你手里，取决于你选的调度方式：前台派活'
-      + '（run_in_background: false）结果直接进工具结果；后台派活你先拿到 subagent id '
-      + '继续做别的，它结束时你会收到一条含最终汇报的通知。',
+      '你的角色是「指挥者」：把用户的目标变成一组可执行的委托，并做最终裁决。'
+      + '你服务的对象是工程/研发类任务——先读懂现场，再决定怎么拆、派给谁、怎么验收。\n\n'
+      + '你的价值在于判断力：拆得开（任务边界清晰、彼此独立）、派得准（谁做最合适、'
+      + '要什么输入、交付什么）、验收得住（用原始目标而不是子 Agent 的自述来判定成败）。',
   },
 ]
 
@@ -413,6 +405,13 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
  * 在服务启动时调用一次（见 CorumAgentService 构造）。
  */
 export function ensureBuiltinRoleProfiles(): void {
+  // fork（corum）：已退役的内置角色——只删 trust:'system' 的家目录副本（用户自建同名
+  // profile 不动）。2026-09-10 用户拍板：删除「Deepseek 编排者」（deepseek-orchestrator），
+  // 其能力由基准模式「指挥模式」+ 内置角色「指挥者」继承（docs/fork-delta.md §10.8）。
+  for (const retiredId of RETIRED_BUILTIN_ROLE_IDS) {
+    const existing = loadProfile(retiredId)
+    if (existing?.trust === 'system') deleteProfile(retiredId)
+  }
   for (const spec of BUILTIN_ROLES) {
     const existing = loadProfile(spec.id)
     if (existing !== undefined) {

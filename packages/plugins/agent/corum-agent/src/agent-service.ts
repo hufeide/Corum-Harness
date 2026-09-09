@@ -54,6 +54,7 @@ import {
   CONDUCTOR_STALE_SECTIONS,
   conductorExecutionDeny,
   conductorModeOf,
+  effectiveExecutionTools,
 } from './conductor.ts'
 import type { ConductorMode } from './conductor.ts'
 // fork（corum）：机制 deny 的收敛口径与 scope 可见工具名——与 fork #10 同源
@@ -285,7 +286,7 @@ export interface SaveProfileInput {
   /** 人格设置（不超过 500 字符）。 */
   persona?: string
   avatar?: string
-  baseMode: 'standard' | 'ptc' | 'minimal' | 'cordis'
+  baseMode: AgentProfile['baseMode']
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
   subagentModel?: { provider: string; model: string; reasoningEffort?: string }
@@ -1140,7 +1141,7 @@ export class CorumAgentService extends TypertRemoteService {
           this.applyConductorMode(
             String(resolved.sessionId),
             resolved.agent.ctx,
-            conductorModeOf(profile.id, isOfficialPreset, profile.executionTools),
+            conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
           )
           this.ctx.logger.info(`corum-agent(task): reused lane preset switched — ${reuse} → ${profile.id}`)
         }
@@ -1178,7 +1179,7 @@ export class CorumAgentService extends TypertRemoteService {
       this.applyConductorMode(
         String(sessionId),
         agentCtx,
-        conductorModeOf(profile.id, isOfficialPreset, profile.executionTools),
+        conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
       )
     }
     const agentOptions = { provider: effectiveModel.provider, model: effectiveModel.model }
@@ -1392,7 +1393,7 @@ export class CorumAgentService extends TypertRemoteService {
     // fork（corum）：指挥模式口径（conductor preset 或 executionTools:'orchestrator'）——
     // 下面三条恢复路径（复用活 agent / resume / 由官方层激活）都要按它决定是否
     // 在主 Agent scope 注册裁剪+人格。
-    const conductor = conductorModeOf(meta.profileId, isOfficialPreset, profile?.executionTools)
+    const conductor = conductorModeOf(meta.profileId, isOfficialPreset, profile === undefined ? undefined : effectiveExecutionTools(profile))
     const sid0 = SessionId(sessionId)
     const activated = this.ctx.agents.get(sid0)
     if (activated !== undefined) {
@@ -1458,7 +1459,7 @@ export class CorumAgentService extends TypertRemoteService {
     this.applyConductorMode(
       String(sessionId),
       resolved.agent.ctx,
-      conductorModeOf(profileId, isOfficialPreset, profile?.executionTools),
+      conductorModeOf(profileId, isOfficialPreset, profile === undefined ? undefined : effectiveExecutionTools(profile)),
     )
     this.ctx.logger.info(`corum-agent(task): preset switched — ${sessionId} → ${profileId}`)
     return { ok: true }

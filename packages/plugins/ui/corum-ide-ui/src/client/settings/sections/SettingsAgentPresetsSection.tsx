@@ -413,6 +413,7 @@ export function AgentPresetsSection() {
 /** 基础模式中文描述（继承自下拉 + 名片 inheritTag 共用）。 */
 const BASE_MODE_LABELS: Record<string, string> = {
   standard: '标准模式（完整编码能力）',
+  conductor: '指挥模式（只编排不亲手执行）',
   ptc: '多步操作模式',
   minimal: '极简双工具模式',
   cordis: '创造模式',
@@ -420,6 +421,7 @@ const BASE_MODE_LABELS: Record<string, string> = {
 
 const BASE_MODE_OPTIONS = [
   { id: 'standard', label: BASE_MODE_LABELS.standard },
+  { id: 'conductor', label: BASE_MODE_LABELS.conductor },
   { id: 'ptc', label: BASE_MODE_LABELS.ptc },
   { id: 'minimal', label: BASE_MODE_LABELS.minimal },
   { id: 'cordis', label: BASE_MODE_LABELS.cordis },

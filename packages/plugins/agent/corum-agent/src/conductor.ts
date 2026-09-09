@@ -113,6 +113,22 @@ export function conductorModeOf(
 }
 
 /**
+ * 一个 corum profile 的**有效**执行工具策略——`baseMode: 'conductor'` 的角色的
+ * 默认值就是 `orchestrator`（「继承指挥模式」= 工具面 + 指挥语义一起继承）。
+ *
+ * 显式声明优先：`executionTools: 'full'` 的角色即使 baseMode 是 conductor 也可亲手
+ * 执行（工具面相同，语义由作者选择）；缺省时按 baseMode 推导。
+ * @param profile - 只取 baseMode / executionTools 两个字段（避免与 AgentProfile 循环依赖）。
+ * @returns 有效执行工具策略（`undefined` = 普通模式）。
+ */
+export function effectiveExecutionTools(
+  profile: { baseMode: string; executionTools?: 'full' | 'orchestrator' },
+): 'full' | 'orchestrator' | undefined {
+  if (profile.executionTools !== undefined) return profile.executionTools
+  return profile.baseMode === 'conductor' ? 'orchestrator' : undefined
+}
+
+/**
  * 指挥者角色段的段名（基准模式用：**追加**在部署人格之后，不覆盖部署人格）。
  *
  * 与 `deployment:persona` 分开是有意的：`deployment:persona` 承载部署事实（桌面应用交互

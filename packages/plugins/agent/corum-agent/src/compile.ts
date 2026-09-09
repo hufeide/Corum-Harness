@@ -28,6 +28,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
 import type { AgentProfile, BaseMode, ProfileModel, PersonaPreset, ParallelWorkPolicy } from './profile.ts'
+// fork（corum）：指挥模式的指挥者人格——基准模式与 corum 角色（baseMode: 'conductor'）
+// 共用同一段文本（单一事实源，见 conductor.ts）。
+import { CONDUCTOR_PERSONA } from './conductor.ts'
 
 /**
  * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
@@ -281,6 +284,8 @@ function standardRows(): CordisRow[] {
 const BASE_MODE_PERSONA: Record<BaseMode, string> = {
   standard: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
   ptc: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
+  // 指挥模式：无用户身份段时用指挥者人格（+ 模型/目录占位行）。
+  conductor: `${CONDUCTOR_PERSONA}\n\nYou are powered by the {{model}} model. Your working directory is {{cwd}}.`,
   minimal: 'You are a helpful software engineer assistant.',
   cordis: 'You are a coding agent powered by the {{model}} model, running on the DeepSeek Harness. Your working directory is {{cwd}}.\n\nYou can read and modify the harness you run on. Its composition is Cordis: every capability is a plugin row in a `cordis.yml`, and an agent preset is one such file mounted for a single session.',
 }
@@ -299,6 +304,8 @@ const BASE_MODE_PERSONA: Record<BaseMode, string> = {
 const MODE_CORE_IDENTITY: Record<BaseMode, string | null> = {
   standard: null,
   ptc: null,
+  // 指挥模式：指挥者身份是该模式的核心（不可丢），再接用户身份段。
+  conductor: CONDUCTOR_PERSONA,
   minimal: 'You are a helpful software engineer assistant.',
   cordis: BASE_MODE_PERSONA.cordis,
 }

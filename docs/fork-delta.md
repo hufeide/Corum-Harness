@@ -1542,7 +1542,23 @@ Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 
 上下文。指挥者身份是**叠加的角色**，故用独立段名 `corum:conductor`（order =
 `DEPLOYMENT_PERSONA + 1`）。corum 旧 profile 形态不受影响（它的人格来自自己的 preset）。
 
-**验证**：`corum-agent/tests/conductor.spec.ts` 15 例（判定 / 平台 deny 口径 / 人格写作
-纪律 / preset 数据面与常量对账）；CDP 实机见 `docs/TODO.md` 2026-09-10「指挥模式」条。
+**「继承指挥模式」= 新增 `baseMode: 'conductor'`**（同日用户追加：「删除，然后继承指挥模式
+新建一个 Agent 角色」）：
+
+| 项 | 内容 |
+|---|---|
+| `BaseMode` | 增加 `'conductor'`（`profile.ts`） |
+| `effectiveExecutionTools()` | `baseMode: 'conductor'` 且未显式声明 `executionTools` → 恒 `'orchestrator'`（工具面 + 指挥语义一起继承；显式 `'full'` 仍可让角色亲手执行） |
+| `compile.ts` | `MODE_CORE_IDENTITY.conductor = CONDUCTOR_PERSONA`、`BASE_MODE_PERSONA.conductor = CONDUCTOR_PERSONA + 模型/目录行`（与基准模式共用同一段文本） |
+| 内置角色 | `conductor-lead`（「指挥者」，研发，`baseMode: 'conductor'`，子 Agent 模型锁本地 deepseek） |
+| 编辑器 | 基础模式下拉增加「指挥模式（只编排不亲手执行）」 |
+| 退役 | `deepseek-orchestrator` 从 `BUILTIN_ROLES` 移除，进 `RETIRED_BUILTIN_ROLE_IDS`（启动时删 `trust:'system'` 家目录副本；用户自建同名 profile 不动） |
+
+**验证**：`corum-agent/tests/conductor.spec.ts` 19 例 + `compile-orchestrator.spec.ts` 8 例
+（判定 / 平台 deny 口径 / 人格写作纪律 / preset 数据面与常量对账 / baseMode 继承 / 编译
+人格）；CDP 实机见 `docs/TODO.md` 2026-09-10「指挥模式」条（基准模式 + `conductor-lead`
+角色各一条泳道）。
 **守卫**：`verify-fork-drift.sh` §17 断言 conductor 与 standard 行面逐字节一致、常量
-`CONDUCTOR_PRESET_ID`/`CONDUCTOR_MODE_LABEL` 与目录/显示名对账。
+`CONDUCTOR_PRESET_ID`/`CONDUCTOR_MODE_LABEL` 与目录/显示名对账、`BaseMode` 含
+`'conductor'`、内置角色 `conductor-lead` 存在且用 `baseMode: 'conductor'`、旧 id 仅在
+退役清理项里、UI 下拉含指挥模式。

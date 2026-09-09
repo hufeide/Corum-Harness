@@ -619,6 +619,35 @@ if [ -d "$VENDORED_PRESETS" ]; then
   else
     fail "conductor.ts 缺 CONDUCTOR_PRESET_ID = 'conductor'（指挥模式判定失效）"
   fi
+  # 指挥模式是三处联动：preset 目录 / corum profile 的 baseMode / UI 下拉。任一处漏改
+  # 都会让「继承指挥模式」静默失效（profile 编译出普通工具面、或编辑器里选不到）。
+  PROFILE_SRC="$REPO_ROOT/packages/plugins/agent/corum-agent/src/profile.ts"
+  BUILTIN_SRC="$REPO_ROOT/packages/plugins/agent/corum-agent/src/builtin-profiles.ts"
+  UI_PRESET_SRC="$REPO_ROOT/packages/plugins/ui/corum-ide-ui/src/client/settings/sections/SettingsAgentPresetsSection.tsx"
+  if grep -qE "^export type BaseMode = .*'conductor'" "$PROFILE_SRC"; then
+    pass "BaseMode 含 'conductor'（corum 角色可继承指挥模式）"
+  else
+    fail "profile.ts 的 BaseMode 缺 'conductor'——corum 角色无法继承指挥模式"
+  fi
+  if grep -qF "id: 'conductor-lead'" "$BUILTIN_SRC" && grep -qF "baseMode: 'conductor'" "$BUILTIN_SRC"; then
+    pass "内置角色「指挥者」（conductor-lead）继承指挥模式"
+  else
+    fail "builtin-profiles.ts 缺 conductor-lead 角色或未用 baseMode: 'conductor'"
+  fi
+  if grep -qF "'deepseek-orchestrator'" "$BUILTIN_SRC"; then
+    if grep -qF "RETIRED_BUILTIN_ROLE_IDS" "$BUILTIN_SRC"; then
+      pass "旧「Deepseek 编排者」已退役（仅在 RETIRED_BUILTIN_ROLE_IDS 里作清理项）"
+    else
+      fail "builtin-profiles.ts 仍以内置角色形式保留 deepseek-orchestrator（应改为退役清理项）"
+    fi
+  else
+    fail "builtin-profiles.ts 缺 RETIRED_BUILTIN_ROLE_IDS 的退役项（升级用户的家目录副本不会被清理）"
+  fi
+  if grep -qF "id: 'conductor', label: BASE_MODE_LABELS.conductor" "$UI_PRESET_SRC"; then
+    pass "Agent 预设编辑器的基础模式下拉含指挥模式"
+  else
+    fail "SettingsAgentPresetsSection 的基础模式下拉缺 conductor——用户无法在编辑器里选指挥模式"
+  fi
   if [ -f "$VENDORED_PRESETS/conductor/agent.cordis.yml" ] && [ -f "$VENDORED_PRESETS/standard/agent.cordis.yml" ]; then
     if [ "$(sed -n '/^- id: /,$p' "$VENDORED_PRESETS/conductor/agent.cordis.yml")"       = "$(sed -n '/^- id: /,$p' "$VENDORED_PRESETS/standard/agent.cordis.yml")" ]; then
       pass "指挥模式工具面与标准模式逐行一致（裁剪只在运行时 agent scope）"
