@@ -36,6 +36,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GridActions, PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
+import type { RemoteEventFace } from './AppFrame.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { ThemePresenter } from '@corum/corum-ui-base/client'
@@ -245,6 +246,8 @@ export function apply(ctx: ClientContext): void {
         // 操作面（attachGrid）挂进 LayoutController，ctx.layout 服务方法即可
         // 直连网格（替代原 window CustomEvent 事件桥）。
         return {
+          // 子 Agent 花名册订阅源（会话条胶囊 + 统计浮层的子 Agent 区）。
+          remote: ctx.remote as unknown as RemoteEventFace,
           setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
           attachGridActions: (a: GridActions) => { layout.attachGrid(a) },
           // 插件中心触发：壳不持面板（业务 chrome 已拆出），经 LayoutController

@@ -1207,3 +1207,120 @@
   font-size: 12px;
   color: var(--dsw-alias-label-dimmed);
 }
+
+/* ── 会话顶栏槽（conversation.session.header，2026-09-10 用户定调）──
+   titlebar-row 的会话段从窗口级浮层搬进会话级槽：随会话视图渲染，会话拖出为
+   独立窗口时自带顶栏。容器只负责让出间距，条本身沿用 .agentTitleBar。 */
+.sessionHeaderSlot {
+  flex: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px 0;
+  box-sizing: border-box;
+}
+
+/* 常驻子 Agent 胶囊（用户 2026-09-10：放 Title 右边、与状态展示合并）。
+   空闲（无运行中子 Agent）时整段不渲染，状态胶囊回落为纯统计。 */
+.agentCapsuleDivider {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  margin: 0 2px;
+  background: var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+.agentCapsuleDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+.agentCapsuleCount {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.agentCapsuleLabel {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-primary);
+}
+.agentCapsuleStep {
+  flex: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.agentCapsuleMore {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 状态详情浮层的子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。 */
+.statusDetailAgents {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+.statusDetailAgentsHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.statusDetailAgentsTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.statusDetailAgentsCount {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.statusDetailAgentRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.statusDetailAgentDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+.statusDetailAgentDot[data-done] { background: var(--dsw-alias-state-success-primary); }
+.statusDetailAgentLabel {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+.statusDetailAgentRow[data-done] .statusDetailAgentLabel { color: var(--dsw-alias-label-secondary); }
+.statusDetailAgentStep {
+  flex: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.statusDetailAgentBadge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--corum-glass-2);
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}

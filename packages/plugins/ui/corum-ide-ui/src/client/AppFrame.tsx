@@ -218,11 +218,13 @@ function TrendLine({ color, width = 170, height = 40 }: { color: string; width?:
 /** 状态栏详情卡（设计稿 GpfJh，×1.25 放大 + 长方形三列 chart）：hover/点击
  *  status-pill 展开的会话统计浮层。长方形 = 左（上下文 donut+图例）右（命中率/
  *  累计费用两个趋势曲线）三列撑宽。 */
-function AgentStatusDetail({ title, projections: p, anchor }: {
+function AgentStatusDetail({ title, projections: p, anchor, roster }: {
   title: string
   projections: AgentSessionProjections | undefined
   /** 会话区在视口中的水平锚点（left/width），详情卡据此在会话区水平居中（用户定调）。 */
   anchor: { left: number; width: number }
+  /** 子 Agent 花名册（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。 */
+  roster: readonly SubagentRosterEntry[]
 }) {
   const stats = p?.sessionStats
   const usage = p?.tokenUsage
@@ -340,11 +342,131 @@ function AgentStatusDetail({ title, projections: p, anchor }: {
           </span>
         </div>
       </div>
+      {/* 子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。
+          运行中在前、已完成在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标。 */}
+      {roster.length > 0 && (
+        <div className={css.statusDetailAgents}>
+          <div className={css.statusDetailAgentsHead}>
+            <span className={css.statusDetailAgentsTitle}>子 Agent</span>
+            <span className={css.statusDetailAgentsCount}>
+              {roster.filter(entry => !entry.done).length} 运行中 · {roster.filter(entry => entry.done).length} 已完成
+            </span>
+          </div>
+          {rankRoster(roster).map((entry) => (
+            <div key={entry.childSessionId} className={css.statusDetailAgentRow} data-done={entry.done || undefined}>
+              <span className={css.statusDetailAgentDot} data-done={entry.done || undefined} />
+              <span className={css.statusDetailAgentLabel} title={entry.label}>{entry.label}</span>
+              <span className={css.statusDetailAgentStep}>
+                {entry.done ? '已完成' : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
+              </span>
+              {entry.isolated && <span className={css.statusDetailAgentBadge}>隔离</span>}
+              {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor, onOpenTrajectory }: {
+/** 子 Agent 花名册条目（会话顶栏常驻胶囊 + 详情浮层的子 Agent 区数据源）。 */
+interface SubagentRosterEntry {
+  readonly childSessionId: string
+  readonly label: string
+  readonly mode: 'foreground' | 'background'
+  readonly isolated: boolean
+  readonly step: number
+  readonly currentAction?: string
+  readonly done: boolean
+  readonly lastActive: number
+}
+
+/** `ctx.remote` 的窄化面（只用到转发事件订阅）。 */
+export interface RemoteEventFace {
+  $on: (event: string, listener: (frame: never) => void) => () => void
+}
+
+/** 花名册内帧形（corum/subagent/child 与 corum/subagent/progress 的并集窄化）。 */
+interface ChildFrame {
+  parentSessionId?: string
+  callId?: string
+  childSessionId?: string
+  label?: string
+  mode?: 'foreground' | 'background'
+  isolated?: boolean
+  sessionId?: string
+  turn?: number
+  step?: number
+  currentAction?: string
+  done?: boolean
+  lastActive?: number
+}
+
+/**
+ * 当前会话的子 Agent 花名册（2026-09-10 用户定调：常驻胶囊与状态展示合并）。
+ *
+ * 数据源 = 统一事件中心转发帧（`corum/subagent/child` 精确父子映射 +
+ * `corum/subagent/progress` 进度推送），按父会话过滤后折叠成条目；运行中在前、
+ * 最近活动排序。页面刷新后无回放帧，花名册从空开始，下一次派遣即恢复
+ * （与 SubagentCard 的「广播优先、时间就近兜底」同源，这里只取精确通道）。
+ */
+function useSubagentRoster(remote: RemoteEventFace | undefined, sessionId: string | undefined): readonly SubagentRosterEntry[] {
+  const [entries, setEntries] = useState<readonly SubagentRosterEntry[]>([])
+  useEffect(() => {
+    if (remote === undefined || sessionId === undefined) { setEntries([]); return undefined }
+    setEntries([])
+    const upsert = (patch: Partial<SubagentRosterEntry> & { childSessionId: string }): void => {
+      setEntries((prev) => {
+        const index = prev.findIndex(e => e.childSessionId === patch.childSessionId)
+        if (index < 0) {
+          if (patch.label === undefined) return prev
+          return [...prev, {
+            childSessionId: patch.childSessionId,
+            label: patch.label,
+            mode: patch.mode ?? 'foreground',
+            isolated: patch.isolated ?? false,
+            step: patch.step ?? 0,
+            ...(patch.currentAction === undefined ? {} : { currentAction: patch.currentAction }),
+            done: patch.done ?? false,
+            lastActive: patch.lastActive ?? Date.now(),
+          }]
+        }
+        const next = [...prev]
+        next[index] = { ...next[index], ...patch } as SubagentRosterEntry
+        return next
+      })
+    }
+    const disposeChild = remote.$on('corum/subagent/child', (frame: ChildFrame) => {
+      if (frame.parentSessionId !== sessionId || frame.childSessionId === undefined) return
+      upsert({
+        childSessionId: frame.childSessionId,
+        ...(frame.label === undefined ? {} : { label: frame.label }),
+        ...(frame.mode === undefined ? {} : { mode: frame.mode }),
+        ...(frame.isolated === undefined ? {} : { isolated: frame.isolated }),
+        lastActive: Date.now(),
+      })
+    })
+    const disposeProgress = remote.$on('corum/subagent/progress', (frame: ChildFrame) => {
+      if (frame.sessionId === undefined) return
+      upsert({
+        childSessionId: frame.sessionId,
+        ...(frame.step === undefined ? {} : { step: frame.step }),
+        ...(frame.currentAction === undefined ? {} : { currentAction: frame.currentAction }),
+        ...(frame.done === undefined ? {} : { done: frame.done }),
+        ...(frame.lastActive === undefined ? {} : { lastActive: frame.lastActive }),
+      })
+    })
+    return () => { disposeChild(); disposeProgress() }
+  }, [remote, sessionId])
+  return entries
+}
+
+/** 运行中在前、最近活动倒序（胶囊取第一个当「当前子 Agent」）。 */
+function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentRosterEntry[] {
+  return [...entries].sort((a, b) => (Number(a.done) - Number(b.done)) || (b.lastActive - a.lastActive))
+}
+
+function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor, onOpenTrajectory, remote }: {
   sessionTitle?: string | undefined
   /** 当前会话 id（AppFrame 从 useSessions 取 current 下发；空态/blank 为 undefined）。 */
   currentSessionId?: string | undefined
@@ -354,6 +476,8 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
   sessionAnchor: { left: number; width: number }
   /** fork（corum）：轨迹按钮 → details 抽屉轨迹视图（fork #12）。 */
   onOpenTrajectory: () => void
+  /** 统一事件中心 remote 面（子 Agent 花名册订阅源；缺省不渲染胶囊）。 */
+  remote?: RemoteEventFace | undefined
 }) {
   const titleRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
@@ -366,6 +490,10 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
     if (currentSessionId === undefined) return undefined
     return (s.byId as unknown as Readonly<Record<string, { projectionValues?: AgentSessionProjections }>>)[currentSessionId]?.projectionValues
   })
+  // 子 Agent 花名册（2026-09-10 用户定调：胶囊与状态展示合并到同一 pill）。
+  const roster = rankRoster(useSubagentRoster(remote, currentSessionId))
+  const running = roster.filter(entry => !entry.done)
+  const lead = running[0]
 
   // 标题溢出检测（字号/内容/宽度变化时重测）。用 useLayoutEffect 在 paint 前
   // 同步测量——避免「旧 overflowing=true + 新标题」先渲染一帧跑马灯双份文本。
@@ -424,9 +552,21 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
         >
           <span className={css.agentStatusDot} />
           <span className={css.agentStats}>{agentStatsSummary(projections)}</span>
+          {/* 常驻子 Agent 胶囊（用户 2026-09-10 定调：放 Title 右边、与状态展示合并）：
+              仅在当前会话有运行中子 Agent 时出现，空闲时整段不渲染。 */}
+          {lead !== undefined && (
+            <>
+              <span className={css.agentCapsuleDivider} />
+              <span className={css.agentCapsuleDot} />
+              <span className={css.agentCapsuleCount}>运行中 {running.length}</span>
+              <span className={css.agentCapsuleLabel}>{lead.label}</span>
+              <span className={css.agentCapsuleStep}>Step {lead.step}</span>
+              {running.length > 1 && <span className={css.agentCapsuleMore}>+{running.length - 1}</span>}
+            </>
+          )}
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${css.agentChev}${detailOpen ? ` ${css.agentChevOpen}` : ''}`}><path d="m6 9 6 6 6-6" /></svg>
         </button>
-        {detailOpen && <AgentStatusDetail title={title} projections={projections} anchor={sessionAnchor} />}
+        {detailOpen && <AgentStatusDetail title={title} projections={projections} anchor={sessionAnchor} roster={roster} />}
       </span>
       <span className={css.agentSpacer} />
       {/* fork（corum）：轨迹按钮是开发者功能——仅在「设置 → 高级 → 开发者模式」
@@ -439,6 +579,72 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
         </button>
       )}
+    </div>
+  )
+}
+
+/** sessions 服务面的窄化（只用到 list 的 uSES 读写）。 */
+export interface SessionsListFace {
+  list: {
+    getSnapshot: () => SessionListState
+    subscribe: (listener: () => void) => () => void
+  }
+}
+
+/** 会话列表选择器 hook（uSES 源 = sessions.list）。 */
+function useSessionListSelector<T>(sessions: SessionsListFace, selector: (state: SessionListState) => T): T {
+  return useSyncExternalStore(sessions.list.subscribe, () => selector(sessions.list.getSnapshot()))
+}
+
+/**
+ * 会话顶栏槽内容（`conversation.session.header`，2026-09-10 用户定调）。
+ *
+ * 背景：titlebar-row 原先是**窗口级**浮层（覆盖左列、整行 app-region:drag），
+ * 会话拖出为独立窗口后这一段仍留在主窗口——会话标题/状态/Agent 胶囊在独立窗口
+ * 里看不到。改为把会话段注册进**会话级槽**：它随会话视图渲染，独立窗口自然带上
+ * 自己的顶栏；窗口控制（红绿灯 + 全局图标按钮）仍留在主窗口的侧栏上方。
+ * @param props.sessionId - 槽的会话作用域 id。
+ * @param props.sessions - `ctx.sessions`（读标题/统计投影）。
+ * @param props.remote - `ctx.remote`（子 Agent 花名册订阅源）。
+ * @param props.onOpenTrajectory - 轨迹按钮动作（壳的 grid 区域点亮）。
+ */
+export function SessionHeaderSlot({ sessionId, sessions, remote, onOpenTrajectory }: {
+  sessionId: string
+  sessions: SessionsListFace
+  remote?: RemoteEventFace | undefined
+  onOpenTrajectory: () => void
+}) {
+  const barRef = useRef<HTMLDivElement | null>(null)
+  const [anchor, setAnchor] = useState({ left: 0, width: 0 })
+  const title = useSessionListSelector(sessions, s => (s.byId[sessionId] as { displayTitle?: string } | undefined)?.displayTitle)
+  const useSessionsCompat = useCallback(
+    <T,>(selector: (state: SessionListState) => T): T => useSessionListSelector(sessions, selector),
+    [sessions],
+  )
+  // 详情浮层锚点 = 顶栏在视口中的水平中心（会话列宽变化/窗口缩放时重测）。
+  useLayoutEffect(() => {
+    const el = barRef.current
+    if (el === null) return undefined
+    const measure = (): void => {
+      const rect = el.getBoundingClientRect()
+      setAnchor(prev => (prev.left === rect.left && prev.width === rect.width ? prev : { left: rect.left, width: rect.width }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    window.addEventListener('resize', measure)
+    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
+  }, [])
+  return (
+    <div ref={barRef} className={css.sessionHeaderSlot}>
+      <AgentTitleBar
+        sessionTitle={title}
+        currentSessionId={sessionId}
+        useSessions={useSessionsCompat as AppFrameProps['useSessions']}
+        sessionAnchor={anchor}
+        onOpenTrajectory={onOpenTrajectory}
+        {...(remote === undefined ? {} : { remote })}
+      />
     </div>
   )
 }
@@ -570,6 +776,8 @@ export type AppFrameProps =
   & {
     /** 主题偏好选择器 hook（inject hooks.theme 绑定而来，selector 形式）。 */
     useTheme: <S>(sel: (p: ThemePreference) => S, eq?: (a: S, b: S) => boolean) => S
+    /** 统一事件中心 remote 面（子 Agent 花名册订阅源；由 index.tsx 注入）。 */
+    remote?: RemoteEventFace | undefined
     /** 主题偏好写入（直通 theme 服务）。 */
     setTheme: (p: ThemePreference) => void
     /**
@@ -597,6 +805,7 @@ export function IdeAppFrame({
   setTheme,
   openPluginManager: onOpenPluginManager,
   attachGridActions,
+  remote,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   const detailsSession = useSessions((s: SessionListState) => {
@@ -1160,9 +1369,10 @@ export function IdeAppFrame({
           leafTopOffset 给 sidebar/conversation 格让位本行）。 */}
       <div
         className={css.titlebarRow}
-        /* 浮层宽度精确 = 对话区右缘：命中/可见范围只覆盖左列（侧栏+对话区）
-           上方，右侧（编辑器/资源管理器/终端上方）连浮层都没有——纯内容区。 */
-        style={{ right: 'auto', width: Math.max(0, convoBox.x + convoBox.width) }}
+        /* 浮层宽度 = 侧栏右缘（2026-09-10 用户定调：会话段搬进
+           conversation.session.header，本行只剩主窗口的窗口控制）。
+           右侧（对话区/编辑器/终端上方）无浮层——纯内容区。 */
+        style={{ right: 'auto', width: sidebarRight }}
       >
         {/* 窗口标题栏宽度跟随侧栏右缘（设计稿：覆盖侧栏正上方，侧栏拖拽时一起变）。
             该段整段 app-region:drag（窗口拖拽），内层按钮 no-drag。 */}
@@ -1178,11 +1388,13 @@ export function IdeAppFrame({
             settingsSlot={renderSlot('sidebar.settings', { wide: false })}
           />
         </div>
-        {/* Agent 标题栏覆盖对话区正上方：绝对定位 left=对话区左缘、width=对话区宽，
-            左缘/右缘始终对齐对话区，侧栏/对话区拖拽时自动跟随调整。
-            空态（hero）**保留标题栏座位**（titlebarDrag 空白 drag 条——方便拖窗口，
-            2026-08-30 用户定调），但不渲染内容（会话标题/状态胶囊/轨迹按钮是会话态
-            信息，空态无会话不显示）。 */}
+        {/* 会话段（会话名 + 状态胶囊 + 常驻 Agent 胶囊 + 轨迹）。
+            ⚠️ 2026-09-10 结构迁移进行中：目标是把这一段搬进
+           `conversation.session.header`（会话级槽，随会话拖出为独立窗口），但该槽
+           已被 corum-ui-conversation 的 ConversationSessionHeader 占用（重复注册
+           会让会话插件 apply 失败——实测）。正确做法是**扩展会话插件自己的头部
+           组件**，而不是在壳里抢注册；本轮先保留窗口层渲染（胶囊/浮层已按用户
+           定调合并）。 */}
         <div
           className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
           data-hero={isHero || undefined}
@@ -1195,6 +1407,7 @@ export function IdeAppFrame({
               useSessions={useSessions}
               sessionAnchor={{ left: convoBox.x, width: convoBox.width }}
               onOpenTrajectory={onOpenTrajectory}
+              {...(remote === undefined ? {} : { remote })}
             />
           )}
         </div>
