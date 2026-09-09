@@ -440,10 +440,16 @@ export interface ComposerBarOwnerProps {
   placeholder?: string
   /** Optional content rendered above the composer surface. */
   accessory?: ReactNode
-  /** fork（corum）：工具栏左侧前导内容（Agent 选择下拉 + AI 润色按钮），渲染在
+  /** fork（corum）：工具栏左侧前导内容（Agent 选择下拉），渲染在
    * 访问模式选择器之后、`conversation.input.left` 槽之前。官方 0.1.3 删除了
-   * leftItems owner prop，corum 以此增量字段保留工具栏内定制（不改官方字段）。 */
+   * leftItems owner prop，corum 以此增量字段保留工具栏内定制（不改官方字段）。
+   *  注：AI 润色按钮**不在**此处——设计稿唯一入口是输入区右上角的 sparkle
+   *  （InputBar 自渲染），润色实现经下方 `polishDraft` 下发（2026-09-09 去重）。 */
   toolbarLeading?: ReactNode
+  /** fork（corum）：会话内提示词润色（corumAgent/polishConversation + 最近 6 条
+   *  user/AI 最终输出），供 InputBar 的 sparkle 按钮调用——设计稿里润色只有这一个
+   *  入口，实现由 owner（ConversationRoot）下发，避免 occupant 反向依赖 RPC 面。 */
+  polishDraft?: (sessionId: string, text: string) => Promise<string>
 }
 
 /** Package-private operations injected into the resident composer bar. */

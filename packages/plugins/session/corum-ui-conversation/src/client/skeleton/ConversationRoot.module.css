@@ -603,28 +603,9 @@
 
 /* Agent chip（2026-09-02 用户定调：task 泳道 composer 可选 Agent）——玻璃 chip
    内嵌无框下拉，hover 高亮提示可点。 */
-/* 会话内提示词润色按钮（composer 工具栏；魔杖图标 ghost 小钮） */
-.polishBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-  flex: none;
-}
-.polishBtn:hover:not(:disabled) {
-  background: var(--corum-glass-2, transparent);
-  color: var(--dsw-alias-brand-text);
-}
-.polishBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
+/* 会话内提示词润色按钮的样式已移除（2026-09-09）：设计稿只有一个入口——输入区
+   右上角的 sparkle（样式在 InputBar.module.css 的 .sparkleIcon），此处曾另挂一个
+   Wand2 按钮（.polishBtn），与 sparkle 同屏重复（用户报障）。 */
 
 .agentLockChip {
   display: inline-flex;

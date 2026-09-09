@@ -45,7 +45,7 @@ export const InputBar = memo(function InputBar({
   renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory, toolbarLeading,
+  placeholder, accessory, toolbarLeading, polishDraft,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -352,6 +352,30 @@ export const InputBar = memo(function InputBar({
     ? null
     : <PermissionSelect key={sessionId} value={permissions} locked={locked} command={command} t={t} />
 
+  // fork（corum）：提示词润色（设计稿 sparkle，输入区右上角）——**唯一入口**。
+  // 润色实现由 apply.ts 经 contract 的 `polishDraft` 下发（corumAgent.polishConversation
+  // + 最近 6 条 user/AI 最终输出），结果写回草稿。
+  // ⚠️ 回归史（2026-09-09 用户报障「有两个润色按钮」）：本按钮曾是 `console.log`
+  // 占位，而 ConversationRoot 又在工具栏里另挂了一个 Wand2 按钮（真实现）——同屏两个。
+  // 现按设计稿只保留本按钮，并把真实现接进来；工具栏那份已删。
+  const [polishing, setPolishing] = useState(false)
+  const canPolish = polishDraft !== undefined && !locked && !polishing && draft.trim() !== ''
+  const runPolish = useCallback(async (): Promise<void> => {
+    if (polishDraft === undefined || sessionId === undefined || inputActions === undefined) return
+    const text = draft.trim()
+    if (text === '' || polishing) return
+    setPolishing(true)
+    try {
+      const polished = await polishDraft(String(sessionId), text)
+      if (polished.trim() !== '') inputActions.setDraft(polished)
+    } catch (error) {
+      // 润色失败不静默：草稿保持不变，错误留给 console（与 ConversationRoot 时期一致）。
+      console.error('[conversation] polish failed', error)
+    } finally {
+      setPolishing(false)
+    }
+  }, [polishDraft, sessionId, inputActions, draft, polishing])
+
   // Claim ghost hint: rendered by CSS as generated content after the last
   // paragraph while the claim's args are blank (a hint implies a single-line
   // token draft). The translated per-command hint wins over the claim's own.
@@ -453,17 +477,17 @@ export const InputBar = memo(function InputBar({
             )}
             <DecoratorPortals editor={workspaceTrigger ? null : editor} />
           </div>
-          {/* 设计稿 sparkle 图标（提示词优化按钮，始终显示，可点击）：19×19 */}
+          {/* 设计稿 sparkle 图标（提示词优化按钮，输入区右上角）：19×19。
+              fork（corum）：接真实现（polishDraft → 写回草稿），空草稿/润色中禁用。 */}
           {!workspaceTrigger && (
             <button
               type="button"
               className={css.sparkleIcon}
               aria-label="优化提示词"
-              disabled={locked}
-              onClick={() => {
-                // TODO: 接入提示词优化功能
-                console.log('优化提示词')
-              }}
+              aria-busy={polishing ? 'true' : undefined}
+              title={polishing ? '润色中…' : 'AI 润色（结合对话上下文优化本次提问）'}
+              disabled={!canPolish}
+              onClick={() => { void runPolish() }}
             >
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />

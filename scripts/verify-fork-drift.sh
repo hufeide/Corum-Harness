@@ -188,6 +188,9 @@ MUST_CONTAIN=(
   "packages/plugins/session/corum-ui-conversation/src/client/skeleton/InputBar.tsx::aria-label=\"语音输入\""
   # .tbtn 必须显式 padding: 0（否则吃 UA 的 button padding 1px 6px，26 宽剩 14px，图标被压扁）。
   "packages/plugins/session/corum-ui-conversation/src/client/skeleton/InputBar.module.css::必须显式归零"
+  # 提示词润色唯一入口 = 输入区右上角 sparkle（2026-09-09 去重：toolbar 里那个 Wand2 已删）。
+  "packages/plugins/session/corum-ui-conversation/src/client/skeleton/InputBar.tsx::polishDraft"
+  "packages/plugins/session/corum-ui-conversation/src/client/contract/slots.ts::polishDraft?: (sessionId: string, text: string) => Promise<string>"
 )
 for entry in "${MUST_CONTAIN[@]}"; do
   corum_rel="${entry%%::*}"

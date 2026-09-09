@@ -420,22 +420,6 @@ export function ConversationRoot({
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
-  // ── 会话内提示词润色（结合最近 6 条 user/AI 最终输出，意图自动判断）──
-  const [polishBusy, setPolishBusy] = useState(false)
-  const doPolish = useCallback(async () => {
-    const text = (inputState?.draft ?? '').trim()
-    if (text === '' || sessionId === undefined || polishBusy || polishDraft === undefined) return
-    setPolishBusy(true)
-    try {
-      const polished = await polishDraft(String(sessionId), text)
-      inputActions?.setDraft(polished)
-    } catch (e) {
-      console.error('[conversation] polish failed', e)
-    } finally {
-      setPolishBusy(false)
-    }
-  }, [inputState?.draft, sessionId, polishBusy, polishDraft, inputActions])
-
   // The chip is a selector; label resolution walks the flow top-down:
   //   1. a just-picked workspace (pending) → its title;
   //   2. cold start, no session yet → placeholder ("Choose workspace");
@@ -577,7 +561,10 @@ export function ConversationRoot({
         // user clears it.
         ? { blocked: composerBlock, placeholder: composerBlock.reason }
         : hasSession ? {} : { placeholder: t('placeholder.hero') }),
-    // corum 工具栏扩展（Agent 选择 + AI 润色）走 corum 增量字段 toolbarLeading
+    // fork（corum）：polishDraft 随 props 下发给 InputBar——提示词润色的唯一入口是
+    // 输入区右上角的 sparkle 按钮（此处不再另挂 Wand2 按钮，避免同屏两个）。
+    polishDraft,
+    // corum 工具栏扩展（Agent 选择）走 corum 增量字段 toolbarLeading
     //（官方 0.1.3 删除了 overlay/leftItems/rightItems/footer owner props，槽由
     // InputBar 自渲染；corum 工具栏内定制经 toolbarLeading 渲染在 accessSelect 后）。
     toolbarLeading: zone === undefined ? undefined : (
@@ -617,18 +604,10 @@ export function ConversationRoot({
             />
           </span>
         )}
-        {/* 会话内提示词润色（结合最近对话上下文，意图自动判断：推进/新问题/BUG） */}
-        {hasSession && (
-          <button
-            type="button"
-            className={css.polishBtn}
-            title={polishBusy ? '润色中…' : 'AI 润色（结合对话上下文优化本次提问）'}
-            disabled={polishBusy || (inputState?.draft?.trim() ?? '') === ''}
-            onClick={() => void doPolish()}
-          >
-            <Wand2 size={13} />
-          </button>
-        )}
+        {/* 会话内提示词润色按钮已移除（2026-09-09 用户报障「有两个」）：设计稿只有
+            一个入口——输入区右上角的 sparkle 按钮（InputBar 的 .sparkleIcon）。此处
+            曾另挂一个 Wand2 按钮（真实现），与 sparkle 同屏重复；现把真实现经下方
+            composer.bar props 的 `polishDraft` 下发给 InputBar，由 sparkle 承载。 */}
       </>
     ),
   })
