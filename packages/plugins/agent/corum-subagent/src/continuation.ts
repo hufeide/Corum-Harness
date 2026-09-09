@@ -398,6 +398,13 @@ export class SubagentContinuationManager {
    */
   private readonly closingScopes = new Map<Agent, Set<Agent>>()
   private draining = false
+  /**
+   * corum（fork #9 增量）：被用户显式停止过的会话（`turn/end` 因用户中止）。
+   * 停止期间其子树的结算通知只注入、不唤醒——否则后台子 Agent 的汇报会把已停下
+   * 的主 Agent 拉起来继续干活（2026-09-09 用户实测：「用户停止后对话中所有任务
+   * 都应该立即停止」）。用户在该会话重新发消息时清除。
+   */
+  private readonly userStopped = new Set<SessionId>()
 
   constructor(
     private readonly ctx: Context,
@@ -777,6 +784,42 @@ export class SubagentContinuationManager {
     )
   }
 
+  /**
+   * corum（fork #9 增量）：用户停止一个会话 = 立即停止该会话子树里所有在跑的
+   * 可续接子 Agent，并抑制它们结算时的「唤醒父会话」。
+   *
+   * 触发方是宿主对官方 `session/event` 的观察（`turn/end` 且
+   * `reason.kind === 'aborted' && reason.reason.kind === 'user'`，与官方
+   * session-controller 的停止入口 `agent.cancel({ kind: 'user' })` 同源）。
+   * 官方语义只取消该会话自己的 turn：后台子 Agent 继续跑，其
+   * `subagent-settled` 通知随后把父会话唤醒——用户实测「已停止，对话还在动」。
+   * 本方法把停止沿 ownership 图级联：逐个 `Agent.cancel({ kind: 'user' },
+   * { keepInbox: true })`，**不 dispose**（子会话仍可续接，台账/卡片状态不变），
+   * 后续唤醒由 {@link userStoppedFor} 抑制。
+   * @param sessionId - 被用户停止的会话 id（停止标记的根）。
+   * @returns 实际被取消的活跃子 Agent 数（供日志与测试断言）。
+   */
+  stopConversation(sessionId: SessionId): number {
+    this.userStopped.add(sessionId)
+    let cancelled = 0
+    // 由深到浅：先停最深的后代，避免中间层在被取消前又推进一轮。
+    for (const activation of this.descendantActivations(sessionId).reverse()) {
+      if (activation.disposal !== undefined) continue
+      activation.handle.agent.cancel({ kind: 'user' }, { keepInbox: true })
+      cancelled += 1
+    }
+    return cancelled
+  }
+
+  /**
+   * corum（fork #9 增量）：解除该会话的用户停止标记——用户重新发消息（或会话
+   * 释放）后，结算通知恢复默认的「唤醒父会话」语义。幂等。
+   * @param sessionId - 会话 id。
+   */
+  resumeConversation(sessionId: SessionId): void {
+    this.userStopped.delete(sessionId)
+  }
+
   /** Deliver one resident continuable child's message to its live direct parent. */
   private sendToParent(
     activation: Activation,
@@ -1013,6 +1056,42 @@ export class SubagentContinuationManager {
       parentSession = parent.session.header.parentSession
     }
     return lineage
+  }
+
+  /**
+   * corum（fork #9 增量）：`rootId` 的活跃后代 Activation，由浅到深。
+   * 沿 Activation 自己的 `parentSession` 链（根会话自身不是 Activation），
+   * 不依赖 `ancestry` 快照，父 Agent 换代也能命中。
+   */
+  private descendantActivations(rootId: SessionId): Activation[] {
+    const byParent = new Map<SessionId, Activation[]>()
+    for (const activation of this.activations.values()) {
+      const siblings = byParent.get(activation.parentSession)
+      if (siblings === undefined) byParent.set(activation.parentSession, [activation])
+      else siblings.push(activation)
+    }
+    const out: Activation[] = []
+    const seen = new Set<SessionId>([rootId])
+    const queue: SessionId[] = [rootId]
+    while (queue.length > 0) {
+      const current = queue.shift() as SessionId
+      for (const child of byParent.get(current) ?? []) {
+        if (seen.has(child.childId)) continue
+        seen.add(child.childId)
+        out.push(child)
+        queue.push(child.childId)
+      }
+    }
+    return out
+  }
+
+  /**
+   * corum（fork #9 增量）：该 Agent 是否处在「用户已停止」的会话子树里。
+   * 自身或任一在世祖先被标记即成立——孙辈的通知不得唤醒已被停下的中间层。
+   */
+  private userStoppedFor(agent: Agent): boolean {
+    if (this.userStopped.size === 0) return false
+    return this.liveLineage(agent).some(candidate => this.userStopped.has(candidate.id))
   }
 
   /**
@@ -1621,7 +1700,9 @@ export class SubagentContinuationManager {
    * told that child was not established. A parent that is no longer live is not
    * an error; the child's own Session remains the durable record either way.
    * A parent whose own lineage is already closing receives the notice without a
-   * wake, because teardown is not a reason to start a turn.
+   * wake, because teardown is not a reason to start a turn. corum（fork #9
+   * 增量）：用户显式停止过的会话子树同样只注入、不唤醒（见
+   * {@link stopConversation}）。
    *
    * Never blocks disposal. A delivery failure is logged and dropped, because
    * retaining a child to retry a notice would pin its whole ancestry in
@@ -1658,7 +1739,10 @@ export class SubagentContinuationManager {
       // reading its inbox and records the account in the log either way; it
       // does NOT survive that parent's own disposal, whose `keepInbox: false`
       // cancel durably clears whatever it never claimed.
-      if (this.closingTeardownFor(parent) !== undefined) {
+      //
+      // corum（fork #9 增量）：同一口径也用于「用户已停止」的会话子树——停止是
+      // 用户的显式意图，子 Agent 的汇报不得把它唤醒（2026-09-09 用户实测）。
+      if (this.closingTeardownFor(parent) !== undefined || this.userStoppedFor(parent)) {
         parent.inject(message)
         return
       }

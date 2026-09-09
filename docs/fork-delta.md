@@ -521,10 +521,10 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 |---|---|---|---|
 | `types.ts` | +7 | `SubagentStartRequest.cwd?: string`（jsdoc 注明硬隔离轴心语义） | 低（纯增量字段，官方未占用该键） |
 | `child-agent.ts` | ±6 | `childSessionMeta` 增第 4 参 `cwd?: string`；`effectiveCwd = cwd ?? parentHeader.cwd` | **中**（官方若改签名/增参需三方合并；调用点 3 处） |
-| `continuation.ts` | ±5 | startContinuable 透传 `request.cwd` + `assertChildCwd(request.cwd)` 校验 + depth import | 低 |
+| `continuation.ts` | ±5 / **+96（2026-09-09 增量）** | ① cwd 透传 + `assertChildCwd(request.cwd)` 校验 + depth import；② **用户停止级联**：`userStopped` 标记 + `stopConversation`/`resumeConversation`/`descendantActivations`/`userStoppedFor` + `notifySettlement` 的「已停止父会话只注入不唤醒」分支（见 §10.11） | **中**（官方若重写 `notifySettlement` 的唤醒判定或 Activation 结构，需三方合并这两处） |
 | `driver/index.ts` | ±6 | one-shot 透传 `request.cwd` + import 重定向 `'@deepseek-ai/dsh-subagent'` → `'../index.ts'` | 低 |
 | `depth.ts` | +17 | `assertChildCwd`（绝对路径 + 已存在校验，`INVALID_CWD`；node:fs/path import） | 低（纯增量函数） |
-| `index.ts` | ±3 | one-shot `start()` 校验调用 + depth import | 低 |
+| `index.ts` | ±3 / **+50（2026-09-09 增量）** | ① one-shot `start()` 校验调用 + depth import；② `stopConversation`/`resumeConversation` 服务面 + `session/event` / `session/disposed` 监听（用户停止判据，见 §10.11） | 低（纯增量方法/监听） |
 | `invariant.ts` | ±4 | PACKAGE_NAME → `@corum/corum-subagent`、插件名 → `corum-subagent-invariant` | 低（机械） |
 | `spawn/index.ts` | ±12 | 插件名 `corum-subagent-spawn-in-process`、默认 provider 名 **`corum-spawn`**（与官方 spawn 并存不抢名）、import 重定向（`../index.ts` + `../driver/index.ts`）、文件头 fork 注释 | 低 |
 | `fork/index.ts` | +97（新增文件） | 官方 `dsh-subagent-fork-in-process` 的 corum 版：默认 provider 名 **`corum-fork`**、`completedTurnPrefix` 种子语义逐行保留、`inheritsParentContext = true`、driver 指向 corum 的 `../driver/index.ts`（cwd 透传） | 低（官方改 seed 逻辑时需同步；守卫 §17 断言种子语义） |
@@ -1688,6 +1688,54 @@ corum-tracked, mode: track }`），`tool-ralph.subagentProvider` 改指它：
 
 **单测**：`corum-subagent/tests/isolated-provider.spec.ts`（9 例：always 模式 5 例 +
 track 模式 4 例——计数/直连纪律/幂等注销/缺服务 fail loud/mode 合法）。
+
+
+### 10.11 fork #9 增补：用户停止级联（2026-09-09，用户实测）
+
+**现象**（用户原话）：「用户已经停止了主 Agent，但是后台子 Agent 还在跑，且结果的
+context 注入会唤醒主 Agent 继续工作，这不符合用户停止的行为，应该是用户停止后，
+对话中所有任务都应该立即停止。」
+
+**官方语义**：`session-controller/src/commands.ts:471` 的停止只做
+`agent.cancel({ kind: 'user' }, { keepInbox: true })` —— 停的是**该会话自己的 turn**。
+后台（continuable）子 Agent 与父会话只有 ownership 边、没有信号关系，继续跑；其
+`subagent-settled` 通知在 `notifySettlement` 里对**空闲父会话**走
+`parent.followup(message)` → 直接开一个新 turn，于是「已停止的对话又动起来」。
+
+**corum 增量**（`continuation.ts` + `index.ts`，见 §10.2 两行）：
+
+1. **判据**（`index.ts` 的 `session/event` 监听）：`turn/end` 且
+   `reason.kind === 'aborted' && reason.reason.kind === 'user'`，**且
+   `session.header.origin !== 'subagent'`**。
+   - 后半条是关键：卡片上「打断单个子 Agent」（`interruptByParent` →
+   `cancel({ kind: 'user' })`）产生同样的 `turn/end`，但官方语义是**只停该目标**、
+   其 resident 后代继续跑——由 `continuation.spec.ts` 的「interrupts only the target
+   while its resident descendant keeps running」钉死。主/任务会话 `origin` 为
+   undefined，子会话为 `'subagent'`，据此区分。
+2. **级联**（`stopConversation`）：按 Activation 的 `parentSession` 链 BFS 出整棵子树，
+   由深到浅逐个 `Agent.cancel({ kind: 'user' }, { keepInbox: true })`；**不 dispose**
+   （子会话仍可续接，卡片转 Done，台账/进度状态不变）。
+3. **抑制唤醒**（`userStoppedFor` + `notifySettlement`）：被停止会话及其子树的结算通知
+   只 `parent.inject(message)`、不 `followup`——通知仍留在收件箱，用户下次发消息时随该
+   turn 领取（实机可见 `src=subagent-settled` 的注入行）。
+4. **解除**：该会话出现 `user/message`（`source.kind === 'user'`）或 `session/disposed`
+   时清标记（`resumeConversation`），恢复官方「结算唤醒」语义。
+
+**实机验证**（2026-09-09 23:34–23:37，dev 实例 CDP）：父会话 `bash sleep 300` + 后台
+子会话 `bash sleep 90` 同跑 → 点「停止生成」→ 父 `turn/end aborted/user`、**子会话
+`turn/end aborted/user`（立即被取消）**、卡片 Running→Done；随后 20s 内父会话**无新
+turn、无新模型请求**（子 Agent 的 `was stopped before it finished` 通知静默停驻），
+直到用户发新消息才在 turn 2 被领取；console 零错误。
+
+**单测**：`continuation.spec.ts` 新增 `corum user-stop cascade` 两例——① 停止后子
+Agent 被 `cancel({ kind: 'user' })`、通知注入但 `followup` 只调用过测试自己那次、无新
+模型请求；② 对照组（不停）证明同一脚手架确实能观察到「唤醒」，防止第一例假绿。
+**守卫**：`./scripts/verify-fork-drift.sh` 全绿。
+
+**升级注意**：官方若改 `notifySettlement` 的唤醒判定（例如自己引入「父会话已停止」
+概念）或 Activation 字段名（`parentSession`/`ownedChildren`），按 §10.2 两行三方合并；
+若官方给 `turn/end` 增加更细的中止原因（区分「停会话」与「停单个子 Agent」），第 1 条
+的 `origin` 判据可换成官方原因码。
 
 
 ### 11.22 非 git 工作区降级机制全量核查（2026-09-10，用户要求）

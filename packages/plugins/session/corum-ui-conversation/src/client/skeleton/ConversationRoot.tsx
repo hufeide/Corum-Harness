@@ -528,9 +528,17 @@ export function ConversationRoot({
         }
       })
       .catch((e) => {
-        // 失败绝不静默吞（PROGRESS §4）：呈现原因，下拉回弹当前值。
+        // 失败绝不静默吞（PROGRESS §4）：呈现原因——**用户可见**（2026-09-09
+        // 修正：此前只写 console.error + aria-label，屏幕零提示，用户看到的是
+        // 「点了没反应」）。__corumNotify 是桌面壳安装的一次性只读桥（规范 §1
+        // 例外，CorumNotification 面：tone/title/message），corum-ui-chat 同款。
         console.error('[conversation] switch task agent failed', e)
-        setAgentSwitchError(e instanceof Error ? e.message : String(e))
+        const message = e instanceof Error ? e.message : String(e)
+        setAgentSwitchError(message)
+        const notify = (window as unknown as {
+          __corumNotify?: (n: { tone: 'error'; title: string; message?: string | undefined }) => void
+        }).__corumNotify
+        notify?.({ tone: 'error', title: '切换 Agent 失败', message })
       })
   }, [sessionId, agentProfileId, agentOptions, emptyActions])
 

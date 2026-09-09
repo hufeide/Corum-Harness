@@ -3119,3 +3119,73 @@ describe('SubagentRuntime.interrupt', () => {
     await drained
   })
 })
+
+/**
+ * corum（fork #9 增量）：用户停止一个会话 = 停止整棵子树，且子树结算通知不得
+ * 唤醒已停下的父会话（2026-09-09 用户实测）。对照组证明同一套脚手架能观察到
+ * 「唤醒」本身，避免第一例因观测不到而假绿。
+ */
+describe('corum user-stop cascade', () => {
+  it('stops live continuable children and never wakes the stopped parent', async () => {
+    const releaseChild = Promise.withResolvers<undefined>()
+    const releaseParent = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('child'), gate: releaseChild.promise },
+      { chunks: textResponse('parent'), gate: releaseParent.promise },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    const child = ctx.agents.get(started.childId)!
+    const childCancel = vi.spyOn(child, 'cancel')
+    const parentInject = vi.spyOn(parent, 'inject')
+    const parentFollowup = vi.spyOn(parent, 'followup')
+
+    // 主会话自己跑一个 turn，然后用户按「停止生成」（官方 session-controller 的
+    // `agent.cancel({ kind: 'user' })`）。
+    parent.followup(createUserMessage({ content: message('work'), source: { kind: 'user' } }))
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) })
+    parent.cancel({ kind: 'user' }, { keepInbox: true })
+    // 父会话的模型流被 gate 挂着，取消信号要等流恢复才落 turn/end——先放行。
+    releaseParent.resolve(undefined)
+
+    // 停止沿 ownership 图级联到在跑的后台子 Agent（父会话的 turn/end 异步落盘后触发）。
+    await vi.waitFor(() => {
+      expect(childCancel).toHaveBeenCalledWith({ kind: 'user' }, { keepInbox: true })
+    })
+
+    releaseChild.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(loaded.events.filter(event => event.type === 'turn/end').map(event => event.data.reason.kind))
+      .toEqual(['aborted'])
+
+    // 子 Agent 结算通知只注入、不唤醒：父会话没有新 turn，也没有新模型请求。
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(adapter.requests).toHaveLength(2)
+    expect(parent.session.snapshotEvents().filter(event => event.type === 'turn/start')).toHaveLength(1)
+    // 通知确实到达（否则本例会因「什么都没发生」而假绿）：注入过 subagent-settled，
+    // 且除测试自己那次 followup 外没有第二次唤醒。
+    expect(parentInject.mock.calls.some(([message]) => message.source?.kind === 'subagent-settled')).toBe(true)
+    expect(parentFollowup).toHaveBeenCalledTimes(1)
+  })
+
+  it('still wakes an idle parent when the conversation was not stopped (control)', async () => {
+    const releaseChild = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('child'), gate: releaseChild.promise },
+      { chunks: textResponse('parent wake') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+
+    releaseChild.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+
+    // 默认语义：子 Agent 结算唤醒父会话（本用例即「对照组」，证明第一例的
+    // 「无新请求」断言真的能观察到唤醒）。
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) })
+  })
+})

@@ -215,6 +215,43 @@ export class SubagentRuntime extends TypertRemoteService {
       projectionCtx.sessionProjections.register(subagentTimingProjectionDefinition)
       projectionCtx.sessionProjections.register(subagentIdentityProjectionDefinition)
     })
+    /**
+     * corum（fork #9 增量）：用户停止一个会话 = 停止整棵子树。
+     *
+     * 判据与官方 session-controller 的停止入口同源——`agent.cancel({ kind:
+     * 'user' })` 让该会话的 `turn/end` 带上
+     * `reason: { kind: 'aborted', reason: { kind: 'user' } }`。官方语义只停该
+     * 会话自己的 turn：后台子 Agent 继续跑，其结算通知随后把父会话唤醒
+     * （2026-09-09 用户实测「用户停止后，后台子 Agent 还在跑，结果的 context
+     * 注入会唤醒主 Agent 继续工作」）。这里把停止沿 ownership 图级联，并抑制
+     * 子树结算通知的唤醒；用户重新发消息即解除（见 continuation 的
+     * `stopConversation` / `resumeConversation`）。
+     */
+    ctx.on('session/event', (session, event) => {
+      if (event.type === 'turn/end') {
+        // 只认「用户停止一个会话」（主/任务会话），不认「卡片上打断单个子 Agent」：
+        // 后者（interruptByParent → 子会话的 `cancel({kind:'user'})`）官方语义是
+        // 只停该目标、其 resident 后代继续跑，由 continuation.spec 的
+        // 「interrupts only the target while its resident descendant keeps running」钉死。
+        // 判据：子会话 `session.header.origin === 'subagent'`。
+        if (session.header.origin === 'subagent') return
+        const reason = (event.data as { reason?: { kind?: string; reason?: { kind?: string } } }).reason
+        if (reason?.kind === 'aborted' && reason.reason?.kind === 'user') {
+          const cancelled = this.continuations?.stopConversation(session.id) ?? 0
+          if (cancelled > 0) {
+            this.ctx.logger.info(
+              `corum-subagent: user stop cascaded to ${cancelled} live subagent(s) — ${session.id}`,
+            )
+          }
+        }
+        return
+      }
+      if (event.type === 'user/message') {
+        const source = (event.data as { source?: { kind?: string } }).source
+        if (source?.kind === 'user') this.continuations?.resumeConversation(session.id)
+      }
+    })
+    ctx.on('session/disposed', (session) => { this.continuations?.resumeConversation(session.id) })
   }
 
   /**
@@ -228,6 +265,25 @@ export class SubagentRuntime extends TypertRemoteService {
    */
   async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
     return this.requireContinuations().startContinuable(spec)
+  }
+
+  /**
+   * corum（fork #9 增量）：用户停止一个会话时，级联停止其子树里所有在跑的
+   * 可续接子 Agent，并抑制它们结算时对父会话的唤醒（详见
+   * {@link SubagentContinuationManager.stopConversation}）。
+   * @param sessionId - 被用户停止的会话 id。
+   * @returns 实际被取消的活跃子 Agent 数。
+   */
+  stopConversation(sessionId: SessionId): number {
+    return this.continuations?.stopConversation(sessionId) ?? 0
+  }
+
+  /**
+   * corum（fork #9 增量）：解除用户停止标记（用户重新发消息 / 会话释放）。
+   * @param sessionId - 会话 id。
+   */
+  resumeConversation(sessionId: SessionId): void {
+    this.continuations?.resumeConversation(sessionId)
   }
 
   /**
