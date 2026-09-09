@@ -23,6 +23,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import { EditorColumn } from './editor/EditorColumn.tsx'
 import type { EditorApiRef, EditorColumnInjected } from './editor/EditorColumn.tsx'
 import { createCorumEditor, createEditorReadySource, type CorumEditorService } from './editor/corum-editor.ts'
+import { createCorumFsClient, type CorumFsClient } from './editor/corum-fs-client.ts'
 import type { FsEntry } from './editor/ExplorerPane.tsx'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
@@ -48,6 +49,11 @@ declare module '@deepseek-ai/cordis' {
      * （dev-conventions §2.4 红线 2/3）。
      */
     corumEditor: CorumEditorService
+    /**
+     * fork（corum）P2-8：corumFs 的 11 个 RPC 封装服务（原散在 apply 闭包的注入面）。
+     * 本包 provide；消费方经 inject 取（同 bundle 的 EditorColumn 仍走注入面，行为不变）。
+     */
+    corumFsClient: CorumFsClient
   }
 }
 
@@ -81,6 +87,10 @@ export function apply(ctx: Context): void {
   // 子面板的数据源——原独立插件 @corum/corum-ide-explorer-ui 已并入本卡。
   ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation', 'workspaces', 'remote'], (editorCtx) => {
     const connection = editorCtx.get('connection') as ConnectionHandle
+    // P2-8：corumFs 调用面收进服务（11 个 RPC 封装单点定义），provide 到 client root
+    // 供任意 bundle inject；本 bundle 的 EditorColumn 注入面经同一实例转调。
+    const corumFs = createCorumFsClient(connection)
+    editorCtx.provide('corumFsClient', corumFs)
 
     // ── 资源管理器根目录跟随当前工作区/会话（2026-09-04 用户定调：空态不该
     // 默认打开 host cwd /Users/kukucai/dsh——树/编辑器必须关联当前项目/任务
@@ -119,10 +129,10 @@ export function apply(ctx: Context): void {
       }
       if (target === lastRoot) return
       lastRoot = target
-      void connection.rpc.call('/api', 'corumFs/setRoot', { args: { cwd: target } }).then(() => {
+      void corumFs.setRoot(target).then(() => {
         // 换根后重启 watch + 通知 EditorColumn 刷新树（cordis 红线：同 bundle
         // 内 CustomEvent 是合法的一次性信号，非共享可变状态）。
-        void connection.rpc.call('/api', 'corumFs/watch', { args: {} })
+        void corumFs.watch()
         window.dispatchEvent(new CustomEvent('corum:workspace-root-changed', { detail: { root: target } }))
       }).catch((err: unknown) => {
         console.warn('[corum-desktop] corumFs/setRoot failed', err)
@@ -199,47 +209,17 @@ export function apply(ctx: Context): void {
           explorer: {
             generation: connection.generation,
             workspaceRoot: workspaceRootSnapshot,
-            listDir: async (path) => {
-              const result = await connection.rpc.call('/api', 'corumFs/list', { args: { path } })
-              return result as { ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }
-            },
+            listDir: async (path) => await corumFs.list(path),
           },
-          readFile: async (path) => {
-            const result = await connection.rpc.call('/api', 'corumFs/read', { args: { path } })
-            return result as { ok: boolean; error?: { message?: string }; value?: { content: string; language: string } }
-          },
-          readBinary: async (path) => {
-            const result = await connection.rpc.call('/api', 'corumFs/readBinary', { args: { path } })
-            return result as { ok: boolean; error?: { message?: string }; value?: { mime: string; base64: string } }
-          },
-          writeFile: async (path, content) => {
-            const result = await connection.rpc.call('/api', 'corumFs/write', { args: { path, content } })
-            return result as { ok: boolean; error?: { message?: string } }
-          },
-          mkdirp: async (path) => {
-            const result = await connection.rpc.call('/api', 'corumFs/mkdir', { args: { path } })
-            return result as { ok: boolean; error?: { message?: string } }
-          },
-          deletePath: async (path) => {
-            const result = await connection.rpc.call('/api', 'corumFs/delete', { args: { path } })
-            return result as { ok: boolean; error?: { message?: string } }
-          },
-          renamePath: async (from, to) => {
-            const result = await connection.rpc.call('/api', 'corumFs/rename', { args: { from, to } })
-            return result as { ok: boolean; error?: { message?: string } }
-          },
-          absolutePath: async (path) => {
-            const result = await connection.rpc.call('/api', 'corumFs/absolutePath', { args: { path } })
-            return result as { ok: boolean; error?: { message?: string }; value?: { absolutePath: string } }
-          },
-          revealPath: async (path) => {
-            const result = await connection.rpc.call('/api', 'corumFs/reveal', { args: { path } })
-            return result as { ok: boolean; error?: { message?: string } }
-          },
-          startWatch: async () => {
-            const result = await connection.rpc.call('/api', 'corumFs/watch', { args: {} })
-            return result as { ok: boolean; error?: { message?: string } }
-          },
+          readFile: async (path) => await corumFs.read(path),
+          readBinary: async (path) => await corumFs.readBinary(path),
+          writeFile: async (path, content) => await corumFs.write(path, content),
+          mkdirp: async (path) => await corumFs.mkdir(path),
+          deletePath: async (path) => await corumFs.delete(path),
+          renamePath: async (from, to) => await corumFs.rename(from, to),
+          absolutePath: async (path) => await corumFs.absolutePath(path),
+          revealPath: async (path) => await corumFs.reveal(path),
+          startWatch: async () => await corumFs.watch(),
           // 统一事件中心：文件变更走官方 forwarded-Remote-event 通道（host
           // corumFs 在 watcher 去抖回调里 emit 批量 changes；真实推送——三期已删
           // 2s pollChanges 兜底 + host 端点）。$on 返回的 dispose 由组件 unmount 时调用。
