@@ -784,3 +784,289 @@ true }` 保留（空 realm 无害，移除 realm 隔离会连带改 delegation �
   api-remotes 转发 → ui-chat WorktreeLedgerChip 订阅），编排器下沉不破坏既有 chip。
 
 **验证**（2026-09-09）：25 单测全绿 + typecheck 零错误 + build 成功（lib/index.js 62.97 kB）。
+
+### 11.16 实机测试遗留问题登记（2026-09-09，CDP 实机验证发现，待解决）
+
+> 来源：用户验收 orchestrate 编排框架时的 CDP 实机测试（ai-lab 无 git 仓库工作区 +
+> kkc-desktop git 仓库工作区对照）。以下为**已确认的行为边界 / 待办问题**，后续解决，
+> 不属于本次编排框架的回归 bug。
+
+**P-A · orchestrate 任务无子 Agent 卡片（用户反馈，可见性问题）**
+- 现象：调用 orchestrate 后，对话流里**不出现子 Agent 卡片**，用户无法看每个子 Agent
+  的工作过程（只有 orchestrate 一张结果卡）。
+- 根因（已定位）：SubagentCard 由 `subagent-call` 节点渲染（`conversation-nodes/subagent.ts`），
+  数据源是 **`origin:'subagent'` 的独立 continuable 子会话**（kkc-desktop git 仓库那次的
+  后台 continuable 子 Agent 产生了独立会话目录，所以有卡片）。而 orchestrate 任务被
+  `run_in_background: task.background === true` 强制为**前台 one-shot**（fan-in 汇合要求，
+  index.ts:1010），前台 one-shot 子 Agent 是一次性运行、**不落 continuable 持久子会话** →
+  无 `subagent-call` 节点 → 无卡片。
+- 影响：用户看不到 orchestrate 各任务的执行细节，只有最终汇总。
+- 待解决方向（未实施）：orchestrate 的 presentCall/presentResult 已展示任务清单与成败，
+  但缺「点开看某任务子 Agent 完整轨迹」的能力；需评估是否为前台 one-shot 子运行也建
+  `subagent-call` 节点（或在其结果卡内嵌子轨迹入口）。
+
+**P-B · 无 git 仓库时 `isolation:always` 整任务失败 → 已解决（2026-09-09 自动降级）**
+- 原现象：ai-lab（无 `.git`）下任务C（`isolation:always`）报 `fatal: not a git repository`，
+  `git worktree add` 失败，任务直接失败。
+- **已解决（本次「新建工作区 git 自动初始化 + 非 git 降级」特性的一部分）**：`spawnOne`
+  在隔离判定前用 `corumIsGitRepo(parentCwd)`（orchestration.ts 新增，带 Map 缓存）侦测
+  父 cwd，**非 git 仓库时强制 `corumIsolate=false`**——git 依赖能力（worktree 隔离 /
+  声明式 verify / integrate）自动关闭而非报错。
+- 实机验证（ai-lab 非 git）：`isolation:always` 写任务**不再报错**，文件直接写主树成功，
+  不创建 `.corum-worktrees/`；`corumIsGitRepo` 5/5 验证（仓库/子目录 true，非 git/不存在
+  目录 false 不抛错）；30 单测全绿无回归。
+- **⚠️ 新观察（LLM 实测提出，待决策）**：降级是**静默**的——`isolation:always` 在 git
+  缺失时退化为直接写主树而不告警，用户可能「以为隔离了实际改了主树」。是否需要在降级
+  时向主 Agent / 用户显式提示「本任务因非 git 仓库未隔离」（用户决策，记入 §11.17）。
+
+**P-C · research 只读子代理连带无 bash，无法枚举目录（只读口径连带效果）**
+- 现象：ai-lab 任务A（`research:true`）想用 `ls` 列目录，但 research 实例「预 deny 写工具」
+  名单含 `bash`（`CORUM_WRITE_TOOLS` 含 bash），子代理无 shell → 只能 glob（glob 只返回
+  文件、不返回纯目录名），列不出目录结构。
+- 定性：research 只读口径的连带效果（deny bash 是为了防写，但也挡住了只读 `ls`/`find`）。
+- 待解决方向（未实施）：是否为 research 实例保留**只读 shell**（如白名单 `ls`/`cat`/`find`/
+  `grep`），或提供只读目录枚举工具（用户决策，涉及只读口径的边界划定）。
+
+**实机测试通过项（对照，确认无回归）**：
+- orchestrate 任务默认**前台** fan-out 汇合（`run_in_background: task.background===true`，
+  修复「默认后台」bug 生效，无历史 "continuable mode" 报错）。
+- 空台账 `autoIntegrate:true` 静默跳过（`pending.length>0` 才 integrate，修复生效）。
+- 任务级 `research:true` 预 deny 写工具（corumResearchToolFilter，kkc-desktop + ai-lab 双双
+  验证只读生效）。
+- 任务级 `isolation` 覆盖优先于实例配置；`autoIntegrate:false` 时隔离分支留待手动合并。
+- 336 单测全绿（301 corum-subagent + 30 corum-tool-subagent + 5 corum-agent）+ 3 包 typecheck
+  零错误 + CDP boot 零 console 错误。
+
+### 11.17 新建工作区 git 自动初始化 + 非 git 降级（2026-09-09，用户需求完整实现）
+
+> 需求：新建工作区后自动侦测/初始化 git 仓库，使子 Agent 编排的 git 依赖能力
+> （隔离/verify/integrate）开箱可用；非 git 则这些功能关闭。用户拍板：完整实现
+> （host 服务 + 设置开关 + 两处接入 + 降级 + UI）+ 正常添加仅降级 off + git init
+> 带空初始 commit + 不生成 .gitignore。
+
+**实现（5 个文件改动）**：
+1. **host `corum-git.ts`（新建）**：`CorumGitService`（Typert Remote，service 名
+   `corumGit`）——`@Remote('status')(path)→{isRepo}`（`git rev-parse --git-dir` 侦测，
+   含 worktree/子目录）、`@Remote('init')(path)→{initialized,alreadyRepo}`（`git init`
+   + 空初始 commit `--allow-empty`，身份用 `-c user.name/email` 一次性传入不污染用户
+   config；幂等——已是仓库直接返回）。同时注册 `corum-workspace` settings namespace
+   （「新工作区始终初始化 git」开关的持久化面，与 ui-onboarding 同款 boot 轮询注册）。
+   与 corumFs 差异：接受任意绝对路径（用户工作区可在任意位置），不做项目根校验。
+   `boot.ts` 注册 `new CorumGitService(hostCtx)`（与 corumFs 同时机）。
+2. **隔离降级（orchestration.ts + index.ts）**：新增纯函数 `corumIsGitRepo(cwd)`
+   （带 Map 缓存）；`spawnOne` 隔离判定后，若 `corumIsolate` 为真但父 cwd 非 git →
+   强制 `corumIsolate=false`（需求第 4 点「git 依赖功能设为 false」的机制实现）。
+3. **renderer `corum-ide-sidebar-ui`**：SessionsPane「添加工作区」流程改为
+   「pickDirectory → `corumGit/status` 侦测 → 非 git 时『始终初始化』开关开则直接
+   `corumGit/init` / 开关关则弹 `ConfirmDialog` 询问 → 确认 init 或拒绝（隔离降级由
+   spawnOne 兜底）→ `workspaces.create`」。inject 加 `settingsScope`，新增
+   `gitWorkspaceStatus`/`gitWorkspaceInit`/`autoInitGitEnabled` 三个动作（走
+   `connection.rpc.call` 打 `corumGit/*`，与 directoryPicker 同通道）。
+4. **renderer `corum-ui-conversation`**：空态「新建任务」无 cwd 选目录隐式建工作区时，
+   「始终初始化」开关开则静默 `corumGit/init`（不插确认框打断建任务流程）；开关关则
+   不初始化（降级兜底）。
+5. **「通用」设置面板 `SettingsGeneralSection.tsx`**：新增「工作区」组 + 真实 Switch
+   「新工作区始终初始化 git」（默认开），照 SubagentSection.autoCleanup 的
+   `useCorumSettings`+`mutate` 模式（本组件原是纯静态占位，这是第一个真实持久化项）。
+   **关键修复**：`index.tsx` 的 GeneralSection 注册原未包 `CorumSettingsContext.Provider`
+   （纯静态时代不需要），导致开关 `useContext` 拿 null 降级隐藏——已补包 Provider。
+
+**验证（2026-09-09，CDP 实机）**：
+- 设置面板：「通用」section 底部「工作区」组 + 开关**默认开启**渲染正确，文案完整。
+- 降级：ai-lab（非 git）`isolation:always` 写任务**不再报错**，文件写主树成功，不建
+  `.corum-worktrees/`（对比此前任务C `fatal: not a git repository` 失败）。
+- `corumIsGitRepo` 5/5；host git init 命令序列（init + 空 commit）实测初始化后
+  `git worktree add` 可创建（隔离前置满足）。
+- 5 包 typecheck 零错误 + build 成功 + 30 单测全绿 + CDP boot 零 console 错误。
+
+**遗留（待决策）**：降级静默无提示（见 §11.16 P-B 的新观察）；「添加工作区」的
+native 目录选择器无法被 CDP 驱动，ConfirmDialog 的 UI 链路（开关关时弹询问）未做实机
+点击验证（逻辑已经 typecheck + 与 ModelSelect 同款 ConfirmDialog 用法）。
+
+### 11.18 Deepseek 编排专用 Agent（2026-09-09，主 Agent 极简规划 + 子 Agent 全权执行）
+
+> 需求（用户定调）：「单独设计一个 Deepseek 专用 Agent，主 Agent 采用极简模式只负责
+> 思考规划，所有执行都给子 Agent 执行。」PLAN：`docs/plan/PLAN-deepseek-orchestrator-agent.md`。
+
+**核心架构矛盾与路线修正（实机暴露，关键教训）**：
+- 初版路线 A（preset 编译裁行）：orchestrator 模式在 compile.ts 把 `filesystem`/`tool-fs`/
+  `persistent-shell` 从 preset 裁掉。**实机失败**——fork #9 `applyChildComposition` 让
+  子 Agent `composeFrom(parent.ctx)` **复用父 preset**，preset 裁了什么子 Agent 也没什么
+  → 子 Agent 没写工具无法执行；且 worker 子 Agent `denyDirectFs` 要 restrict
+  `str_replace_editor`，父 preset 已裁则 fail-loud。
+- **修正为路线 B**：preset **恒全量编译**（子 Agent join 后全功能），主 Agent 的裁剪走
+  运行时 `agentCtx.tools.restrict`（agent-service `createAgentForTask` 的 orchestrator
+  分支），**只作用于主 Agent 自己的 scope**，deny `['str_replace_editor','write','edit',
+  'bash',...]`（保留 read/read_image/glob/grep/编排全家/规划辅助）。子 Agent 不受影响。
+- **再踩一坑**：deny 名单初版写死含 `pwsh`，但 macOS 不装载 pwsh → `tools.restrict` 对
+  未知名 fail-loud（console 报「names unknown global tool pwsh」）。修为平台口径
+  （`...process.platform === 'win32' ? ['pwsh'] : []`，与 corumWriteToolsForPlatform 同款）。
+
+**实现**：
+1. `profile.ts`：`AgentProfile` 加 `executionTools?: 'full' | 'orchestrator'`。
+2. `agent-service.ts`：`createAgentForTask` 的 setup 加 orchestrator 分支 `tools.restrict`
+   （deny 执行工具，平台口径 pwsh）。
+3. `compile.ts`：`corumSubagentConfig` orchestrator 收紧 worker `maxDepth: 1`（子 Agent
+   只执行不再派活，编排收归主 Agent）。
+4. `builtin-profiles.ts`：`BuiltinRoleSpec` 加 executionTools/subagentModel/researchModel/
+   parallelWork/model 字段；`BUILTIN_ROLES` 加 `deepseek-orchestrator`（编排者 persona：
+   绝不亲手执行 + 理解→拆解→派活→裁决工作循环）；`ensureBuiltinRoleProfiles` 透传 +
+   system profile 幂等刷新新字段。
+5. 模型锁：主 Agent localhost deepseek-v4-pro、子 Agent/research localhost flash。
+
+**验证（2026-09-09 CDP 实机）**：
+- 「Deepseek 编排者」出现在 Agent 列表（Corum 内置 27→28）；profile 持久化正确
+  （executionTools/模型锁/parallelWork）。
+- 编排者**不亲手写文件**：发自然语言并行任务，主树无产出，两个文件写在**两个独立
+  worktree**（wt-1b3dcf 的 ORCH-NOTE-1、wt-cca323 的 ORCH-NOTE-2，内容质量高）。
+- 子 Agent **有写工具能执行**（路线 B 生效，能建 worktree）；隔离生效（两文件两分支）。
+- 编排者 persona 思考体现铁律：「My role is orchestration; I shouldn't do the research
+  myself — I delegate research to subagent_research」。
+- 6+5 单测全绿（compile-orchestrator 6 例：preset 全量 + maxDepth=1 + full/缺省无回归）。
+- **P-D → 已解决（2026-09-09，方案一：integrate 恒前台，删 throw）**：编排者用 continuable
+  （background 默认 true），调 integrate 曾撞「integrate must run in foreground」。根因：
+  integrate 分支用 `runSpec.runInBackground` 时抛错，要求模型显式 `run_in_background:false`
+  压过 continuable 默认后台——把机制成本转嫁模型。且 `integrate` 是 **corum 自研**（官方
+  `dsh-tool-subagent` 无此参数、无 worktree/隔离/台账概念），「强制前台」本是 corum 自己
+  的阶段性权宜（注释「骨架阶段仅前台路径」）。修正（`index.ts` integrate 分支）：删 throw
+  + `runSpec` 读取，integrate **恒由机制强制前台**（fan-in 汇合本质是同步等待点，主 Agent
+  须等 merge+verify 结果才能裁决，后台路径拿不到结果无意义），既保 fan-in 语义又消掉
+  一类报错。**实机验证**：编排者 `autoIntegrate:true`（continuable 默认后台）完整闭环——
+  fan-out 两个 `isolation:always` 写任务（各自 worktree 产出 int-one/int-two）→ integrate
+  强制前台顺利合并回主树（ORCH-INT-1/2.txt 落主树）→ verify 通过 → autoCleanup 清理
+  worktree，**全程无 integrate 报错**；30 单测全绿 + CDP 零 console 错误。
+
+### 11.19 integrate 机制真值门禁 + 清理安全阀（2026-09-09，数据丢失类缺陷修复）
+
+> 来源：`docs/TODO.md` 高优先项「orchestrate autoIntegrate 合并回主树不可靠」。用户选定
+> 「编排器 integrate 可靠化」方向；两项行为决策由用户拍板：① dispose 清理保留未合并分支、
+> worktree 无未提交改动才移除目录；② 声明的 `merge.verify` 仍由集成者执行并回报，机制只做
+> git 真值校验（不复跑 verify）。
+
+**根因（4 条）**：① 集成成功判定 = 集成者 LLM 的 `stopReason==='completed'`，机制从不看 git；
+② 集成分支无条件写 `entry.status='integrated'` 并 `corumCleanupLedgerEntries` →
+`worktree remove --force` + `branch -D`（未合并提交变 unreachable，git 级复现过）；
+③ `cleanupOnDispose(['active','settled'])` 同一强删路径，且集成路径翻转后不 `persist`
+（落盘台账 4 条 `active` 而 worktree 已空、分支已无 = 状态漂移实证）；
+④ orchestrate 的 `autoIntegrate` 丢弃 `spawnOne` 返回值，未落地也报 `[task N] done`。
+
+**修复落点**（`packages/plugins/agent/corum-orchestration/src/orchestration.ts` +
+`corum-tool-subagent/src/index.ts`）：
+
+| 面 | 内容 |
+|---|---|
+| 新增纯函数 | `corumGitHead` / `corumGitStatusPorcelain` / `corumBranchMerged`（祖先）/ `corumBranchIntegrated`（祖先 ∪ `git cherry` patch 等价）/ `corumWorktreeHasUncommitted` / `corumIntegrationTruth`（真值门禁）/ `corumIntegrationFailure`（失败报告） |
+| 集成分支 | 集成前快照 HEAD + 脏基线 → 集成者 settle 后按 git 实况判定；未达标 **抛错 + 保留 worktree/分支 + 台账保持 settled**；达标才 `orchestration.markIntegrated`（翻转 + `persist` + 可选强清理 = 唯一合法 force 点） |
+| 清理安全阀 | `corumCleanupWorktree(cwd, entry, { force })`：非 force 时未合并分支不删、脏 worktree 保留目录；`corumCleanupLedgerEntries` 仅完整清理才标 `discarded`；`cleanupOnDispose` 改非 force |
+| persona | `corumIntegratorPersona` 加破坏性 git 命令禁令（`reset --hard` / `checkout .` / `clean -fd` / `stash`）+ 声明机制会独立复核 |
+| orchestrate | `autoIntegrate` 分支检查 integrate 结果（非 foreground 抛错），不再把失败当 done |
+
+**验证（真实 git 仓库 + 三层 CDP）**：
+- 单测 **48/48**（新增 `corum-tool-subagent/tests/integrate.spec.ts` 18 例，真实临时 git
+  仓库驱动，含「写了没提交 → integrated=false」「非 force 保留分支」「force 才删」「台账
+  如实」「失败报告含自述 vs 实况」）。
+- **CDP 正向**（`/tmp/corum-int-verify` scratch 仓库 + 编排者会话）：单任务 `isolation:always`
+  + `autoIntegrate:true` → 主树 `git log` 出现 `Merge wt/wt-a787a0` + `POSITIVE-1.txt`，
+  `git branch` 仅 main（门禁通过后才清理）。
+- **CDP 负向**（子任务写文件但**不提交**）：orchestrate 返回 `isError`——「integrate did not
+  persist into the main tree… worktrees with UNCOMMITTED changes… Worktrees and branches are
+  PRESERVED」；主树无新 commit、`wt/wt-82138b` 分支与 worktree（含未提交 `NEGATIVE-1.txt`）
+  保留、台账落盘 `active`（如实）；集成者自述被标注「NOT trusted as evidence」。
+- **CDP 第三路**（UI 探针同构）：主树无 `UI-PROBE.txt`，worktree `wt-385509` 保留。
+- 两包 typecheck + build 绿；console 零报错；无 renderer 改动（宿主侧，重启应用生效）。
+
+**顺带发现（已单独立项 `docs/TODO.md`）**：`subagent/end` 监听签名错误——fork #9 声明父
+Agent 是 dispatch 的 `this`（scope carrier）而非第二参数，`settleFromEnd` 恒收 `undefined`
+并抛错（被 emitter 吞掉）→ **settle 联动实机从未生效**（子 Agent 结束后台账仍 `active`，
+`maxParallelChildren` 因此把已结束的子 Agent 计入额度）。修法：`carrierKeyOf(this)` +
+spawn 后绑定 `entry.runId` 精确 settle。
+
+---
+
+## 13. 待执行重构（2026-09-09 盘点定调，PLAN 已就绪，放新会话执行）
+
+> 来源：架构盘点（用户问「目前的功能分布在哪些插件上，切得是否合理」）后的两项
+> 重构决策。完整执行依据：`docs/plan/PLAN-refactor-orchestration-package-and-settings-center.md`。
+> **状态：已执行（2026-09-09 新会话按 PLAN 落地，见 §13.1 / §13.2 验证记录）。**
+
+**盘点结论**：corum 插件切分整体合理（seam `corum-subagent` / 工具 `corum-tool-subagent` /
+UI / host 四层边界清晰，符合红线与官方 fork 继承纪律）。唯二优化点即下两项重构。
+
+**重构 1 · 拆出 `@corum/corum-orchestration`（编排器独立包）**
+- 现状：`CorumOrchestration`（台账 service + 10 个隔离纯函数 + storage domain）住在
+  `corum-tool-subagent/orchestration.ts`（工具包）。编排器更像 seam 与工具间的独立
+  「编排层」，应拆出。
+- 影响面（已查证，很小）：运行时耦合仅 tool-subagent 自身 + 单测；其它消费方
+  （corum-api-remotes / ui-chat / sidebar / conversation）均 type-only，经
+  `corum-api-remotes/corum-events` 自包含同构声明解耦，不直接 import orchestration.ts。
+- 决策：**新包自己挂 cordis 行 provide**（cordis.patch.yml insert，行序在 tool-subagent
+  双实例前；tool-subagent 改「只读不建」）；服务名 `corumOrchestration` 不变；
+  `corum-tool-subagent/orchestration.ts` 改 re-export（单测/下游零破坏）。
+
+**重构 2 · 设置中心统一 section 扩展机制 + 拆文件**
+- 现状：`SettingsSections.tsx`（3038 行）19 个 section 塞一处 + `SECTION_DEFS` 硬编码 +
+  `SettingsShell` 的 `NAV_GROUPS` 硬编码 id→分组映射（「插件」「子 Agent」落「其他」组）。
+- 目标（用户定调）：设置中心面板提供统一 section 扩展机制（cordis slot `settings.section`，
+  已存在）；每个 section 独立成文件统一注册；**归属分组由 section 自声明**（`SectionDef`
+  加 `navGroup` 字段），**没声明的统一放「扩展」**。
+- 分组（保持 5 组）：通用 / AGENT / 数据与隐私 / 扩展 / 高级；**「插件」入口去掉**；
+  **「插件管理 / skill / MCP」归「扩展」**（Agent 的扩展）；**「子 Agent」归「AGENT」**；
+  「其他」组消失（所有 section 有归属）。
+- 全拆：19 个 section → `settings/sections/<Name>Section.tsx`，`SettingsSections.tsx`
+  瘦身为共享面（CorumSettingsContext/useCorumSettings/共享组件）+ 聚合注册。
+
+**执行约定**：新会话按 PLAN 文档自驱动——先重构 1 后重构 2，每个各自
+「typecheck → 单测 → build → CDP 实机三层验证（UI 渲染 + 行为 + 零 console 错误）」，
+全部通过再进下一个；完成后回本文件登记 §13 为「已执行」并补验证记录。
+
+### 13.1 重构 1 执行记录（已交付）
+
+**拆包**：
+- 新包 `packages/plugins/agent/corum-orchestration/`（name `@corum/corum-orchestration`，
+  cordis 插件）：`src/orchestration.ts`（从 tool-subagent 整体迁入，含 `CorumOrchestration`
+  service + 10 个纯函数 + `corumOrchestrationDomainSpec` + 台账类型 + `'corum/worktree-ledger'`
+  事件声明）；`src/index.ts` 挂 cordis 行（`apply` 在根上下文幂等 provide `corumOrchestration`）
+  + re-export 全部纯函数/类型/domain；`package.json` / `tsconfig.json` / `tsdown.config.ts`
+  （照 tool-subagent 模板，deps：cordis/dsh-agent/dsh-storage-domain/dsh-subagent/zod）。
+- `corum-tool-subagent/src/orchestration.ts` 改为 re-export 垫片（从新包 re-export，
+  保持 `index.ts` 内部 import 路径与单测 `from '../src/orchestration.ts'` 不变，零破坏）。
+- `corum-tool-subagent/src/index.ts` 的 apply 由「幂等自建兜底」改为「只读不建」：
+  `ctx.root.get('corumOrchestration')`，缺则抛装配错误（顺序由 patch.yml 行序承担）。
+- `packages/desktop/cordis.patch.yml` insert 段在 `corum-tool-subagent` 双实例行之前挂
+  `- id: corum-orchestration`（name `@corum/corum-orchestration`）。
+- `packages/desktop/package.json` + `corum-tool-subagent/package.json` 加 workspace 依赖，
+  `pnpm install --no-frozen-lockfile` 链接。
+
+**验证**：新包 + tool-subagent typecheck ✓；单测 isolation.spec 30 例全绿 ✓；新包 +
+tool-subagent build ✓；desktop typecheck + build ✓（顺带修复 desktop 侧 pre-existing
+WIP 的 `corum-git.ts` `this.logger`→`this.ctx.logger` 3 处，使 desktop typecheck 恢复
+可跑）。**CDP 实机**：boot 零 console 错误 + orchestrate 写任务隔离建 worktree 正常
+（`wt-b8303c` 创建 + 台账落盘 `corum_orchestration/ledger`）+ 台账 chip 渲染 +
+`corumOrchestrationDomainSpec` 落盘（存量 `version:1` record 完好）+ 挂载顺序正确
+（tool-subagent apply 读 `corumOrchestration` 不抛）。
+
+### 13.2 重构 2 执行记录（已交付）
+
+**拆文件**：
+- `SettingsSections.tsx`（3038 行）拆为 19 个 `settings/sections/Settings*Section.tsx`
+  独立文件 + `settings/shared.tsx`（共享面：CorumRpcContext/CorumSettingsContext/
+  SectionNavContext/useCorumRpc/useCorumSettings/useSectionNav/GlassButton/InfoCard）+
+  `settings/types.ts`（跨 section 共享的 skill/MCP 投影类型）。`SettingsSections.tsx`
+  瘦身为 `SECTION_DEFS` 聚合 + `NAV_GROUP_BY_ID` 分组数据源 + 共享面 re-export。
+- `SectionDef` 加 `navGroup?: SettingsNavGroup` 自声明分组；19 个 section 全量映射
+  （subagent→agent、mcp/skills/extensions→extensions、models→agent 等，见 PLAN 表）。
+- `SettingsShell.tsx`：删除硬编码 `NAV_GROUPS` id 列表，改为读 `NAV_GROUP_BY_ID`
+  （section 自声明），缺省归 `extensions`；「其他」桶删除（所有 section 有归属）。
+- 去掉「插件」入口：`corum-ui-settings-plugins` 不再注册 `settings.section`（id=plugins），
+  其「插件配置」tab（含 Bash/Agent Loop/Web Search 三卡）与官方 plugin-inventory「插件
+  列表」tab 经共享槽 `settings.plugins.tab` 并入 `corum-ide-ui` 的「插件管理」扩展
+  section（ExtensionsSection 声明并渲染 `settings.plugins.tab`）。
+- 顺带修复 corum-ide-ui pre-existing 的 4 处 dsh 0.1.3 类型漂移（`(s: unknown)=>s`
+  选择器模式 + `SessionListState` 结构漂移，见 AppFrame.tsx `panels`、SettingsShell.tsx
+  三处 useSections/useOnboardingSteps/useSessions），使 corum-ide-ui typecheck 恢复可跑。
+
+**验证**：corum-ide-ui + corum-ui-settings-plugins typecheck ✓；两包 build ✓。
+**CDP 实机**：设置面板 5 组渲染正确（通用/AGENT/数据与隐私/扩展/高级）；「子 Agent」
+在 AGENT 组；「插件管理/技能/MCP」在扩展组；无「其他」组；无「插件」入口；「插件管理」
+内三张配置卡 + 插件列表（含 `@corum/corum-orchestration`）渲染；「工作区」git 开关在
+通用组可读写（settings.mutate 落盘）；console 零错误。
