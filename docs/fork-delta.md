@@ -1233,3 +1233,75 @@ fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
   开着区域时再关 → 按钮消失**且区域自动收起**（按钮是唯一开关，避免区域无法关闭）。
   开关读 `settings/developer-mode.ts` 的 `useDeveloperMode()`（同 bundle，localStorage
   `corum.settings.developerMode` + 同 bundle 事件）。CDP 三条路径全部验证通过。
+
+---
+
+### 11.21 编排四项实机问题修复（2026-09-09，用户实机反馈 + 子 Agent 自述限制）
+
+用户一条消息报四项（单任务无谓隔离 / 进不去子会话 / 隔离子 Agent 提交不了 / 汇报不可见）。
+完整根因、验证与踩坑见 `docs/TODO.md`「子 Agent 编排四项实机问题」；此处只登记 fork #10
+（本包）的实质 diff 增量，供升级 rebase 对照。
+
+**`src/index.ts` 增量（fork 分区之外新增三处）**：
+
+| 位置 | 增量 | 说明 |
+|---|---|---|
+| `spawnOne` 入参 | `fanoutCount?: number`、`notifyParent?: boolean` | 并发信号① / 通知开关（orchestrate 任务与 integrate 传 false） |
+| 隔离判定 | `corumShouldIsolate(..., concurrent)` | 四个并发信号（fan-out ≥2 / 后台 / 台账 active / 在跑非隔离开写子 Agent） |
+| 非隔离写任务 | `[corum orchestration]` prompt 前缀 | 主工作区直连时禁止 git 操作（父可能有无关联改动） |
+| `corumEmitChildStarted` | 新事件 `corum/subagent/child` | 按父侧 `callId` 广播 `childSessionId`（前台/continuable/后台三路径） |
+| `corumNotifyForegroundResult` | settlement notice 注入 | 前台 settle 后 `parent.inject()` 一条 `subagent-settled` notice |
+| 写子 Agent 计数 | `orchestration.beginWriteChild/endWriteChild`（finally 释放） | 并发信号④ |
+
+**跨包配套**：`corum-orchestration` 纯函数签名 + 计数方法；`corum-api-remotes`
+（事件声明 + allowlist 第 20 条）；`corum-ui-chat`（`subagentChildSubscribe` +
+`subagentChildOf` 缓存 + 卡片 `useLiveChildSessionId` + apply 预热订阅 + fold 精确优先）。
+
+**验证**：`docs/TODO.md` 同条（CDP 三层 + 真内核 + 单测 62 例）；`verify-fork-drift.sh`
+§4 已登记本事件 emit 面映射。
+
+---
+
+## 15. 第 13 个 fork 包：`@corum/corum-sandbox-local`（2026-09-09，隔离子 Agent 的 git 提交）
+
+| 项 | 值 |
+|---|---|
+| 官方对照包 | `@deepseek-ai/dsh-sandbox-local` |
+| 官方基线 | 0.1.3-alpha.1（源码基线 = dsh 检出 `packages/sandbox/sandbox-local`） |
+| 文件数 | 2 官方文件 + 1 corum 新增模块 |
+| 逐字节相同 | `src/index.ts`（**完整官方文件，零增量**） |
+| 实质修改 | `src/profiles.ts`（3 个 builder 并集可写根 + 1 行 import） |
+| corum 新增 | `src/git-write-roots.ts`（git 元数据根探测 + 缓存） |
+| rebase 风险 | **低**（增量集中在 60 行的 profiles.ts + 独立新模块；官方改 profiles 时按 §5 第 3 步三方合并） |
+
+**动机（2026-09-09 用户实机复现）**：官方可写根 = `writableRoots(policy)` =
+`[workspaceRoot, /tmp, tmpdir()]`；隔离 worktree 的 cwd 是
+`<repo>/.corum-worktrees/wt-xxxx`，而 `git add/commit` 要写的是**主仓** `.git`：
+`worktrees/<slug>/index.lock`、`objects/**`、`refs/heads/<branch>`、`logs/**`——全部在
+workspace 之外。Seatbelt 直接 EPERM（实测 `fatal: Unable to create
+'.../index.lock': Operation not permitted`），子 Agent 永远提交不了，「子 Agent 提交 →
+集成者合并」的隔离语义整条断裂。
+
+**修复**：`corumGitWriteRoots(policy)` 在 `workspace-write` 下按 `policy.workspaceRoot`
+跑一次 `git rev-parse --git-dir --git-common-dir`（2s 超时 + 进程内缓存），把两个目录
+canonical 化后并集进 Seatbelt `(subpath …)` / bwrap `--bind` / Landlock `readWrite`。
+非 git 目录 / git 缺失 / 超时 → 空数组（能力自动关闭，绝不抛错）。
+
+**边界（有意为之）**：授予整个 common dir（含 config/hooks）——一次 commit 会触碰
+objects/refs/logs 多处，逐文件白名单既脆又慢；DSH 沙箱定位是 containment 不是安全边界。
+**父工作区仍写不进去**（实测：worktree 文件 OK / `.git` OK / 主树文件与 tracked 文件 EPERM）。
+Windows 的 windows-acl runner 只接受单个 `--workspace` 根（runner 协议），本函数对它无效，
+Windows 上隔离子 Agent 的 git 提交仍不可用（登记为已知限制）。
+
+**装配**：desktop overlay 禁官方 `sandbox` 行 + insert `corum-sandbox`
+（`name: '@corum/corum-sandbox-local'`）；服务名 `sandbox` 不变 →
+`dsh-bash-sandbox` / `dsh-terminal-bash` / `dsh-pwsh-sandbox` 对 `ctx.sandbox` 的消费零感知。
+`packages/desktop/package.json` 加 workspace 依赖。
+
+**验证**：
+- 真内核（`sandbox-exec`，repo 不在 /tmp）：官方 profile `git add` EPERM；corum profile
+  `git add && git commit` 成功；主树写入仍 EPERM。
+- 单测 8 例（worktree gitdir+common、主仓、非 git、read-only、缓存、三平台 profile 参数）。
+- CDP：orchestrate 2 任务的两个子 Agent 均成功 commit 并被集成合并；后台委托正确隔离。
+- 守卫：`scripts/verify-fork-drift.sh` §15（index.ts 逐字节一致 / profiles 含标记 /
+  git-write-roots 有探测 / 装配行与 desktop 依赖在位）。
