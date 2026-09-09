@@ -1,5 +1,21 @@
-/* Zero-height sticky slot, like the back-to-bottom control: the rail floats
-   over the transcript's right gutter without extending scrollHeight. */
+/* fork（corum）：轮次导航 gutter（设计稿 vESwF）——左 gutter 竖列圆点刻度。
+   刻度 = 8×8 圆点：淡点 $label-tertiary（tertiary），当前点 $brand-primary
+   （brand）+ glass-2 光晕，垂直居中；hover/focus 预览卡翻到右侧（官方右侧
+   横线刻度已退役）。
+   Zero-height sticky slot, like the back-to-bottom control: the rail floats
+   over the transcript's left gutter without extending scrollHeight.
+
+   ⚠️ rebase 纪律：本文件是「官方 0.1.3-alpha.1 结构 + 5 处 corum 增量」。
+   官方升级时**不要整文件覆盖**（2026-09-07 的 0.1.3 合并 commit f09aa05b 就是
+   整文件拷贝官方，把本定制静默还原成原生右侧横线刻度，2026-09-10 用户报障）。
+   增量点（grep `fork（corum）` 全部命中）：
+   ① .frame  left: 取代 right:（贴左缘）
+   ② .mark   inset:0 全宽（圆点水平居中）+ ::before 改 8×8 圆点
+   ③ 状态色 markPreview/markActive/focus-visible 换 brand/secondary + 光晕
+   ④ .preview  left:calc(100%+10px) 翻到右侧 + 玻璃化
+   ⑤ previewResponse 颜色 label-tertiary + 入场动画方向取反
+   官方同名文件在 /Users/kukucai/dsh/packages/client/ui-chat/src/client/chat/
+   TurnNavigator.module.css，逐块对照只贴回这 5 处即可。 */
 .slot {
   position: sticky;
   top: 0;
@@ -22,9 +38,10 @@
 
   position: absolute;
   top: calc(var(--turn-rail-band) / 2);
-  /* Flush with the scrollport edge: the slot sits inside the transcript's side
-     padding, so the rail gives that inset back and keeps 12px of its own. */
-  right: calc(12px - (var(--dsh-composer-side-clearance) + 16px));
+  /* fork（corum）①：左 gutter（设计稿 vESwF 在 messages 左侧）——贴滚动容器
+     左缘，8 宽刻度列 + 自身 12px 内边距（与右侧 composer side clearance 对称
+     让位）。官方此处是 right:（右侧横线刻度）。 */
+  left: calc(12px - (var(--dsh-composer-side-clearance) + 16px));
   width: 28px;
   /* Fixed-pitch marks never compress: a ladder taller than the band scrolls
      inside this frame instead of pushing marks under the composer or above
@@ -89,13 +106,12 @@
 }
 
 /* The rail owns pointer input for the whole column, so a mark is a keyboard
-   destination that paints one tick — never a mouse target of its own. */
+   destination that paints one dot — never a mouse target of its own. */
 .mark {
   position: absolute;
-  /* As wide as the longest tick, right-aligned with it: the focus ring below
-     then wraps the tick instead of the rail's full pointer column. */
-  inset: 0 0 0 auto;
-  width: 20px;
+  /* fork（corum）②：刻度列水平居中（设计稿 vESwF alignItems center）——28 宽
+     frame 内圆点居中；官方是 inset:0 0 0 auto + width:20px 的右对齐横线。 */
+  inset: 0;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -107,47 +123,51 @@
 .mark::before {
   position: absolute;
   top: 50%;
-  right: 0;
-  width: 12px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--dsw-alias-border-l4);
+  /* fork（corum）②：8×8 圆点（设计稿 dot），水平+垂直居中；官方是 12×2 横线
+     右对齐（right:0）。 */
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
   content: '';
-  transform: translateY(-50%);
-  transition: width 140ms ease, background-color 140ms ease;
+  transform: translate(-50%, -50%);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
 }
 
-/* Ordered before hover/active so those states keep their stronger tick. */
+/* 未载入轮次（历史未分页进来）：圆点尺寸不变，只压一档透明度（官方此处是
+   横线缩到 8px）。 */
 .markUnloaded::before {
-  width: 8px;
   opacity: 0.6;
 }
 
+/* fork（corum）③：hover 预览比淡点实一档 + glass-2 光晕。 */
 .markPreview::before {
-  width: 18px;
-  background: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-label-secondary);
+  box-shadow: 0 0 0 3px var(--corum-glass-2, rgba(42, 24, 64, 0.55));
 }
 
 .markBusy::before {
   animation: dsh-turn-mark-busy 1s ease-in-out infinite;
 }
 
+/* fork（corum）③：当前点 = $brand-primary + glass-2 光晕（官方是 label-primary
+   横线加宽到 20px）。 */
 .markActive::before {
-  width: 20px;
-  background: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 3px var(--corum-glass-2, rgba(42, 24, 64, 0.55));
 }
 
-/* Keyboard focus outranks both resting states: the tick takes the brand color
-   the rest of the rail never uses, and a hairline ring keeps it legible
-   against a busy transcript. */
+/* Keyboard focus outranks both resting states: brand color + hairline ring. */
 .mark:focus-visible::before {
-  width: 20px;
-  background: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 3px var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
 }
 
 .mark:focus-visible {
-  outline: 1px solid var(--dsw-alias-state-business-primary);
+  outline: 1px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
+  border-radius: 50%;
 }
 
 .preview {
@@ -163,17 +183,25 @@
     ),
     calc(100% - var(--turn-preview-height))
   );
-  right: calc(100% + 10px);
+  /* fork（corum）④：预览卡翻到右侧（gutter 在左，卡片向右展开进消息区上方）
+     + 玻璃化（glass-1 + blur + corum 光边）。官方此处是 right:calc(100%+10px)
+     + bg-layer-1 实底。 */
+  left: calc(100% + 10px);
   box-sizing: border-box;
   width: min(300px, calc(100cqw - 120px));
   max-height: var(--turn-preview-height);
   overflow: hidden;
   padding: 10px 12px;
-  border: 0;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 10px;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: var(--dsw-elevation-panel);
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
+  /* ⚠️ 只写标准属性：构建管线（tsdown 的 css 压缩）在两条并存时只保留后一条
+     `-webkit-backdrop-filter`，而 Chromium 150 已不支持该别名（CDP 实测
+     `CSS.supports('-webkit-backdrop-filter','blur(4px)') === false`）→ 玻璃模糊
+     静默失效。全仓 43 个 corum CSS 同病（另开一轮统一修），此处先按正确写法。 */
+  backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   animation: dsh-turn-preview-enter 120ms ease-out;
   transition: top 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -193,7 +221,8 @@
 
 .previewResponse {
   margin-top: 4px;
-  color: var(--dsw-alias-label-caption);
+  /* fork（corum）⑤：响应文案降一档到 label-tertiary（官方用 label-caption）。 */
+  color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12);
   -webkit-line-clamp: 3;
 }
@@ -203,8 +232,9 @@
   to { opacity: 1; }
 }
 
+/* fork（corum）⑤：卡片从左侧 gutter 向右展开，入场方向随之取反。 */
 @keyframes dsh-turn-preview-enter {
-  from { opacity: 0; transform: translateX(4px); }
+  from { opacity: 0; transform: translateX(-4px); }
   to { opacity: 1; transform: translateX(0); }
 }
 

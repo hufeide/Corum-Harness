@@ -16,6 +16,14 @@
 >   的架构形态不再作为实施基准。后续实施以新方案为准。
 > - 2026-09-09 增补：第 12 个 fork 包 `@corum/corum-ui-trajectory`（client 侧，fork 自官方 `@deepseek-ai/dsh-client-ui-trajectory`）登记于 **§14**——轨迹视图注册点从 conversation.view 迁到 details 抽屉。
 > - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
+> - ⚠️ **2026-09-10 回归修复（整文件覆盖事故）**：0.1.3 合并 commit `f09aa05b` 把
+>   `corum-ui-chat/chat/TurnNavigator.module.css` **整文件拷成官方版**，把「左 gutter
+>   8×8 圆点刻度」（设计稿 vESwF，commit `53b66a87`）静默还原成官方右侧横线刻度——
+>   typecheck/build 全绿、console 零错误，**用户看 UI 才发现**（§4.2 此前未登记该
+>   文件，故台账也没拦住）。已按「官方 0.1.3 结构 + 5 处 corum 增量」重新三方合并并
+>   CDP 验证（左 gutter 圆点 + 当前点 brand + 预览卡右翻）。**纪律**：带 corum 定制的
+>   文件禁止整文件覆盖，必须逐处合并；`scripts/verify-fork-drift.sh` 新增 §5
+>   「定制面不得与官方逐字节一致 + 定制标记必须存在」断言（已负向测试）。
 
 ---
 
@@ -123,7 +131,7 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 
 **仅 import 改名（25 个，官方覆盖后 sed 包名）**：`conversation-nodes/` 全部 16 个（assistant/chat-snapshot-builder/command/common/compaction/event-projection/fallback/inbox/message/request-prompt/retry/tool/turn-error/turn-max-tokens/turn-process/turn-tail）、`contract/chat-nodes.ts`、`contract/snapshot.ts`、`model/conversation-context.ts`、`chat/ContextBody.tsx` 等。注意 `contract/snapshot.ts:70` 的 `declare module '@corum/corum-ui-conversation/client'` 也是改名产物——sed 时连 declare module 字符串一起换。
 
-**实质修改（19 个）**：
+**实质修改（20 个）**：
 
 | 文件 | 差异点 | 原因 | 风险 |
 |---|---|---|---|
@@ -132,6 +140,7 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 | `client/apply.ts` | import corum-reskin.css；新增 `reviewSources` WeakMap + `reviewSource()`（:85-100）；binding 取出改两行；slots 注入加 `review` + `getAgentName`（:134, :167-195，~29 行 RPC 手搓） | fork 重设计注释（:25-26）；getAgentName 2026-08-31 用户定调显示 nickname；`ctx.get('connection') as` 两处硬取未声明 inject（审计 P0/P1，:93,174） | 🔴 getAgentName 整块是 corum 独有 RPC 逻辑（listTaskAgents/listProfiles），官方 apply.ts 改动需绕开此块合并 |
 | `client/contract/slots.ts` | 新增 `review: ReviewSource` + `getAgentName` 两槽字段（:128-131）；**用 `import('../chat/review-source.ts')` inline import 渲染层** | fork 注释 :128 | 🟡 字段增量合并；⚠️ contract 反向依赖渲染层（§3.1 残留瑕疵） |
 | `chat/ChatView.tsx` (+css 39 行) | 新增 agentName state+effect（:210-217）、reviewChanges uSES + revertAll（:235-245）、`<AgentNameContext.Provider>` 包裹（:594,703）、ReviewCard 挂载块（:677-691）；`useSyncExternalStore` import；`t as unknown as` 双断言（:688） | Review 卡 + Agent 昵称（fork 注释 :235, :677） | 🔴 ReviewCard/AgentNameContext 挂载点与官方 ChatView 布局演进需人工合并 |
+| `chat/TurnNavigator.module.css` | **官方 0.1.3 结构 + 5 处 corum 增量**（文件头注释逐条列出，全部带 `fork（corum）` 标记）：① `.frame` `left:` 取代 `right:`（贴左缘）② `.mark` `inset:0` 全宽 + `::before` 改 8×8 圆点（`border-radius:50%`，水平+垂直居中）③ `markPreview/markActive/focus-visible` 换 secondary/brand + glass 光晕 ④ `.preview` `left:calc(100%+10px)` 右翻 + 玻璃化 ⑤ `previewResponse` 色 label-tertiary + 入场动画方向取反 | 设计稿 vESwF「左 gutter 竖列圆点刻度」（commit `53b66a87`，用户定调）；0.1.3 合并时被整文件覆盖，2026-09-10 重新贴回（见文首回归修复条） | 🔴 **禁止整文件覆盖**（已发生一次静默还原）。官方 0.1.3 的 scroller/fades/固定间距/`markUnloaded`/`markBusy` 结构保留，只把上述 5 处增量贴回；`scripts/verify-fork-drift.sh` §5 已加断言守护 |
 | `chat/AssistantMarkdown.tsx` (+css 27 行) | 新增 `AgentHeader` 组件（:13-26，硬编码 'Corum Agent' + `new Date().toLocaleTimeString('zh-CN')`）+ `showAgentHeader` prop（:130-131） | 设计稿 x1mv8q head；⚠️ 渲染期 `new Date()` 流式重渲时间每秒变（审计 P1） | 🟡 增量合并；时区硬编码入 §3.3 i18n 整改 |
 | `chat/AssistantNodeView.tsx` | 新增 `showAgentHeader = data.step <= 1` 计算并下传（:29-32,42） | 注释「Agent 头只在 turn 的第一个 step 显示」 | 🟡 |
 | `chat/MessageItem.tsx` (+css 40 行) | 删官方 `reveal: 'always'/'hover'` 可达性设计（:151,164-166, :281-293 官方 isLatestUserRow 逻辑全删）；新增 userHeader（'You' + zh-CN time，:181-185）+ `time` prop | 设计稿 riOKX h；⚠️ 删了官方「无 hover 设备最新行常显」可达性（审计 P1） | 🔴 官方 MessageItem 的 actions-reveal 机制被整块删除，官方在此文件的任何改进都与之冲突 |
@@ -223,6 +232,14 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
    注意连 `declare module '@deepseek-ai/dsh-client-ui-conversation/client'` 字符串一起换（chat/contract/snapshot.ts）。
 5. **invariant.ts / 根 index.ts**：按 §3.6 模板处理；根 index.ts 向官方写法对齐（settingsNamespace 已内联）。
 
+> ⚠️ **整文件覆盖禁令（2026-09-10 事故教训）**：上面第 3/4 步的「官方覆盖」**只对
+> 「逐字节相同」与「仅 import 改名」两类文件成立**。凡在 §4 各包「实质修改」表里出现
+> 过的文件，**禁止整文件拷贝官方版**——必须按台账逐处三方合并。反例：0.1.3 合并
+> `f09aa05b` 把 `corum-ui-chat/chat/TurnNavigator.module.css` 整文件拷成官方版，左
+> gutter 圆点刻度静默消失（编译全绿、console 干净，只能靠人眼看 UI 发现）。
+> **合并完成后必跑 `scripts/verify-fork-drift.sh`**：其 §5 会直接报出「与官方逐字节
+> 一致」的定制文件与缺失的定制标记。
+
 ### 第 2 步 · 优先核对的「语义地雷」（合并实质文件前先查）
 
 6. **错误码命名空间**（§3.5）：conversation `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、`image-labels.ts`——若官方新版本继续演进错误码，corum 必须同步，否则附件/steer 错误处理静默失效。
@@ -235,6 +252,7 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
    - **chat/ChatNodeSeat.tsx:153**（foldable=false）——**先完成 P0-12 整改再 rebase**，否则把死代码合并进新版。
    - **chat/corum-reskin.css**——**先完成 P0-13 整改**（收回各 module.css），否则全局选择器对新 DOM 误伤/失效。
    - **chat/MessageItem.tsx / MessageIconActions.tsx / TurnTailNodeView.tsx**——corum 删了官方 reveal/usageAction 机制，官方在这三文件的任何演进都要决定「跟官方机制」还是「维持 corum 重设计」。
+   - **chat/TurnNavigator.module.css**——左 gutter 8×8 圆点刻度（设计稿 vESwF）5 处增量，官方 0.1.3 结构演进时**只贴回增量、禁止整文件覆盖**（2026-09-10 已被覆盖过一次）。
    - **chat/apply.ts**（reviewSource + getAgentName 块）、**chat/ChatView.tsx**（ReviewCard/AgentNameContext 挂载点）。
    - **conversation/apply.ts**（emptyActions 119 行块 + uiWorkspace 降级）、**conversation/contract/slots.ts**（emptyActions 契约增量）。
    - **conversation/ConversationSession.tsx**（crumbs/lineage 整块删除）——官方 header 槽演进需确认 corum 是否仍全删。
@@ -421,7 +439,7 @@ dsh 0.1.3 未上公共 registry（最新仍 0.1.2-rc.1）。落地路径沿用 0
 | 包 | 评级→实际 | 关键改动 |
 |---|---|---|
 | corum-ui-conversation | XL→落地 | apply(emptyActions 190 行移植到官方 Config/fileUploads 骨架)/InputBar(file-upload 链路+sparkle)/ConversationRoot(**新增契约增量 `toolbarLeading`** 承载 corum 工具栏，因官方删 overlay/leftItems/rightItems/footer 槽)/slots(emptyActions 移植)/locales(补官方 20 键)/view-selection(官方新文件) |
-| corum-ui-chat | L→落地 | conversation-nodes 19 文件官方换新+sed（82 错自动消解）+ contract(8 文件) + apply(chatRuntime/corumEditor/review/getAgentName 移植到 keyedHooks/loadThrough 骨架) + ChatView(官方 memo ChatNodeList/turn rail + AgentNameContext/ReviewCard 移植) + ChatNodeSeat(foldable=false 保留，P0 随官方投影器内聚缓解) + TurnNavigator/turn-rail-items(官方新线) |
+| corum-ui-chat | L→落地 | conversation-nodes 19 文件官方换新+sed（82 错自动消解）+ contract(8 文件) + apply(chatRuntime/corumEditor/review/getAgentName 移植到 keyedHooks/loadThrough 骨架) + ChatView(官方 memo ChatNodeList/turn rail + AgentNameContext/ReviewCard 移植) + ChatNodeSeat(foldable=false 保留，P0 随官方投影器内聚缓解) + TurnNavigator/turn-rail-items(官方新线——⚠️ **TurnNavigator.module.css 整文件覆盖连带丢掉 corum 圆点刻度定制，2026-09-10 重新贴回，见文首与 §4.2**) |
 | corum-ui-settings-models | M→落地 | JsonValue 5 处改 dsh-util-values + SettingsRemote→ClientRemote['settings'] + settings-conflict→settings/conflict + 合并官方候选模型搜索框(candidateQuery/visibleCandidates/toggleVisibleCandidates) + candidateToolbar CSS 改名 |
 | corum-ui-approval / corum-ui-questions / corum-ui-model-selection / corum-credentials-local / corum-api-remotes | S→落地 | 编译即绿（0.1.3 契约兼容，官方这些包 corum 定制 tsx 均未动）；仅 invariant 清理 + api-remotes 补 fileUploadsRemote 3 行 |
 | corum-subagent(第 9 fork) | M→落地 | driver/spawn 内部 import 改相对路径 + attachments.admitPromptContent 服务方法 + assistant-output expandAssistantStream + continuation persistence.stat |

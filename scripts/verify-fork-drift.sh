@@ -143,6 +143,60 @@ for ev in $declared; do
   esac
 done
 
+# ── 5. fork 定制面不得被官方整文件覆盖（静默还原检测）──────────────────────
+# 背景：2026-09-07 的 0.1.3 合并（commit f09aa05b）把
+# corum-ui-chat/chat/TurnNavigator.module.css 整文件拷成官方版，把「左 gutter
+# 8×8 圆点刻度」（设计稿 vESwF）静默还原成官方右侧横线刻度——typecheck/build
+# 全绿、console 零错误，直到 2026-09-10 用户看 UI 才发现。
+# 纪律：官方文件里凡带 corum 定制，合并时只能逐处三方合并，禁止整文件覆盖。
+# 本节把这条纪律变成可执行断言；新增 fork 定制面时把文件登记进下面两张表。
+section "[5] fork 定制面：不得与官方逐字节一致（静默覆盖检测）"
+
+# (1) 必须与官方「有差异」的定制文件。格式：corum 相对路径::官方相对路径
+MUST_DIFFER=(
+  "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::packages/client/ui-chat/src/client/chat/TurnNavigator.module.css"
+  "packages/plugins/session/corum-ui-chat/src/client/chat/MessageItem.tsx::packages/client/ui-chat/src/client/chat/MessageItem.tsx"
+  "packages/plugins/session/corum-ui-chat/src/client/chat/TurnTailNodeView.tsx::packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx"
+  "packages/plugins/session/corum-ui-chat/src/client/chat/ChatNodeSeat.tsx::packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx"
+  "packages/plugins/session/corum-ui-conversation/src/client/skeleton/InputBar.tsx::packages/client/ui-conversation/src/client/skeleton/InputBar.tsx"
+  "packages/plugins/session/corum-ui-conversation/src/client/skeleton/ConversationRoot.tsx::packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx"
+  "packages/plugins/session/corum-ui-conversation/src/client/apply.ts::packages/client/ui-conversation/src/client/apply.ts"
+  "packages/plugins/session/corum-ui-approval/src/client/ApprovalPanel.tsx::packages/client/ui-approval/src/client/ApprovalPanel.tsx"
+)
+for entry in "${MUST_DIFFER[@]}"; do
+  corum_rel="${entry%%::*}"
+  off_rel="${entry##*::}"
+  if [ ! -f "$REPO_ROOT/$corum_rel" ]; then
+    fail "${corum_rel} 不存在（台账登记了定制，文件却没了）"
+  elif [ ! -f "$DSH_CHECKOUT/$off_rel" ]; then
+    skip "${corum_rel}：官方检出缺 ${off_rel}（官方改名？需人工核对台账）"
+  elif cmp -s "$REPO_ROOT/$corum_rel" "$DSH_CHECKOUT/$off_rel"; then
+    fail "${corum_rel} 与官方逐字节一致——corum 定制疑似被官方整文件覆盖（还原成原生了）"
+  else
+    pass "${corum_rel} 保留 corum 定制（与官方有差异）"
+  fi
+done
+
+# (2) 必须含定制实现标记的文件（比 (1) 更强：防止只留注释、实现被覆盖）。
+#     格式：相对路径::标记字面量（file 内 grep -F 命中即通过）
+MUST_CONTAIN=(
+  "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::left: calc(12px - (var(--dsh-composer-side-clearance) + 16px))"
+  "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::border-radius: 50%;"
+  "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::background: var(--dsw-alias-brand-primary);"
+  "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::left: calc(100% + 10px);"
+)
+for entry in "${MUST_CONTAIN[@]}"; do
+  corum_rel="${entry%%::*}"
+  marker="${entry##*::}"
+  if [ ! -f "$REPO_ROOT/$corum_rel" ]; then
+    fail "${corum_rel} 不存在（标记检查：${marker}）"
+  elif grep -qF -- "$marker" "$REPO_ROOT/$corum_rel"; then
+    pass "$(basename "$corum_rel") 含定制标记：${marker}"
+  else
+    fail "$(basename "$corum_rel") 缺定制标记「${marker}」——定制被覆盖或写法被改写"
+  fi
+done
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then
