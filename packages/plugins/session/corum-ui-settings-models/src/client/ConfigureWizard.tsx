@@ -22,6 +22,7 @@ function brandOfProvider(provider: string): Brand | undefined {
   return COMMON_PROVIDERS.find(b => b.id === provider) ?? brandOf(provider)
 }
 import { useConnTest } from './useConnTest.ts'
+import { catalogFallbackModels, isNoDiscoveryError, wizardProfilePath } from './catalog-fallback.ts'
 
 import {
   BackRow, GlassButton, IconCheck, IconPlus, IconZap, SelectField, SettingGroup,
@@ -83,18 +84,38 @@ function useDetect(api: ModelsWire): {
   models: LlmDiscoveredModel[] | undefined
   detecting: boolean
   failure: string | undefined
-  run: (settingsNs: string, req: Record<string, unknown>) => Promise<void>
+  /** true = 结果来自内置目录（该 namespace 没有网络发现），不是网络侦测所得。 */
+  catalog: boolean
+  /**
+   * @param fallback - NO_DISCOVERY 时的内置目录候选（目录型 provider，如官方
+   * DeepSeek 整节）。省略则该错误按普通失败显示。
+   */
+  run: (settingsNs: string, req: Record<string, unknown>, fallback?: () => LlmDiscoveredModel[]) => Promise<void>
 } {
   const [models, setModels] = useState<LlmDiscoveredModel[] | undefined>(undefined)
   const [detecting, setDetecting] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
-  const run = async (settingsNs: string, req: Record<string, unknown>): Promise<void> => {
+  const [catalog, setCatalog] = useState(false)
+  const run = async (settingsNs: string, req: Record<string, unknown>, fallback?: () => LlmDiscoveredModel[]): Promise<void> => {
     setDetecting(true)
     setFailure(undefined)
     setModels(undefined)
+    setCatalog(false)
     try {
       const res = await api.llm.discoverModels(settingsNs, req as unknown as Parameters<ModelsWire['llm']['discoverModels']>[1])
-      if (!res.ok) { setFailure(res.error.message); return }
+      if (!res.ok) {
+        // 目录型 provider（官方 DeepSeek 整节）没有注册网络发现——读它自己的
+        // 模型目录，不是失败。候选为空才退回错误提示。
+        if (fallback !== undefined && isNoDiscoveryError(res.error.message)) {
+          const builtin = fallback()
+          if (builtin.length === 0) { setFailure(res.error.message); return }
+          setCatalog(true)
+          setModels(builtin)
+          return
+        }
+        setFailure(res.error.message)
+        return
+      }
       setModels(res.value)
     } catch (error) {
       setFailure(messageOf(error))
@@ -102,7 +123,7 @@ function useDetect(api: ModelsWire): {
       setDetecting(false)
     }
   }
-  return { models, detecting, failure, run }
+  return { models, detecting, failure, catalog, run }
 }
 
 /* ── 路径 A：选择供应商 ── */
@@ -124,7 +145,13 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider }: Det
 
   const doDetect = async (): Promise<void> => {
     // catalog 路由用 provider 名 + apiKey 侦测；多数内置路由读自身目录。
-    await detect.run(nsOfProvider(provider), { provider, ...(apiKey.trim() === '' ? {} : { apiKey: apiKey.trim() }) })
+    // 官方 DeepSeek（整节 llm-deepseek）没有网络发现：走内置目录兜底。
+    const settingsNs = nsOfProvider(provider)
+    await detect.run(
+      settingsNs,
+      { provider, ...(apiKey.trim() === '' ? {} : { apiKey: apiKey.trim() }) },
+      () => catalogFallbackModels(schema, state.namespaces.get(settingsNs), wizardProfilePath(settingsNs, provider), provider),
+    )
     setPicked(new Set())
   }
 
@@ -257,6 +284,9 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider }: Det
           </GlassButton>
         </span>
         {detect.failure === undefined ? null : <p className={styles['error']}>{detect.failure}</p>}
+        {detect.catalog
+          ? <p className={styles['notice']}>该供应商使用内置模型目录（未发网络请求），从下方勾选要启用的模型。</p>
+          : null}
       </div>
 
       {detect.models === undefined ? null : (

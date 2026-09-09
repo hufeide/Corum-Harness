@@ -38,7 +38,7 @@
 | corum-ui-approval | ui-approval | 0.1.2-alpha.2 | 8 / 8 | 4 | 1 | 3 | 0 | 0 | **中**（ApprovalPanel 重设计 + lucide 依赖） |
 | corum-ui-questions | ui-user-questions | 0.1.2-alpha.2 | 7 / 11 | 0 | 0 | 3 | 4 | 8 | **高**（渲染层整体重写，文件名全不同——按「新包替换」对待） |
 | corum-ui-model-selection | ui-model-selection | 0.1.2-alpha.2 | 11 / 11 | 4 | 0 | 7 | 0 | 0 | **低**（教科书式最小 fork，仅 model-unavailable 语义 + 触发器文案） |
-| corum-ui-settings-models | ui-settings-models | 0.1.2-alpha.2 | 24 / 25 | 11 | 0 | 13 | 0 | 1 | **中**（operations.ts 删除改直持 wire face，官方加回即冲突） |
+| corum-ui-settings-models | ui-settings-models | 0.1.2-alpha.2 | 24 / 25 | 10 | 0 | 10 | 12 | 1 | **中**（operations.ts 删除改直持 wire face；corum 自研模型页 12 个新文件，官方加回 operations 即冲突） |
 
 合计：相同 103、仅改名 26、实质修改 65、新增 19、删除 11（`src/` 内文件；各包根 `index.ts`/`invariant.ts`/`css-modules.d.ts` 计入实质修改）。
 
@@ -194,10 +194,22 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 
 ### 4.6 corum-ui-settings-models（对照 ui-settings-models）
 
-相同 11 / 改名 0 / 实质 15 / 新增 0 / 删除 1。**rebase 风险：中**。
+相同 10 / 改名 0 / 实质 10 / 新增 12 / 删除 1。**rebase 风险：中**。
+
+> 统计口径（2026-09-09 复核，`comm` + `cmp` 逐文件比对 `src/client`）：官方 21 个文件，corum
+> 32 个；共享 20 个（10 逐字节相同、10 有实质差异），corum 独有 12 个，官方独有 1 个。旧表
+> 「相同 11 / 实质 15 / 新增 0」与文件集不符（模型页重写新增的 12 个文件没进台账），已按实
+> 复核修正。
+>
+> **corum 独有（12 个）**🟢：`AddModelSelectView.tsx`、`ConfigureWizard.tsx`、`ModelConfigView.tsx`、
+> `ProviderDetailView.tsx`、`controls.tsx`、`brands.tsx`、`model-cards.ts`、`model-profile.ts`、
+> `reasoning.ts`、`thinking-catalog.ts`、`useConnTest.ts`、`catalog-fallback.ts`（两页式模型页
+> 自研渲染层：供应商卡/详情/模型配置/向导/添加模型 + 思考档位 catalog + 目录兜底）。官方
+> 若重构 Models 页，这 12 个文件是**整包替换**而非合并对象。
 
 - **官方有但 corum 删除（1 个）**🔴：`client/operations.ts`（官方 109 行封装层 `createModelsOperations`/`ModelsOperations`）。corum 删掉它，14 处改为组件直持 Remote wire face（`ModelsWire{settings,credentials,llm}`）。package.json description 自称「其余与官方逐行一致」**不实**（审计 P1，应如实更新）。改造质量良好（补了官方没有的传输失败 try/catch——store.ts `messageOf` + 各处 catch，修官方「transport reject 成未处理 rejection」的真实缺口），但**官方若更新 operations.ts 或其调用方，corum 全部 14 处调用点要逐处对齐**。
-- **实质修改（13 个）**：
+- **实质修改（10 个共享文件）**（下列条目同时记了 corum 独有文件里值得留意的行为：
+  `reasoning.ts`/`ModelConfigView.tsx`/`ProviderDetailView.tsx`）：
   - `client/store.ts`（105 diff 行）🔴：`ModelsWire`/`ModelsCredentials`/`ModelsLlm` 类型定义内置（:24-87）、构造函数 `ctx` 改 `api: Pick<ModelsWire,...>`、加载链路加 try/catch + `messageOf`（:210-266）。
   - `client/ModelListEditor.tsx`（63 diff 行）🟡：`acceptsImage()` + **模型级「支持图片输入」开关**（:442-469，CORUM-PATCH 注释说清语义：勾选写 `input:['text','image']`、不勾删 `input` 键回退 route defaultInput/catalog——这是本包 fork 的**首要动机**，写进了 description）；`api.llm.discoverModels` 直调 + messageOf catch。⚠️ 裸 checkbox 无样式（审计 P1）。
   - `client/CustomProviderCard.tsx` / `ProviderEditor.tsx` / `ModelsSection.tsx` / `DeepSeekOnboardingDialog.tsx`（28/62/57/11 diff 行）🟡：`operations.*` → `api.{settings,credentials,llm}.*` 直调 + wire 结果（`response.ok/error.message`）替换官方 outcome 判别（`written.kind`）+ 传输失败 catch；JsonValue import 从 `dsh-util-values` 改 `dsh-api-remotes/client`。

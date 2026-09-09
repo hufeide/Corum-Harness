@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import type { ModelsWire } from './store.ts'
 import { messageOf } from './store.ts'
+import { isNoDiscoveryError } from './catalog-fallback.ts'
 
 export type ConnTestResult =
   | { kind: 'idle' }
@@ -49,13 +50,12 @@ export function useConnTest(api: ModelsWire): {
       if (!response.ok) {
         // catalog 目录路由（如 llm-deepseek）：discoverModels 不注册网络发现，
         // 返回「no model discovery is registered」——转成内置目录友好结果（非错误）。
-        const msg = response.error.message
-        if (/no model discovery is registered/i.test(msg)) {
+        if (isNoDiscoveryError(response.error.message)) {
           // 从该 namespace 的 settings 读模型目录计数（catalog 路由的模型在 profile.models）。
           setResult({ kind: 'catalog', count: -1 })
           return
         }
-        setResult({ kind: 'error', message: msg })
+        setResult({ kind: 'error', message: response.error.message })
         return
       }
       setResult({ kind: 'ok', ms, count: response.value.length })

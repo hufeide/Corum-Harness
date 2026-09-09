@@ -21,6 +21,7 @@ import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { formatCapacity, parseCapacity } from './DeepSeekModelsEditor.tsx'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import { messageOf, type ModelsWire } from './store.ts'
+import { catalogIdsAsModels, discoveredModelsOf, isNoDiscoveryError } from './catalog-fallback.ts'
 import type { en } from './locales.ts'
 import styles from './ModelsSection.module.css'
 
@@ -251,6 +252,18 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         ...probe.apiKey === undefined ? {} : { apiKey: probe.apiKey },
       })
       if (!response.ok) {
+        // 目录型路由（适配器自带模型目录、不注册网络发现）：discoverModels 抛
+        // NO_DISCOVERY。退回该 profile 自己的 models 行 → 内置 catalog 表。
+        if (isNoDiscoveryError(response.error.message)) {
+          const builtin = discoveredModelsOf(models)
+          const fallback = builtin.length > 0 ? builtin : catalogIdsAsModels(probe.provider ?? '')
+          if (fallback.length > 0) {
+            const known = new Set(models.map(model => textOf(model, 'id')))
+            setCandidates(fallback)
+            setPicked(new Set(fallback.filter(model => !known.has(model.id)).map(model => model.id)))
+            return
+          }
+        }
         setFailure(response.error.message)
         return
       }

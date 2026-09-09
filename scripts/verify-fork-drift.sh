@@ -319,6 +319,34 @@ else
   fi
 fi
 
+# ── 10. 目录型 provider 的 discoverModels 兜底（防「换个入口又弹 NO_DISCOVERY」）──
+# 背景：官方 llm-deepseek 不注册 model discovery，discoverModels 必抛 NO_DISCOVERY；
+# corum 模型页把它当硬错误显示 → 正式包「添加 DeepSeek 供应商」直接失败（2026-09-09，
+# PROGRESS 第 56 轮）。修复抽成 catalog-fallback.ts，但**四处调用点**必须都接兜底——
+# 只修用户报的那一处，下次换入口（添加模型/连通性测试）还会撞。
+# 断言：client 下每个调用 discoverModels 的文件都必须 import 兜底模块。
+section "[10] 目录型 provider 的 discoverModels 兜底（catalog-fallback）"
+MODELS_CLIENT="$REPO_ROOT/packages/plugins/session/corum-ui-settings-models/src/client"
+if [ ! -d "$MODELS_CLIENT" ]; then
+  skip "找不到 corum-ui-settings-models/src/client"
+elif [ ! -f "$MODELS_CLIENT/catalog-fallback.ts" ]; then
+  fail "缺少 catalog-fallback.ts（目录型 provider 的 NO_DISCOVERY 兜底单一事实源）"
+else
+  call_sites=$(grep -l 'discoverModels(' "$MODELS_CLIENT"/*.ts "$MODELS_CLIENT"/*.tsx 2>/dev/null | grep -v 'catalog-fallback.ts' || true)
+  if [ -z "$call_sites" ]; then
+    fail "未找到任何 discoverModels 调用点（正则失配？）"
+  else
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      if grep -q "from './catalog-fallback.ts'" "$file"; then
+        pass "$(basename "$file") 接了 catalog 兜底"
+      else
+        fail "$(basename "$file") 调 discoverModels 但没接 catalog 兜底——NO_DISCOVERY 会当错误弹给用户"
+      fi
+    done <<< "$call_sites"
+  fi
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then

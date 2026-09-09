@@ -14,13 +14,9 @@ import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { ModelCard, ProviderCard } from './model-cards.ts'
 import { formatCapacity } from './model-profile.ts'
-import { catalogModelIdsOf } from './reasoning.ts'
+import { catalogFallbackModels, isNoDiscoveryError } from './catalog-fallback.ts'
 import { BrandLogo } from './brands.tsx'
 
-/** catalog 目录路由的「可用模型」列表（discoverModels 不注册网络发现时用）。 */
-function catalogModelsOf(provider: string): LlmDiscoveredModel[] {
-  return catalogModelIdsOf(provider).map(id => ({ id }))
-}
 import {
   BackRow, GlassButton, IconCpu, IconPlus, IconZap,
 } from './controls.tsx'
@@ -40,6 +36,7 @@ export function AddModelSelectView({ provider, state, api, schema, onBack, onNex
   const [models, setModels] = useState<LlmDiscoveredModel[] | undefined>(undefined)
   const [detecting, setDetecting] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
+  const [catalog, setCatalog] = useState(false)
   const [selected, setSelected] = useState<string | undefined>(undefined)
   const [customId, setCustomId] = useState('')
 
@@ -49,15 +46,18 @@ export function AddModelSelectView({ provider, state, api, schema, onBack, onNex
   const detect = async (): Promise<void> => {
     setDetecting(true)
     setFailure(undefined)
+    setCatalog(false)
     try {
       // 自定义路由（pi-ai）需带 baseURL 才能探测；catalog 目录路由不用。
       const req: Record<string, unknown> = { provider: provider.provider }
       if (provider.baseURL !== undefined && provider.baseURL !== '') req.baseURL = provider.baseURL
       const res = await api.llm.discoverModels(provider.settingsNs, req as unknown as Parameters<ModelsWire['llm']['discoverModels']>[1])
       if (!res.ok) {
-        // catalog 目录路由：discoverModels 不注册网络发现——从内置 catalog 表列模型。
-        if (/no model discovery is registered/i.test(res.error.message)) {
-          setModels(catalogModelsOf(provider.provider))
+        // catalog 目录路由：discoverModels 不注册网络发现——读该 provider 自己的
+        // 模型目录（profile 已解析 models → 内置 catalog 表），不是失败。
+        if (isNoDiscoveryError(res.error.message)) {
+          setCatalog(true)
+          setModels(catalogFallbackModels(schema, state.namespaces.get(provider.settingsNs), provider.settingsPath, provider.provider))
           return
         }
         // pi-ai 无 catalog 路由且无法网络探测：给「手动输入」提示（非硬错误）。
@@ -102,6 +102,9 @@ export function AddModelSelectView({ provider, state, api, schema, onBack, onNex
       </span>
 
       {failure === undefined ? null : <p className={styles['error']}>{failure}</p>}
+      {catalog
+        ? <p className={styles['notice']}>该供应商使用内置模型目录（未发网络请求）。</p>
+        : null}
 
       <div className={styles['fieldCol']} style={{ gap: 6 }}>
         {(models ?? []).map((m) => {
