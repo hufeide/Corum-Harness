@@ -1715,20 +1715,24 @@ export class CorumAgentService extends TypertRemoteService {
       } else {
         try {
           const status = await local.status()
-          const usable = status.installed && status.running && status.meetsMinMem && status.models.length > 0
+          // 严格已激活（用户定调 2026-09-09）：只有加载到内存的模型才用于润色——
+          // 未激活模型首次调用要冷加载，可用性没保证，auto 档也不该挑它。
+          const activated = status.models.filter(m => m.active === true)
+          const usable = status.installed && status.running && status.meetsMinMem && activated.length > 0
           if (engine === 'local' || usable) {
             const ensured = status.running ? { ok: true } : await local.ensureServer()
             if (!ensured.ok) {
               throw new Error(ensured.error ?? '本地引擎启动失败')
             }
-            // 模型选择：配置值必须仍在**本机已部署**列表里（可能被删过），否则回落
-            // 「已激活优先」——与设置页下拉的语义一致（用户定调：不手填模型 id）。
-            const deployed = status.models
+            // 模型选择：配置值必须在**已激活**集合里（可能已被停止/卸载），否则回落
+            // 第一个已激活模型——与设置页下拉的语义一致（不手填模型 id）。
             const configured = config.localModel === undefined
               ? undefined
-              : deployed.find(m => m.name === config.localModel)
-            const model = (configured ?? deployed.find(m => m.active === true) ?? deployed[0])?.name ?? ''
-            if (model === '') throw new Error('本地引擎没有已部署模型：请在「设置 → 扩展 → Ollama」下载并激活一个模型')
+              : activated.find(m => m.name === config.localModel)
+            const model = (configured ?? activated[0])?.name ?? ''
+            if (model === '') {
+              throw new Error('本地引擎没有已激活的模型：请在「设置 → 扩展 → Ollama」激活一个模型（未激活的模型不进润色候选）')
+            }
             const out = await local.chat({ model, prompt: `${system}\n\n${prompt}`, temperature: 0.2, numPredict: 1024 })
             if (out.text.trim() !== '') return out.text
             throw new Error('本地模型返回空结果')

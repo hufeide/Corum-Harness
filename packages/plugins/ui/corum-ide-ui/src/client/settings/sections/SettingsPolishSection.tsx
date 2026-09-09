@@ -129,8 +129,8 @@ export function PolishSection() {
       const status = await rpc<LocalLlmStatusView>('localLlm', 'status', {})
       setLocal(status)
       if (localModel === '') {
-        // 默认优先「已部署且已激活」的模型（无需冷加载），其次任一已部署模型。
-        const preferred = status.models.find(m => m.active === true) ?? status.models[0]
+        // 默认选中第一个已激活模型（严格已激活：未激活的不进候选）。
+        const preferred = status.models.find(m => m.active === true)
         if (preferred !== undefined) setLocalModel(preferred.name)
       }
     } catch {
@@ -170,14 +170,13 @@ export function PolishSection() {
   }
 
   const modelOptions = providers.flatMap(p => p.models.map(m => ({ id: `${p.id}::${m.id}`, label: `${p.name} · ${m.name}` })))
-  // 本地模型下拉：只列**本机已部署**的模型（来自 Ollama status），已激活的排在最前并标 ●。
-  // 不允许手填模型 id（用户定调：模型必须来自本机已部署/已激活的集合）。
-  const deployed = local?.models ?? []
-  const localModelOptions = [
-    ...deployed.filter(m => m.active === true).map(m => ({ id: m.name, label: `● 已激活 · ${localModelLabel(m)}` })),
-    ...deployed.filter(m => m.active !== true).map(m => ({ id: m.name, label: `○ 未激活 · ${localModelLabel(m)}` })),
-  ]
-  const localReady = local !== null && local.installed && local.running && local.meetsMinMem
+  // 本地模型下拉：**只列本机已激活（加载到内存）的模型**（用户定调 2026-09-09：
+  // 「严格已激活的，确保功能可用」——未激活模型首次调用要冷加载、可用性没保证）。
+  // 也不允许手填模型 id：模型必须来自 Ollama 已部署且已激活的集合。
+  const activatedModels = (local?.models ?? []).filter(m => m.active === true)
+  const localModelOptions = activatedModels.map(m => ({ id: m.name, label: `● 已激活 · ${localModelLabel(m)}` }))
+  const activatedCount = activatedModels.length
+  const localReady = local !== null && local.installed && local.running && local.meetsMinMem && activatedCount > 0
 
   if (rpc === null) return <p className={css.hintText}>RPC 未就绪。</p>
 
@@ -197,8 +196,8 @@ export function PolishSection() {
             <span className={css.polishChoiceTitle}>还没配置润色模型</span>
             <span className={css.polishDesc}>
               {localReady
-                ? `检测到本地 Ollama 可用（内存 ${local.totalMemGb} GB，${local.models.length} 个模型）——本地跑省钱、离线可用。`
-                : '本机未检测到可用的 Ollama。可直接用线上模型，或先去「设置 → 扩展 → Ollama」装本地引擎。'}
+                ? `检测到本地 Ollama 可用（内存 ${local.totalMemGb} GB，${activatedCount} 个已激活模型）——本地跑省钱、离线可用。`
+                : '本机没有可用的本地引擎/已激活模型。可直接用线上模型，或先去「设置 → 扩展 → Ollama」装引擎并激活模型。'}
             </span>
           </div>
           <GlassButton
@@ -207,7 +206,7 @@ export function PolishSection() {
             onClick={() => {
               setEngine(localReady ? 'auto' : 'online')
               if (localModel === '' && local !== null) {
-                const preferred = local.models.find(m => m.active === true) ?? local.models[0]
+                const preferred = local.models.find(m => m.active === true)
                 if (preferred !== undefined) setLocalModel(preferred.name)
               }
               void save()
@@ -242,14 +241,14 @@ export function PolishSection() {
         </SettingRow>
         <SettingRow
           label="本地模型"
-          desc="从本机「已部署」的 Ollama 模型里选（● 已激活的免冷加载、优先用）；不提供手填模型 id。"
+          desc="只列本机**已激活**的 Ollama 模型（加载到内存、随取随用）；未激活的请先到「设置 → 扩展 → Ollama」激活。不提供手填模型 id。"
         >
           <SelectField
             /* 没有可选项时显示占位而不是历史配置值（模型可能已被卸载，别误导） */
             value={localModelOptions.length > 0 ? localModel : ''}
             options={localModelOptions.length > 0
               ? [{ id: '', label: '（自动：优先已激活的模型）' }, ...localModelOptions]
-              : [{ id: '', label: local === null ? '（本地引擎未挂载）' : '（没有已部署的本地模型）' }]}
+              : [{ id: '', label: local === null ? '（本地引擎未挂载）' : '（没有已激活的本地模型）' }]}
             disabled={busy || loading || localModelOptions.length === 0}
             onChange={(id) => { setLocalModel(id); setSaved(false) }}
           />
