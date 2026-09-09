@@ -6,6 +6,7 @@ export const NS = 'trajectory'
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   'view.trajectory': '轨迹',
+  'region.empty': '选择一个会话后查看轨迹',
   'toolbar.aria': '轨迹工具栏',
   'toolbar.duration': '时长',
   'toolbar.useActualDuration': '使用实际时长',
@@ -199,6 +200,7 @@ export type TrajectoryTranslate =
 /** English dictionary, checked complete against the Chinese source of truth. */
 export const en: Record<TrajectoryKey, string> = {
   'view.trajectory': 'Trajectory',
+  'region.empty': 'Select a session to view its trajectory',
   'toolbar.aria': 'Trajectory toolbar',
   'toolbar.duration': 'Duration',
   'toolbar.useActualDuration': 'Use actual duration',

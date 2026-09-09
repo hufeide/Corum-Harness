@@ -7,12 +7,9 @@ import type {
 } from '@corum/corum-ui-conversation/client'
 import type {
   InjectFace, KeyedSnapshotSelectorHook, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
-  SlotHookFactory, SnapshotSelectorHook, TranslateNS,
+  SlotHookFactory, SnapshotSelectorHook,
 } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
-// fork（corum）：轨迹视图数据面类型（fork #12 包，type-only）。
-import type { TrajectorySnapshot } from '@corum/corum-ui-trajectory/view'
-import { TRAJECTORY_NS } from '@corum/corum-ui-trajectory/view'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { MarkdownFileMentions } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { createChatStore } from '../stores.ts'
@@ -172,42 +169,15 @@ export type ChatViewSlotProps =
 /** Full props of the durable-message image renderer. */
 export type MessageImagesProps = PropsRuntime<'conversation.message.images'> & PropsLocale<'conversation'>
 
-/** fork（corum）：details 抽屉视图模式（与壳 trajectory-details.ts 同字面量）。 */
-export type DetailsViewMode = 'tool' | 'trajectory'
-
-/** Details-panel callbacks + fork #12 轨迹视图数据面。 */
+/** Details-panel callbacks. */
 export interface DetailsInjected {
   closeDetails: () => void
-  /**
-   * fork（corum）：轨迹视图的可观测源（fork #12，`@corum/corum-ui-trajectory`）。
-   * 经 InjectFace 绑定成 `useTrajectory` / `useDuration` 两个选择器 Hook。
-   */
-  hooks: {
-    /** 官方 `uiConversation.binding(sessionId).target('trajectory')` 快照源。 */
-    trajectory: ObservableSnapshot<TrajectorySnapshot>
-    /** 官方 duration store（「实际耗时 / 预估」切换）。 */
-    duration: SnapshotStore<boolean>
-    /** 抽屉视图模式（壳 provide 的 trajectoryDetails 源 → useDetailsView）。 */
-    detailsView: ObservableSnapshot<DetailsViewMode>
-  }
-  /** 切到工具详情视图（抽屉内 tab）。 */
-  showTool: () => void
-  /** 切到轨迹视图（抽屉内 tab）。 */
-  showTrajectory: () => void
-  /** 加载更早历史（官方 TrajectoryView 的 loadOlder）。 */
-  loadOlder: () => Promise<boolean>
-  /** 图片附件读取（官方 TrajectoryView 的 loadImage）。 */
-  loadImage: MessageImageLoader
-  /** 切换实际耗时显示（官方 TrajectoryView 的 setActualDuration）。 */
-  setActualDuration: (actualDuration: boolean) => void
-  /** 轨迹命名空间的翻译（官方 TrajectoryView 的 t）。 */
-  trajectoryT: TranslateNS<typeof TRAJECTORY_NS>
 }
 
 /** Full details-panel props. */
 export type DetailsSlotProps =
   PropsRuntime<'details'>
-  & PropsRenderSlots<'conversation.details.tool' | 'conversation.trajectory.images'>
+  & PropsRenderSlots<'conversation.details.tool'>
   & PropsStore<ChatStore>
   & InjectFace<DetailsInjected>
   & PropsLocale<'chat'>

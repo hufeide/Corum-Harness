@@ -26,10 +26,6 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
-    "./view": {
-      "types": "./src/client/view.ts",
-      "default": "./src/client/view.ts"
-    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -54,6 +50,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-ui-conversation": "workspace:*",
     "@deepseek-ai/dsh-agent": "^0.1.3-alpha.1",
     "@deepseek-ai/dsh-compaction": "^0.1.3-alpha.1",

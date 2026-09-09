@@ -557,7 +557,7 @@ function FloatingChrome({ slotKey }: { slotKey: string }) {
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.tabStrip' | 'corum.panel'>
+  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.trajectory' | 'corum.tabStrip' | 'corum.panel'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & {
     /** 主题偏好选择器 hook（inject hooks.theme 绑定而来，selector 形式）。 */
@@ -571,12 +571,6 @@ export type AppFrameProps =
      * 服务化，原 CustomEvent 广播已退役）。
      */
     openPluginManager: () => void
-    /**
-     * fork（corum）：右上角轨迹按钮触发（fork #12）——经 root cordis 服务
-     * `ctx.trajectoryDetails.openTrajectory()`（chat 提供）：打开 details 抽屉
-     * 并切到轨迹视图。壳不持轨迹视图（业务面在 corum-ui-chat 的 DetailsPanel）。
-     */
-    openTrajectory: () => void
     /**
      * 壳内部桥：根注册 inject 面下发的 attach 函数，把 AppFrame 的区域操作面
      * 经 attachGrid 挂进 LayoutController（AppFrame 是纯组件拿不到 cordis
@@ -594,7 +588,6 @@ export function IdeAppFrame({
   useTheme,
   setTheme,
   openPluginManager: onOpenPluginManager,
-  openTrajectory: onOpenTrajectory,
   attachGridActions,
 }: AppFrameProps) {
   const panels = useStore(s => s)
@@ -768,7 +761,7 @@ export function IdeAppFrame({
   // 2026-08-30 定调）——DEFAULT_HIDDEN 含 corum.editor + corum.panel；
   // 点左上角「面板切换」快捷按钮（onTogglePanels → toggleRegionVisibility）
   // 点亮编辑器，「终端」钮点亮终端。
-  const DEFAULT_HIDDEN = ['corum.editor', 'corum.panel'] as const
+  const DEFAULT_HIDDEN = ['corum.editor', 'corum.trajectory', 'corum.panel'] as const
   const [userShown, setUserShown] = useState<ReadonlySet<string>>(new Set())
   // 快捷按钮显示某区域：移出 userShown 隐藏集（显示）+ 保证树里 hidden=false。
   const showRegion = useCallback((slots: readonly GridSlot[]) => {
@@ -809,6 +802,9 @@ export function IdeAppFrame({
     }
   }, [userShown, showRegion, saveIdeGrid])
   const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor']) }, [toggleRegionVisibility])
+  // fork（corum）：右上角轨迹按钮 → 点亮右侧「轨迹」区域（fork #12；2026-09-09
+  // 用户定调：抽屉形态不好用，改为与编辑器/终端同构的独立区域）。
+  const onOpenTrajectory = useCallback(() => { showRegion(['corum.trajectory' as GridSlot]) }, [showRegion])
   const onToggleTerminal = useCallback(() => { toggleRegionVisibility(['corum.panel']) }, [toggleRegionVisibility])
   // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
   const onToggleTheme = useCallback(() => {

@@ -38,7 +38,6 @@ import type { GridActions, PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
-import { TrajectoryDetails } from './trajectory-details.ts'
 import { ThemePresenter } from '@corum/corum-ui-base/client'
 import { GLASS_TOKENS } from './theme-layer.ts'
 import { TestModule } from './TestModule.tsx'
@@ -90,11 +89,6 @@ declare module '@deepseek-ai/cordis' {
      * 插件也可用 ui-base 的 registerSlot()（壳已 bindSlotRegistry 桥接到同一实例）。
      */
     slotRegistry: import('@corum/corum-ui-base/client').SlotRegistryFace
-    /**
-     * fork（corum）：details 抽屉的「工具详情 ⟷ 轨迹」视图状态（fork #12）。
-     * 壳自己 provide（抽屉归壳），corum-ui-chat 的 DetailsPanel 经 inject 消费。
-     */
-    trajectoryDetails: import('./trajectory-details.ts').TrajectoryDetailsFace
   }
 }
 
@@ -130,6 +124,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      *  编辑器区合并卡, 2026-09-03 改版：编辑器 main + 资源管理器 210 子面板同一张
      *  玻璃卡，资源管理器不再是独立槽位）。 */
     'corum.editor': { kind: 'single'; scope: 'root' }
+    /** 右侧「轨迹」区域（fork #12 occupant；右上角轨迹按钮点亮）。session-maybe：
+     *  无当前会话时 occupant 渲染空态。 */
+    'corum.trajectory': { kind: 'single'; scope: 'session-maybe' }
     /** Top bar over the conversation column: editor tab strip (0-height when empty). */
     'corum.tabStrip': { kind: 'list'; scope: 'root' }
     /** Bottom bar: terminal / todos / queue (design.pen ⑥ 底部面板, 150px; 0 = collapsed). */
@@ -201,9 +198,6 @@ export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remo
  */
 export function apply(ctx: ClientContext): void {
   const layout = new LayoutController()
-  // fork（corum）：抽屉视图状态服务（fork #12）——壳 provide，chat 经 inject 消费。
-  const trajectoryDetails = new TrajectoryDetails(() => { layout.openDetails() })
-  ctx.effect(() => ctx.reflect.provide('trajectoryDetails', trajectoryDetails), 'ide-shell: trajectory details service')
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
     // C1：槽位注册表服务化——provide 为 cordis 服务（跨 bundle 单例），并把
@@ -233,6 +227,7 @@ export function apply(ctx: ClientContext): void {
         // The shell's own region slots.
         'corum.sidebar': { kind: 'single', scope: 'root' },
         'corum.editor': { kind: 'single', scope: 'root' },
+        'corum.trajectory': { kind: 'single', scope: 'session-maybe' },
         'corum.tabStrip': { kind: 'list', scope: 'root' },
         'corum.panel': { kind: 'single', scope: 'root' },
         'corum.floating': { kind: 'single', scope: 'root' },
@@ -256,8 +251,6 @@ export function apply(ctx: ClientContext): void {
           // → grid actions 订阅面通知，corum-ide-plugin-manager-ui 插件认领并
           // 打开自己的 modal 面板（三-2 服务化，原 CustomEvent 广播已退役）。
           openPluginManager: () => { layout.openPluginManager() },
-          // fork（corum）：右上角轨迹按钮 → details 抽屉轨迹视图（fork #12）。
-          openTrajectory: () => { trajectoryDetails.openTrajectory() },
           hooks: {
             theme: {
               getSnapshot: () => ctx.theme.getTheme().preference,

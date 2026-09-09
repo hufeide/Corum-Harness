@@ -28,6 +28,7 @@ export const IDE_GRID_SLOTS = [
   'corum.sidebar',
   'conversation',
   'corum.editor',
+  'corum.trajectory',
   'corum.panel',
   'details',
 ] as const
@@ -56,6 +57,10 @@ export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation
 registerSlot('corum.sidebar' satisfies IdeGridSlot, { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true, collapsedWidth: 56, visibility: 'fixed' })
 registerSlot('conversation' satisfies IdeGridSlot, { label: '对话区', defaultWeight: 509, minWidth: 509, visibility: 'fixed' })
 registerSlot('corum.editor' satisfies IdeGridSlot, { label: '编辑器', defaultWeight: 700, minWidth: 205, visibility: 'fixed' })
+// 轨迹区域（2026-09-09 用户定调：抽屉形态不好用，改为独立区域——与编辑器/终端
+// 同构的右侧网格叶子，右上角轨迹按钮点亮）。occupant 由 fork #12 包
+// @corum/corum-ui-trajectory 注册（它持有官方轨迹视图）；默认隐藏（DEFAULT_HIDDEN）。
+registerSlot('corum.trajectory' satisfies IdeGridSlot, { label: '轨迹', defaultWeight: 260, minWidth: 320, visibility: 'fixed' })
 // 终端：与其他区域同构的普通网格叶子，可调宽、可自由组合（design.pen ⑥）。
 registerSlot('corum.panel' satisfies IdeGridSlot, { label: '终端', defaultWeight: 227, minHeight: 227, visibility: 'fixed' })
 
@@ -88,10 +93,12 @@ export function ideDefaultGrid(): GridNode {
       columnBranch(
         [
           leafNode('corum.editor' satisfies IdeGridSlot),
+          // 轨迹区域默认隐藏（hidden leaf 不占高度）；点亮后与编辑器/终端三分右列。
+          leafNode('corum.trajectory' satisfies IdeGridSlot),
           leafNode('corum.panel' satisfies IdeGridSlot),
         ],
-        // 编辑器卡 707 / 终端 227（column 分支沿高度分，总 934 内容高）。
-        [707, 227],
+        // 编辑器卡 450 / 轨迹 260 / 终端 227（column 分支沿高度分，总 934 内容高）。
+        [450, 260, 227],
       ),
     ],
     // sidebar 300 / convo 509 / right-col 905 的相对份额（1728 主窗口边距=0）。

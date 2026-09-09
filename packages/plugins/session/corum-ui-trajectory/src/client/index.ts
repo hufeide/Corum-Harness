@@ -8,15 +8,17 @@
  * 因此本包：
  *   - **保留**官方全部 ctx 级注册（轨迹节点定义、request-header/assistant/tool/compaction
  *     定义、conversation view 构建器、locale 字典、`uiSession.provide` 的 trajectory hook）；
- *   - **不注册** `conversation.view` 条目（details 槽是 `kind:'single'`，其 occupant 由
- *     corum-ui-chat 的 DetailsPanel 持有——轨迹视图由它渲染）；
- *   - 组件面经 `exports["./view"] → src/client/view.ts` 供 `@corum/corum-ui-chat` 的
- *     DetailsPanel 内联消费（插件 bundle 自身不含组件，保持精简）。
+ *   - **不注册** `conversation.view` 条目；
+ *   - **注册右侧「轨迹」区域 occupant**（壳声明的 `corum.trajectory` 网格叶子）：
+ *     2026-09-09 用户定调——抽屉形态不好用，改为与编辑器/终端同构的独立区域，
+ *     右上角轨迹按钮点亮（`layout.showRegion`）。
  *
  * @module @corum/corum-ui-trajectory
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -35,6 +37,8 @@ import {
 } from './trajectory-snapshot-builder.ts'
 import type { TrajectorySnapshot } from './trajectory-contract.ts'
 import { registerTrajectoryToolDefinition } from './trajectory-tool-definition.ts'
+import { createTrajectoryDurationStore } from './duration-store.ts'
+import { TrajectoryRegion, type TrajectoryRegionInjected } from './TrajectoryRegion.tsx'
 
 export type { TrajectoryKey } from './locales.ts'
 export type {
@@ -45,8 +49,8 @@ export type {
   UseTrajectory,
 } from './trajectory-contract.ts'
 
-/** Required services: the trajectory registries, ordinary Session paging, and the locale service. */
-export const inject = ['sessions', 'uiSession', 'uiConversation', 'locale']
+/** Required services: the trajectory registries, slots, Session paging, and the locale service. */
+export const inject = ['slots', 'sessions', 'uiSession', 'uiConversation', 'locale']
 
 /**
  * Client plugin body: register every trajectory ctx contribution (definitions,
@@ -81,6 +85,48 @@ export function apply(ctx: Context): void {
     resolve: binding => ({ hooks: { trajectory: trajectorySource(binding) } }),
   })
   // fork（corum）：官方在此注册 conversation.view（id 'trajectory'）成为对话区 tab；
-  // corum 形态是 details 抽屉，故不注册。轨迹视图由 corum-ui-chat 的 DetailsPanel
-  // 渲染本包导出的 TrajectoryView（props 由 chat 侧装配）。
+  // corum 形态是**右侧独立区域**（用户 2026-09-09 定调），故不注册 tab，改为注册
+  // 壳声明的 corum.trajectory 区域 occupant（session-maybe：无会话时空态）。
+  const duration = createTrajectoryDurationStore()
+  const emptySource = {
+    getSnapshot: (): TrajectorySnapshot => EMPTY_TRAJECTORY_SNAPSHOT,
+    subscribe: (_listener: () => void): (() => void) => () => {},
+  }
+  ctx.slots.inject('corum.trajectory', () => ctx.slots.register({
+    name: 'corum.trajectory',
+    locale: NS,
+    children: { 'conversation.trajectory.images': { kind: 'single', scope: 'session' } },
+    inject: (sessionId?: SessionId): TrajectoryRegionInjected => {
+      const trajectory = sessionId === undefined
+        ? undefined
+        : ctx.uiConversation.binding(sessionId).target('trajectory')
+      return {
+        hooks: {
+          trajectory: trajectory === undefined
+            ? emptySource
+            : {
+                getSnapshot: () => trajectory.getSnapshot() ?? EMPTY_TRAJECTORY_SNAPSHOT,
+                subscribe: listener => trajectory.subscribe(listener),
+              },
+          duration,
+        },
+        loadOlder: async () => {
+          if (sessionId === undefined) return false
+          const session = ctx.sessions.binding(sessionId)?.session
+          if (session === undefined) return false
+          const before = trajectory?.getSnapshot()
+          await session.loadOlder()
+          return trajectory?.getSnapshot() !== before
+        },
+        loadImage: Object.assign(
+          (attachment: ImageAttachmentRef) => ctx.uiConversation.imageUrl(sessionId as SessionId, attachment),
+          {
+            peek: (attachment: ImageAttachmentRef) =>
+              ctx.uiConversation.peekImageUrl(sessionId as SessionId, attachment),
+          },
+        ),
+        setActualDuration: (actualDuration: boolean) => { duration.set(actualDuration) },
+      }
+    },
+  }, TrajectoryRegion))
 }

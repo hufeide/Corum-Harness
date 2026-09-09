@@ -1,0 +1,24 @@
+/* fork（corum）：右侧「轨迹」区域外壳——作为网格叶子里的 flex 项撑满并内部滚动。
+   注意不能写 height:100%：网格 occupant 的父节点是 display:contents（无盒子），
+   百分比高度会退化成 auto，导致内容把区域撑高后被卡片的 overflow:hidden 裁掉
+   （2026-09-09 实机发现：region 高 10372px 而卡片仅 860px，无法滚动）。 */
+
+.region {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.empty {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  min-height: 0;
+  padding: 24px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}

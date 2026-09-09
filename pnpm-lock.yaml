@@ -1227,9 +1227,6 @@ importers:
       '@corum/corum-api-remotes':
         specifier: workspace:*
         version: link:../../agent/corum-api-remotes
-      '@corum/corum-ui-trajectory':
-        specifier: workspace:*
-        version: link:../corum-ui-trajectory
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
@@ -1275,6 +1272,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: ^0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+      '@deepseek-ai/dsh-client-ui-trajectory':
+        specifier: ^0.1.3-alpha.1
+        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
       '@deepseek-ai/dsh-client-ui-workspace':
         specifier: ^0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
@@ -1785,6 +1785,9 @@ importers:
         specifier: ^18.2.0
         version: 18.2.0(react@18.2.0)
     devDependencies:
+      '@corum/corum-ide-ui':
+        specifier: workspace:*
+        version: link:../../ui/corum-ide-ui
       '@corum/corum-ui-conversation':
         specifier: workspace:*
         version: link:../corum-ui-conversation

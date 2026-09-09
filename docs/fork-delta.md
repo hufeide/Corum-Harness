@@ -1167,27 +1167,33 @@ fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
 **rebase 风险：低**。升级官方时：`sed` 一把梭改 import 路径 + 重放 `index.ts` 的
 「删 conversation.view 注册」补丁（两处，已用 `// fork（corum）：` 注释锚定）。
 
-**接线**：
+**接线（2026-09-09 二轮：抽屉 → 独立区域，用户定调「抽屉不好用，做成类似编辑器/资源管理器的区域，整个右边弹出」）**：
 
 | 面 | 改动 |
 |---|---|
 | `cordis.ide.patch.yml` | 顶层 `- id: ui-trajectory disabled: true`（与 fork 互斥：槽声明唯一）+ insert 块 `- id: corum-ui-trajectory` |
-| `corum-ui-chat` details 条目 | 声明 `conversation.trajectory.images` 子槽（注册点随轨迹视图迁入；ui-attachment 经 inject 自动跟进）；inject 面新增 `hooks.{trajectory,duration,detailsView}` + `loadOlder/loadImage/setActualDuration/trajectoryT` + `showTool/showTrajectory` |
-| `DetailsPanel` | 头部「工具详情 ⟷ 轨迹」两个 tab；轨迹态渲染 `TrajectoryView`（props 由 details 槽装配，`viewRequest/completeViewRequest` 属对话区 view 的 focus 面，抽屉形态传 undefined） |
-| `corum-ide-ui` | 右上角轨迹按钮接 `trajectoryDetails.openTrajectory()`（打开抽屉 + 切轨迹视图） |
-| `trajectoryDetails` 服务 | **壳 provide**（抽屉归壳），chat 经 inject + 能力接口收窄消费 |
+| `corum-ide-ui`（壳） | `IDE_GRID_SLOTS` + `registerSlot('corum.trajectory', {label:'轨迹', minWidth:320, visibility:'fixed'})` + 默认网格右列 `[编辑器, 轨迹, 终端]`；SlotMap + root children 声明 `'corum.trajectory': { kind:'single', scope:'session-maybe' }`；`DEFAULT_HIDDEN` 加该槽；右上角轨迹按钮 → `showRegion(['corum.trajectory'])` |
+| `corum-ui-trajectory`（fork） | `apply` 注册 `corum.trajectory` occupant（`session-maybe`：无当前会话时空态），声明 `conversation.trajectory.images` 子槽（ui-attachment 经 inject 跟进注册），按会话解析轨迹快照源 + duration store |
+| `corum-ui-chat` | **零改动**（抽屉方案的 DetailsPanel tabs / inject 面 / details 子槽全部回退；`details/trajectory-details.ts` 骨架一并删除） |
 
-**关键教训（实机踩到）**：初版把 `trajectoryDetails` 放在 chat 侧 provide、壳 inject，
-形成 **chat inject `layout`（壳 provide）↔ 壳 inject `trajectoryDetails`（chat provide）
-的循环等待**——boot 报「7 entries did not activate / pending (waiting for service)」。
-依赖方向必须单一：抽屉归壳 → 状态归壳 → 壳 provide、chat 消费。
+**关键教训（实机两处，都已修）**：
+1. **依赖方向**：初版把视图状态服务放 chat 侧、壳 inject → chat inject `layout`（壳 provide）
+   ↔ 壳 inject `trajectoryDetails`（chat provide）**循环等待**，boot 报 7 插件 pending。
+   抽屉方案废弃后该服务随之删除（区域形态不需要壳↔chat 通信）。
+2. **样式注入的插件 id 必须动态取**：`scripts/inline-css.mjs` 从 corum-ui-chat 拷贝时把
+   `data-plugin` 写死成 `@corum/corum-ui-chat`，轨迹区域的 CSS 被注入到错误的标签下 →
+   区域样式全无、内容被卡片 `overflow:hidden` 裁掉（实测 region 高 10372px vs 卡片 860px）。
+   已改为从 `package.json` 的 `name` 读取。
+3. **区域 occupant 的根节点不要写 `height:100%`**：网格 occupant 的父节点是
+   `display:contents`（无盒子），百分比高度退化成 auto；用 `flex:1 1 auto; min-height:0`
+   让区域撑满并内部滚动（实测修复后 region 858px、内部 tablePane 776/1578 可滚）。
 
 **验证（三层 CDP）**：
-- 三包（fork / corum-ui-chat / corum-ide-ui）typecheck + build 绿；全仓 35 包 typecheck 绿。
+- 全仓 35 包 typecheck 绿；三包（fork / chat / corum-ide-ui）build 绿。
 - boot：fork 在 client entries 内、无插件 pending、console 零报错。
-- 行为：点右上角轨迹按钮 → details 抽屉打开且 `data-view="trajectory"`（357×771 可见），
-  官方轨迹视图完整渲染——工具条「时长/轮次/调用」+ 列头「输入/模型/工具」+ 真实轮次
-  （第 1 轮 / 上下文 / 用户 / 助手 / 初始系统提示词，19k 字符内容），**文案全部走
-  trajectory 字典**（无 `toolbar.duration` 之类原始 key）。
-- 切回「工具详情」tab → `data-view="tool"`、回到工具详情空态；console 全程零报错。
-- 官方「对话 / 轨迹」tab 已随 `ui-trajectory` 禁用而消失（无重复入口）。
+- 行为：点右上角轨迹按钮 → **右侧区域点亮**（`corum.trajectory` 叶子 x=809/w=471/h=860，
+  与编辑器/终端同列同构；默认隐藏），官方轨迹视图完整渲染——工具条「时长/轮次/调用」+
+  列头「输入/模型/工具」+ 真实轮次（第 1 轮 / 上下文 / 用户 / 助手 / 初始系统提示词），
+  内部滚动容器 776/1578 可滚，文案全部走 trajectory 字典。
+- details 抽屉回到纯工具详情（无「轨迹」tab）；官方「对话 / 轨迹」tab 已随
+  `ui-trajectory` 禁用而消失；console 全程零报错。
