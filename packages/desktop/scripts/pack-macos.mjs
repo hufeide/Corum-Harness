@@ -279,8 +279,43 @@ async function smokeBridge() {
   }
 }
 
+/**
+ * 闭包版本一致性硬断言：`pnpm deploy --legacy` 忽略 lockfile 重新解析，
+ * `^0.1.3-alpha.1` 会漂到 registry 上的 alpha.2 —— 2026-09-09 实测正式包闭包里
+ * 131 个 dsh 包是 alpha.2 而 session 核心是 alpha.1，冷读历史日志直接报
+ * 「failed to observe session ... events is not iterable」（用户可见：会话打不开）。
+ * 这里在打包时逐个读 package.json，任何 dsh 包与 deploy 根的钉定版本不一致就
+ * fail loud，绝不把混版闭包打进 .app。
+ */
+async function assertUniformDshVersions() {
+  const deployRoot = JSON.parse(await readFile(join(DEPLOY_ROOT, 'package.json'), 'utf8'))
+  const pinned = deployRoot.dependencies?.['@deepseek-ai/dsh-session']
+  if (typeof pinned !== 'string' || !/^\d/.test(pinned)) {
+    throw new Error('pack-macos: desktop-host must pin @deepseek-ai/dsh-session to an exact version')
+  }
+  const scopeDir = join(HOST_DIR, 'node_modules', '@deepseek-ai')
+  const versions = new Map()
+  for (const entry of await readdir(scopeDir, { withFileTypes: true })) {
+    if (!entry.name.startsWith('dsh-') || !entry.isDirectory()) continue
+    const manifestPath = join(scopeDir, entry.name, 'package.json')
+    if (!existsSync(manifestPath)) continue
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    const list = versions.get(manifest.version) ?? []
+    list.push(manifest.name)
+    versions.set(manifest.version, list)
+  }
+  const skew = [...versions.entries()].filter(([version]) => version !== pinned)
+  if (skew.length > 0) {
+    const detail = skew.map(([version, names]) => `${version}: ${names.length} 个（如 ${names.slice(0, 3).join(', ')}）`).join('; ')
+    throw new Error(`pack-macos: host closure has mixed dsh versions (expected ${pinned}) — ${detail}。`
+      + ' 修 pnpm-workspace.yaml 的 overrides（pnpm 11 不支持 glob，需逐个钉）后重跑。')
+  }
+  console.log(`[pack-macos] dsh closure uniform at ${pinned} (${versions.get(pinned)?.length ?? 0} packages)`)
+}
+
 async function main() {
   await deployHost()
+  await assertUniformDshVersions()
   await copyDesktopArtifacts()
   await materializeSymlinks(join(HOST_DIR, 'node_modules'))
   await smokeBridge()

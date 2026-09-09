@@ -391,6 +391,35 @@ else
   fi
 fi
 
+# ── 13. 打包闭包版本一致性（防「混版闭包」回归）────────────────────────────
+# 背景：pnpm deploy --legacy 忽略 lockfile 重新解析，`^0.1.3-alpha.1` 漂到 registry 上的
+# alpha.2 → 正式包闭包 131 个 dsh 包是 alpha.2、session 核心是 alpha.1，冷读历史日志报
+# 「events is not iterable」（2026-09-09，PROGRESS 第 58 轮）。修复：pnpm-workspace.yaml
+# 逐个钉死（pnpm 11 的 override 不支持 glob，实测通配无效）+ pack 时硬断言。
+section "[13] 打包闭包版本一致性（pnpm overrides 逐个钉 + pack 时断言）"
+WORKSPACE_YAML="$REPO_ROOT/pnpm-workspace.yaml"
+PACK_SCRIPT="$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"
+if [ ! -f "$WORKSPACE_YAML" ]; then
+  skip "找不到 pnpm-workspace.yaml"
+else
+  if grep -q "'@deepseek-ai/dsh-\*'" "$WORKSPACE_YAML"; then
+    fail "pnpm-workspace.yaml 里用了 glob override '@deepseek-ai/dsh-*'——pnpm 11 不支持，实测无效（会静默漂版）"
+  else
+    pass "overrides 未使用无效的 glob 写法"
+  fi
+  pinned=$(grep -c "^  '@deepseek-ai/dsh-.*': '0.1.3-alpha.1'$" "$WORKSPACE_YAML" || true)
+  if [ "$pinned" -ge 150 ]; then
+    pass "逐个钉定 $pinned 个 dsh 包到 0.1.3-alpha.1"
+  else
+    fail "只钉了 $pinned 个 dsh 包（预期 ≥150）——deploy 会重新解析出 alpha.2"
+  fi
+fi
+if [ -f "$PACK_SCRIPT" ] && grep -q "assertUniformDshVersions" "$PACK_SCRIPT"; then
+  pass "pack-macos.mjs 含闭包版本一致性硬断言"
+else
+  fail "pack-macos.mjs 缺少闭包版本一致性断言（混版闭包会静默打进 .app）"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then
