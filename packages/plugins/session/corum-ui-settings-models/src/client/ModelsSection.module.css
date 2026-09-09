@@ -204,6 +204,32 @@
 }
 .chipInput::placeholder { color: var(--dsw-alias-label-dimmed); }
 
+/* ── 自定义模型 id 表单字段（明显可辨识的输入框，区别于上方 selRow 按钮） ── */
+.customIdField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: stretch;
+}
+.customIdLabel {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.customIdInput {
+  width: 100%;
+  height: 34px;
+  padding: 8px 12px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+.customIdInput:focus { outline: none; border-color: var(--corum-glass-border-active); }
+.customIdInput::placeholder { color: var(--dsw-alias-label-dimmed); }
+
 /* ── ＋添加提供方大卡（透明底 r16 stroke 居中） ── */
 .addCard {
   display: flex;

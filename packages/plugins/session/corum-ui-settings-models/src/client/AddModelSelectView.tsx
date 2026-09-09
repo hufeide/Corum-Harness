@@ -18,7 +18,7 @@ import { catalogFallbackModels, isNoDiscoveryError } from './catalog-fallback.ts
 import { BrandLogo } from './brands.tsx'
 
 import {
-  BackRow, GlassButton, IconCpu, IconPlus, IconZap,
+  BackRow, GlassButton, IconCpu, IconZap,
 } from './controls.tsx'
 import styles from './ModelsSection.module.css'
 
@@ -130,15 +130,15 @@ export function AddModelSelectView({ provider, state, api, schema, onBack, onNex
             </button>
           )
         })}
-        <span className={styles['chipAdd']} style={{ alignSelf: 'flex-start' }}>
-          <IconPlus size={13} />
+        <label className={styles['customIdField']}>
+          <span className={styles['customIdLabel']}>自定义模型 id</span>
           <input
-            className={styles['chipInput']}
+            className={styles['customIdInput']}
             value={customId}
-            placeholder="自定义输入模型 id…"
+            placeholder="输入模型 id，例如 my-model-v1"
             onChange={e => { setCustomId(e.target.value); setSelected(undefined) }}
           />
-        </span>
+        </label>
       </div>
 
       <div className={styles['foot']}>
