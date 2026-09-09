@@ -1132,9 +1132,13 @@ export class CorumAgentService extends TypertRemoteService {
         // 可安全换绑：select 重组 scoped 工具链并记 agent-preset/selected，
         // installModelSelection 重装模型绑定；task 索引/存活表/落盘目录同步。
         if (resolved.profileId !== profile.id) {
-          await this.ctx.agentPresets.select(resolved.agent, profile.id)
-          // 官方 preset 无 corum profile 实体——跳过编译落盘（同 selectTaskAgentProfile）。
+          // 先编译落盘再 select（docs/fork-delta.md §8 note 3）：select/mount 要读
+          // .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有
+          // agent.json 但产物缺失）若先 select 会报 composition missing、writeAgentDir
+          // 永远到不了。官方 preset 无 corum profile 实体——跳过编译落盘
+          // （同 selectTaskAgentProfile）。
           if (!isOfficialPreset) this.writeAgentDir(profile, agentDirPath(profile.id))
+          await this.ctx.agentPresets.select(resolved.agent, profile.id)
           this.registerTaskSession(resolved.sessionId, resolved.cwd, profile.id)
           this.taskAgents.set(String(resolved.sessionId), { ...resolved, profileId: profile.id })
           // fork（corum）：换绑后指挥模式口径必须跟随新 preset（旧限制先撤销）。
@@ -1449,10 +1453,13 @@ export class CorumAgentService extends TypertRemoteService {
     const isOfficialPreset = profileId !== TASK_PROFILE_ID && loadProfile(profileId) === undefined
     const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
     if (!isOfficialPreset && profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
+    // 先编译落盘再 select（docs/fork-delta.md §8 note 3）：agentPresets.select 要读
+    // .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有 agent.json
+    // 但产物缺失）若先 select 会抛 agent-preset/invalid（composition missing）、
+    // writeAgentDir 永远到不了。官方 preset 无 corum profile 实体——跳过编译落盘。
+    if (!isOfficialPreset && profile !== undefined) this.writeAgentDir(profile, agentDirPath(profile.id))
     // select 自己判 blank（turnBoundary 投影）——非 blank 泳道抛 locked，原样上抛给 UI。
     await this.ctx.agentPresets.select(resolved.agent, profileId)
-    // 官方 preset 无 corum profile 实体——跳过编译落盘。
-    if (!isOfficialPreset && profile !== undefined) this.writeAgentDir(profile, agentDirPath(profile.id))
     this.registerTaskSession(resolved.sessionId, resolved.cwd, profileId)
     this.taskAgents.set(String(sessionId), { ...resolved, profileId })
     // fork（corum）：指挥模式口径随切换重算（切出指挥模式即撤销裁剪与人格段）。
