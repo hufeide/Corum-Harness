@@ -332,6 +332,38 @@ describe('corumEntryDead / entriesOf 死条目剔除（2026-09-09）', () => {
   })
 })
 
+describe('git 判据是运行时探测，不是产品开关（2026-09-10 用户更正）', () => {
+  it('机制代码不读 `autoInitGit`（开关只管新建工作区，与「当前工作区是否有 .git」是两个维度）', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const root = new URL('../../../..', import.meta.url).pathname // packages/
+    const walk = (dir: string): string[] => fs.existsSync(dir)
+      ? fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) return entry.name === 'node_modules' || entry.name === 'lib' || entry.name === 'client' ? [] : walk(full)
+        return entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') ? [full] : []
+      })
+      : []
+    const mechanismFiles = [
+      ...walk(path.join(root, 'plugins/agent')),
+      ...walk(path.join(root, 'desktop/src/host')),
+    ]
+    expect(mechanismFiles.length).toBeGreaterThan(20)
+    const offenders = mechanismFiles.filter(file => fs.readFileSync(file, 'utf8').includes('autoInitGit'))
+    // 唯一允许出现的地方：host 的 corum-git.ts —— 它只**注册**该设置（namespace + schema），
+    // 不参与任何机制判定；读取方只有客户端的新建工作区流程。
+    expect(offenders.map(file => path.basename(file))).toEqual(['corum-git.ts'])
+  })
+
+  it('机制侧判据是 corumIsGitRepo(cwd)（git rev-parse 探测当前工作区）', async () => {
+    const fs = await import('node:fs')
+    const toolSrc = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+    expect(toolSrc).toContain('corumIsGitRepo(parentCwdForRepo)')
+    const providerSrc = fs.readFileSync(new URL('../../corum-subagent/src/isolated/index.ts', import.meta.url), 'utf8')
+    expect(providerSrc).toContain('corumIsGitRepo(parentCwd)')
+  })
+})
+
 describe('非 git 降级：强制隔离被跳过时告知子 Agent（2026-09-10 核查）', () => {
   it('工具层：跳过隔离时 prompt 追加说明；机制段不再声称 forced isolation fails loud', async () => {
     const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8'))

@@ -1689,8 +1689,19 @@ track 模式 4 例——计数/直连纪律/幂等注销/缺服务 fail loud/mod
 
 ### 11.22 非 git 工作区降级机制全量核查（2026-09-10，用户要求）
 
-**触发**：用户在「新建工作区」关掉「始终初始化 git」（`corum-workspace.autoInitGit = false`）
-→ 工作区没有 `.git`。此后所有依赖 git 的机制必须自动关闭而不是报错。
+**判据（两个维度，别混）**：
+
+| 维度 | 内容 | 谁负责 |
+|---|---|---|
+| **机制判据（运行时）** | 每个 git 依赖机制在**派遣时探测当前工作区**是否有 `.git`（`corumIsGitRepo(cwd)` → `git rev-parse --git-dir`）；没有就自动关闭该机制 | `corum-orchestration` / `corum-tool-subagent` / `corum-isolated` |
+| **产品开关（创建时）** | `corum-workspace.autoInitGit` 只决定**新建工作区**时是否跑 `git init`；它**不参与任何机制判定**（机制代码不得读它） | 客户端「新建工作区」流程（`SessionsPane` / `apply.ts`）+ host 仅注册 namespace/schema（`corum-git.ts`） |
+
+**推论**：开关关掉不会影响**已存在**的 git 工作区（能力照常）；开关开着也不会让**非 git**
+工作区获得隔离（例如打开一个已存在的无 `.git` 目录、`.git` 被删除、`git init` 失败）。
+工作区在会话中途 `git init`，下一次派遣立刻恢复 git 能力（无需重启）——实机验证见下。
+
+**触发场景（任一都会让机制判非 git）**：新建工作区时开关为关 / 打开一个既有的非 git 目录 /
+`.git` 被删除 / `git init` 失败。
 
 **机制矩阵（核查结论）**：
 
@@ -1726,6 +1737,11 @@ track 模式 4 例——计数/直连纪律/幂等注销/缺服务 fail loud/mod
 | `ralph`（`corum-tracked`） | 一轮完成，文件落地，零 git 依赖 |
 | `subagent_fork` | 子会话复述父会话口令 `TEAL-77`（上下文继承与 git 无关） |
 | `subagent integrate: true` | 返回 `no isolated worktrees to integrate`（未执行 git） |
+
+**运行时判据的决定性验证**（同一工作区、同一进程、不重启）：在上面那个非 git 工作区里手动
+`git init` + 首次提交后，再派一次双任务 `orchestrate` → **立刻恢复隔离**（生成
+`wt/wt-0f0062`、`wt/wt-af889c` 两条 worktree/分支，两个子 Agent 各自 commit）。证明判据是
+**运行时探测当前工作区**，而不是任何开关状态；也证明「负结果不缓存」修复生效。
 
 **守卫/单测**：`resolveEffectiveMode` 4 例（非 git → track / git → always / track·off 不变 /
 降级路径不触碰 git）、`corumIsGitRepo` 负缓存 1 例（非 git → false，`git init` 后同进程 → true）。
