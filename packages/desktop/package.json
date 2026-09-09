@@ -53,6 +53,7 @@
     "appId": "com.corum.agentos",
     "productName": "Corum",
     "asar": true,
+    "npmRebuild": false,
     "files": [
       "lib/**/*",
       "cordis.patch.yml",
