@@ -55,9 +55,12 @@
   (sidebarMode service done, slot-registry service done). Note
   `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md` §C1 carries a superseded
   "precondition not met" conclusion — this file wins.
-- `docs/fork-delta.md` — diff ledger of the fork packages (now 12, incl. the
-  trajectory fork) + official-upgrade runbook (required reading before touching
+- `docs/fork-delta.md` — diff ledger of the fork packages (now 13, incl. the
+  sandbox fork) + official-upgrade runbook (required reading before touching
   fork packages).
+- `docs/HANDOFF-2026-09-10-orchestration-unification.md` — **最新交接入口**
+  （编排统一化：官方四模式 + 指挥模式 + orchestrate 双模式 + 隔离下沉 provider
+  层 + 提示词英文 + 非 git 降级全量核查）；下个 session 从这里开始。
 - `docs/plugin-template.md` — new-plugin package template and setup steps.
 - `.dbg/cordis-singleton-probe.md`, `.dbg/c3a-sidebar-mode-service.md` — the
   cordis cross-bundle singleton proof + the sidebarMode service implementation
