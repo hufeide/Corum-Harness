@@ -28,7 +28,6 @@
   inset: 0;
   background: var(--dsw-alias-bg-mask-1, rgba(0, 0, 0, 0.4));
   backdrop-filter: var(--dsw-mask-blur, none);
-  -webkit-backdrop-filter: var(--dsw-mask-blur, none);
 }
 
 /* 内容体：相对遮罩在上，恢复交互。 */

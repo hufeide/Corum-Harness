@@ -1048,7 +1048,6 @@
   justify-content: center;
   background: rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .modalDialog {
@@ -1063,7 +1062,6 @@
   border-radius: 20px;
   background: var(--corum-glass-1);
   backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
   overflow: hidden;
 }
@@ -2365,7 +2363,6 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   background: var(--corum-glass-1);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   z-index: 10002;
   box-sizing: border-box;
 }

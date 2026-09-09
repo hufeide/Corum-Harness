@@ -12,7 +12,6 @@
   align-items: center;
   justify-content: center;
   background: var(--dsw-alias-bg-mask-1, #0006);
-  -webkit-backdrop-filter: var(--dsw-mask-blur, none);
   backdrop-filter: var(--dsw-mask-blur, none);
 }
 

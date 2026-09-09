@@ -74,7 +74,6 @@
   /* 设计稿 FloatingLayer: fill #00000059 */
   background: rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 /* ── 主面板（SettingsShell: 1040×820 glass-1）────────────────────── */
@@ -97,7 +96,6 @@
   border: 1px solid var(--corum-glass-border);
   /* 设计稿 effect: background_blur 16 + shadow #00000040 offset(0,16) blur 48 */
   backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);

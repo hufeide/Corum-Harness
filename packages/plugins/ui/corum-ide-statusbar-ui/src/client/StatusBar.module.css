@@ -11,7 +11,6 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
   backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
   box-sizing: border-box;
 }
 .dot {

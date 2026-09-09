@@ -123,7 +123,6 @@
 [data-drag-ghost],
 [data-drag-ghost] * {
   backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
 }
 
 /* 已脱出占位卡。 */

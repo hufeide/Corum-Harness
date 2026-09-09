@@ -147,7 +147,7 @@ done
 # 背景：2026-09-07 的 0.1.3 合并（commit f09aa05b）把
 # corum-ui-chat/chat/TurnNavigator.module.css 整文件拷成官方版，把「左 gutter
 # 8×8 圆点刻度」（设计稿 vESwF）静默还原成官方右侧横线刻度——typecheck/build
-# 全绿、console 零错误，直到 2026-09-10 用户看 UI 才发现。
+# 全绿、console 零错误，直到 2026-09-09 用户看 UI 才发现。
 # 纪律：官方文件里凡带 corum 定制，合并时只能逐处三方合并，禁止整文件覆盖。
 # 本节把这条纪律变成可执行断言；新增 fork 定制面时把文件登记进下面两张表。
 section "[5] fork 定制面：不得与官方逐字节一致（静默覆盖检测）"
@@ -196,6 +196,49 @@ for entry in "${MUST_CONTAIN[@]}"; do
     fail "$(basename "$corum_rel") 缺定制标记「${marker}」——定制被覆盖或写法被改写"
   fi
 done
+
+# ── 6. inline-css 标记卫生（防「样式注入到错误标签 / 静默跳过注入」）────────
+# 背景：corum-ide-plugin-manager-ui 的 scripts/inline-css.mjs 是从 explorer 包
+# 拷贝的——id 写死成 `@corum/corum-ide-explorer-ui`，幂等判定用泛
+# `client.includes('data-plugin')`；而该包源码里有 `data-plugin-manager-overlay`
+# 属性，于是每次构建都误判「已注入」并删掉 lib/style.css → 插件中心面板长期
+# 无样式（position:static、无圆角无底色），2026-09-09 CDP 实测才发现。
+# 断言：① 禁用泛 'data-plugin' 判定；② 写死的 id 必须等于本包名（推荐从
+# package.json 读，见 corum-ui-conversation / corum-ui-trajectory 的写法）。
+section "[6] inline-css 标记卫生（id 归属 + 幂等判定）"
+while IFS= read -r script; do
+  pkg_dir="$(dirname "$(dirname "$script")")"
+  pkg_name=$(node -e "try{console.log(require('$pkg_dir/package.json').name)}catch(e){console.log('?')}" 2>/dev/null)
+  # 只看代码行：注释里出现该字符串（说明为什么禁止）不算违规。
+  if grep -n "includes('data-plugin')" "$script" | grep -vE '^[0-9]+:[[:space:]]*(\*|//)' > /dev/null; then
+    fail "$(echo "$script" | sed "s|$REPO_ROOT/||") 用泛 'data-plugin' 做幂等判定（业务源码含该字符串会误判，导致跳过注入）"
+  fi
+  hardcoded=$(grep -oE 'data-plugin="@[^"]*"' "$script" | head -1 | sed 's/data-plugin="//; s/"//')
+  if [ -n "$hardcoded" ] && [ "$hardcoded" != "$pkg_name" ]; then
+    fail "$(echo "$script" | sed "s|$REPO_ROOT/||") 写死的 id「${hardcoded}」≠ 本包名「${pkg_name}」（样式会注入到别人的标签下）"
+  elif [ -n "$hardcoded" ]; then
+    pass "$(basename "$pkg_dir") inline-css id 与包名一致"
+  else
+    pass "$(basename "$pkg_dir") inline-css 从 package.json 读 id"
+  fi
+done < <(find "$REPO_ROOT/packages" -path '*/scripts/inline-css.mjs' -not -path '*/node_modules/*' | sort)
+
+# ── 7. 只写标准 backdrop-filter（-webkit- 别名在 Chromium 150 已被移除）────
+# 背景：源码同时写两条时构建压缩只保留后一条（惯例是 -webkit- 在后），而
+# Electron 43 / Chromium 150 的 CSS.supports('-webkit-backdrop-filter') === false
+# → 全仓「液态玻璃」模糊静默失效（2026-09-09 清理 42 处后加此断言）。
+section "[7] corum CSS 不含 -webkit-backdrop-filter 声明"
+wb_hits=$(grep -rn --include='*.css' -e '^[[:space:]]*-webkit-backdrop-filter' \
+  "$REPO_ROOT/packages/plugins" "$REPO_ROOT/packages/desktop/src" 2>/dev/null \
+  | grep -v '/node_modules/' | grep -v '/lib/' | grep -v '/build/' | grep -v '/dist/')
+if [ -n "$wb_hits" ]; then
+  printf '%s\n' "$wb_hits" | while IFS= read -r line; do
+    fail "含 -webkit-backdrop-filter 声明：$(echo "$line" | sed "s|$REPO_ROOT/||")"
+  done
+  failures=$((failures + $(printf '%s\n' "$wb_hits" | wc -l | tr -d ' ')))
+else
+  pass "源码 CSS 无 -webkit-backdrop-filter 声明（Chromium 150 已不支持该别名）"
+fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'

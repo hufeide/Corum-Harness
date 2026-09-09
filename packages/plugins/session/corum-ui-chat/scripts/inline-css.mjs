@@ -27,7 +27,10 @@ const inject = [
 ].join('')
 
 const client = readFileSync(clientJs, 'utf8')
-if (!client.includes('data-plugin')) {
+// 幂等判定必须认**本插件专属标记**（不能认泛 'data-plugin'：业务源码里
+// 可能出现该字符串——corum-ide-plugin-manager-ui 就因 data-plugin-manager-overlay
+// 被误判「已注入」，样式长期不注入）。
+if (!client.includes("s.setAttribute('data-plugin','@corum/corum-ui-chat')")) {
   writeFileSync(clientJs, inject + '\n' + client)
   console.log(`[inline-css] injected ${cssText.length} chars of CSS into client.js`)
 } else {
