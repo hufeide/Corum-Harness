@@ -22,6 +22,8 @@ DSH_CHECKOUT="${DSH_CHECKOUT:-/Users/kukucai/dsh}"
 FORK_API_REMOTES="$REPO_ROOT/packages/plugins/agent/corum-api-remotes"
 OFFICIAL_API_REMOTES="$DSH_CHECKOUT/packages/api/remotes"
 AGENT_EVENTS="$REPO_ROOT/packages/plugins/agent/corum-agent/src/events.ts"
+AGENT_CONTRACT="$REPO_ROOT/packages/plugins/agent/corum-agent/src/contract/agent.ts"
+AGENT_SERVICE="$REPO_ROOT/packages/plugins/agent/corum-agent/src/agent-service.ts"
 
 failures=0
 skips=0
@@ -292,6 +294,30 @@ for pkg_json in "$REPO_ROOT"/packages/plugins/*/*/package.json; do
     fail "${pkg_name} 挂在 $(basename "$mount_hit") 但不在 packages/desktop/package.json 依赖里——host 解析不到包（pnpm install 后仍 404）"
   fi
 done
+
+# ── 9. corumAgent 契约方法 ↔ 宿主 @Remote 实现（防「声明了但没实现」）────────
+# 背景：AI 润色的 5 个方法（getPolishConfig/setPolishConfig/polishPrompt/
+# polishConversation/translatePrompt）契约、配置存储、客户端按钮都在，宿主端
+# 实现在基座升级重置未提交工作树时丢失 → 点按钮 404（2026-09-09，PROGRESS 第 50/51 轮）。
+# 断言：contract/agent.ts 的 CORUM_AGENT_METHODS 里每个方法，agent-service.ts 必须有
+# 对应的 `@Remote('<method>')`。
+section "[9] corumAgent 契约方法 ↔ 宿主 @Remote 实现"
+if [ ! -f "$AGENT_CONTRACT" ] || [ ! -f "$AGENT_SERVICE" ]; then
+  skip "找不到 contract/agent.ts 或 agent-service.ts"
+else
+  methods=$(grep -oE "^  [a-zA-Z]+: '[a-zA-Z]+'," "$AGENT_CONTRACT" | sed "s/.*: '//; s/',//" | sort -u)
+  if [ -z "$methods" ]; then
+    fail "contract/agent.ts 未解析到 CORUM_AGENT_METHODS（正则失配？）"
+  else
+    for method in $methods; do
+      if grep -qF "@Remote('$method')" "$AGENT_SERVICE"; then
+        pass "corumAgent/$method 有宿主实现"
+      else
+        fail "corumAgent/$method 在契约里声明了，但 agent-service.ts 没有 @Remote 实现（调用必 404）"
+      fi
+    done
+  fi
+fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'

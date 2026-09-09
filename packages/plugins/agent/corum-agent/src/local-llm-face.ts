@@ -36,3 +36,15 @@ export interface LocalLlmFace {
   ensureServer(): Promise<{ ok: boolean; error?: string }>
   chat(args: LocalChatArgs): Promise<LocalChatResult>
 }
+
+/**
+ * Context 面：`localLlm` 是**可选**服务（只有 @corum/corum-ollama 挂载时才存在）。
+ * 这里以窄能力接口（LocalLlmFace）声明，不 import 实现包——见 AGENTS.md 红线 3。
+ * 调用方一律 `ctx.get('localLlm')`（不用 inject：缺席时插件仍要能激活）。
+ */
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** 本地 LLM 引擎（Ollama）服务；未挂载 corum-ollama 时 undefined。 */
+    localLlm?: LocalLlmFace
+  }
+}

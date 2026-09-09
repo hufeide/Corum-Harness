@@ -181,44 +181,28 @@ export interface VerifyResult {
   error?: string
 }
 
-/** getPolishConfig 返回：润色配置（未配置为 null）。 */
-export interface GetPolishConfigResult {
-  config: { provider: string; model: string; reasoningEffort?: string } | null
-}
-/** setPolishConfig 入参（engine/provider/model/localModel/reasoningEffort；后两个可空串）。 */
-export type SetPolishConfigArgs = {
-  engine?: 'auto' | 'local' | 'online'
-  provider: string
-  model: string
-  localModel?: string
-  reasoningEffort?: string
-}
-/** polishPrompt 入参。 */
-export type PolishPromptArgs = {
-  text: string
-  kind?: string
-}
-/** polishPrompt 返回：润色后文本。 */
-export interface PolishPromptResult {
-  polished: string
-}
-/** polishConversation 入参（位置参数：text, history——对话上下文 user/AI 最终输出）。 */
-export type PolishConversationArgs = {
-  text: string
-  history: Array<{ role: 'user' | 'assistant'; text: string }>
-}
-/** polishConversation 返回：润色后文本 + 意图（auto 自动判断）。 */
-export interface PolishConversationResult {
-  polished: string
-  intent: string
-}
-/** translatePrompt 入参。 */
-export type TranslatePromptArgs = {
-  text: string
-}
-/** translatePrompt 返回：译文。 */
-export interface TranslatePromptResult {
-  translated: string
+/* ── AI 润色的 wire 类型：单一定义在 agent-service.ts（宿主实现同源），
+ * 这里 re-export——2026-09-09 重建宿主端时收敛，避免契约与实现两处漂移。 ── */
+import type {
+  GetPolishConfigResult,
+  SetPolishConfigArgs,
+  PolishPromptArgs,
+  PolishPromptResult,
+  PolishConversationArgs,
+  PolishConversationResult,
+  TranslatePromptArgs,
+  TranslatePromptResult,
+} from '../agent-service.ts'
+
+export type {
+  GetPolishConfigResult,
+  SetPolishConfigArgs,
+  PolishPromptArgs,
+  PolishPromptResult,
+  PolishConversationArgs,
+  PolishConversationResult,
+  TranslatePromptArgs,
+  TranslatePromptResult,
 }
 
 /**

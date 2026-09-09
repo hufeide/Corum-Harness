@@ -23,9 +23,11 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 // 空类型 import：让 ctx.llm 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-llm'
+// 空类型 import：让 ctx.localLlm（可选本地引擎面）的 Context 合并生效。
+import type {} from './local-llm-face.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 // 空类型 import：让 ctx.sessionPersistence 的 Context 合并生效（resume 用）。
@@ -38,7 +40,8 @@ import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId, isValidAgentDimension } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
-import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
+import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
+import type { PolishConfig } from './profile-store.ts'
 import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID, TASK_PROJECT_ID } from './builtin-profiles.ts'
 import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './event-projection.ts'
 
@@ -141,6 +144,84 @@ export interface ProviderCatalog {
     name: string
     input?: string[]
   }>
+}
+
+/* ── AI 润色的 wire 类型（2026-09-09 宿主端重建；contract/agent.ts 从此 re-export）── */
+
+/** getPolishConfig 返回：润色配置（未配置为 null）。 */
+export interface GetPolishConfigResult {
+  config: {
+    provider: string
+    model: string
+    /** 引擎：auto（本地可用走本地，否则线上）/ local / online。 */
+    engine?: 'auto' | 'local' | 'online'
+    /** 本地模型名（engine=local/auto 的本地分支）。 */
+    localModel?: string
+    reasoningEffort?: string
+  } | null
+}
+
+/** setPolishConfig 入参（provider/model 必填；engine/localModel/reasoningEffort 可选）。 */
+export interface SetPolishConfigArgs {
+  engine?: 'auto' | 'local' | 'online'
+  provider: string
+  model: string
+  localModel?: string
+  reasoningEffort?: string
+}
+
+/** polishPrompt 入参（kind 给模型一点体裁提示，如 prompt / text）。 */
+export interface PolishPromptArgs {
+  text: string
+  kind?: string
+}
+
+/** polishPrompt 返回：润色后文本。 */
+export interface PolishPromptResult {
+  polished: string
+}
+
+/** polishConversation 入参（text + 最近若干条 user/AI 最终输出）。 */
+export interface PolishConversationArgs {
+  text: string
+  history: Array<{ role: 'user' | 'assistant'; text: string }>
+}
+
+/** polishConversation 返回：润色后文本 + 意图（continue/new-topic/bug-report/other/unknown）。 */
+export interface PolishConversationResult {
+  polished: string
+  intent: string
+}
+
+/** translatePrompt 入参。 */
+export interface TranslatePromptArgs {
+  text: string
+}
+
+/** translatePrompt 返回：译文。 */
+export interface TranslatePromptResult {
+  translated: string
+}
+
+/**
+ * 解析润色模型的 JSON 信封（polishConversation）。
+ * 模型常把 JSON 包在 ```json 代码块或前后加解释文字里，故先抓第一个平衡的 `{...}`。
+ * 解析失败返回 null（调用方回落「整段即润色结果」）。
+ */
+function parsePolishEnvelope(raw: string): PolishConversationResult | null {
+  const start = raw.indexOf('{')
+  const end = raw.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1)) as { polished?: unknown; intent?: unknown }
+    if (typeof parsed.polished !== 'string' || parsed.polished.trim() === '') return null
+    return {
+      polished: parsed.polished.trim(),
+      intent: typeof parsed.intent === 'string' && parsed.intent.trim() !== '' ? parsed.intent.trim() : 'unknown',
+    }
+  } catch {
+    return null
+  }
 }
 
 /** 单条会话事件的 UI 投影（只取 UI 需要的简化结构）。 */
@@ -1490,6 +1571,193 @@ export class CorumAgentService extends TypertRemoteService {
       })
     }
     return { tasks: out }
+  }
+
+  /* ── AI 润色（prompt polish）────────────────────────────────────────────
+   * fork（corum）：宿主端实现（2026-09-09 重建）。
+   * 历史：契约（contract/agent.ts 的 5 个方法）+ 配置存储（profile-store 的
+   * load/savePolishConfig）+ 客户端按钮一直都在，但宿主端方法在基座升级重置
+   * **未提交工作树**时丢失（点 sparkle → /api/corumAgent/polishConversation 404；
+   * 见 docs/ide-formal/PROGRESS.md 第 50 轮）。本轮按契约重建。
+   * 引擎路由（PolishConfig.engine）：online → ctx.llm.stream；local →
+   * ctx.localLlm.chat（窄能力接口，不耦合 @corum/corum-ollama）；auto →
+   * 本地引擎可用（installed && running && meetsMinMem && 有模型）走本地，否则线上。
+   * ────────────────────────────────────────────────────────────────────── */
+
+  /** 读取润色配置（未配置返回 null）。 */
+  @Remote('getPolishConfig')
+  getPolishConfigRemote(): GetPolishConfigResult {
+    const config = loadPolishConfig()
+    if (config === undefined) return { config: null }
+    return {
+      config: {
+        provider: config.provider,
+        model: config.model,
+        ...(config.engine === undefined ? {} : { engine: config.engine }),
+        ...(config.localModel === undefined ? {} : { localModel: config.localModel }),
+        ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort }),
+      },
+    }
+  }
+
+  /**
+   * 保存润色配置（provider/model 必填——engine=local 时仍作为 auto 的线上回落）。
+   * ⚠️ 形参名必须与 contract 的 args 字段同名：typert 网关按**方法形参名**做
+   * 命名绑定（SRC 描述符），形参写成单个 `args` 会报
+   * `gateway/arguments-invalid: unexpected "text"...`（2026-09-09 首次重建时踩到）。
+   */
+  @Remote('setPolishConfig')
+  setPolishConfigRemote(
+    engine: 'auto' | 'local' | 'online' | undefined,
+    provider: string,
+    model: string,
+    localModel?: string,
+    reasoningEffort?: string,
+  ): { ok: boolean } {
+    const providerText = typeof provider === 'string' ? provider.trim() : ''
+    const modelText = typeof model === 'string' ? model.trim() : ''
+    if (providerText === '' || modelText === '') return { ok: false }
+    const engineValue = engine === 'local' || engine === 'online' || engine === 'auto' ? engine : undefined
+    const localModelValue = typeof localModel === 'string' && localModel.trim() !== '' ? localModel.trim() : undefined
+    const reasoningEffortValue = typeof reasoningEffort === 'string' && reasoningEffort.trim() !== ''
+      ? reasoningEffort.trim()
+      : undefined
+    savePolishConfig({
+      ...(engineValue === undefined ? {} : { engine: engineValue }),
+      ...(localModelValue === undefined ? {} : { localModel: localModelValue }),
+      provider: providerText,
+      model: modelText,
+      ...(reasoningEffortValue === undefined ? {} : { reasoningEffort: reasoningEffortValue }),
+    })
+    return { ok: true }
+  }
+
+  /** 润色一段提示词（无对话上下文；kind 用于给模型一点体裁提示）。 */
+  @Remote('polishPrompt')
+  async polishPromptRemote(text: string, kind?: string): Promise<PolishPromptResult> {
+    const source = typeof text === 'string' ? text.trim() : ''
+    if (source === '') return { polished: '' }
+    const config = this.requirePolishConfig()
+    const kindText = typeof kind === 'string' && kind.trim() !== '' ? kind.trim() : 'prompt'
+    const system = [
+      '你是提示词润色助手。把用户给的文本改写得更清晰、更具体、更便于 AI 执行，',
+      '保持原意与语言（中文进中文出，英文进英文出），不要回答问题、不要解释、不要加前后缀。',
+      `文本类型：${kindText}。只输出润色后的文本本身。`,
+    ].join('')
+    const polished = await this.runPolishEngine(config, system, source)
+    return { polished: polished.trim() }
+  }
+
+  /**
+   * 会话内提示词润色：结合最近若干条「user 提问 + AI 最终输出」，把草稿改写成
+   * 意图明确、衔接顺畅的输入，并给出意图分类（continue/new-topic/bug-report/other）。
+   * 模型按 JSON 返回；解析失败时回落「整段即润色结果 + intent=unknown」。
+   */
+  @Remote('polishConversation')
+  async polishConversationRemote(
+    text: string,
+    history: Array<{ role: 'user' | 'assistant'; text: string }>,
+  ): Promise<PolishConversationResult> {
+    const source = typeof text === 'string' ? text.trim() : ''
+    if (source === '') return { polished: '', intent: 'unknown' }
+    const config = this.requirePolishConfig()
+    const recent = Array.isArray(history) ? history.slice(-6) : []
+    const context = recent.length === 0
+      ? '（无历史对话）'
+      : recent.map(h => `${h.role === 'user' ? '用户' : 'AI'}：${h.text}`).join('\n')
+    const system = [
+      '你是提示词润色助手。下面给你最近的对话上下文和用户刚输入的草稿。',
+      '把草稿改写成意图明确、衔接上下文顺畅、便于 AI 直接执行的输入：',
+      '补全省略的指代、把含糊要求具体化，但**不要**替用户做决定、不要添加用户没说的需求。',
+      '保持用户的语言。',
+      '只输出一个 JSON 对象，不要 markdown 代码块、不要多余文字，形如：',
+      '{"polished":"润色后的文本","intent":"continue|new-topic|bug-report|other"}',
+    ].join('')
+    const prompt = `对话上下文：\n${context}\n\n草稿：\n${source}`
+    const raw = await this.runPolishEngine(config, system, prompt)
+    const parsed = parsePolishEnvelope(raw)
+    return parsed ?? { polished: raw.trim(), intent: 'unknown' }
+  }
+
+  /** 中英文互译（中文→英文、英文→中文；其它语言→中文）。 */
+  @Remote('translatePrompt')
+  async translatePromptRemote(text: string): Promise<TranslatePromptResult> {
+    const source = typeof text === 'string' ? text.trim() : ''
+    if (source === '') return { translated: '' }
+    const config = this.requirePolishConfig()
+    const system = [
+      '你是翻译助手。中文译成英文，英文译成中文，其它语言译成中文。',
+      '只输出译文本身，不要解释、不要加引号。',
+    ].join('')
+    const translated = await this.runPolishEngine(config, system, source)
+    return { translated: translated.trim() }
+  }
+
+  /** 取润色配置；未配置时抛错（客户端把错误显示成「请先配置润色模型」）。 */
+  private requirePolishConfig(): PolishConfig {
+    const config = loadPolishConfig()
+    if (config === undefined) {
+      throw new Error('未配置 AI 润色模型：请在「设置 → 扩展 → AI 润色」选择引擎与模型')
+    }
+    return config
+  }
+
+  /**
+   * 一次润色调用（引擎路由 + 单次补全）。本地失败时：
+   * engine=local 明确指定 → 抛错；engine=auto → 回落线上（本地只是加速项）。
+   */
+  private async runPolishEngine(config: PolishConfig, system: string, prompt: string): Promise<string> {
+    const engine = config.engine ?? 'auto'
+    if (engine !== 'online') {
+      const local = this.ctx.get('localLlm')
+      if (local === undefined) {
+        if (engine === 'local') throw new Error('本地引擎不可用：请先在「设置 → 扩展 → Ollama」安装并下载模型')
+      } else {
+        try {
+          const status = await local.status()
+          const usable = status.installed && status.running && status.meetsMinMem && status.models.length > 0
+          if (engine === 'local' || usable) {
+            const ensured = status.running ? { ok: true } : await local.ensureServer()
+            if (!ensured.ok) {
+              throw new Error(ensured.error ?? '本地引擎启动失败')
+            }
+            const model = config.localModel ?? status.models[0] ?? ''
+            if (model === '') throw new Error('本地引擎没有可用模型：请在「设置 → 扩展 → Ollama」下载一个模型')
+            const out = await local.chat({ model, prompt: `${system}\n\n${prompt}`, temperature: 0.2, numPredict: 1024 })
+            if (out.text.trim() !== '') return out.text
+            throw new Error('本地模型返回空结果')
+          }
+        } catch (error) {
+          if (engine === 'local') throw error
+          // auto：本地不可用时静默回落线上。
+        }
+      }
+    }
+    return await this.generateOnline(config, system, prompt)
+  }
+
+  /** 线上一次性补全（ctx.llm.stream + BlockAssembler，与官方 compaction 同法）。 */
+  private async generateOnline(config: PolishConfig, system: string, prompt: string): Promise<string> {
+    const llm = this.ctx.get('llm')
+    if (llm === undefined) throw new Error('llm 服务不可用（无法调用线上模型）')
+    const assembler = new BlockAssembler()
+    for await (const chunk of llm.stream({
+      provider: config.provider,
+      model: config.model,
+      ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(config.reasoningEffort) }),
+      system,
+      messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'corum-agent' } })],
+      temperature: 0.2,
+      maxTokens: 1024,
+    })) {
+      assembler.push(chunk)
+    }
+    const text = assembler.blocks()
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('')
+    if (text.trim() === '') throw new Error('润色模型返回空结果')
+    return text
   }
 
   /** 冒烟测试。 */

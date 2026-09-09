@@ -27,6 +27,7 @@ import { AgentPresetsSection } from './sections/SettingsAgentPresetsSection.tsx'
 import { AccountSection } from './sections/SettingsAccountSection.tsx'
 import { McpSection } from './sections/SettingsMcpSection.tsx'
 import { SkillsSection } from './sections/SettingsSkillsSection.tsx'
+import { PolishSection } from './sections/SettingsPolishSection.tsx'
 import { AdvancedSection } from './sections/SettingsAdvancedSection.tsx'
 import { ProfilesSection } from './sections/SettingsProfilesSection.tsx'
 import { ExtensionsSection } from './sections/SettingsExtensionsSection.tsx'
@@ -82,6 +83,8 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'data', order: 140, label: '数据管理', navGroup: 'data', Component: DataSection },
   { id: 'mcp', order: 150, label: 'MCP 与集成', navGroup: 'extensions', Component: McpSection },
   { id: 'skills', order: 160, label: '技能', navGroup: 'extensions', Component: SkillsSection },
+  // fork（corum）：AI 润色配置（2026-09-09 重建；导航 id 沿用历史值 ai-polish）。
+  { id: 'ai-polish', order: 165, label: 'AI 润色', navGroup: 'extensions', Component: PolishSection },
   { id: 'advanced', order: 170, label: '高级', navGroup: 'advanced', Component: AdvancedSection },
   { id: 'profiles', order: 180, label: '配置档案', navGroup: 'advanced', Component: ProfilesSection },
   { id: 'extensions', order: 190, label: '插件管理', navGroup: 'extensions', Component: ExtensionsSection },
