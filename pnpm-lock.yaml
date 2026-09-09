@@ -1315,6 +1315,9 @@ importers:
 
   packages/plugins/agent/corum-subagent:
     dependencies:
+      '@corum/corum-orchestration':
+        specifier: workspace:*
+        version: link:../corum-orchestration
       '@deepseek-ai/dsh-brand':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)

@@ -1669,5 +1669,17 @@ Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 
 **守卫**：§17 断言「四 preset 的 `tool-workflow` 一律 disabled」「引擎行仍启用」「isolated
 provider 具备 worktree/绑定/回滚/通知四件事」「host patch 挂 `@corum/corum-subagent/isolated`」
 「orchestrate 按 `isolate` 选 provider 且取 `workflowEngine`」。
-**单测**：`corum-subagent/tests/isolated-provider.spec.ts`（5 例：建 worktree/通知注入/
-bind+rollback/缺服务 fail loud/默认配置）。
+**同日追加（用户「ralph 一并纳入」）**：provider 增加 `mode: 'track'` 与第二个实例
+`corum-tracked`（host patch 同一 `@corum/corum-subagent/isolated` 行 + `config: { providerName:
+corum-tracked, mode: track }`），`tool-ralph.subagentProvider` 改指它：
+- **不建 worktree**（ralph 每轮必须看到上一轮的改动——工作区是唯一长期记忆，隔离会让下一轮
+  读到旧基线）；
+- 但 `beginWriteChild(sessionId)` 登记「在跑写子 Agent」计数（settle/失败后幂等
+  `endWriteChild` 注销），并注入 `corumDirectWriteNotice()` 直连纪律 → 其它委托（前台
+  `subagent` 写）看得见「有人在写主树」而选择隔离。
+
+实机：`ralph` 一轮完成，`ralph8.txt` 直接落在主树，`git worktree list`/`git branch -a` 均只有
+`main`（无 worktree/分支）；计数行为由单测锁定（begin/end + 幂等 release）。
+
+**单测**：`corum-subagent/tests/isolated-provider.spec.ts`（9 例：always 模式 5 例 +
+track 模式 4 例——计数/直连纪律/幂等注销/缺服务 fail loud/mode 合法）。

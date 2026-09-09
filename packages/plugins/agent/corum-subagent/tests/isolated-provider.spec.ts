@@ -15,7 +15,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ResolvedSubagentStartRequest } from '../src/index.ts'
 import { describe, expect, it } from 'vitest'
-import { Config, prepareIsolatedChild } from '../src/isolated/index.ts'
+import { Config, prepareIsolatedChild, prepareTrackedChild } from '../src/isolated/index.ts'
 
 interface Call { readonly kind: string; readonly args: readonly unknown[] }
 
@@ -31,6 +31,8 @@ function fakeContext(calls: Call[]): Context {
           },
           bindRunId: (sessionId: string, slug: string, runId: string) => { calls.push({ kind: 'bind', args: [sessionId, slug, runId] }) },
           discardEntry: (sessionId: string, slug: string) => { calls.push({ kind: 'discard', args: [sessionId, slug] }) },
+          beginWriteChild: (sessionId: string) => { calls.push({ kind: 'begin', args: [sessionId] }) },
+          endWriteChild: (sessionId: string) => { calls.push({ kind: 'end', args: [sessionId] }) },
         }
       : undefined,
   }
@@ -90,5 +92,39 @@ describe('prepareIsolatedChild — workflow 脚本子会话的隔离内核', () 
     expect(config.providerName).toBe('corum-isolated')
     expect(config.mode).toBe('always')
     expect(config.maxParallelChildren).toBe(4)
+  })
+})
+
+describe('prepareTrackedChild — ralph 的「不隔离但计数」内核（2026-09-10 用户「ralph 一并纳入」）', () => {
+  it('登记「在跑写子 Agent」但不建 worktree（ralph 每轮必须看到上一轮改动）', () => {
+    const calls: Call[] = []
+    const tracked = prepareTrackedChild(fakeContext(calls), request())
+    expect(calls.map(call => call.kind)).toEqual(['begin'])
+    expect(tracked.request.cwd).toBeUndefined()
+    // 只注入直连纪律，不注入隔离通知。
+    const text = tracked.request.prompt.map(block => block.type === 'text' ? block.text : '').join('')
+    expect(text).toContain('[corum orchestration]')
+    expect(text).toContain('do NOT run git add / commit')
+    expect(text).not.toContain('[corum isolation]')
+    expect(text.endsWith('do the thing')).toBe(true)
+  })
+
+  it('release() 注销计数且幂等（settle 与失败路径都安全）', () => {
+    const calls: Call[] = []
+    const tracked = prepareTrackedChild(fakeContext(calls), request())
+    tracked.release()
+    tracked.release()
+    expect(calls.map(call => call.kind)).toEqual(['begin', 'end'])
+    expect(calls[1]?.args).toEqual(['session-parent'])
+  })
+
+  it('缺 corumOrchestration 服务时 fail loud', () => {
+    const ctx = new Context()
+    ;(ctx as unknown as { root: unknown }).root = { get: () => undefined }
+    expect(() => prepareTrackedChild(ctx, request())).toThrow(/corumOrchestration/)
+  })
+
+  it('track 是合法 mode（ralph 的 provider 配置）', () => {
+    expect(Config({ mode: 'track' } as never).mode).toBe('track')
   })
 })

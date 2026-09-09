@@ -749,8 +749,8 @@ if [ -d "$VENDORED_PRESETS" ]; then
     if ! row_disabled "$vendored" workflow-worker-thread && ! grep -qF 'provider: corum-spawn' "$vendored"; then
       fail "${preset}：workflow 引擎未走 corum-spawn provider"
     fi
-    if ! row_disabled "$vendored" tool-ralph && ! grep -qF 'subagentProvider: corum-spawn' "$vendored"; then
-      fail "${preset}：ralph 未走 corum-spawn provider"
+    if ! row_disabled "$vendored" tool-ralph && ! grep -qF 'subagentProvider: corum-tracked' "$vendored"; then
+      fail "${preset}：ralph 未走 corum-tracked provider（子 Agent 不计数）"
     fi
     # workflow 工具行：四个 preset 一律 disabled（语义并入 orchestrate script 模式）；
     # 引擎行必须保留启用，否则 orchestrate script 模式与 ralph 都没有引擎。
@@ -822,6 +822,22 @@ if [ -d "$VENDORED_PRESETS" ]; then
     pass "host patch 挂载 @corum/corum-subagent/isolated"
   else
     fail "desktop/cordis.patch.yml 未挂载 corum-isolated provider"
+  fi
+  # tracked provider（ralph 纳入并发计数）：同一 provider 的 track 模式行必须存在，
+  # 且实现里保留「计数 + 直连纪律 + 幂等注销」三件事。
+  if grep -qF "providerName: corum-tracked" "$REPO_ROOT/packages/desktop/cordis.patch.yml" \
+    && grep -qF "mode: track" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+    pass "host patch 挂载 corum-tracked provider（mode: track）"
+  else
+    fail "desktop/cordis.patch.yml 缺 corum-tracked provider 行"
+  fi
+  if grep -qF 'export function prepareTrackedChild' "$CORUM_ISOLATED_PROVIDER" \
+    && grep -qF 'beginWriteChild' "$CORUM_ISOLATED_PROVIDER" \
+    && grep -qF 'endWriteChild' "$CORUM_ISOLATED_PROVIDER" \
+    && grep -qF 'corumDirectWriteNotice' "$CORUM_ISOLATED_PROVIDER"; then
+    pass "track 模式：登记/注销在跑写子 Agent + 注入直连纪律"
+  else
+    fail "isolated provider 缺 track 模式（计数 + 直连纪律）"
   fi
   if grep -qF "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC" \
     && grep -qF "isolate === 'off' ? 'corum-spawn' : 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \

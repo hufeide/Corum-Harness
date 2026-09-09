@@ -125,7 +125,8 @@ describe('preset 数据面与代码常量对账', () => {
     }
     expect(composition).toMatch(/- id: tool-workflow[\s\S]{0,200}?disabled: true/)
     expect(composition).toContain('provider: corum-spawn')
-    expect(composition).toContain('subagentProvider: corum-spawn')
+    // ralph 子 Agent 走 corum-tracked（不隔离但计入并发信号，2026-09-10「ralph 一并纳入」）。
+    expect(composition).toContain('subagentProvider: corum-tracked')
   })
 
   it('陈旧工具指引段名单覆盖 write/edit（裁工具后提示词不得仍教模型使用）', () => {

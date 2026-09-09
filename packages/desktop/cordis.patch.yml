@@ -201,6 +201,15 @@
     - id: corum-subagent-isolated
       name: '@corum/corum-subagent/isolated'
 
+    # Fork #9 tracked provider（2026-09-10 用户「ralph 一并纳入」）：注册 'corum-tracked'
+    # ——不建 worktree（ralph 每轮必须看到上一轮改动），但把子会话登记进「在跑写子 Agent」
+    # 计数并注入直连纪律，让其它委托看得见「有人在写主树」而选择隔离。
+    - id: corum-subagent-tracked
+      name: '@corum/corum-subagent/isolated'
+      config:
+        providerName: corum-tracked
+        mode: track
+
     # Fork #10 编排器独立包（docs/plan/PLAN-refactor-orchestration-package-and-
     # settings-center.md 重构 1）：新包自己挂 cordis 行 provide（独立性最彻底），
     # apply 在根上下文幂等 provide `corumOrchestration`。行序**必须**在下方

@@ -246,7 +246,9 @@
     - id: tool-ralph
       name: '@deepseek-ai/dsh-tool-ralph'
       config:
-        subagentProvider: corum-spawn
+        # 2026-09-10 用户「ralph 一并纳入」：子 Agent 走 corum-tracked——不隔离（顺序迭代
+        # 必须看到上一轮改动），但登记「在跑写子 Agent」计数 + 注入直连纪律。
+        subagentProvider: corum-tracked
 
 # ── remaining model-facing rows ─────────────────────────────────────────────
 

@@ -14,6 +14,12 @@
  *   ④ start 返回后 `bindRunId`，`subagent/end` 到达时由编排服务精确 settle；
  *   ⑤ start 抛错 → `discardEntry` 回滚（否则台账留下永不结算的 active 条目）。
  *
+ * 三种 mode：
+ * - `always`（默认）：每个子会话建 worktree（workflow 脚本的并发子 Agent）；
+ * - `track`：**不建 worktree**，但把子会话登记进「在跑写子 Agent」计数并注入直连纪律
+ *   （ralph——顺序执行、每轮必须看到上一轮的改动，不能隔离；但其它委托必须看得见它在写）；
+ * - `off`：直通（只读脚本要看到父树未提交改动）。
+ *
  * 只支持 one-shot 前台子会话（引擎的 `agent()` 就是一次性前台调用）；continuable
  * 创建直接 fail loud——静默降级会丢掉隔离保证。
  *
@@ -29,6 +35,7 @@ import type {
   SubagentCapabilities,
   SubagentProvider,
 } from '../index.ts'
+import { corumDirectWriteNotice, corumIsolationNotice } from '@corum/corum-orchestration'
 import { startInProcessRun } from '../driver/index.ts'
 
 export const name = 'corum-subagent-isolated-in-process'
@@ -39,10 +46,11 @@ export interface Config {
   /** Provider name on `ctx.subagents` (default `corum-isolated`). */
   providerName: string
   /**
-   * `always`（默认）= 每个子会话都建 worktree；`off` = 直通（等价 corum-spawn，
-   * 供只读脚本使用——隔离子会话看到的是分支基线，看不到父工作区未提交的改动）。
+   * `always`（默认）= 每个子会话都建 worktree（并发脚本）；
+   * `track` = 不建 worktree，但登记「在跑写子 Agent」计数 + 注入直连纪律（顺序迭代如 ralph）；
+   * `off` = 直通（只读脚本要看到父工作区未提交改动时用）。
    */
-  mode: 'always' | 'off'
+  mode: 'always' | 'track' | 'off'
   /** 并发上限（与工具层同口径，达到即抛错让脚本作者等待/先集成）。 */
   maxParallelChildren: number
   /** worktree 根目录（相对父 cwd 或绝对路径，默认 `.corum-worktrees`）。 */
@@ -53,7 +61,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   providerName: z.string().default('corum-isolated'),
-  mode: z.union([z.const('always' as const), z.const('off' as const)]).default('always' as const),
+  mode: z.union([z.const('always' as const), z.const('track' as const), z.const('off' as const)]).default('always' as const),
   maxParallelChildren: z.natural().min(1).default(4),
   worktreeRoot: z.string(),
   branchPrefix: z.string(),
@@ -71,11 +79,9 @@ interface CorumOrchestrationFace {
   ) => { slug: string; branch: string; path: string }
   bindRunId: (sessionId: string, slug: string, runId: string) => void
   discardEntry: (sessionId: string, slug: string) => void
-}
-
-/** 隔离通知文本（与工具层 `corumIsolationNotice` 逐字一致——单一事实源在编排包）。 */
-function isolationNotice(branch: string): string {
-  return `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is write-denied by the sandbox (reads are still allowed for reference). Commit your changes on branch ${branch} inside this worktree; do not attempt to write outside it.\n\n`
+  /** track 模式：登记/注销「在跑写子 Agent」（并发感知信号④）。 */
+  beginWriteChild: (sessionId: string) => void
+  endWriteChild: (sessionId: string) => void
 }
 
 /** 一个已准备的隔离子会话：可直接交给 driver 的请求 + 绑定/回滚回调。 */
@@ -116,10 +122,52 @@ export function prepareIsolatedChild(
     request: {
       ...request,
       cwd: child.path,
-      prompt: [{ type: 'text', text: isolationNotice(child.branch) + promptText(request.prompt) }],
+      prompt: [{ type: 'text', text: corumIsolationNotice(child) + promptText(request.prompt) }],
     },
     bind: (runId: string) => { orchestration.bindRunId(sessionId, child.slug, runId) },
     rollback: () => { orchestration.discardEntry(sessionId, child.slug) },
+  }
+}
+
+/** 已登记的「直连写子会话」（track 模式）：请求 + 注销回调。 */
+export interface PreparedTrackedChild {
+  /** 已注入直连纪律的请求（不建 worktree）。 */
+  readonly request: ResolvedSubagentStartRequest
+  /** settle/失败后注销计数（幂等）。 */
+  release: () => void
+}
+
+/**
+ * 准备一个「不隔离但被计数」的子会话（ralph 这类顺序迭代的引擎子 Agent）。
+ *
+ * 为什么不隔离：ralph 每轮必须看到上一轮的改动（工作区是唯一长期记忆），worktree 会让
+ * 下一轮读到旧基线。为什么必须计数：它正在主工作区里写，其它委托（前台 `subagent` 写）
+ * 必须看得见「已有写者」而选择隔离——否则又回到并行改同一棵树。
+ * @param ctx - provider 所在上下文（取根上的 `corumOrchestration` 服务）。
+ * @param request - 引擎给出的 start 请求。
+ * @returns 已注入直连纪律的请求 + 幂等注销回调。
+ */
+export function prepareTrackedChild(
+  ctx: Context,
+  request: ResolvedSubagentStartRequest,
+): PreparedTrackedChild {
+  const orchestration = ctx.root.get('corumOrchestration', false) as CorumOrchestrationFace | undefined
+  if (orchestration === undefined) {
+    throw new Error('corum-isolated provider requires the corumOrchestration service; load @corum/corum-orchestration before this provider')
+  }
+  const sessionId = String(request.parent.session.id)
+  orchestration.beginWriteChild(sessionId)
+  let released = false
+  return {
+    request: {
+      ...request,
+      prompt: [{ type: 'text', text: corumDirectWriteNotice() + promptText(request.prompt) }],
+    },
+    release: () => {
+      if (released) return
+      released = true
+      orchestration.endWriteChild(sessionId)
+    },
   }
 }
 
@@ -143,6 +191,17 @@ class IsolatedInProcessProvider implements SubagentProvider {
 
   async start(request: ResolvedSubagentStartRequest) {
     if (this.config.mode === 'off') return startInProcessRun(request, {})
+    if (this.config.mode === 'track') {
+      const tracked = prepareTrackedChild(this.ctx, request)
+      try {
+        const run = await startInProcessRun(tracked.request, {})
+        void run.result.then(tracked.release, tracked.release)
+        return run
+      } catch (error: unknown) {
+        tracked.release()
+        throw error
+      }
+    }
     const prepared = prepareIsolatedChild(this.ctx, request, this.config)
     try {
       const run = await startInProcessRun(prepared.request, {})

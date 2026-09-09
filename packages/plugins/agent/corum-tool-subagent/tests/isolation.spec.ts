@@ -348,7 +348,9 @@ describe('isolation notice — fork（corum）prompt 前缀', () => {
     expect(toolSrc).toContain('corumIsolationNotice(child)')
     expect(toolSrc).toContain('corumDirectWriteNotice()')
     const providerSrc = fs.readFileSync(new URL('../../corum-subagent/src/isolated/index.ts', import.meta.url), 'utf8')
-    expect(providerSrc).toContain('isolationNotice(child.branch)')
+    // 2026-09-10：provider 直接引用编排包的 helper（不再自持副本）。
+    expect(providerSrc).toContain('corumIsolationNotice(child)')
+    expect(providerSrc).toContain('corumDirectWriteNotice()')
   })
 })
 
