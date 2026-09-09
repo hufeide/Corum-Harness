@@ -802,9 +802,11 @@ export function IdeAppFrame({
     }
   }, [userShown, showRegion, saveIdeGrid])
   const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor']) }, [toggleRegionVisibility])
-  // fork（corum）：右上角轨迹按钮 → 点亮右侧「轨迹」区域（fork #12；2026-09-09
-  // 用户定调：抽屉形态不好用，改为与编辑器/终端同构的独立区域）。
-  const onOpenTrajectory = useCallback(() => { showRegion(['corum.trajectory' as GridSlot]) }, [showRegion])
+  // fork（corum）：右上角轨迹按钮 → 右侧「轨迹」区域显隐开关（fork #12；2026-09-09
+  // 用户定调：抽屉形态不好用，改为与编辑器/终端同构的独立区域）。用 toggle 而非
+  // 纯 show：fixed 槽不进插件中心的视图管理，按钮是唯一的收起入口（与 rail 的
+  // 面板/终端按钮同款语义）。
+  const onOpenTrajectory = useCallback(() => { toggleRegionVisibility(['corum.trajectory' as GridSlot]) }, [toggleRegionVisibility])
   const onToggleTerminal = useCallback(() => { toggleRegionVisibility(['corum.panel']) }, [toggleRegionVisibility])
   // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
   const onToggleTheme = useCallback(() => {
