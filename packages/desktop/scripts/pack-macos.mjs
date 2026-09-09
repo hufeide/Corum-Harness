@@ -21,16 +21,17 @@ import { cp, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'no
 import { join, resolve, sep } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..', '..', '..')
+/** desktop 包根（脚本位置推导——2026-09 全局重命名后 packages/shell 已不存在）。 */
+const DESKTOP_ROOT = resolve(import.meta.dirname, '..')
 
 /** 宿主运行时的 staging 目录 */
-const HOST_DIR = join(root, 'packages', 'shell', 'build', 'host')
+const HOST_DIR = join(DESKTOP_ROOT, 'build', 'host')
 /** corum-desktop 自身产物源（bridge.js 等已由 pnpm run build 产出） */
-const DESKTOP_LIB = join(root, 'packages', 'shell', 'lib')
-const DESKTOP_ROOT = join(root, 'packages', 'shell')
+const DESKTOP_LIB = join(DESKTOP_ROOT, 'lib')
 /** 前端 dist 源（@deepseek-ai/dsh-web-frontend 的构建产物；registry 依赖落在 shell 包 node_modules） */
 const WEB_DIST = join(DESKTOP_ROOT, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist')
 /** 前端 dist 在打包 staging 里的目标 */
-const DIST_DIR = join(root, 'packages', 'shell', 'build', 'dist')
+const DIST_DIR = join(DESKTOP_ROOT, 'build', 'dist')
 /**
  * dependency-only deploy 根：pnpm deploy 从这里物化 host 闭包。其依赖清单
  * = 官方 desktop-host 的 36 个 host 服务包 + preset 引用的 30 个包（agent.cordis.yml
@@ -109,7 +110,7 @@ async function deployHost() {
   // 它用 createRequire(host/package.json).resolve.paths() 逐级向上解析裸插件名，
   // 缺 hoisted 时是 .pnpm 隔离布局，peer 依赖（如 dsh-llm 的 peer dsh-timeout）
   // 只藏在 .pnpm 嵌套目录里，profile 里的裸插件名会解析失败。
-  const deployTmp = join(root, 'packages', 'shell', 'build', '.deploy-tmp')
+  const deployTmp = join(DESKTOP_ROOT, 'build', '.deploy-tmp')
   await rm(deployTmp, { recursive: true, force: true })
   await run('pnpm deploy desktop-host (hoisted registry closure)', 'pnpm', [
     '--filter', 'corum-desktop-host', 'deploy',
@@ -219,7 +220,7 @@ async function copyDesktopArtifacts() {
 async function smokeBridge() {
   const bridge = join(HOST_DIR, 'lib', 'bridge.js')
   if (!existsSync(bridge)) throw new Error(`pack-macos: ${bridge} missing — run the corum-desktop build first`)
-  const smokeHome = join(root, 'packages', 'shell', 'build', '.smoke-home')
+  const smokeHome = join(DESKTOP_ROOT, 'build', '.smoke-home')
   try {
     await new Promise((resolveSmoke, reject) => {
     // Redirect the harness home into the build staging tree (OUTSIDE host/ so
@@ -227,7 +228,6 @@ async function smokeBridge() {
     // (~/.corum-desktop) may be outside the sandbox's writable area, and the smoke
     // only needs to prove the closure boots — it must not touch the developer's
     // real desktop-home.
-    const smokeHome = join(root, 'packages', 'shell', 'build', '.smoke-home')
       const child = spawn(process.execPath, [bridge], {
         cwd: HOST_DIR,
         stdio: ['ignore', 'pipe', 'pipe'],

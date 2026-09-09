@@ -1,6 +1,6 @@
 {
   "name": "corum-desktop",
-  "description": "Corum（矩道）desktop carrier: Electron shell + host bridge + IPC transport, booting the corum profile over the official dsh foundation (zero HTTP).",
+  "description": "Corum\uff08\u77e9\u9053\uff09desktop carrier: Electron shell + host bridge + IPC transport, booting the corum profile over the official dsh foundation (zero HTTP).",
   "version": "0.1.0",
   "type": "module",
   "private": true,
@@ -83,15 +83,15 @@
       "target": [
         "dmg",
         "zip"
-      ]
-    },
-    "extendInfo": {
-      "CFBundleLocalizations": [
-        "en",
-        "zh-Hans"
       ],
-      "CFBundleAllowMixedLocalizations": true,
-      "CFBundleDisplayName": "矩道"
+      "extendInfo": {
+        "CFBundleLocalizations": [
+          "en",
+          "zh-Hans"
+        ],
+        "CFBundleAllowMixedLocalizations": true,
+        "CFBundleDisplayName": "\u77e9\u9053"
+      }
     }
   },
   "license": "MIT",

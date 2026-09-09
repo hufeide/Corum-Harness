@@ -20,7 +20,9 @@ import { pipeline } from 'node:stream/promises'
 import { spawn } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..', '..', '..')
-const NODE_DIR = join(root, 'packages', 'shell', 'build', 'node')
+/** desktop 包根（脚本位置推导——2026-09 重命名后 packages/shell 已不存在）。 */
+const DESKTOP_ROOT = resolve(import.meta.dirname, '..')
+const NODE_DIR = join(DESKTOP_ROOT, 'build', 'node')
 
 const DEFAULT_VERSION = 'v26.4.0'
 const ARCH = 'arm64'
@@ -38,12 +40,12 @@ async function main() {
   const version = process.argv[2] ?? DEFAULT_VERSION
 
   await rm(NODE_DIR, { recursive: true, force: true })
-  await mkdir(join(root, 'packages', 'shell', 'build'), { recursive: true })
+  await mkdir(join(DESKTOP_ROOT, 'build'), { recursive: true })
 
   const name = `node-${version}-${PLATFORM}-${ARCH}`
   const mirror = (process.env.NODE_MIRROR ?? 'https://nodejs.org/dist').replace(/\/$/, '')
   const url = `${mirror}/${version}/${name}.tar.gz`
-  const tarGz = join(root, 'packages', 'shell', 'build', `${name}.tar.gz`)
+  const tarGz = join(DESKTOP_ROOT, 'build', `${name}.tar.gz`)
 
   if (!existsSync(tarGz)) {
     console.log(`[fetch-node] downloading ${url}`)
@@ -54,8 +56,8 @@ async function main() {
     console.log(`[fetch-node] using cached ${tarGz}`)
   }
 
-  await run('extract node', 'tar', ['-xzf', tarGz, '-C', join(root, 'packages', 'shell', 'build')])
-  await run('rename node dir', 'mv', [join(root, 'packages', 'shell', 'build', name), NODE_DIR])
+  await run('extract node', 'tar', ['-xzf', tarGz, '-C', join(DESKTOP_ROOT, 'build')])
+  await run('rename node dir', 'mv', [join(DESKTOP_ROOT, 'build', name), NODE_DIR])
   console.log('[fetch-node] node runtime staged at', NODE_DIR)
 }
 
