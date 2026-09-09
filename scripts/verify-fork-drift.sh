@@ -184,6 +184,10 @@ MUST_CONTAIN=(
   "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::border-radius: 50%;"
   "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::background: var(--dsw-alias-brand-primary);"
   "packages/plugins/session/corum-ui-chat/src/client/chat/TurnNavigator.module.css::left: calc(100% + 10px);"
+  # 设计稿 tbtn-voice：2026-09-09 曾被 commit 523e7aca 整块换成官方 <ContextMeter/>（用户报障）。
+  "packages/plugins/session/corum-ui-conversation/src/client/skeleton/InputBar.tsx::aria-label=\"语音输入\""
+  # .tbtn 必须显式 padding: 0（否则吃 UA 的 button padding 1px 6px，26 宽剩 14px，图标被压扁）。
+  "packages/plugins/session/corum-ui-conversation/src/client/skeleton/InputBar.module.css::必须显式归零"
 )
 for entry in "${MUST_CONTAIN[@]}"; do
   corum_rel="${entry%%::*}"

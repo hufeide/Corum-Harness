@@ -250,6 +250,10 @@
   flex: none;
   width: 26px;
   height: 26px;
+  /* 必须显式归零：不写 padding 会落到 UA 样式表的 `button { padding: 1px 6px }`，
+     26 宽被吃掉 12px → 内容盒只剩 14px，图标被 flex 压扁成 14×18（设计稿是
+     18×18 / 19×19）。2026-09-09 复刻语音按钮时 CDP 量到 computed width=14px 才发现。 */
+  padding: 0;
   border: none;
   border-radius: 8px;
   background: transparent;

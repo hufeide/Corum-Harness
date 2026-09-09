@@ -33,7 +33,6 @@ import { ComposerContentEditable } from '../input/editor/ComposerContentEditable
 import { DecoratorPortals } from '../input/editor/DecoratorPortals.tsx'
 import { registerComposerKeymap } from '../input/editor/keymap.ts'
 import { attachmentErrorText, imageSizeText } from '../image-labels.ts'
-import { ContextMeter } from './ContextMeter.tsx'
 import { PermissionSelect } from './PermissionSelect.tsx'
 import css from './InputBar.module.css'
 
@@ -532,7 +531,32 @@ export const InputBar = memo(function InputBar({
               : renderSlot('conversation.input.right', {})}
             {/* 设计稿 tbtn-model：模型选择按钮（26 高 r8） */}
             {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
-            <ContextMeter useProjection={useProjection} t={t} />
+            {/* fork（corum）：设计稿 tbtn-voice——26×26 r8 + mic 图标 18×18
+                $label-secondary（design.pen 的 toolbar 顺序：tbtn-model →
+                tbtn-voice → tbtn-send，无 context 环）。
+                ⚠️ 回归史（2026-09-09 用户报障）：commit 523e7aca「0.1.3 契约适配」
+                把本按钮整块换成官方的 <ContextMeter/>（上下文已用 % 环），设计稿的
+                🎤 位置被原生 context 信息占据；现按设计稿还原。
+                上下文占用信息不受影响——它另有归属：状态栏详情
+                （corum-ide-ui AppFrame statusDetail「上下文 Context · 上限/已用/未用」，
+                同一 contextPressure/contextBreakdown 投影）。
+                语音输入按 SPEC-conversation-header.md §3 属「本轮可先占位」，
+                尚未接真实 STT。 */}
+            <Tooltip label="语音输入" side="top" delayMs={500}>
+              <button
+                type="button"
+                className={css.tbtn}
+                aria-label="语音输入"
+                disabled={locked}
+                onMouseDown={keepFocus}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" x2="12" y1="19" y2="22" />
+                </svg>
+              </button>
+            </Tooltip>
             {interruptible && (
               <Tooltip label={t('input.stop')} side="top" delayMs={500}>
                 <button
