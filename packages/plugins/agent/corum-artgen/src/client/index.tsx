@@ -71,6 +71,8 @@ interface ArtGenStatus {
   enginePath: string
   /** 已下载的模型列表。 */
   models: SdModel[]
+  /** 断点残片（fileName → 已下载字节；>0 = 可继续下载）。 */
+  partials: Array<{ fileName: string; bytes: number }>
   /** 运行平台（process.platform）。 */
   platform: string
   /** 物理内存（GB）。 */
@@ -162,8 +164,26 @@ function formatBytesClient(bytes: number): string {
   return `${val.toFixed(val >= 100 ? 0 : val >= 10 ? 1 : 2)} ${units[i]}`
 }
 
+/** 下载进度视图（引擎 / 模型共用；含速度/ETA）。 */
+interface DownloadProgressView {
+  percent: number
+  total: string
+  downloaded: string
+  status: string
+  speed?: string
+  eta?: string
+}
+
+/** 剩余时间标签（秒 → 中文短语）。 */
+function formatEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return ''
+  if (seconds < 60) return `${Math.round(seconds)} 秒`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`
+  return `${Math.floor(seconds / 3600)} 小时 ${Math.round((seconds % 3600) / 60)} 分`
+}
+
 /** 通用下载进度条（引擎 / 模型共用）。 */
-function DownloadProgressBar({ progress }: { progress: { percent: number; total: string; downloaded: string; status: string } | null }): ReactNode {
+function DownloadProgressBar({ progress }: { progress: DownloadProgressView | null }): ReactNode {
   if (progress === null) return null
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -176,8 +196,10 @@ function DownloadProgressBar({ progress }: { progress: { percent: number; total:
         </div>
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-brand-primary)', minWidth: 36, textAlign: 'right' }}>{progress.percent}%</span>
       </div>
-      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>
+      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flexWrap: 'wrap' }}>
         <span>已下载：{progress.downloaded} / {progress.total}</span>
+        {progress.speed !== undefined && <span style={{ color: 'var(--dsw-alias-brand-primary)' }}>速度：{progress.speed}</span>}
+        {progress.eta !== undefined && <span>剩余约 {progress.eta}</span>}
         <span>状态：{progress.status === 'downloading' ? '下载中' : progress.status === 'done' ? '完成' : progress.status === 'error' ? '失败' : progress.status}</span>
       </div>
     </div>
@@ -200,12 +222,12 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
 
   // 引擎下载
   const [dlEngine, setDlEngine] = useState(false)
-  const [dlEngineProgress, setDlEngineProgress] = useState<{ percent: number; total: string; downloaded: string; status: string } | null>(null)
+  const [dlEngineProgress, setDlEngineProgress] = useState<DownloadProgressView | null>(null)
 
   // 模型下载（dlModelKey 标识当前下载项：推荐档位 'low|mid|high' 或在线模型 fileName；
   // 只让正在下载的那一项显示「下载中」，其余项不受波及——修「下载 A 时删 B，B 也显下载中」）
   const [dlModelKey, setDlModelKey] = useState<string | null>(null)
-  const [dlModelProgress, setDlModelProgress] = useState<{ percent: number; total: string; downloaded: string; status: string } | null>(null)
+  const [dlModelProgress, setDlModelProgress] = useState<DownloadProgressView | null>(null)
 
   // 生成测试区
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT)
@@ -250,31 +272,26 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
 
   useEffect(() => { void refresh() }, [])
 
+  /** 事件/轮询载荷 → 进度视图（含速度/ETA）。 */
+  const toView = (p: { percent: number; totalBytes: number; downloadedBytes: number; status: string; bytesPerSecond?: number; etaSeconds?: number }): DownloadProgressView => ({
+    percent: p.percent,
+    total: formatBytesClient(p.totalBytes),
+    downloaded: formatBytesClient(p.downloadedBytes),
+    status: p.status,
+    ...(p.bytesPerSecond !== undefined && p.bytesPerSecond > 0 ? { speed: `${formatBytesClient(p.bytesPerSecond)}/s` } : {}),
+    ...(p.etaSeconds !== undefined && p.etaSeconds > 0 ? { eta: formatEta(p.etaSeconds) } : {}),
+  })
+
+  // 引擎下载（2026-09-09：改非阻塞 startDownloadEngine + 事件/轮询；可断点续传）。
   const downloadEngine = async (): Promise<void> => {
     setDlEngine(true)
     setError(null)
     setDlEngineProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
-    // P2-7：`$on('corum/artgen/download-progress')` 推送替代 500ms 轮询
-    // （先订阅再发起下载，避免丢首帧；host downloadEngine RPC 本身阻塞到完成）。
-    const off = subscribeProgress((p) => {
-      if (p.key !== 'engine') return
-      setDlEngineProgress({
-        percent: p.percent,
-        total: formatBytesClient(p.totalBytes),
-        downloaded: formatBytesClient(p.downloadedBytes),
-        status: p.status,
-      })
-    })
     try {
-      const r = await call<{ ok: boolean; error?: string }>('downloadEngine', {})
-      if (!r.ok) setError(r.error ?? '引擎下载失败')
-      setDlEngineProgress(null)
-      await refresh()
+      const r = await call<{ started: boolean; already?: boolean; error?: string }>('startDownloadEngine', {})
+      if (r.error !== undefined) { setError(r.error); setDlEngine(false) }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      setDlEngineProgress(null)
-    } finally {
-      off()
       setDlEngine(false)
     }
   }
@@ -283,33 +300,75 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
     setDlModelKey(tier)
     setError(null)
     setDlModelProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
-    // P2-7：进度走 $on 推送；终态（done/error）用 Promise 汇合，替代 600ms 轮询等待。
-    let settle: ((p: ArtgenDownloadProgressEvent) => void) | null = null
-    const terminal = new Promise<ArtgenDownloadProgressEvent>((resolve) => { settle = resolve })
-    const off = subscribeProgress((p) => {
-      if (p.key !== 'model') return
-      setDlModelProgress({
-        percent: p.percent,
-        total: formatBytesClient(p.totalBytes),
-        downloaded: formatBytesClient(p.downloadedBytes),
-        status: p.status,
-      })
-      if (p.status === 'done' || p.status === 'error') settle?.(p)
-    })
     try {
-      await call<{ started: boolean }>('startDownloadModel', { tier })
-      const final = await terminal
-      if (final.status === 'error') throw new Error(final.error ?? '模型下载失败')
-      setDlModelProgress(null)
-      await refresh()
+      const r = await call<{ started: boolean; already?: boolean; error?: string }>('startDownloadModel', { tier })
+      if (r.already === true) { setDlModelKey(null); setDlModelProgress(null); await refresh() }
+      else if (r.error !== undefined) { setError(r.error); setDlModelKey(null); setDlModelProgress(null) }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      setDlModelProgress(null)
-    } finally {
-      off()
       setDlModelKey(null)
+      setDlModelProgress(null)
     }
   }
+
+  // 进度订阅 + 兜底轮询 + 挂载恢复（2026-09-09）：下载在 host 侧跑，关设置/切页面不中断、
+  // 重开也能恢复显示（原先用组件内 Promise 等终态，卸载即丢进度）。
+  useEffect(() => {
+    if (!dlEngine && dlModelKey === null) return undefined
+    const off = subscribeProgress((p) => {
+      if (p.key === 'engine') {
+        setDlEngineProgress(toView(p))
+        if (p.status === 'done' || p.status === 'error') {
+          if (p.status === 'error') setError(p.error ?? '引擎下载失败')
+          setDlEngine(false)
+          void refresh()
+        }
+      } else {
+        setDlModelProgress(toView(p))
+        if (p.status === 'done' || p.status === 'error') {
+          if (p.status === 'error') setError(p.error ?? '模型下载失败')
+          setDlModelKey(null)
+          void refresh()
+        }
+      }
+    })
+    let stopped = false
+    const timer = setInterval(() => {
+      void (async () => {
+        if (stopped) return
+        try {
+          for (const key of ['engine', 'model'] as const) {
+            const p = await call<{ percent: number; downloadedBytes: number; totalBytes: number; status: string; error?: string; bytesPerSecond?: number; etaSeconds?: number; target?: string }>('getDownloadProgress', { key })
+            if (stopped) return
+            if (p.status === 'idle') continue
+            if (key === 'engine') {
+              setDlEngineProgress(toView(p))
+              if (p.status === 'done' || p.status === 'error') { if (p.status === 'error') setError(p.error ?? '引擎下载失败'); setDlEngine(false); void refresh() }
+            } else {
+              setDlModelProgress(toView(p))
+              if (p.target !== undefined && dlModelKey === null) setDlModelKey(p.target)
+              if (p.status === 'done' || p.status === 'error') { if (p.status === 'error') setError(p.error ?? '模型下载失败'); setDlModelKey(null); void refresh() }
+            }
+          }
+        } catch { /* 忽略 */ }
+      })()
+    }, 2000)
+    return () => { stopped = true; clearInterval(timer); off() }
+  }, [dlEngine, dlModelKey])
+
+  // 挂载恢复：host 侧可能已经在下载（上次关闭设置时留下的）。
+  useEffect(() => {
+    void (async () => {
+      for (const key of ['engine', 'model'] as const) {
+        try {
+          const p = await call<{ percent: number; downloadedBytes: number; totalBytes: number; status: string; bytesPerSecond?: number; etaSeconds?: number; target?: string }>('getDownloadProgress', { key })
+          if (p.status !== 'downloading') continue
+          if (key === 'engine') { setDlEngineProgress(toView(p)); setDlEngine(true) }
+          else { setDlModelProgress(toView(p)); setDlModelKey(p.target ?? '__downloading__') }
+        } catch { /* 忽略 */ }
+      }
+    })()
+  }, [])
 
   // 删除模型
   const [busyModel, setBusyModel] = useState<string | null>(null)
@@ -410,34 +469,24 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
     }
   }
 
-  // 下载在线模型（后台下载；P2-7：进度走 $on 推送 + 终态 Promise 汇合）。
+  // 下载在线模型（后台下载；进度走事件 + 兜底轮询，与引擎/推荐模型同一套）。
   const downloadOnline = async (m: OnlineSdModel) => {
     setDlModelKey(m.fileName)
     setError(null)
     setDlModelProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
-    let settle: ((p: ArtgenDownloadProgressEvent) => void) | null = null
-    const terminal = new Promise<ArtgenDownloadProgressEvent>((resolve) => { settle = resolve })
-    const off = subscribeProgress((p) => {
-      if (p.key !== 'model') return
-      setDlModelProgress({ percent: p.percent, total: formatBytesClient(p.totalBytes), downloaded: formatBytesClient(p.downloadedBytes), status: p.status })
-      if (p.status === 'done' || p.status === 'error') settle?.(p)
-    })
     try {
       const r = await call<{ started: boolean; already?: boolean; error?: string }>('downloadModelFromUrl', { url: m.downloadUrl, fileName: m.fileName })
-      if (r.already === true) { setDlModelProgress(null); await refresh(); return }
-      if (r.error !== undefined) throw new Error(r.error)
-      const final = await terminal
-      if (final.status === 'error') throw new Error(final.error ?? '下载失败')
-      setDlModelProgress(null)
-      await refresh()
+      if (r.already === true) { setDlModelProgress(null); setDlModelKey(null); await refresh() }
+      else if (r.error !== undefined) { setError(r.error); setDlModelProgress(null); setDlModelKey(null) }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setDlModelProgress(null)
-    } finally {
-      off()
       setDlModelKey(null)
     }
   }
+
+  // 断点残片（fileName → 字节）：>0 时按钮显示「继续下载」。
+  const partialOf = (fileName: string): number => status?.partials?.find(p => p.fileName === fileName)?.bytes ?? 0
 
   // 当前激活模型（生成唯一使用）。
   const activeModel = status?.models.find(m => m.active === true)
@@ -538,7 +587,11 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                 padding: '5px 12px', borderRadius: 8, fontSize: 12, cursor: dlEngine ? 'wait' : 'pointer',
                 border: '1px solid var(--corum-glass-border-active)', background: 'var(--corum-glass-3)',
                 color: 'var(--dsw-alias-brand-primary)', whiteSpace: 'nowrap',
-              }}>{dlEngine ? '下载中…' : '下载引擎到本地'}</button>
+              }}>{dlEngine
+                ? '下载中…'
+                : partialOf('sd-cli-download.zip') > 0
+                  ? `继续下载（已下载 ${formatBytesClient(partialOf('sd-cli-download.zip'))}）`
+                  : '下载引擎到本地'}</button>
             </>
           )}
         </div>
@@ -578,7 +631,7 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
             <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>加载推荐…</span>
           ) : recommended.map(m => {
             const downloaded = status?.models.some(x => x.fileName === m.fileName) ?? false
-            const thisDownloading = dlModelKey === m.tier
+            const thisDownloading = dlModelKey === m.tier || dlModelKey === m.fileName
             const anyDownloading = dlModelKey !== null
             const disabled = anyDownloading || !engineReady || downloaded || m.compatible === false
             return (
@@ -609,7 +662,11 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                       padding: '5px 12px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
                       background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
                       cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: disabled ? 0.5 : 1,
-                    }}>{thisDownloading ? '下载中…' : '下载'}</button>}
+                    }}>{thisDownloading
+                      ? '下载中…'
+                      : partialOf(m.fileName) > 0
+                        ? `继续下载（${formatBytesClient(partialOf(m.fileName))}）`
+                        : '下载'}</button>}
               </div>
             )
           })}
@@ -747,7 +804,11 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                         padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
                         background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
                         cursor: disabled ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: disabled ? 0.5 : 1,
-                      }}>{thisDownloading ? '下载中…' : '下载'}</button>}
+                      }}>{thisDownloading
+                        ? '下载中…'
+                        : partialOf(m.fileName) > 0
+                          ? `继续下载（${formatBytesClient(partialOf(m.fileName))}）`
+                          : '下载'}</button>}
                 </div>
               )
             })}

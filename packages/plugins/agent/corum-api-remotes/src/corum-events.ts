@@ -244,6 +244,12 @@ export interface ArtgenDownloadProgressEvent {
   readonly status: string
   /** 失败原因（status='error' 时）。 */
   readonly error?: string
+  /** 下载目标文件名（模型 = 文件名；引擎 = sd-cli-download.zip）。2026-09-09 新增。 */
+  readonly target?: string
+  /** 瞬时下载速度（字节/秒；滑动窗口）。2026-09-09 新增。 */
+  readonly bytesPerSecond?: number
+  /** 预计剩余秒数。2026-09-09 新增。 */
+  readonly etaSeconds?: number
 }
 
 /**

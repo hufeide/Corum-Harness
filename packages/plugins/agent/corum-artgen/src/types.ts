@@ -49,6 +49,11 @@ export interface ArtGenStatus {
   platform: string
   /** 当前已激活的模型名（全局唯一；生成强制使用该模型）。 */
   activeModel?: string
+  /**
+   * 断点残片（fileName → 已下载字节）：>0 表示该文件可「继续下载」（2026-09-09 断点续传）。
+   * 引擎残片用固定名 'sd-cli-download.zip'。
+   */
+  partials: Array<{ fileName: string; bytes: number }>
   /** 物理内存（GB）。 */
   totalMemGb: number
   /** 是否达到最低硬件门槛（8GB 内存）。 */

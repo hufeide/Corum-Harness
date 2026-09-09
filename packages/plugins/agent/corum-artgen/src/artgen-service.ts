@@ -21,8 +21,8 @@
 
 import { spawn, execSync } from 'node:child_process'
 import { homedir, totalmem, cpus } from 'node:os'
-import { existsSync, mkdirSync, renameSync, statSync, rmSync, readdirSync, readFileSync, copyFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { existsSync, mkdirSync, renameSync, statSync, rmSync, readdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs'
+import { join, basename, dirname } from 'node:path'
 // P2-7：下载进度事件声明（cordis Events 合并面）。
 import type {} from '@corum/corum-api-remotes/corum-events'
 import type { Context } from '@deepseek-ai/cordis'
@@ -37,8 +37,16 @@ declare module '@deepseek-ai/cordis' {
 
 /** 生成超时（ms；5 分钟，大图生成需要时间）。 */
 const GEN_TIMEOUT_MS = 300_000
-/** 下载超时（ms；sd-cli ~47MB，模型 ~2GB，给 5 分钟）。 */
-const DOWNLOAD_TIMEOUT_MS = 300_000
+/**
+ * 下载**停滞**判定（ms；2026-09-09 用户报障「模型下载中途停止」）——只要还有字节
+ * 流入就不算超时；原先用 `AbortSignal.timeout(5min)` 卡**总时长**，2GB+ 的模型
+ * 必然被砍在中间。
+ */
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000
+/** 建连/首字节超时（ms）。 */
+const DOWNLOAD_CONNECT_TIMEOUT_MS = 30_000
+/** 下载进度推送节流（ms）。 */
+const DOWNLOAD_PROGRESS_THROTTLE_MS = 250
 /** GitHub API 请求超时（ms）。 */
 const API_TIMEOUT_MS = 15_000
 /** 本地文生图最低物理内存门槛（GB）。SD 1.5 推理需要 ~4GB，留余量定 8GB。 */
@@ -294,6 +302,12 @@ interface DownloadSlot {
   totalBytes: number
   status: 'idle' | 'downloading' | 'done' | 'error'
   error?: string
+  /** 下载目标文件名（模型 = 文件名；引擎 = sd-cli-download.zip）——UI 恢复「哪一项在下载」。 */
+  target?: string
+  /** 瞬时速度（字节/秒；滑动窗口）。 */
+  bytesPerSecond?: number
+  /** 预计剩余秒数。 */
+  etaSeconds?: number
 }
 
 /** 新建空闲下载槽。 */
@@ -408,7 +422,153 @@ export class ArtGenService extends TypertRemoteService {
       totalBytes: next.totalBytes,
       status: next.status,
       ...(next.error !== undefined ? { error: next.error } : {}),
+      ...(next.target !== undefined ? { target: next.target } : {}),
+      ...(next.bytesPerSecond !== undefined ? { bytesPerSecond: next.bytesPerSecond } : {}),
+      ...(next.etaSeconds !== undefined ? { etaSeconds: next.etaSeconds } : {}),
     })
+  }
+
+  /**
+   * 通用「可续传 + 停滞看门狗」下载（2026-09-09）：
+   * - **断点续传**：半截文件保留在 `<partPath>`，重试/重启后用 `Range: bytes=N-` 续；
+   *   206 追加写、200（服务端忽略 Range）丢弃重写、416（残片比对象大）丢弃重来一次；
+   * - **来源校验**：`<partPath>.json` 记 URL + ETag/Last-Modified，续传带 `If-Range`，
+   *   换镜像/上游换构建时丢弃残片而不是拼接；
+   * - **停滞判定**：每收到 chunk 重置看门狗（60s 无字节才中止），不卡总时长；
+   * - 进度写 `downloadSlots[slot]` 并带速度/ETA（250ms 节流）。
+   * 失败时**保留**残片（可续传）并把「已保留断点」写进 error。
+   */
+  private async downloadToFile(url: string, partPath: string, slot: 'engine' | 'model'): Promise<{ ok: boolean; error?: string; bytes: number; totalBytes: number }> {
+    const metaPath = `${partPath}.json`
+    try { mkdirSync(dirname(partPath), { recursive: true }) } catch { /* 已存在 */ }
+    // 续传前校验残片来源
+    let resumeFrom = 0
+    let validator: string | undefined
+    try { resumeFrom = statSync(partPath).size } catch { resumeFrom = 0 }
+    if (resumeFrom > 0) {
+      let metaUrl: string | undefined
+      let metaValidator: string | undefined
+      try {
+        const parsed = JSON.parse(readFileSync(metaPath, 'utf8')) as { url?: unknown; validator?: unknown }
+        if (typeof parsed.url === 'string') metaUrl = parsed.url
+        if (typeof parsed.validator === 'string') metaValidator = parsed.validator
+      } catch { metaUrl = undefined }
+      if (metaUrl !== url) {
+        // 没有元数据（旧残片）或来源不同（换镜像/上游换构建）→ 丢弃重来
+        try { rmSync(partPath, { force: true }) } catch { /* 忽略 */ }
+        try { rmSync(metaPath, { force: true }) } catch { /* 忽略 */ }
+        resumeFrom = 0
+      } else if (metaValidator !== undefined) {
+        validator = metaValidator
+      }
+    }
+    const target = basename(partPath).replace(/\.part$/, '')
+    this.setDownloadSlot(slot, { percent: 0, downloadedBytes: resumeFrom, totalBytes: 0, status: 'downloading', target })
+    let attempt = 0
+    let lastBytes = resumeFrom
+    let lastTotal = 0
+    try {
+      for (;;) {
+        attempt += 1
+        const controller = new AbortController()
+        let watchdog: NodeJS.Timeout | null = null
+        const arm = (ms: number): void => {
+          if (watchdog !== null) clearTimeout(watchdog)
+          watchdog = setTimeout(() => { controller.abort(new Error(`下载停滞超过 ${Math.round(ms / 1000)} 秒（无数据流入）`)) }, ms)
+        }
+        arm(DOWNLOAD_CONNECT_TIMEOUT_MS)
+        try {
+          const r = await fetch(url, {
+            redirect: 'follow',
+            signal: controller.signal,
+            ...(resumeFrom > 0
+              ? {
+                headers: {
+                  Range: `bytes=${resumeFrom}-`,
+                  ...(validator !== undefined ? { 'If-Range': validator } : {}),
+                },
+              }
+              : {}),
+          })
+          if (r.status === 416) {
+            if (watchdog !== null) { clearTimeout(watchdog); watchdog = null }
+            try { rmSync(partPath, { force: true }) } catch { /* 忽略 */ }
+            resumeFrom = 0
+            if (attempt >= 2) throw new Error('断点续传失败：服务端拒绝 Range 请求（416）')
+            continue
+          }
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          if (!r.body) throw new Error('下载返回空响应体')
+          const appending = r.status === 206 && resumeFrom > 0
+          if (resumeFrom > 0 && !appending) {
+            try { rmSync(partPath, { force: true }) } catch { /* 忽略 */ }
+            resumeFrom = 0
+          }
+          const contentRange = r.headers.get('content-range')
+          const rangeTotal = contentRange === null ? 0 : Number(contentRange.split('/')[1] ?? '0')
+          const contentLength = parseInt(r.headers.get('content-length') ?? '0', 10)
+          const totalBytes = rangeTotal > 0 ? rangeTotal : (contentLength > 0 ? resumeFrom + contentLength : 0)
+          lastTotal = totalBytes
+          const etag = r.headers.get('etag') ?? r.headers.get('last-modified') ?? undefined
+          try { writeFileSync(metaPath, JSON.stringify({ url, ...(etag !== undefined ? { validator: etag } : {}) }, null, 2)) } catch { /* 忽略 */ }
+          if (etag !== undefined) validator = etag
+          const fileStream = (await import('node:fs')).createWriteStream(partPath, { flags: appending ? 'a' : 'w' })
+          const reader = r.body.getReader()
+          let downloaded = resumeFrom
+          const samples: Array<{ at: number; bytes: number }> = [{ at: Date.now(), bytes: downloaded }]
+          let lastEmit = 0
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            arm(DOWNLOAD_STALL_TIMEOUT_MS)
+            if (!fileStream.write(Buffer.from(value))) {
+              await new Promise<void>(resolve => fileStream.once('drain', () => resolve()))
+            }
+            downloaded += value.byteLength
+            const now = Date.now()
+            samples.push({ at: now, bytes: downloaded })
+            while (samples.length > 2 && now - samples[0].at > 4000) samples.shift()
+            if (now - lastEmit < DOWNLOAD_PROGRESS_THROTTLE_MS) continue
+            lastEmit = now
+            const first = samples[0]
+            const elapsedSec = (now - first.at) / 1000
+            const bps = elapsedSec > 0 ? Math.round((downloaded - first.bytes) / elapsedSec) : undefined
+            this.setDownloadSlot(slot, {
+              percent: totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0,
+              downloadedBytes: downloaded,
+              totalBytes,
+              status: 'downloading',
+              target,
+              ...(bps !== undefined && bps > 0 ? { bytesPerSecond: bps } : {}),
+              ...(bps !== undefined && bps > 0 && totalBytes > downloaded ? { etaSeconds: Math.round((totalBytes - downloaded) / bps) } : {}),
+            })
+          }
+          if (watchdog !== null) { clearTimeout(watchdog); watchdog = null }
+          fileStream.end()
+          await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
+          if (totalBytes > 0 && downloaded < totalBytes) {
+            throw new Error(`下载不完整（${downloaded}/${totalBytes} 字节）`)
+          }
+          lastBytes = downloaded
+          return { ok: true, bytes: downloaded, totalBytes }
+        } finally {
+          if (watchdog !== null) clearTimeout(watchdog)
+        }
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      let partial = 0
+      try { partial = statSync(partPath).size } catch { partial = 0 }
+      this.setDownloadSlot(slot, {
+        percent: lastTotal > 0 ? Math.round((partial / lastTotal) * 100) : 0,
+        downloadedBytes: partial > 0 ? partial : lastBytes,
+        totalBytes: lastTotal,
+        status: 'error',
+        target,
+        error: partial > 0 ? `${message}（已保留断点 ${Math.round(partial / 1048576 * 10) / 10} MB，可继续下载）` : message,
+      })
+      return { ok: false, error: message, bytes: lastBytes, totalBytes: lastTotal }
+    }
   }
 
   /**
@@ -459,10 +619,27 @@ export class ArtGenService extends TypertRemoteService {
     const cpuCores = (() => { try { return cpus().length } catch { return 0 } })()
     const meetsMinReq = totalMemGb >= MIN_MEMORY_GB
     const minReqReason = !meetsMinReq ? `内存不足（需 ≥${MIN_MEMORY_GB} GB，当前 ${totalMemGb} GB），本地文生图需要至少 ${MIN_MEMORY_GB} GB 内存` : undefined
+    // 断点残片（供 UI 显示「继续下载」）：引擎固定名 + 模型目录下的 *.part
+    const partials: Array<{ fileName: string; bytes: number }> = []
+    const enginePart = join(SD_BIN_DIR, 'sd-cli-download.zip.part')
+    try {
+      const bytes = statSync(enginePart).size
+      if (bytes > 0) partials.push({ fileName: 'sd-cli-download.zip', bytes })
+    } catch { /* 无残片 */ }
+    try {
+      for (const entry of readdirSync(SD_MODELS_DIR)) {
+        if (!entry.endsWith('.part')) continue
+        try {
+          const bytes = statSync(join(SD_MODELS_DIR, entry)).size
+          if (bytes > 0) partials.push({ fileName: entry.slice(0, -'.part'.length), bytes })
+        } catch { /* 跳过 */ }
+      }
+    } catch { /* 目录不存在 */ }
     return {
       engineBundled,
       enginePath: engineBundled ? getSdCliPath() : '',
       models,
+      partials,
       platform: process.platform,
       ...(this.activeModel !== undefined ? { activeModel: this.activeModel } : {}),
       totalMemGb,
@@ -478,6 +655,21 @@ export class ArtGenService extends TypertRemoteService {
    * 调 GitHub API 获取 latest release assets，按平台匹配正确 asset 下载。
    * 下载（ghproxy 镜像）→ 写入临时文件 → 解压 zip → 提取 sd-cli → chmod 755。
    */
+  /**
+   * 启动引擎下载（**非阻塞**：立即返回，进度走 `corum/artgen/download-progress`）。
+   * 与 startDownloadModel 同纪律：长下载挂阻塞 RPC 会撞 Node 的 300s requestTimeout。
+   */
+  @Remote('startDownloadEngine')
+  startDownloadEngine(): { started: boolean; already?: boolean } {
+    if (isBundled()) return { started: false, already: true }
+    if (this.engineDownloadTask !== null) return { started: true }
+    this.engineDownloadTask = this.downloadEngine().finally(() => { this.engineDownloadTask = null })
+    return { started: true }
+  }
+
+  /** 引擎下载后台任务（startDownloadEngine 共享；重复启动不重复下载）。 */
+  private engineDownloadTask: Promise<{ ok: boolean; error?: string }> | null = null
+
   @Remote('downloadEngine')
   async downloadEngine(): Promise<{ ok: boolean; error?: string }> {
     if (isBundled()) return { ok: true } // 已下载
@@ -486,52 +678,38 @@ export class ArtGenService extends TypertRemoteService {
     // 立即标记为 downloading（让前端轮询能看到状态变化）。
     this.setDownloadSlot('engine', { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
     try {
-      // 1. 调 GitHub API 获取 latest release assets 列表（通过 ghproxy 镜像）。
-      const apiUrl = 'https://gh-proxy.com/https://api.github.com/repos/leejet/stable-diffusion.cpp/releases/latest'
-      const apiRes = await fetch(apiUrl, {
-        signal: AbortSignal.timeout(API_TIMEOUT_MS),
-        headers: { 'Accept': 'application/json', 'User-Agent': 'corum-artgen' },
-      })
-      if (!apiRes.ok) {
-        this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: `GitHub API HTTP ${apiRes.status}` })
-        return { ok: false, error: `查询 release 失败（HTTP ${apiRes.status}）` }
-      }
-      const release = (await apiRes.json()) as GitHubRelease
-      const assets = release.assets ?? []
-      // 2. 按平台匹配正确的 asset。
-      const asset = assets.find(a => matchPlatformAsset(a.name))
-      if (asset === undefined) {
-        this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: '未找到匹配平台的 asset' })
-        return { ok: false, error: `未找到匹配平台 ${process.platform}-${process.arch} 的预编译二进制` }
-      }
-      // 3. 下载（ghproxy 镜像转发 GitHub 下载 URL）。
-      const downloadUrl = `https://gh-proxy.com/${asset.browser_download_url}`
-      const r = await fetch(downloadUrl, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
-      if (!r.ok) {
-        this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: `下载 HTTP ${r.status}` })
-        return { ok: false, error: `下载失败（HTTP ${r.status}）` }
-      }
-      if (!r.body) return { ok: false, error: '下载返回空响应体' }
-      // 从 Content-Length 获取总大小。
-      const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
-      this.setDownloadSlot('engine', { percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
-      // 流式写入临时 zip 文件。
-      const tmpZipPath = join(SD_BIN_DIR, 'sd-cli-download.zip')
-      const fileStream = (await import('node:fs')).createWriteStream(tmpZipPath)
-      const reader = r.body.getReader()
-      let downloaded = 0
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (!fileStream.write(Buffer.from(value))) {
-          await new Promise<void>(resolve => fileStream.once('drain', () => resolve()))
+      // CORUM_ARTGEN_ENGINE_URL 可直接指定引擎包地址（换镜像；也用于端到端验证），
+      // 指定时跳过 GitHub API 解析。
+      const engineOverride = process.env.CORUM_ARTGEN_ENGINE_URL
+      let downloadUrl: string
+      if (engineOverride !== undefined && engineOverride.trim() !== '') {
+        downloadUrl = engineOverride.trim()
+      } else {
+        // 1. 调 GitHub API 获取 latest release assets 列表（通过 ghproxy 镜像）。
+        const apiUrl = 'https://gh-proxy.com/https://api.github.com/repos/leejet/stable-diffusion.cpp/releases/latest'
+        const apiRes = await fetch(apiUrl, {
+          signal: AbortSignal.timeout(API_TIMEOUT_MS),
+          headers: { 'Accept': 'application/json', 'User-Agent': 'corum-artgen' },
+        })
+        if (!apiRes.ok) {
+          this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: `GitHub API HTTP ${apiRes.status}` })
+          return { ok: false, error: `查询 release 失败（HTTP ${apiRes.status}）` }
         }
-        downloaded += value.byteLength
-        const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
-        this.setDownloadSlot('engine', { percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' })
+        const release = (await apiRes.json()) as GitHubRelease
+        const assets = release.assets ?? []
+        // 2. 按平台匹配正确的 asset。
+        const asset = assets.find(a => matchPlatformAsset(a.name))
+        if (asset === undefined) {
+          this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: '未找到匹配平台的 asset' })
+          return { ok: false, error: `未找到匹配平台 ${process.platform}-${process.arch} 的预编译二进制` }
+        }
+        downloadUrl = `https://gh-proxy.com/${asset.browser_download_url}`
       }
-      fileStream.end()
-      await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
+      const tmpZipPath = join(SD_BIN_DIR, 'sd-cli-download.zip.part')
+      const dl = await this.downloadToFile(downloadUrl, tmpZipPath, 'engine')
+      if (!dl.ok) return { ok: false, error: `下载失败：${dl.error ?? '未知错误'}` }
+      const downloaded = dl.bytes
+      const totalBytes = dl.totalBytes
       // 4. 解压 zip → 提取全部文件到 SD_BIN_DIR（sd-cli 依赖 dylib/so/dll）。
       const exeName = getSdCliExeName()
       const destPath = getSdCliPath()
@@ -866,7 +1044,10 @@ export class ArtGenService extends TypertRemoteService {
     if (existsSync(destPath)) return { started: false, already: true }
     if (this.downloadSlots.model.status === 'downloading') return { started: true }
     // 后台跑（不 await），进度写 downloadSlots.model；Flux 等模型下载后自动补配套 VAE。
-    void this.runModelDownload(cfg.url, cfg.fileName, destPath, cfg.vaeUrl, cfg.vaeFileName)
+    // URL 可经 CORUM_ARTGEN_MODEL_URL 覆盖（换镜像；也用于端到端验证续传/停滞）。
+    const override = process.env.CORUM_ARTGEN_MODEL_URL
+    const url = override !== undefined && override.trim() !== '' ? override.trim() : cfg.url
+    void this.runModelDownload(url, cfg.fileName, destPath, cfg.vaeUrl, cfg.vaeFileName)
     return { started: true }
   }
 
@@ -874,57 +1055,31 @@ export class ArtGenService extends TypertRemoteService {
   private async runModelDownload(url: string, fileName: string, destPath: string, vaeUrl?: string, vaeFileName?: string): Promise<void> {
     this.setDownloadSlot('model', { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
     try {
-      const r = await fetch(url, {
-        redirect: 'follow',
-        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-      })
-      if (!r.ok) {
-        this.setDownloadSlot('model', { ...this.downloadSlots.model, status: 'error', error: `HTTP ${r.status}` })
-        return
+      // 可续传下载（半截文件留在 <dest>.part，重试/重启后 Range 续传）。
+      const partPath = `${destPath}.part`
+      // 迁移旧版残片：早期实现写 `<dest>.tmp`（截断写、失败即留），字节同样从 0 连续，
+      // 直接改名为 .part 并补 sidecar（记录当前 URL）即可继续用，避免重下几 GB。
+      if (!existsSync(partPath) && existsSync(`${destPath}.tmp`)) {
+        try {
+          renameSync(`${destPath}.tmp`, partPath)
+          writeFileSync(`${partPath}.json`, JSON.stringify({ url }, null, 2))
+        } catch { /* 迁移失败就从零开始 */ }
       }
-      if (!r.body) {
-        this.setDownloadSlot('model', { ...this.downloadSlots.model, status: 'error', error: '下载返回空响应体' })
-        return
-      }
-      const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
-      this.setDownloadSlot('model', { percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
-      // 流式写入临时文件 → 重命名为最终文件名（原子操作）。
-      const tmpPath = join(SD_MODELS_DIR, `${fileName}.tmp`)
-      const fileStream = (await import('node:fs')).createWriteStream(tmpPath)
-      const reader = r.body.getReader()
-      let downloaded = 0
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (!fileStream.write(Buffer.from(value))) {
-          await new Promise<void>(resolve => fileStream.once('drain', () => resolve()))
-        }
-        downloaded += value.byteLength
-        const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
-        this.setDownloadSlot('model', { percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' })
-      }
-      fileStream.end()
-      await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
-      renameSync(tmpPath, destPath)
-      this.setDownloadSlot('model', { percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'downloading' })
+      const dl = await this.downloadToFile(url, partPath, 'model')
+      if (!dl.ok) return
+      renameSync(partPath, destPath)
+      try { rmSync(`${partPath}.json`, { force: true }) } catch { /* 忽略 */ }
+      this.setDownloadSlot('model', { percent: 100, downloadedBytes: dl.bytes, totalBytes: dl.totalBytes > 0 ? dl.totalBytes : dl.bytes, status: 'downloading' })
       // 配套 VAE（Flux GGUF 必需）—— 主模型下载完成后补下，失败仅记错误不影响主模型。
       if (vaeUrl !== undefined && vaeFileName !== undefined) {
         const vaeDest = join(SD_MODELS_DIR, vaeFileName)
         if (!existsSync(vaeDest)) {
           try {
-            const vr = await fetch(vaeUrl, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
-            if (vr.ok && vr.body) {
-              const vtmp = join(SD_MODELS_DIR, `${vaeFileName}.tmp`)
-              const vstream = (await import('node:fs')).createWriteStream(vtmp)
-              const vreader = vr.body.getReader()
-              for (;;) {
-                const { done, value } = await vreader.read()
-                if (done) break
-                if (!vstream.write(Buffer.from(value))) await new Promise<void>(res => vstream.once('drain', () => res()))
-              }
-              vstream.end()
-              await new Promise<void>(res => vstream.on('finish', () => res()))
-              renameSync(vtmp, vaeDest)
+            const vpart = `${vaeDest}.part`
+            const vdl = await this.downloadToFile(vaeUrl, vpart, 'model')
+            if (vdl.ok) {
+              renameSync(vpart, vaeDest)
+              try { rmSync(`${vpart}.json`, { force: true }) } catch { /* 忽略 */ }
             }
           } catch { /* VAE 下载失败不阻塞主模型 */ }
         }
