@@ -20,8 +20,9 @@
 
 import { createInterface } from 'node:readline'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { readFile, realpath, stat, mkdir, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { bootDesktop, resolveDesktopHome } from './boot.ts'
 import { CorumSessionArchive } from './session-archive.ts'
@@ -44,6 +45,68 @@ const MAX_IMPORT_BASE64_LENGTH = 96 * 1024 * 1024
 /** The loopback host the desktop webserver always binds (pinned in cordis.patch.yml). */
 const LOOPBACK_HOST = '127.0.0.1'
 
+/** 本 home 的 host PID 记录（`<home>/run/host.pid`）——用于启动时清掉上一代孤儿。 */
+function hostPidPath(): string {
+  return join(resolveDesktopHome(), 'run', 'host.pid')
+}
+
+/**
+ * 清掉同一 home 里上一代残留的 host 进程。
+ *
+ * 2026-09-09 事故：`before-quit` 只 `app.exit(0)`、不杀子进程，而子进程的
+ * stdin EOF 后仍被 webserver 句柄吊着 → 每次退出留一个**孤儿 host**，它继续攥着
+ * 打开过的 `session.lock`；下次启动的新 host 读/写那些会话直接失败（用户可见：
+ * 「模型选择失败」、历史加载失败）。本轮已修两条泄漏路径，本函数负责回收**已经
+ * 存在的**孤儿（老版本留下的）。
+ *
+ * 安全性：只杀「PID 记录在**本 home** 的 run/host.pid 里 + 该 PID 仍存活 +
+ * `ps` 确认命令行是本仓库/本 app 的 host 入口」三者同时成立的进程；PID 复用导致
+ * 的误杀由命令行校验挡住，任何异常都静默放过。
+ */
+async function reapStaleHost(): Promise<void> {
+  if (process.platform === 'win32') return
+  try {
+    const raw = await readFile(hostPidPath(), 'utf8')
+    const stale = Number((JSON.parse(raw) as { pid?: unknown }).pid)
+    if (!Number.isSafeInteger(stale) || stale <= 0 || stale === process.pid) return
+    try {
+      process.kill(stale, 0) // 存活探测
+    } catch {
+      return // 已经不在了
+    }
+    let command = ''
+    try {
+      command = execFileSync('ps', ['-p', String(stale), '-o', 'command='], { encoding: 'utf8' })
+    } catch {
+      return // 取不到命令行（权限/沙盒）→ 不动它
+    }
+    if (!command.includes(join('host', 'lib', 'bridge.js'))) return // PID 复用，放过
+    process.stderr.write(`[corum-desktop] reaping stale host ${String(stale)} (a previous parent exited without killing it)\n`)
+    try { process.kill(stale, 'SIGTERM') } catch { /* 竞态：已退出 */ }
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise(done => setTimeout(done, 100))
+      try {
+        process.kill(stale, 0)
+      } catch {
+        return
+      }
+    }
+    try { process.kill(stale, 'SIGKILL') } catch { /* 竞态：已退出 */ }
+  } catch {
+    // 没有记录 / 记录损坏：没有可回收的对象
+  }
+}
+
+/** 记录本进程 PID，供下一代启动时回收（写失败不影响运行）。 */
+async function recordHostPid(): Promise<void> {
+  try {
+    await mkdir(dirname(hostPidPath()), { recursive: true })
+    await writeFile(hostPidPath(), `${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`)
+  } catch {
+    // best effort
+  }
+}
+
 // The parent (Electron main) may exit while a frame is still in flight; a
 // synchronous write to its closed stdout then raises EPIPE on the stream. The
 // child owns no state worth keeping once its parent is gone, so swallow the
@@ -62,6 +125,9 @@ function send(message: unknown): void {
 }
 
 async function main(): Promise<void> {
+  // 回收上一代孤儿（它可能还攥着会话锁），再登记本进程 PID，最后才 boot。
+  await reapStaleHost()
+  await recordHostPid()
   const ctx = await bootDesktop()
   // The official web transport rows are enabled by the desktop overlay: the
   // webserver binds loopback on an ephemeral port, and the connection row owns
@@ -245,6 +311,17 @@ async function main(): Promise<void> {
       }
     }
   }
+  // stdin EOF = 父进程（Electron main）已经没了（正常退出 / 崩溃 / 被强杀都会关掉
+  // 这条管道）。此时必须主动退出：webserver 句柄会把这个进程永远吊着，变成孤儿
+  // host 继续攥着 session.lock，下一代启动就再也读不到那些会话
+  // （2026-09-09 用户报「模型选择失败」，根因即此）。退出前尽力 flush 一次。
+  process.stderr.write('[corum-desktop] parent gone (stdin EOF) — flushing and exiting\n')
+  try {
+    await archive.flushAll()
+  } catch (error) {
+    process.stderr.write(`[corum-desktop] shutdown flush failed: ${String(error)}\n`)
+  }
+  process.exit(0)
 }
 
 void main().catch((error) => {

@@ -420,6 +420,37 @@ else
   fail "pack-macos.mjs 缺少闭包版本一致性断言（混版闭包会静默打进 .app）"
 fi
 
+# ── 14. host 子进程不得变成孤儿（防「模型选择失败 / 历史打不开」回归）──────────
+# 背景：before-quit 只 app.exit(0) 不杀子进程，子进程 stdin EOF 后又被 webserver
+# 句柄吊着 → 每次退出留一个孤儿 host，攥着 session.lock；下一代启动读不到那些会话
+# （2026-09-09 用户报「模型选择失败」，PROGRESS 第 60 轮）。三条断言：父进程退出杀
+# 子进程、子进程 stdin EOF 自杀、启动时回收上一代孤儿。
+section "[14] host 子进程生命周期（防孤儿）"
+BRIDGE_SRC="$REPO_ROOT/packages/desktop/src/host/bridge.ts"
+if [ ! -f "$BRIDGE_SRC" ]; then
+  skip "找不到 packages/desktop/src/host/bridge.ts"
+else
+  if grep -q "parent gone (stdin EOF)" "$BRIDGE_SRC"; then
+    pass "bridge.ts 在父进程 stdin EOF 时主动退出"
+  else
+    fail "bridge.ts 缺 stdin EOF 自杀路径——父进程崩溃/被强杀时会留下孤儿 host"
+  fi
+  if grep -q "reapStaleHost" "$BRIDGE_SRC"; then
+    pass "bridge.ts 启动时回收上一代孤儿 host"
+  else
+    fail "bridge.ts 缺 reapStaleHost——老版本留下的孤儿会一直攥着 session.lock"
+  fi
+fi
+if [ -f "$DESKTOP_MAIN" ]; then
+  if grep -q "bridge?.dispose()" "$DESKTOP_MAIN"; then
+    pass "main.ts before-quit 显式杀掉 host 子进程"
+  else
+    fail "main.ts before-quit 未调用 bridge?.dispose()——每次退出都会留下孤儿 host"
+  fi
+else
+  skip "找不到 packages/desktop/src/electron/main.ts"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then

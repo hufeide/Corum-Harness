@@ -388,7 +388,12 @@ app.on('before-quit', (event) => {
     } catch (error) {
       process.stderr.write(`[corum-desktop] quit flush error: ${String(error)}\n`)
     } finally {
-      // The host child is killed when its parent exits; nothing else to dispose.
+      // 必须显式杀掉 host 子进程：它是独立 OS 进程，`app.exit()` 不会连带杀死它。
+      // 此前这里写着「The host child is killed when its parent exits」——是错的：
+      // 子进程的 webserver 句柄会把它永远吊着，于是每次退出都留下一个**孤儿 host**，
+      // 继续攥着打开过的 session.lock，下一次启动就读不到那些会话
+      // （2026-09-09 用户报「模型选择失败」；PROGRESS 第 60 轮）。
+      bridge?.dispose()
       app.exit(0)
     }
   })()
