@@ -1161,6 +1161,19 @@ export class CorumAgentService extends TypertRemoteService {
         const deny = ['str_replace_editor', 'write', 'edit', 'bash',
           ...process.platform === 'win32' ? ['pwsh'] : []]
         agentCtx.tools.restrict({ deny })
+        // fork（corum）：裁掉工具后，官方 fs 插件注册的 `tool:write` / `tool:edit`
+        // 提示词段落还在（它们是 preset 常驻层的静态段，不随 restrict 消失），
+        // 于是主 Agent 的提示词里留着「Use the write tool …」这种它没有的工具指引
+        // （2026-09-09 提示词体检发现：模型可能因此尝试调用不存在的工具）。
+        // 系统提示词层是「内层覆盖外层」：在 Agent scope 注册同名空段即可覆盖 preset
+        // 常驻层的段落（子 Agent 走自己的 scope，仍看得到全局指引）。
+        for (const staleToolSection of ['tool:write', 'tool:edit']) {
+          agentCtx.systemPrompt.section({
+            name: staleToolSection,
+            order: agentCtx.systemPrompt.getSectionOrder('TOOL_WRITE'),
+            text: '',
+          })
+        }
       }
     }
     const agentOptions = { provider: effectiveModel.provider, model: effectiveModel.model }

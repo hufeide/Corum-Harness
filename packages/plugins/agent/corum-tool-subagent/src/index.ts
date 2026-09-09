@@ -938,7 +938,7 @@ export function apply(ctx: Context, config: Config): void {
         corumEntryInfo = { slug, branch, path: worktreePath }
         request.cwd = worktreePath
         request.toolFilter = corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs)
-        const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is read-denied by the sandbox. Commit your changes on branch ${branch} inside this worktree; do not attempt to touch paths outside it.\n\n`
+        const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is write-denied by the sandbox (reads are still allowed for reference). Commit your changes on branch ${branch} inside this worktree; do not attempt to write outside it.\n\n`
         request.prompt = [{ type: 'text', text: isolationNotice + args.prompt }] as ContentBlock[]
       } else if (corumIsWrite && !effReadonlyResearch) {
         // fork（corum）：不隔离的写任务（单发前台，无并发）直接在主工作区改——必须明确
@@ -1316,7 +1316,10 @@ export function apply(ctx: Context, config: Config): void {
       // A backend fiber may activate later; a misspelled provider remains visible in this log.
       runtimeCtx.logger.info(`subagent provider "${config.provider}" not registered yet; the "${config.toolName ?? 'subagent'}" tool will register when it appears`)
     }
-    if (backgroundEnabled && continuable) {
+    // fork（corum）：只给 worker 实例注册这条「后台默认」段落。research 实例的
+    // 工具 description 已逐字携带同一句（2026-09-09 用户指出提示词多处重叠——
+    // 此前 worker/research/subagent_fork 三个实例各注册一段几乎相同的文字）。
+    if (backgroundEnabled && continuable && !corumReadonlyResearch) {
       // The section follows provider availability without its own manual
       // lifecycle: empty text is omitted from rendered prompts while the tool is
       // absent, and the registration itself stays owned by this plugin fiber.
@@ -1349,7 +1352,7 @@ export function apply(ctx: Context, config: Config): void {
               '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- Write-capable children get ISOLATED git worktrees (own branch, parent tree read-denied) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and must leave git to you. Isolation requires the workspace to be a git repository — if it is not, set `isolation: "off"` for write tasks (forced `isolation: "always"` fails with a git error in a non-repo).',
+              '- Write-capable children get ISOLATED git worktrees (own branch; the parent working tree is write-denied to that child) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and leaves git to you. Isolation needs a git repository: in a non-repo workspace it is skipped automatically (no action needed), and a forced `isolation: "always"` on an orchestrate task fails loud.',
               '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Set `merge.autoIntegrate: true` to merge+commit the isolated branches after all checks pass, or false to only report and decide yourself.',
               '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',

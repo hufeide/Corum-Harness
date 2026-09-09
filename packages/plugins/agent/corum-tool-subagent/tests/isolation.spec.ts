@@ -337,7 +337,9 @@ describe('isolation notice — fork（corum）prompt 前缀', () => {
     const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8'))
     expect(src).toContain('[corum isolation]')
     expect(src).toContain('RELATIVE path only')
-    expect(src).toContain('read-denied by the sandbox')
+    // 2026-09-09 措辞更正：沙箱只拒写（读仍允许），旧文本的 read-denied 是错的。
+    expect(src).toContain('write-denied by the sandbox')
+    expect(src).toContain('reads are still allowed')
   })
 })
 
