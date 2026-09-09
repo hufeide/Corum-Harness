@@ -249,8 +249,8 @@ describe('corum 事件转发（P2-4 运行时守护）', () => {
     .map(entry => entry.event)
     .filter(event => event.startsWith('corum/'))
 
-  it('allowlist 含全部 16 个 corum 事件（新增事件必须同步登记）', () => {
-    expect(CORUM_EVENTS.length).toBe(16)
+  it('allowlist 含全部 19 个 corum 事件（新增事件必须同步登记）', () => {
+    expect(CORUM_EVENTS.length).toBe(19)
     expect(new Set(CORUM_EVENTS).size).toBe(CORUM_EVENTS.length)
   })
 

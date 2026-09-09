@@ -56,4 +56,8 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'corum/subagent/progress', mode: 'emit' },
   // 子 Agent 隔离台账快照（fork #10 发射；「并行工作区」chip 订阅源）
   { event: 'corum/worktree-ledger', mode: 'emit' },
+  // P2-7：下载进度事件化（取代设置页 500ms 轮询）。
+  { event: 'corum/artgen/download-progress', mode: 'emit' },
+  { event: 'corum/ollama/download-progress', mode: 'emit' },
+  { event: 'corum/artgen/job-progress', mode: 'emit' },
 ] as const satisfies readonly TypertForwardableEventEntry[]

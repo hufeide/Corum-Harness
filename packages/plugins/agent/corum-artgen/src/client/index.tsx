@@ -11,6 +11,8 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+// P2-7：下载进度事件载荷 + cordis Events/$on 合并面。
+import type { ArtgenDownloadProgressEvent, ArtgenJobProgressEvent } from '@corum/corum-api-remotes/corum-events'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
@@ -185,7 +187,13 @@ function DownloadProgressBar({ progress }: { progress: { percent: number; total:
 const SIZES: number[] = [256, 512, 1024]
 const DEFAULT_PROMPT = 'minimalist flat vector avatar icon for an AI assistant, soft gradient glass style, centered, clean background'
 
-function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNode {
+function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
+  call: ReturnType<typeof makeCall>
+  /** P2-7：下载进度推送订阅（apply 侧绑定 ctx.remote.$on）。 */
+  subscribeProgress: (listener: (p: ArtgenDownloadProgressEvent) => void) => () => void
+  /** P2-7：文生图任务进度推送订阅。 */
+  subscribeJobProgress: (listener: (p: ArtgenJobProgressEvent) => void) => () => void
+}): ReactNode {
   const [status, setStatus] = useState<ArtGenStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -246,29 +254,27 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
     setDlEngine(true)
     setError(null)
     setDlEngineProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
-    const poll = setInterval(async () => {
-      try {
-        const p = await call<DownloadProgress>('getDownloadProgress', { key: 'engine' })
-        setDlEngineProgress({
-          percent: p.percent,
-          total: formatBytesClient(p.totalBytes),
-          downloaded: formatBytesClient(p.downloadedBytes),
-          status: p.status,
-        })
-        if (p.status === 'done' || p.status === 'error') clearInterval(poll)
-      } catch { /* 忽略轮询错误 */ }
-    }, 500)
+    // P2-7：`$on('corum/artgen/download-progress')` 推送替代 500ms 轮询
+    // （先订阅再发起下载，避免丢首帧；host downloadEngine RPC 本身阻塞到完成）。
+    const off = subscribeProgress((p) => {
+      if (p.key !== 'engine') return
+      setDlEngineProgress({
+        percent: p.percent,
+        total: formatBytesClient(p.totalBytes),
+        downloaded: formatBytesClient(p.downloadedBytes),
+        status: p.status,
+      })
+    })
     try {
       const r = await call<{ ok: boolean; error?: string }>('downloadEngine', {})
-      clearInterval(poll)
       if (!r.ok) setError(r.error ?? '引擎下载失败')
       setDlEngineProgress(null)
       await refresh()
     } catch (e) {
-      clearInterval(poll)
       setError(e instanceof Error ? e.message : String(e))
       setDlEngineProgress(null)
     } finally {
+      off()
       setDlEngine(false)
     }
   }
@@ -277,36 +283,30 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
     setDlModelKey(tier)
     setError(null)
     setDlModelProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
-    // 后台下载（不阻塞 RPC 连接），轮询进度槽直到完成/失败。
-    const poll = setInterval(async () => {
-      try {
-        const p = await call<DownloadProgress>('getDownloadProgress', { key: 'model' })
-        setDlModelProgress({
-          percent: p.percent,
-          total: formatBytesClient(p.totalBytes),
-          downloaded: formatBytesClient(p.downloadedBytes),
-          status: p.status,
-        })
-        if (p.status === 'done' || p.status === 'error') clearInterval(poll)
-      } catch { /* 忽略轮询错误 */ }
-    }, 500)
+    // P2-7：进度走 $on 推送；终态（done/error）用 Promise 汇合，替代 600ms 轮询等待。
+    let settle: ((p: ArtgenDownloadProgressEvent) => void) | null = null
+    const terminal = new Promise<ArtgenDownloadProgressEvent>((resolve) => { settle = resolve })
+    const off = subscribeProgress((p) => {
+      if (p.key !== 'model') return
+      setDlModelProgress({
+        percent: p.percent,
+        total: formatBytesClient(p.totalBytes),
+        downloaded: formatBytesClient(p.downloadedBytes),
+        status: p.status,
+      })
+      if (p.status === 'done' || p.status === 'error') settle?.(p)
+    })
     try {
       await call<{ started: boolean }>('startDownloadModel', { tier })
-      // 等待后台下载结束（轮询槽位状态）。
-      for (;;) {
-        await new Promise(r => setTimeout(r, 600))
-        const p = await call<DownloadProgress>('getDownloadProgress', { key: 'model' })
-        if (p.status === 'done') break
-        if (p.status === 'error') throw new Error(p.error ?? '模型下载失败')
-      }
-      clearInterval(poll)
+      const final = await terminal
+      if (final.status === 'error') throw new Error(final.error ?? '模型下载失败')
       setDlModelProgress(null)
       await refresh()
     } catch (e) {
-      clearInterval(poll)
       setError(e instanceof Error ? e.message : String(e))
       setDlModelProgress(null)
     } finally {
+      off()
       setDlModelKey(null)
     }
   }
@@ -410,36 +410,31 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
     }
   }
 
-  // 下载在线模型（后台下载 + 轮询进度槽）。
+  // 下载在线模型（后台下载；P2-7：进度走 $on 推送 + 终态 Promise 汇合）。
   const downloadOnline = async (m: OnlineSdModel) => {
     setDlModelKey(m.fileName)
     setError(null)
     setDlModelProgress({ percent: 0, total: '0 B', downloaded: '0 B', status: 'downloading' })
-    const poll = setInterval(async () => {
-      try {
-        const p = await call<DownloadProgress>('getDownloadProgress', { key: 'model' })
-        setDlModelProgress({ percent: p.percent, total: formatBytesClient(p.totalBytes), downloaded: formatBytesClient(p.downloadedBytes), status: p.status })
-        if (p.status === 'done' || p.status === 'error') clearInterval(poll)
-      } catch { /* 忽略 */ }
-    }, 500)
+    let settle: ((p: ArtgenDownloadProgressEvent) => void) | null = null
+    const terminal = new Promise<ArtgenDownloadProgressEvent>((resolve) => { settle = resolve })
+    const off = subscribeProgress((p) => {
+      if (p.key !== 'model') return
+      setDlModelProgress({ percent: p.percent, total: formatBytesClient(p.totalBytes), downloaded: formatBytesClient(p.downloadedBytes), status: p.status })
+      if (p.status === 'done' || p.status === 'error') settle?.(p)
+    })
     try {
       const r = await call<{ started: boolean; already?: boolean; error?: string }>('downloadModelFromUrl', { url: m.downloadUrl, fileName: m.fileName })
-      if (r.already === true) { clearInterval(poll); setDlModelProgress(null); await refresh(); return }
+      if (r.already === true) { setDlModelProgress(null); await refresh(); return }
       if (r.error !== undefined) throw new Error(r.error)
-      for (;;) {
-        await new Promise(res => setTimeout(res, 600))
-        const p = await call<DownloadProgress>('getDownloadProgress', { key: 'model' })
-        if (p.status === 'done') break
-        if (p.status === 'error') throw new Error(p.error ?? '下载失败')
-      }
-      clearInterval(poll)
+      const final = await terminal
+      if (final.status === 'error') throw new Error(final.error ?? '下载失败')
       setDlModelProgress(null)
       await refresh()
     } catch (e) {
-      clearInterval(poll)
       setError(e instanceof Error ? e.message : String(e))
       setDlModelProgress(null)
     } finally {
+      off()
       setDlModelKey(null)
     }
   }
@@ -459,18 +454,26 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
       // 不指定 model → host 用当前激活模型（互斥后的唯一生效模型）。
       const args: Txt2ImgArgs = { prompt: prompt.trim(), width: size, height: size, steps }
       const { jobId } = await call<{ jobId: string }>('startTxt2Img', { args: args as unknown as Record<string, unknown> })
-      for (;;) {
-        await new Promise(r => setTimeout(r, 400))
+      // P2-7：进度走 `$on('corum/artgen/job-progress')` 推送（取代 400ms 轮询）；
+      // 终态帧不带结果图，故 done 后用一次 getTxt2ImgJob 取 result。
+      let settle: ((p: ArtgenJobProgressEvent) => void) | null = null
+      const terminal = new Promise<ArtgenJobProgressEvent>((resolve) => { settle = resolve })
+      const off = subscribeJobProgress((p) => {
+        if (p.jobId !== jobId) return
+        setGenProgress(p.percent)
+        if (p.status === 'done' || p.status === 'error') settle?.(p)
+      })
+      try {
+        const final = await terminal
+        if (final.status === 'error') throw new Error(final.error ?? '生成失败')
         const job = await call<Txt2ImgJob | null>('getTxt2ImgJob', { jobId })
-        if (job === null) throw new Error('文生图任务已过期')
-        setGenProgress(job.percent)
-        if (job.status === 'done') {
-          setResultImage(job.result!.imageBase64)
-          setGenDuration(job.result!.durationMs)
-          setGenProgress(100)
-          break
+        if (job?.result !== undefined) {
+          setResultImage(job.result.imageBase64)
+          setGenDuration(job.result.durationMs)
         }
-        if (job.status === 'error') throw new Error(job.error ?? '生成失败')
+        setGenProgress(100)
+      } finally {
+        off()
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -836,7 +839,7 @@ function ArtGenSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
   )
 }
 
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'remote']
 
 export function apply(ctx: ClientContext): void {
   let slots: ClientContext['slots'] | undefined
@@ -847,10 +850,15 @@ export function apply(ctx: ClientContext): void {
   }
   const connection = ctx.get('connection') as ConnectionHandle
   const call = makeCall(connection)
+  // P2-7：下载进度推送订阅面（renderer 侧 $on；host 在 downloadSlots 每次写入时 emit）。
+  const subscribeProgress = (listener: (p: ArtgenDownloadProgressEvent) => void): (() => void) =>
+    ctx.remote.$on('corum/artgen/download-progress', listener)
+  const subscribeJobProgress = (listener: (p: ArtgenJobProgressEvent) => void): (() => void) =>
+    ctx.remote.$on('corum/artgen/job-progress', listener)
   slots.inject('settings.section', () => slots.register({
     name: 'settings.section',
     id: 'artgen',
     order: 197,
     label: '本地文生图',
-  }, () => <ArtGenSection call={call} />))
+  }, () => <ArtGenSection call={call} subscribeProgress={subscribeProgress} subscribeJobProgress={subscribeJobProgress} />))
 }

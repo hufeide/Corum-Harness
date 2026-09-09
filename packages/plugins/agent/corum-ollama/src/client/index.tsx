@@ -11,6 +11,8 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+// P2-7：引擎下载进度事件载荷 + cordis Events/$on 合并面。
+import type { OllamaDownloadProgressEvent } from '@corum/corum-api-remotes/corum-events'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
@@ -259,7 +261,11 @@ function DeleteButton({ busy, modelId, onDelete }: { busy: boolean; modelId: str
   )
 }
 
-function OllamaSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNode {
+function OllamaSection({ call, subscribeProgress }: {
+  call: ReturnType<typeof makeCall>
+  /** P2-7：引擎下载进度推送订阅（apply 侧绑定 ctx.remote.$on）。 */
+  subscribeProgress: (listener: (p: OllamaDownloadProgressEvent) => void) => () => void
+}): ReactNode {
   const [status, setStatus] = useState<LocalEngineStatus | null>(null)
   const [recommended, setRecommended] = useState<RecommendedModel[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -456,35 +462,30 @@ function OllamaSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
     }
   }
 
-  // 下载引擎二进制（调 host downloadEngine RPC，轮询 getDownloadProgress 显示进度）
+  // 下载引擎二进制（P2-7：进度走 `$on('corum/ollama/download-progress')` 推送，
+  // 取代 500ms 轮询 getDownloadProgress；host downloadEngine RPC 阻塞到完成）。
   const downloadEngine = async () => {
     setDownloading(true)
     setError(null)
     setDlProgress({ percent: 0, downloaded: '0 B', total: '0 B', status: 'downloading' })
-    // 启动轮询
-    const poll = setInterval(async () => {
-      try {
-        const p = await call<{ percent: number; downloadedBytes: number; totalBytes: number; status: string; error?: string }>('getDownloadProgress', {})
-        setDlProgress({
-          percent: p.percent,
-          downloaded: formatBytesClient(p.downloadedBytes),
-          total: formatBytesClient(p.totalBytes),
-          status: p.status,
-        })
-        if (p.status === 'done' || p.status === 'error') clearInterval(poll)
-      } catch { /* 忽略 */ }
-    }, 500)
+    const off = subscribeProgress((p) => {
+      setDlProgress({
+        percent: p.percent,
+        downloaded: formatBytesClient(p.downloadedBytes),
+        total: formatBytesClient(p.totalBytes),
+        status: p.status,
+      })
+    })
     try {
       const r = await call<{ ok: boolean; error?: string }>('downloadEngine', {})
-      clearInterval(poll)
       if (!r.ok) setError(r.error ?? '下载失败')
       setDlProgress(null)
       await refresh()
     } catch (e) {
-      clearInterval(poll)
       setError(e instanceof Error ? e.message : String(e))
       setDlProgress(null)
     } finally {
+      off()
       setDownloading(false)
     }
   }
@@ -709,7 +710,7 @@ function OllamaSection({ call }: { call: ReturnType<typeof makeCall> }): ReactNo
   )
 }
 
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'remote']
 
 export function apply(ctx: ClientContext): void {
   let slots: ClientContext['slots'] | undefined
@@ -720,10 +721,13 @@ export function apply(ctx: ClientContext): void {
   }
   const connection = ctx.get('connection') as ConnectionHandle
   const call = makeCall(connection)
+  // P2-7：引擎下载进度推送订阅面（renderer 侧 $on；host 在 downloadProgress 每次写入时 emit）。
+  const subscribeProgress = (listener: (p: OllamaDownloadProgressEvent) => void): (() => void) =>
+    ctx.remote.$on('corum/ollama/download-progress', listener)
   slots.inject('settings.section', () => slots.register({
     name: 'settings.section',
     id: 'ollama',
     order: 195,
     label: 'Ollama',
-  }, () => <OllamaSection call={call} />))
+  }, () => <OllamaSection call={call} subscribeProgress={subscribeProgress} />))
 }

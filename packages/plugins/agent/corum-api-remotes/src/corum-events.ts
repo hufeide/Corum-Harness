@@ -224,6 +224,54 @@ export interface SubagentProgressEvent {
   readonly lastActive: number
 }
 
+/**
+ * corum/artgen/download-progress：文生图引擎/模型下载进度推送（P2-7；
+ * host corumArtGen 的 downloadSlots 每次写入即 emit——取代设置页 500ms 轮询
+ * `corumArtGen/getDownloadProgress`）。
+ */
+export interface ArtgenDownloadProgressEvent {
+  /** 槽位：engine（sd-cli 二进制）或 model（SD 模型）。 */
+  readonly key: 'engine' | 'model'
+  readonly percent: number
+  readonly downloadedBytes: number
+  readonly totalBytes: number
+  /** 下载状态（'downloading' | 'done' | 'error' | 'idle'）。 */
+  readonly status: string
+  /** 失败原因（status='error' 时）。 */
+  readonly error?: string
+}
+
+/**
+ * corum/artgen/job-progress：文生图任务进度推送（P2-7；host corumArtGen 的
+ * txt2imgJobs 每次 percent/phase/终态变更即 emit——取代设置页 400ms 轮询
+ * `corumArtGen/getTxt2ImgJob`）。
+ */
+export interface ArtgenJobProgressEvent {
+  readonly jobId: string
+  readonly status: 'running' | 'done' | 'error'
+  readonly percent: number
+  /** 阶段（queued / starting / generating / sampling / decoding / done）。 */
+  readonly phase: string
+  /** 失败原因（status='error' 时）。 */
+  readonly error?: string
+}
+
+/**
+ * corum/ollama/download-progress：本地 LLM 引擎（ollama 二进制）下载进度推送
+ * （P2-7；host localLlm 的 downloadProgress 每次写入即 emit——取代设置页
+ * 500ms 轮询 `localLlm/getDownloadProgress`）。模型拉取本身走 Ollama HTTP
+ * 流式接口（client 直读 ReadableStream），不经本事件。
+ */
+export interface OllamaDownloadProgressEvent {
+  readonly percent: number
+  readonly downloadedBytes: number
+  readonly totalBytes: number
+  /** 下载状态（'idle' | 'downloading' | 'done' | 'error'）。 */
+  readonly status: string
+  /** 失败原因（status='error' 时）。 */
+  readonly error?: string
+}
+
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────
 
 declare module '@deepseek-ai/cordis' {
@@ -260,6 +308,12 @@ declare module '@deepseek-ai/cordis' {
     'corum/subagent/progress'(data: SubagentProgressEvent): void
     /** corum/worktree-ledger：子 Agent 隔离台账快照（fork #10 发射；「并行工作区」chip 订阅源）。 */
     'corum/worktree-ledger'(data: CorumWorktreeLedgerFrameEvent): void
+    /** corum/artgen/download-progress：文生图引擎/模型下载进度（P2-7）。 */
+    'corum/artgen/download-progress'(data: ArtgenDownloadProgressEvent): void
+    /** corum/ollama/download-progress：本地 LLM 引擎下载进度（P2-7）。 */
+    'corum/ollama/download-progress'(data: OllamaDownloadProgressEvent): void
+    /** corum/artgen/job-progress：文生图任务进度（P2-7）。 */
+    'corum/artgen/job-progress'(data: ArtgenJobProgressEvent): void
   }
 }
 
@@ -278,7 +332,7 @@ export interface CorumWorktreeLedgerFrameEvent {
 
 // ── Remote 转发选择面（renderer $on 的 key 面）──────────────────────────────
 
-/** 并入转发 allowlist 的 corum 事件名（12 个领域事件 + 终端输出 + 文件变更 + 子 Agent 进度）。 */
+/** 并入转发 allowlist 的 corum 事件名（12 个领域事件 + 终端输出 + 文件变更 + 子 Agent 进度 + 台账 + 两个下载进度）。 */
 export type CorumForwardedEvent =
   | 'corum/task/assigned'
   | 'corum/task/started'
@@ -296,6 +350,9 @@ export type CorumForwardedEvent =
   | 'corum/file/changed'
   | 'corum/subagent/progress'
   | 'corum/worktree-ledger'
+  | 'corum/artgen/download-progress'
+  | 'corum/ollama/download-progress'
+  | 'corum/artgen/job-progress'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}

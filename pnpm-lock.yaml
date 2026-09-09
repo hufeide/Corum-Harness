@@ -758,6 +758,9 @@ importers:
 
   packages/plugins/agent/corum-artgen:
     dependencies:
+      '@corum/corum-api-remotes':
+        specifier: workspace:*
+        version: link:../corum-api-remotes
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
@@ -854,6 +857,9 @@ importers:
 
   packages/plugins/agent/corum-ollama:
     dependencies:
+      '@corum/corum-api-remotes':
+        specifier: workspace:*
+        version: link:../corum-api-remotes
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)

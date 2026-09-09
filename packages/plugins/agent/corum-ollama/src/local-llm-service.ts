@@ -24,6 +24,8 @@ import { totalmem, cpus, homedir } from 'node:os'
 import { existsSync, mkdirSync, renameSync, statSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
+// P2-7：下载进度事件声明（cordis Events 合并面）。
+import type {} from '@corum/corum-api-remotes/corum-events'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { GpuInfo, LocalEngineStatus, LocalChatArgs, LocalChatResult, RecommendedModel, PulledModel, OnlineModelTag } from './types.ts'
@@ -533,6 +535,21 @@ export class LocalLlmService extends TypertRemoteService {
    */
   private downloadProgress: { percent: number; downloadedBytes: number; totalBytes: number; status: 'idle' | 'downloading' | 'done' | 'error'; error?: string } = { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'idle' }
 
+  /**
+   * P2-7：写下载进度并推送 `corum/ollama/download-progress`（取代设置页 500ms
+   * 轮询 getDownloadProgress）。所有进度写入都经本方法，保证帧与槽状态一致。
+   */
+  private setDownloadProgress(next: typeof this.downloadProgress): void {
+    this.downloadProgress = next
+    this.ctx.emit('corum/ollama/download-progress', {
+      percent: next.percent,
+      downloadedBytes: next.downloadedBytes,
+      totalBytes: next.totalBytes,
+      status: next.status,
+      ...(next.error !== undefined ? { error: next.error } : {}),
+    })
+  }
+
   @Remote('getDownloadProgress')
   getDownloadProgress(): { percent: number; downloadedBytes: number; totalBytes: number; status: string; error?: string } {
     return { ...this.downloadProgress }
@@ -546,7 +563,7 @@ export class LocalLlmService extends TypertRemoteService {
     const destPath = join(binDir, exeName)
     try { mkdirSync(binDir, { recursive: true }) } catch { /* 已存在 */ }
     // 立即标记为 downloading（让前端轮询能看到状态变化）
-    this.downloadProgress = { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' }
+    this.setDownloadProgress({ percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
     try {
       const url = ollamaDownloadUrl()
       const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
@@ -555,7 +572,7 @@ export class LocalLlmService extends TypertRemoteService {
       if (!r.body) return { ok: false, error: '下载返回空响应体' }
       // 从 Content-Length 获取总大小
       const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
-      this.downloadProgress = { percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' }
+      this.setDownloadProgress({ percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
       // 流式写入临时文件 → 重命名为最终文件名（原子操作）
       const tmpPath = join(binDir, `${exeName}.tmp`)
       const fileStream = (await import('node:fs')).createWriteStream(tmpPath)
@@ -570,7 +587,7 @@ export class LocalLlmService extends TypertRemoteService {
         }
         downloaded += value.byteLength
         const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
-        this.downloadProgress = { percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' }
+        this.setDownloadProgress({ percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' })
       }
       fileStream.end()
       await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
@@ -600,13 +617,13 @@ export class LocalLlmService extends TypertRemoteService {
           try { (await import('node:fs')).chmodSync(destPath, 0o755) } catch { /* 忽略 */ }
         }
       }
-      this.downloadProgress = { percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'done' }
+      this.setDownloadProgress({ percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'done' })
       // 启动服务
       const startResult = await this.ensureServer()
       if (!startResult.ok) return { ok: false, error: `下载成功但启动失败：${startResult.error ?? '未知错误'}` }
       return { ok: true }
     } catch (e) {
-      this.downloadProgress = { ...this.downloadProgress, status: 'error', error: e instanceof Error ? e.message : String(e) }
+      this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: e instanceof Error ? e.message : String(e) })
       return { ok: false, error: `下载引擎失败：${e instanceof Error ? e.message : String(e)}` }
     }
   }

@@ -23,6 +23,8 @@ import { spawn, execSync } from 'node:child_process'
 import { homedir, totalmem, cpus } from 'node:os'
 import { existsSync, mkdirSync, renameSync, statSync, rmSync, readdirSync, readFileSync, copyFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
+// P2-7：下载进度事件声明（cordis Events 合并面）。
+import type {} from '@corum/corum-api-remotes/corum-events'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { ArtGenStatus, SdModel, Txt2ImgArgs, Txt2ImgResult, Txt2ImgJob, GpuInfo, RecommendedSdModel, OnlineSdModel } from './types.ts'
@@ -393,6 +395,36 @@ export class ArtGenService extends TypertRemoteService {
     model: idleSlot(),
   }
 
+  /**
+   * P2-7：写下载进度槽并推送 `corum/artgen/download-progress`（取代设置页 500ms
+   * 轮询 getDownloadProgress）。所有槽位写入都经本方法，保证帧与槽状态一致。
+   */
+  private setDownloadSlot(key: 'engine' | 'model', next: DownloadSlot): void {
+    this.downloadSlots[key] = next
+    this.ctx.emit('corum/artgen/download-progress', {
+      key,
+      percent: next.percent,
+      downloadedBytes: next.downloadedBytes,
+      totalBytes: next.totalBytes,
+      status: next.status,
+      ...(next.error !== undefined ? { error: next.error } : {}),
+    })
+  }
+
+  /**
+   * P2-7：推送 `corum/artgen/job-progress`（文生图任务进度；取代设置页 400ms
+   * 轮询 getTxt2ImgJob）。percent/phase 的每次变更都经本方法广播。
+   */
+  private emitJobProgress(jobId: string, job: { status: 'running' | 'done' | 'error'; percent: number; phase: string; error?: string }): void {
+    this.ctx.emit('corum/artgen/job-progress', {
+      jobId,
+      status: job.status,
+      percent: job.percent,
+      phase: job.phase,
+      ...(job.error !== undefined ? { error: job.error } : {}),
+    })
+  }
+
   // ── 常驻服务模式（sd-server）状态 ──
   /** 是否启用常驻模式（激活时拉 sd-server，生成走 HTTP，模型常驻内存）。 */
   private residentMode = false
@@ -452,7 +484,7 @@ export class ArtGenService extends TypertRemoteService {
     try { mkdirSync(SD_BIN_DIR, { recursive: true }) } catch { /* 已存在 */ }
     const slot = this.downloadSlots.engine
     // 立即标记为 downloading（让前端轮询能看到状态变化）。
-    this.downloadSlots.engine = { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' }
+    this.setDownloadSlot('engine', { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
     try {
       // 1. 调 GitHub API 获取 latest release assets 列表（通过 ghproxy 镜像）。
       const apiUrl = 'https://gh-proxy.com/https://api.github.com/repos/leejet/stable-diffusion.cpp/releases/latest'
@@ -461,7 +493,7 @@ export class ArtGenService extends TypertRemoteService {
         headers: { 'Accept': 'application/json', 'User-Agent': 'corum-artgen' },
       })
       if (!apiRes.ok) {
-        this.downloadSlots.engine = { ...this.downloadSlots.engine, status: 'error', error: `GitHub API HTTP ${apiRes.status}` }
+        this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: `GitHub API HTTP ${apiRes.status}` })
         return { ok: false, error: `查询 release 失败（HTTP ${apiRes.status}）` }
       }
       const release = (await apiRes.json()) as GitHubRelease
@@ -469,20 +501,20 @@ export class ArtGenService extends TypertRemoteService {
       // 2. 按平台匹配正确的 asset。
       const asset = assets.find(a => matchPlatformAsset(a.name))
       if (asset === undefined) {
-        this.downloadSlots.engine = { ...this.downloadSlots.engine, status: 'error', error: '未找到匹配平台的 asset' }
+        this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: '未找到匹配平台的 asset' })
         return { ok: false, error: `未找到匹配平台 ${process.platform}-${process.arch} 的预编译二进制` }
       }
       // 3. 下载（ghproxy 镜像转发 GitHub 下载 URL）。
       const downloadUrl = `https://gh-proxy.com/${asset.browser_download_url}`
       const r = await fetch(downloadUrl, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
       if (!r.ok) {
-        this.downloadSlots.engine = { ...this.downloadSlots.engine, status: 'error', error: `下载 HTTP ${r.status}` }
+        this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: `下载 HTTP ${r.status}` })
         return { ok: false, error: `下载失败（HTTP ${r.status}）` }
       }
       if (!r.body) return { ok: false, error: '下载返回空响应体' }
       // 从 Content-Length 获取总大小。
       const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
-      this.downloadSlots.engine = { percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' }
+      this.setDownloadSlot('engine', { percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
       // 流式写入临时 zip 文件。
       const tmpZipPath = join(SD_BIN_DIR, 'sd-cli-download.zip')
       const fileStream = (await import('node:fs')).createWriteStream(tmpZipPath)
@@ -496,7 +528,7 @@ export class ArtGenService extends TypertRemoteService {
         }
         downloaded += value.byteLength
         const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
-        this.downloadSlots.engine = { percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' }
+        this.setDownloadSlot('engine', { percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' })
       }
       fileStream.end()
       await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
@@ -534,13 +566,13 @@ export class ArtGenService extends TypertRemoteService {
       }
       // 验证 sd-cli 是否就位。
       if (!existsSync(destPath)) {
-        this.downloadSlots.engine = { ...this.downloadSlots.engine, status: 'error', error: '解压后未找到 sd-cli 二进制' }
+        this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: '解压后未找到 sd-cli 二进制' })
         return { ok: false, error: '解压后未找到 sd-cli 二进制文件' }
       }
-      this.downloadSlots.engine = { percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'done' }
+      this.setDownloadSlot('engine', { percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'done' })
       return { ok: true }
     } catch (e) {
-      this.downloadSlots.engine = { ...this.downloadSlots.engine, status: 'error', error: e instanceof Error ? e.message : String(e) }
+      this.setDownloadSlot('engine', { ...this.downloadSlots.engine, status: 'error', error: e instanceof Error ? e.message : String(e) })
       return { ok: false, error: `下载引擎失败：${e instanceof Error ? e.message : String(e)}` }
     }
   }
@@ -586,18 +618,22 @@ export class ArtGenService extends TypertRemoteService {
       const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const job: { status: 'running' | 'done' | 'error'; percent: number; phase: string; result?: Txt2ImgResult; error?: string } = { status: 'running', percent: 0, phase: 'queued' }
       this.txt2imgJobs.set(jobId, job)
+      this.emitJobProgress(jobId, job)
       void (async () => {
         try {
           job.phase = 'generating'
           job.percent = 50 // HTTP 无逐步进度，给一个中间态
+          this.emitJobProgress(jobId, job)
           const result = await this.txt2imgViaServer(args, resolved.fileName)
           job.status = 'done'
           job.percent = 100
+          this.emitJobProgress(jobId, job)
           job.phase = 'done'
           job.result = result
         } catch (e) {
           job.status = 'error'
           job.error = e instanceof Error ? e.message : String(e)
+          this.emitJobProgress(jobId, job)
         } finally {
           setTimeout(() => { this.txt2imgJobs.delete(jobId) }, 5 * 60_000)
         }
@@ -638,6 +674,7 @@ export class ArtGenService extends TypertRemoteService {
     const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const job: { status: 'running' | 'done' | 'error'; percent: number; phase: string; result?: Txt2ImgResult; error?: string } = { status: 'running', percent: 0, phase: 'starting' }
     this.txt2imgJobs.set(jobId, job)
+    this.emitJobProgress(jobId, job)
     // spawn sd-cli，逐行解析 stdout 进度（真实百分比）。
     const proc = spawn(cliPath, cliArgs, { stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
@@ -671,6 +708,7 @@ export class ArtGenService extends TypertRemoteService {
           if (pct > job.percent) {
             job.percent = pct
             job.phase = 'sampling'
+            this.emitJobProgress(jobId, job)
           }
         }
       }
@@ -678,6 +716,7 @@ export class ArtGenService extends TypertRemoteService {
       if (/decoding|decoded|decode_first_stage/i.test(text) && job.percent < 96) {
         job.percent = 96
         job.phase = 'decoding'
+        this.emitJobProgress(jobId, job)
       }
     }
     proc.stdout.on('data', (data: Buffer) => {
@@ -694,11 +733,13 @@ export class ArtGenService extends TypertRemoteService {
       if (code !== 0) {
         job.status = 'error'
         job.error = `sd-cli 执行失败（exit ${code}）：${stderr.trim() !== '' ? stderr.trim().slice(0, 400) : stdout.trim().slice(0, 400)}`
+        this.emitJobProgress(jobId, job)
         return
       }
       if (!existsSync(outputPath)) {
         job.status = 'error'
         job.error = 'sd-cli 执行完成但未生成输出文件'
+        this.emitJobProgress(jobId, job)
         return
       }
       try {
@@ -710,11 +751,13 @@ export class ArtGenService extends TypertRemoteService {
         if (seedMatch !== null) seed = parseInt(seedMatch[1], 10)
         job.status = 'done'
         job.percent = 100
+        this.emitJobProgress(jobId, job)
         job.phase = 'done'
         job.result = { imageBase64, seed, durationMs: Date.now() - started }
       } catch (e) {
         job.status = 'error'
         job.error = `读取输出失败：${e instanceof Error ? e.message : String(e)}`
+        this.emitJobProgress(jobId, job)
       } finally {
         try { rmSync(outputPath, { force: true }) } catch { /* 忽略 */ }
       }
@@ -723,6 +766,7 @@ export class ArtGenService extends TypertRemoteService {
     proc.on('error', err => finish(() => {
       job.status = 'error'
       job.error = `启动 sd-cli 失败：${err.message}`
+      this.emitJobProgress(jobId, job)
     }))
     // 兜底超时杀进程。
     const killTimer = setTimeout(() => {
@@ -730,6 +774,7 @@ export class ArtGenService extends TypertRemoteService {
       finish(() => {
         job.status = 'error'
         job.error = `生成超时（${GEN_TIMEOUT_MS / 1000}s）`
+        this.emitJobProgress(jobId, job)
       })
     }, GEN_TIMEOUT_MS)
     return { jobId }
@@ -827,22 +872,22 @@ export class ArtGenService extends TypertRemoteService {
 
   /** 后台下载模型到 destPath，进度写 downloadSlots.model；可选配套 VAE（Flux）。 */
   private async runModelDownload(url: string, fileName: string, destPath: string, vaeUrl?: string, vaeFileName?: string): Promise<void> {
-    this.downloadSlots.model = { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' }
+    this.setDownloadSlot('model', { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
     try {
       const r = await fetch(url, {
         redirect: 'follow',
         signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
       })
       if (!r.ok) {
-        this.downloadSlots.model = { ...this.downloadSlots.model, status: 'error', error: `HTTP ${r.status}` }
+        this.setDownloadSlot('model', { ...this.downloadSlots.model, status: 'error', error: `HTTP ${r.status}` })
         return
       }
       if (!r.body) {
-        this.downloadSlots.model = { ...this.downloadSlots.model, status: 'error', error: '下载返回空响应体' }
+        this.setDownloadSlot('model', { ...this.downloadSlots.model, status: 'error', error: '下载返回空响应体' })
         return
       }
       const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
-      this.downloadSlots.model = { percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' }
+      this.setDownloadSlot('model', { percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
       // 流式写入临时文件 → 重命名为最终文件名（原子操作）。
       const tmpPath = join(SD_MODELS_DIR, `${fileName}.tmp`)
       const fileStream = (await import('node:fs')).createWriteStream(tmpPath)
@@ -856,12 +901,12 @@ export class ArtGenService extends TypertRemoteService {
         }
         downloaded += value.byteLength
         const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
-        this.downloadSlots.model = { percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' }
+        this.setDownloadSlot('model', { percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' })
       }
       fileStream.end()
       await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
       renameSync(tmpPath, destPath)
-      this.downloadSlots.model = { percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'downloading' }
+      this.setDownloadSlot('model', { percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'downloading' })
       // 配套 VAE（Flux GGUF 必需）—— 主模型下载完成后补下，失败仅记错误不影响主模型。
       if (vaeUrl !== undefined && vaeFileName !== undefined) {
         const vaeDest = join(SD_MODELS_DIR, vaeFileName)
@@ -884,9 +929,9 @@ export class ArtGenService extends TypertRemoteService {
           } catch { /* VAE 下载失败不阻塞主模型 */ }
         }
       }
-      this.downloadSlots.model = { ...this.downloadSlots.model, percent: 100, status: 'done' }
+      this.setDownloadSlot('model', { ...this.downloadSlots.model, percent: 100, status: 'done' })
     } catch (e) {
-      this.downloadSlots.model = { ...this.downloadSlots.model, status: 'error', error: e instanceof Error ? e.message : String(e) }
+      this.setDownloadSlot('model', { ...this.downloadSlots.model, status: 'error', error: e instanceof Error ? e.message : String(e) })
     }
   }
 

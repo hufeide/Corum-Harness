@@ -127,6 +127,16 @@ for ev in $declared; do
         && pass "${ev}：corum-orchestration 有 emit" \
         || fail "${ev}：corum-orchestration 无 emit"
       ;;
+    corum/artgen/*)
+      grep -rqF "'$ev'" "$REPO_ROOT/packages/plugins/agent/corum-artgen/src" 2>/dev/null \
+        && pass "${ev}：corum-artgen 有 emit" \
+        || fail "${ev}：corum-artgen 无 emit"
+      ;;
+    corum/ollama/*)
+      grep -rqF "'$ev'" "$REPO_ROOT/packages/plugins/agent/corum-ollama/src" 2>/dev/null \
+        && pass "${ev}：corum-ollama 有 emit" \
+        || fail "${ev}：corum-ollama 无 emit"
+      ;;
     *)
       skip "${ev}：无 emit 面映射（新增事件请在脚本里登记归属）"
       ;;
