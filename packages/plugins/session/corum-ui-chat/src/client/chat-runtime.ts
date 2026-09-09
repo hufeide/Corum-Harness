@@ -207,20 +207,21 @@ export function worktreeLedgerSubscribe(
 // 此在运行中即可跳转/订阅；历史回放仍走原有 summary 兜底匹配。
 let subagentChildDispose: (() => void) | null = null
 const subagentChildListeners = new Set<(frame: SubagentChildEvent) => void>()
-/** callId → childSessionId 进程内缓存（本 bundle 单例；页面刷新后由 summary 兜底）。 */
-const subagentChildByCall = new Map<string, string>()
+/** callId → 子会话身份（id + 前台/后台模式）进程内缓存（本 bundle 单例；页面刷新后由 summary/args 兜底）。 */
+const subagentChildByCall = new Map<string, { readonly childSessionId: string; readonly mode: 'foreground' | 'background' }>()
 /** 缓存上限（超限按插入序淘汰最旧——长会话里 delegation 可能很多，防无界增长）。 */
 const SUBAGENT_CHILD_CACHE_MAX = 1000
 
 /**
- * 已观测到的精确子会话 id（'corum/subagent/child' 广播过即命中）。
+ * 已观测到的精确子会话身份（'corum/subagent/child' 广播过即命中）。
  *
  * 供卡片与 conversation fold 在同一进程内复用精确映射——fold 过去只能按时间
- * 就近猜，多子 Agent 并行时会串；精确值优先、猜值兜底。
+ * 就近猜，多子 Agent 并行时会串；精确值优先、猜值兜底。`mode` 是宿主在 spawn
+ * 那一刻定下的前台一次性 / 后台 agent（卡片据此显示徽标）。
  * @param callId - 父侧 tool/call id。
- * @returns 子会话 id，未广播过时 undefined。
+ * @returns 子会话 id 与模式，未广播过时 undefined。
  */
-export function subagentChildOf(callId: string): string | undefined {
+export function subagentChildOf(callId: string): { readonly childSessionId: string; readonly mode: 'foreground' | 'background' } | undefined {
   return subagentChildByCall.get(callId)
 }
 
@@ -233,7 +234,7 @@ export function subagentChildSubscribe(
     const remote = chatRuntimeRef.current?.remote
     if (remote !== undefined) {
       subagentChildDispose = remote.$on('corum/subagent/child', (frame) => {
-        subagentChildByCall.set(frame.callId, frame.childSessionId)
+        subagentChildByCall.set(frame.callId, { childSessionId: frame.childSessionId, mode: frame.mode })
         if (subagentChildByCall.size > SUBAGENT_CHILD_CACHE_MAX) {
           const oldest = subagentChildByCall.keys().next().value
           if (oldest !== undefined) subagentChildByCall.delete(oldest)

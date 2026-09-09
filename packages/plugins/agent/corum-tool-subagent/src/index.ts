@@ -344,6 +344,8 @@ interface CorumSubagentChildEvent {
   readonly childSessionId: string
   readonly label: string
   readonly isolated: boolean
+  /** 前台一次性（父等结果）还是后台 agent（父继续干活、可续接）。 */
+  readonly mode: 'foreground' | 'background'
   readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string }
   readonly time: number
 }
@@ -698,6 +700,7 @@ export function apply(ctx: Context, config: Config): void {
       childSessionId: string,
       label: string,
       isolated: boolean,
+      mode: 'foreground' | 'background',
       worktree: { slug: string; branch: string; path: string } | undefined,
     ): void => {
       if (callId === undefined || callId === '') return
@@ -708,6 +711,7 @@ export function apply(ctx: Context, config: Config): void {
           childSessionId,
           label,
           isolated,
+          mode,
           ...worktree === undefined ? {} : { worktree: { ...worktree } },
           time: Date.now(),
         })
@@ -962,7 +966,7 @@ export function apply(ctx: Context, config: Config): void {
           })
           // continuable 登记的是 childId（settle 事件按 childId 精确匹配）。
           corumBindRun(String(started.childId))
-          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, corumEntryInfo)
+          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo)
           return { kind: 'continuable' as const, subagentId: started.childId }
         }
         const jobs = runtimeCtx.get('jobs')
@@ -979,7 +983,7 @@ export function apply(ctx: Context, config: Config): void {
             // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
             void start.then((startedRun) => {
               corumBindRun(String(startedRun.id))
-              corumEmitChildStarted(parent.session.id, exec.callId, String(startedRun.id), args.label, corumIsolate, corumEntryInfo)
+              corumEmitChildStarted(parent.session.id, exec.callId, String(startedRun.id), args.label, corumIsolate, 'background', corumEntryInfo)
             }).catch(() => {})
             return {
               cancel: (reason?: string) => {
@@ -999,7 +1003,7 @@ export function apply(ctx: Context, config: Config): void {
           signal: exec.signal,
         })
         corumBindRun(String(run.id))
-        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, corumEntryInfo)
+        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, 'foreground', corumEntryInfo)
         const outcome = await settleForegroundRun(run)
         // fork（corum）：前台子 Agent 的最终汇报注入父会话（2026-09-09 用户反馈
         // 「子 Agent 结束后反馈没有注入主 Agent」）。工具结果里本来就有汇报，但它埋在

@@ -222,40 +222,48 @@ function runningStepText(
 }
 
 /**
- * 子会话 id 的实时解析（2026-09-09 用户反馈「子 Agent 处理时无法进入子会话」）。
+ * 子会话身份（id + 前台/后台模式）的实时解析（2026-09-09）。
  *
- * 顺序：宿主 spawn 广播（'corum/subagent/child'，精确）> 本进程已观测缓存 >
- * fold 出的历史匹配（summary 时间就近，仅页面刷新后兜底）。广播到达即触发重渲染，
- * 于是 goto 按钮与进度订阅在运行期第一帧就可用，不必等子会话结束。
+ * 顺序：宿主 spawn 广播（'corum/subagent/child'，精确 id + 权威 mode）> 本进程
+ * 已观测缓存 > fold 出的历史匹配（summary 时间就近给 id、工具参数给 mode，仅页面
+ * 刷新后兜底）。广播到达即触发重渲染，于是 goto 按钮、进度订阅与模式徽标在运行期
+ * 第一帧就可用，不必等子会话结束。
  * @param callId - 父侧 tool/call id（卡片身份）。
- * @param fallback - conversation fold 给出的兜底 id（可能 undefined）。
- * @returns 当前可用的子会话 id。
+ * @param fallbackId - conversation fold 给出的兜底 id（可能 undefined）。
+ * @param fallbackMode - conversation fold 从工具参数推出的兜底模式（可能 undefined）。
+ * @returns 当前可用的子会话 id 与模式。
  */
-function useLiveChildSessionId(callId: string, fallback: string | undefined): string | undefined {
-  const [live, setLive] = useState<string | undefined>(() => subagentChildOf(callId))
+function useLiveChildIdentity(
+  callId: string,
+  fallbackId: string | undefined,
+  fallbackMode: 'foreground' | 'background' | undefined,
+): { readonly childSessionId: string | undefined; readonly mode: 'foreground' | 'background' | undefined } {
+  const [live, setLive] = useState(() => subagentChildOf(callId))
   useEffect(() => {
     setLive(subagentChildOf(callId))
     const sub = subagentChildSubscribe((frame) => {
       if (frame.callId !== callId) return
-      setLive(frame.childSessionId)
+      setLive({ childSessionId: frame.childSessionId, mode: frame.mode })
     })
     return () => { sub.unsubscribe() }
   }, [callId])
-  return live ?? fallback
+  return { childSessionId: live?.childSessionId ?? fallbackId, mode: live?.mode ?? fallbackMode }
 }
 
 /** 一个 delegation 召唤的卡片（进度由 'corum/subagent/progress' 推送注入，见 useChildProgress）。 */
 function SubagentRow({
-  callId, description, prompt: delegationPrompt, childSessionId: foldedChildSessionId, t,
+  callId, description, prompt: delegationPrompt, childSessionId: foldedChildSessionId,
+  mode: foldedMode, t,
 }: {
   callId: string
   description: string | undefined
   prompt: string | undefined
   childSessionId: string | undefined
+  mode: 'foreground' | 'background' | undefined
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
   // hooks 顺序恒定（React #310）：必须在任何 early return 之前。
-  const childSessionId = useLiveChildSessionId(callId, foldedChildSessionId)
+  const { childSessionId, mode } = useLiveChildIdentity(callId, foldedChildSessionId, foldedMode)
   const progress = useChildProgress(childSessionId)
   const model = useChildModel(childSessionId)
   const [expanded, setExpanded] = useState(false)
@@ -282,6 +290,14 @@ function SubagentRow({
             </span>
           )}
         </span>
+        {mode !== undefined && (
+          <span
+            className={mode === 'background' ? css.modeChipBg : css.modeChipFg}
+            title={t(mode === 'background' ? 'subagent.mode.backgroundTitle' : 'subagent.mode.foregroundTitle')}
+          >
+            {t(mode === 'background' ? 'subagent.mode.background' : 'subagent.mode.foreground')}
+          </span>
+        )}
         <span className={running ? css.runChip : css.doneChip}>
           {running
             ? <><span className={css.runDot} />{t('subagent.running')}</>
@@ -419,6 +435,7 @@ export const SubagentCard = memo(function SubagentCard({ node, t }: ChatNodeView
           description={invocation.description}
           prompt={invocation.prompt}
           childSessionId={invocation.childSessionId}
+          mode={invocation.mode}
           t={t}
         />
       ))}

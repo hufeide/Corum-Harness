@@ -251,6 +251,8 @@ export interface SubagentChildEvent {
   readonly label: string
   /** 是否隔离到独立 worktree（false = 直接在主工作区）。 */
   readonly isolated: boolean
+  /** 前台一次性（父等结果）还是后台 agent（父继续干活、可续接）。 */
+  readonly mode: 'foreground' | 'background'
   /** 隔离时的 worktree 三件套（台账 chip 与卡片提示用）。 */
   readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string }
   /** 广播时间（ms epoch）。 */

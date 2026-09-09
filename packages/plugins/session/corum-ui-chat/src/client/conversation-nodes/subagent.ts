@@ -68,11 +68,14 @@ function refreshCorrelation(
 ): readonly SubagentInvocation[] {
   const children = Object.values(summaries).filter(summary => summary.origin === 'subagent')
   return invocations.map((invocation) => {
-    if (invocation.childSessionId !== undefined) return invocation
     // 精确优先：宿主 spawn 广播（'corum/subagent/child'）已在本进程缓存了真实 id
-    // （2026-09-09 修复「运行期进不去子会话」）；没有才退回 summary 时间就近匹配。
+    // 与前台/后台模式（2026-09-09 修复「运行期进不去子会话」）；没有才退回
+    // summary 时间就近匹配（时间匹配拿不到模式，卡片改用工具参数兜底）。
     const exact = subagentChildOf(invocation.callId)
-    if (exact !== undefined) return { ...invocation, childSessionId: exact }
+    if (exact !== undefined) {
+      return { ...invocation, childSessionId: exact.childSessionId, mode: exact.mode }
+    }
+    if (invocation.childSessionId !== undefined) return invocation
     const childSessionId = correlateChild(children, invocation.time)
     return childSessionId === undefined ? invocation : { ...invocation, childSessionId }
   })
@@ -98,6 +101,7 @@ function startInvocation(match: ConversationMatch): SubagentInvocation {
     time: match.event.time,
     ...fields.description === undefined ? {} : { description: fields.description },
     ...fields.prompt === undefined ? {} : { prompt: fields.prompt },
+    ...fields.mode === undefined ? {} : { mode: fields.mode },
   }
 }
 

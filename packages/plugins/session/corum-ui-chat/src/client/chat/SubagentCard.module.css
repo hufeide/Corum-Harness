@@ -324,3 +324,25 @@
 .ledgerStatus[data-status='integrated'] {
   color: var(--dsw-alias-state-success-primary);
 }
+
+/* fork（corum）：前台一次性 / 后台 agent 模式徽标（2026-09-09 用户要求卡片可区分）。
+   与 run/done chip 同尺寸族的轻量胶囊，弱化描边与字重，避免与状态 chip 抢焦点。 */
+.modeChipFg,
+.modeChipBg {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.modeChipBg {
+  border-color: var(--corum-glass-border-active, #01CDFE);
+  color: var(--dsw-alias-brand-text);
+}

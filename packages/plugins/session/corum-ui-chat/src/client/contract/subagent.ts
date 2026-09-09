@@ -31,6 +31,12 @@ export interface SubagentInvocation {
   readonly prompt?: string
   /** Matched child Session id (`origin: 'subagent'` + parent lineage + nearest start time). */
   readonly childSessionId?: string
+  /**
+   * 前台一次性（父等结果）还是后台 agent（父继续干活、可续接）。
+   * 首选宿主 `corum/subagent/child` 广播的权威值；页面刷新后由工具参数
+   * `run_in_background` 兜底（缺省参数时未知——实例默认由机制决定）。
+   */
+  readonly mode?: 'foreground' | 'background'
   /** Renderer-polled child progress (not folded by the Definition). */
   readonly progress?: SubagentProgressSnapshot
 }
@@ -74,6 +80,7 @@ function textOf(value: unknown): string | undefined {
 export function subagentDelegationFields(argsRaw: string): {
   readonly description?: string
   readonly prompt?: string
+  readonly mode?: 'foreground' | 'background'
 } {
   try {
     const parsed: unknown = JSON.parse(argsRaw)
@@ -84,7 +91,18 @@ export function subagentDelegationFields(argsRaw: string): {
     const prompt = promptValue === undefined
       ? undefined
       : [...promptValue].slice(0, PROMPT_EXCERPT_MAX).join('')
-    return { ...description === undefined ? {} : { description }, ...prompt === undefined ? {} : { prompt } }
+    // run_in_background 缺省时实例默认（worker=continuable→后台，research=one-shot
+    // →前台）由机制决定，工具参数面看不出——留给宿主广播补权威值。
+    const mode = record.run_in_background === true
+      ? 'background' as const
+      : record.run_in_background === false
+        ? 'foreground' as const
+        : undefined
+    return {
+      ...description === undefined ? {} : { description },
+      ...prompt === undefined ? {} : { prompt },
+      ...mode === undefined ? {} : { mode },
+    }
   } catch {
     return {}
   }
@@ -103,6 +121,7 @@ export function encodeSubagentTurn(invocations: readonly SubagentInvocation[]): 
     invocation.description ?? '',
     invocation.prompt ?? '',
     invocation.childSessionId ?? '',
+    invocation.mode ?? '',
     invocation.progress === undefined ? '' : [
       invocation.progress.turn,
       invocation.progress.step,
@@ -131,7 +150,7 @@ function decodeProgress(raw: string | undefined): SubagentProgressSnapshot | und
 export function decodeSubagentTurn(signature: SubagentTurnSignature): readonly SubagentInvocation[] {
   if (signature === '') return []
   return signature.split('|').map((entry) => {
-    const [callId, anchorSeq, time, description, prompt, childSessionId, progressRaw] = entry.split('~')
+    const [callId, anchorSeq, time, description, prompt, childSessionId, mode, progressRaw] = entry.split('~')
     const progress = decodeProgress(progressRaw)
     return {
       callId,
@@ -141,6 +160,7 @@ export function decodeSubagentTurn(signature: SubagentTurnSignature): readonly S
       ...description === '' ? {} : { description },
       ...prompt === '' ? {} : { prompt },
       ...childSessionId === '' ? {} : { childSessionId },
+      ...mode === 'foreground' || mode === 'background' ? { mode } : {},
       ...progress === undefined ? {} : { progress },
     }
   })

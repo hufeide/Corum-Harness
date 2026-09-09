@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { notifySubscribers } from '@deepseek-ai/dsh-client-store'
 import type {
   ConversationLocation, ConversationNode, ConversationTimelineSnapshot, ConversationViewBuilder,
-  ConversationViewDefinition, PartialAssistant, RunningToolCall,
+  ConversationViewDefinition, PartialAssistant, RunningToolCall, ToolCallBlock,
 } from '@corum/corum-ui-conversation/client'
 import type { ChatConversationViewNode, ChatNode } from '../contract/chat-nodes.ts'
 import { isRunningTool } from '../contract/chat-nodes.ts'
@@ -10,7 +10,7 @@ import type {
   ChatLocationNodeIndex, ChatNodeProcessSource, ChatNodeSource, ChatNodeStore, ChatSnapshot,
   ChatTurnNavigationIndex, ChatTurnProcessPresentation, LegacyConversationSlice, TurnNavigationItem,
 } from '../contract/snapshot.ts'
-import { TURN_PROCESS_INDEPENDENT_KINDS } from '../contract/turn-process.ts'
+import { TURN_PROCESS_INDEPENDENT_KINDS, isSubagentDelegationTool } from '../contract/turn-process.ts'
 import { sessionRecallLabels, skillInvocationName } from './event-projection.ts'
 import { sameTurnNavigationItem, turnNavigationItem } from './turn-navigation.ts'
 import { ChatTurnProcessProjector } from './turn-process-presentation.ts'
@@ -391,6 +391,26 @@ function presentationPosition(
 }
 
 /**
+ * fork（corum）：delegation 工具行是否应从瀑布里隐藏。
+ *
+ * 2026-09-09 用户反馈「卡片展示的时机不对，先显示了卡片，然后才出现工具调用
+ * subagent，其实卡片已经代表了」——`subagent`/`subagent_*` 的 `tool/call` 同时
+ * 产出 SubagentCard（`subagent-call` 节点）与通用 `tool-call` 节点，后者纯冗余。
+ * 规则：delegation 调用隐藏通用工具行，**但失败（isError）时保留**——失败信息只
+ * 在工具结果里，卡片此时只显示 Done/Running，藏掉就看不见报错了。
+ * @param node - one materialized Chat Node.
+ * @returns whether the generic tool row duplicates a delegation card.
+ */
+function isRedundantDelegationRow(node: ChatConversationViewNode): boolean {
+  const candidate = node as ChatNode
+  if (candidate.kind !== 'tool-call') return false
+  const root = (candidate.data as { root: ToolCallBlock }).root
+  const name = 'kind' in root ? root.call?.name : root.name
+  if (name === undefined || !isSubagentDelegationTool(name)) return false
+  return !('kind' in root && root.isError === true)
+}
+
+/**
  * Order visible Chat Nodes without changing existing relative order as process
  * eligibility changes. Opening human input precedes process candidates, while
  * each synthetic process control sits between them.
@@ -400,7 +420,7 @@ function presentationPosition(
 export function orderedVisibleChatNodes(
   nodes: readonly ChatConversationViewNode[],
 ): ChatConversationViewNode[] {
-  const visible = nodes.filter(node => node.visibility === 'visible')
+  const visible = nodes.filter(node => node.visibility === 'visible' && !isRedundantDelegationRow(node))
   const presentations = turnProcessPresentations(visible)
   return visible.sort((left, right) => {
     const leftPosition = presentationPosition(left, presentations)

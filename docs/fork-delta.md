@@ -1254,8 +1254,9 @@ fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
 | 写子 Agent 计数 | `orchestration.beginWriteChild/endWriteChild`（finally 释放） | 并发信号④ |
 
 **跨包配套**：`corum-orchestration` 纯函数签名 + 计数方法；`corum-api-remotes`
-（事件声明 + allowlist 第 20 条）；`corum-ui-chat`（`subagentChildSubscribe` +
-`subagentChildOf` 缓存 + 卡片 `useLiveChildSessionId` + apply 预热订阅 + fold 精确优先）。
+（事件声明 + allowlist 第 20 条，载荷含 `mode` 前台/后台）；`corum-ui-chat`
+（`subagentChildSubscribe` + `subagentChildOf` 缓存 id+mode + 卡片 `useLiveChildIdentity`
++ apply 预热订阅 + fold 精确优先 + `chat-snapshot-builder` 过滤 delegation 的冗余工具行）。
 
 **验证**：`docs/TODO.md` 同条（CDP 三层 + 真内核 + 单测 62 例）；`verify-fork-drift.sh`
 §4 已登记本事件 emit 面映射。
