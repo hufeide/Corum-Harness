@@ -78,12 +78,12 @@ export function SubagentSection() {
       </div>
       {error !== null && <p className={css.hintText} style={{ color: 'var(--dsw-alias-state-danger-primary)' }}>{error}</p>}
       <SettingGroup title="隔离与并行">
-        <SettingRow label="隔离模式" desc="子 Agent 写任务自动隔离到独立 git worktree；需 git 工作区。">
+        <SettingRow label="隔离模式" desc="可能并发的子 Agent 写任务隔离到独立 git worktree；单发前台写任务直接在主工作区改。需 git 工作区。">
           <SelectField
             value={user.isolationMode ?? ''}
             options={[
               { id: '', label: `默认（${resolved.isolationMode ?? 'write-tasks'}）` },
-              { id: 'write-tasks', label: 'write-tasks · 写任务隔离' },
+              { id: 'write-tasks', label: 'write-tasks · 并发写任务隔离' },
               { id: 'always', label: 'always · 凡召唤必隔离' },
               { id: 'off', label: 'off · 不隔离' },
             ]}

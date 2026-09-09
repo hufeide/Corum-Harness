@@ -20,7 +20,7 @@ import { memo, useEffect, useState } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, Loader } from 'lucide-react'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
-import { chatRuntimeRef, subagentProgressSubscribe, worktreeLedgerSubscribe } from '../chat-runtime.ts'
+import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe, worktreeLedgerSubscribe } from '../chat-runtime.ts'
 import css from './SubagentCard.module.css'
 
 /** 子会话进度 RPC 返回形（与 host getChildSessionProgress 对齐）。 */
@@ -221,15 +221,41 @@ function runningStepText(
     : `${stepLabel} · ${progress.currentAction}`
 }
 
+/**
+ * 子会话 id 的实时解析（2026-09-09 用户反馈「子 Agent 处理时无法进入子会话」）。
+ *
+ * 顺序：宿主 spawn 广播（'corum/subagent/child'，精确）> 本进程已观测缓存 >
+ * fold 出的历史匹配（summary 时间就近，仅页面刷新后兜底）。广播到达即触发重渲染，
+ * 于是 goto 按钮与进度订阅在运行期第一帧就可用，不必等子会话结束。
+ * @param callId - 父侧 tool/call id（卡片身份）。
+ * @param fallback - conversation fold 给出的兜底 id（可能 undefined）。
+ * @returns 当前可用的子会话 id。
+ */
+function useLiveChildSessionId(callId: string, fallback: string | undefined): string | undefined {
+  const [live, setLive] = useState<string | undefined>(() => subagentChildOf(callId))
+  useEffect(() => {
+    setLive(subagentChildOf(callId))
+    const sub = subagentChildSubscribe((frame) => {
+      if (frame.callId !== callId) return
+      setLive(frame.childSessionId)
+    })
+    return () => { sub.unsubscribe() }
+  }, [callId])
+  return live ?? fallback
+}
+
 /** 一个 delegation 召唤的卡片（进度由 'corum/subagent/progress' 推送注入，见 useChildProgress）。 */
 function SubagentRow({
-  description, prompt: delegationPrompt, childSessionId, t,
+  callId, description, prompt: delegationPrompt, childSessionId: foldedChildSessionId, t,
 }: {
+  callId: string
   description: string | undefined
   prompt: string | undefined
   childSessionId: string | undefined
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
+  // hooks 顺序恒定（React #310）：必须在任何 early return 之前。
+  const childSessionId = useLiveChildSessionId(callId, foldedChildSessionId)
   const progress = useChildProgress(childSessionId)
   const model = useChildModel(childSessionId)
   const [expanded, setExpanded] = useState(false)
@@ -389,6 +415,7 @@ export const SubagentCard = memo(function SubagentCard({ node, t }: ChatNodeView
       {invocations.map(invocation => (
         <SubagentRow
           key={invocation.callId}
+          callId={invocation.callId}
           description={invocation.description}
           prompt={invocation.prompt}
           childSessionId={invocation.childSessionId}

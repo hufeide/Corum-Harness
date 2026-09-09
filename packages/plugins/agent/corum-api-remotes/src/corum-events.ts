@@ -230,6 +230,34 @@ export interface SubagentProgressEvent {
 }
 
 /**
+ * corum/subagent/child：宿主 spawn 子 Agent 时发出的**精确父子映射**
+ * （2026-09-09 用户反馈「子 Agent 处理时无法进入子会话实时查看」）。
+ *
+ * 背景：SubagentCard 过去只能靠「会话列表里 origin='subagent' 且时间最近的
+ * 一行」猜 childSessionId——父会话在等工具结果时不再产生事件、卡片不重算，
+ * 于是整个运行期拿不到 id（goto 按钮 disabled、进度帧也过滤不了），只有子会话
+ * 结束、父会话追加工具结果后才匹配上。宿主在 `subagents.start()` 返回的同一刻
+ * 就知道 `run.id`（= 子会话 id），按父侧 tool/call id 精确广播即可让卡片在
+ * 第一帧就能跳转与订阅进度。
+ */
+export interface SubagentChildEvent {
+  /** 父会话 id（卡片按当前会话过滤）。 */
+  readonly parentSessionId: string
+  /** 父侧 tool/call id（卡片按它精确匹配本次委托）。 */
+  readonly callId: string
+  /** 子会话 id（origin='subagent'）。 */
+  readonly childSessionId: string
+  /** 委托标签（工具 description / 任务 label）。 */
+  readonly label: string
+  /** 是否隔离到独立 worktree（false = 直接在主工作区）。 */
+  readonly isolated: boolean
+  /** 隔离时的 worktree 三件套（台账 chip 与卡片提示用）。 */
+  readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string }
+  /** 广播时间（ms epoch）。 */
+  readonly time: number
+}
+
+/**
  * corum/artgen/download-progress：文生图引擎/模型下载进度推送（P2-7；
  * host corumArtGen 的 downloadSlots 每次写入即 emit——取代设置页 500ms 轮询
  * `corumArtGen/getDownloadProgress`）。
@@ -321,6 +349,8 @@ declare module '@deepseek-ai/cordis' {
     'corum/file/changed'(data: FileChangedEvent): void
     /** corum/subagent/progress：子 Agent 会话进度增量推送（统一事件中心三期；SubagentCard 进度轮询迁移的承载事件）。 */
     'corum/subagent/progress'(data: SubagentProgressEvent): void
+    /** corum/subagent/child：宿主 spawn 子 Agent 的精确父子映射（卡片运行中即可跳子会话）。 */
+    'corum/subagent/child'(data: SubagentChildEvent): void
     /** corum/worktree-ledger：子 Agent 隔离台账快照（fork #10 发射；「并行工作区」chip 订阅源）。 */
     'corum/worktree-ledger'(data: CorumWorktreeLedgerFrameEvent): void
     /** corum/artgen/download-progress：文生图引擎/模型下载进度（P2-7）。 */
@@ -364,6 +394,7 @@ export type CorumForwardedEvent =
   | 'corum/terminal/output'
   | 'corum/file/changed'
   | 'corum/subagent/progress'
+  | 'corum/subagent/child'
   | 'corum/worktree-ledger'
   | 'corum/artgen/download-progress'
   | 'corum/ollama/download-progress'

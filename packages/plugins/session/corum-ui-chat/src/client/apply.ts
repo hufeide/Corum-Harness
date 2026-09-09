@@ -32,7 +32,7 @@ import { en, NS, zh } from './locale.ts'
 import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'
 import { createChatStore } from './stores.ts'
 import { TranscriptViewPolicy } from './transcript-view.ts'
-import { createChatRuntime, type ChatRuntimeService } from './chat-runtime.ts'
+import { createChatRuntime, primeSubagentChildCache, type ChatRuntimeService } from './chat-runtime.ts'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../chat-settings.ts'
 import { useTurnDataValue } from './chat/use-turn-data.ts'
 
@@ -124,6 +124,9 @@ export function apply(ctx: Context): void {
   // 本插件 inject 数组已含 'remote'（红线 4 声明消费）。
   chatRuntime.setRemote(ctx.remote)
   ctx.provide('chatRuntime', chatRuntime)
+  // 2026-09-09：spawn 精确父子映射的订阅在激活期就建好——卡片挂载晚于广播时，
+  // 仍能从进程内缓存拿到 childSessionId（运行中即可跳子会话）。
+  ctx.effect(() => primeSubagentChildCache(), 'ui-chat:subagent-child-prime')
   ctx.uiSession.provide({
     hooks: ['chat'],
     resolve: binding => ({ hooks: { chat: chatSource(binding) } }),

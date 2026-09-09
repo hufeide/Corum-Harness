@@ -54,6 +54,8 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'corum/file/changed', mode: 'emit' },
   // ── fork（corum）：统一事件中心三期——子 Agent 进度增量推送并入转发 ──
   { event: 'corum/subagent/progress', mode: 'emit' },
+  // 子 Agent spawn 精确父子映射（fork #10 发射；SubagentCard 运行中即可跳子会话）
+  { event: 'corum/subagent/child', mode: 'emit' },
   // 子 Agent 隔离台账快照（fork #10 发射；「并行工作区」chip 订阅源）
   { event: 'corum/worktree-ledger', mode: 'emit' },
   // P2-7：下载进度事件化（取代设置页 500ms 轮询）。

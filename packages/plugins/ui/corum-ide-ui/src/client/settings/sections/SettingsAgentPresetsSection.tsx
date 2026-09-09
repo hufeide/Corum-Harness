@@ -858,12 +858,12 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           <div className={css.formGroupTitle}>并行开发</div>
           <div className={css.formColsStretch}>
             <div className={css.formCol} style={{ gap: 3 }}>
-              <label className={css.fieldLabelSm}>隔离模式（默认 write-tasks：写任务自动隔离）</label>
+              <label className={css.fieldLabelSm}>隔离模式（默认 write-tasks：并发写任务隔离）</label>
               <SelectField
                 value={draft.pwIsolation}
                 options={[
                   { id: '', label: '（跟随全局/默认）' },
-                  { id: 'write-tasks', label: 'write-tasks · 写任务隔离' },
+                  { id: 'write-tasks', label: 'write-tasks · 并发写任务隔离' },
                   { id: 'always', label: 'always · 凡召唤必隔离' },
                   { id: 'off', label: 'off · 不隔离' },
                 ]}

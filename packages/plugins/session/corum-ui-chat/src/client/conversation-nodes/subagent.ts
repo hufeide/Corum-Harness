@@ -6,6 +6,7 @@ import type { SessionSummary } from '@deepseek-ai/dsh-api-session-controller/cli
 import type {} from '@deepseek-ai/dsh-tools/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import { isSubagentDelegationTool } from '../contract/turn-process.ts'
+import { subagentChildOf } from '../chat-runtime.ts'
 import {
   decodeSubagentTurn, encodeSubagentTurn, subagentDelegationFields,
   type SubagentInvocation, type SubagentTurnSignature,
@@ -68,6 +69,10 @@ function refreshCorrelation(
   const children = Object.values(summaries).filter(summary => summary.origin === 'subagent')
   return invocations.map((invocation) => {
     if (invocation.childSessionId !== undefined) return invocation
+    // 精确优先：宿主 spawn 广播（'corum/subagent/child'）已在本进程缓存了真实 id
+    // （2026-09-09 修复「运行期进不去子会话」）；没有才退回 summary 时间就近匹配。
+    const exact = subagentChildOf(invocation.callId)
+    if (exact !== undefined) return { ...invocation, childSessionId: exact }
     const childSessionId = correlateChild(children, invocation.time)
     return childSessionId === undefined ? invocation : { ...invocation, childSessionId }
   })

@@ -24,8 +24,8 @@ import z from '@deepseek-ai/schemastery'
 import { carrierKeyOf, scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import {
@@ -133,7 +133,10 @@ export interface Config {
   maxDepth?: number | 'provider-managed'
   /** fork（corum）：子 Agent 隔离策略。 */
   isolation?: {
-    /** always=凡召唤必隔离；write-tasks=按工具面判定（默认）；off=不隔离。 */
+    /**
+     * always=凡召唤必隔离；write-tasks=写任务**且可能并发**才隔离（默认；
+     * 单发前台写任务直接在主工作区执行，2026-09-09 并发感知）；off=不隔离。
+     */
     mode?: 'always' | 'write-tasks' | 'off'
     /** worktree 根目录（相对父会话 cwd 或绝对路径，默认 '.corum-worktrees'）。 */
     worktreeRoot?: string
@@ -327,6 +330,32 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
   return `${error}${diagnostic}${partial}`
 }
 
+/**
+ * fork（corum）：`corum/subagent/child` 载荷——spawn 成功那一刻的精确父子映射。
+ *
+ * 与 `@corum/corum-api-remotes` 的 `SubagentChildEvent` 同构（自包含声明：本包
+ * 的编译程序里看不到 api-remotes 的 Events 合并，按 fork 包之间的既有口径各自
+ * 声明一次，结构必须逐字段一致，改一处要两处一起改——verify-fork-drift.sh
+ * §事件段会兜住声明/转发两侧）。
+ */
+interface CorumSubagentChildEvent {
+  readonly parentSessionId: string
+  readonly callId: string
+  readonly childSessionId: string
+  readonly label: string
+  readonly isolated: boolean
+  readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string }
+  readonly time: number
+}
+
+// fork（corum）：与 corum-orchestration 的 `corum/worktree-ledger` 同款——本包
+// 自己声明一次，emit 点不必 `as never`。
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'corum/subagent/child': (data: CorumSubagentChildEvent) => void
+  }
+}
+
 type ForegroundToolResult = {
   readonly kind: 'foreground'
   readonly runId: SubagentRun['id']
@@ -367,6 +396,55 @@ async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResu
   }
   if (disposal.status === 'rejected') throw disposal.reason
   return execution.value
+}
+
+/**
+ * fork（corum）：前台子 Agent 的最终汇报以「settlement notice」形态注入父会话。
+ *
+ * 2026-09-09 用户实机反馈「子 Agent 结束后反馈没有注入主 Agent」：汇报本来就在
+ * `subagent` 的工具结果里（父 Agent 的模型上下文拿得到），但它在会话流里只是一张
+ * 工具卡的内容，用户很难注意到；而子会话卡片只显示进度与任务提示词。这里复用
+ * fork #9 后台子 Agent 的同款通知形态（`source.kind: 'subagent-settled'` +
+ * `form: 'notice'`，chat 渲染成一条可见的注入行），把汇报变成会话里的一等消息。
+ *
+ * 注入走 `agent.inject()`（模型面上下文，不唤醒驱动器）：父 Agent 正在等工具结果，
+ * 下一个 step 边界领取；若这一轮就此结束，消息留在收件箱、下一轮可见，绝不会
+ * 因为它凭空开启新回合。注入失败只告警——可见性是增强，不能反过来让委托失败。
+ *
+ * @param parent - 委派方 Agent（注入目标）。
+ * @param childId - 子会话 id（notice 的 senderSessionId）。
+ * @param label - 委托标签（给 summary 一句人话上下文）。
+ * @param outcome - 前台 settle 结果（output = 子 Agent 最终 assistant 文本块）。
+ * @param logger - 注入失败时的告警出口。
+ */
+function corumNotifyForegroundResult(
+  parent: Agent,
+  childId: string,
+  label: string,
+  outcome: ForegroundToolResult,
+  logger: { warn: (message: string) => void },
+): void {
+  try {
+    const report = outputValueText(outcome.output).trim()
+    const summary = `Subagent ${childId} finished (${label}) — final report:`
+    parent.inject(createUserMessage({
+      content: [
+        { type: 'text', text: summary },
+        { type: 'text', text: report === '' ? 'It left no closing message.' : report },
+      ],
+      // fork #9 的 source 声明在 @corum/corum-subagent 的模块增补里，本包的程序
+      // 里看不到那个 MessageSourceMap 合并——按 dev-conventions §4a 的跨包类型
+      // 口径收窄（与同一文件里 `subagent/end` 监听同款）。
+      source: {
+        kind: 'subagent-settled',
+        form: 'notice',
+        summary: boundContextSummary(summary),
+        senderSessionId: childId,
+      } as unknown as MessageSource,
+    }))
+  } catch (error: unknown) {
+    logger.warn(`subagent foreground result notice was not delivered to its parent: ${String(error)}`)
+  }
 }
 
 /**
@@ -605,9 +683,42 @@ export function apply(ctx: Context, config: Config): void {
      * fan-out）共用。闭包捕获 install 的配置终值（三级配置已解析）；入参只给
      * runtimeCtx/exec/task 级差异。返回前台 settle 结果或后台/continuable 句柄。
      */
+    /**
+     * fork（corum）：广播 spawn 精确父子映射（`corum/subagent/child`）。
+     *
+     * 2026-09-09 用户反馈「子 Agent 处理时无法进入子会话实时查看」：卡片过去靠
+     * 会话列表时间就近猜 childSessionId，运行期猜不出来（父会话在等工具结果、
+     * 不产生事件 → 卡片不重算），于是 goto 按钮恒 disabled、进度帧也过滤不了。
+     * 这里在 start 返回的同一刻按父侧 tool/call id 广播真实 id——卡片第一帧就能
+     * 跳转并订阅进度。广播失败只告警（可见性增强，绝不影响委托）。
+     */
+    const corumEmitChildStarted = (
+      parentSessionId: string,
+      callId: string | undefined,
+      childSessionId: string,
+      label: string,
+      isolated: boolean,
+      worktree: { slug: string; branch: string; path: string } | undefined,
+    ): void => {
+      if (callId === undefined || callId === '') return
+      try {
+        runtimeCtx.emit('corum/subagent/child', {
+          parentSessionId,
+          callId,
+          childSessionId,
+          label,
+          isolated,
+          ...worktree === undefined ? {} : { worktree: { ...worktree } },
+          time: Date.now(),
+        })
+      } catch (error: unknown) {
+        runtimeCtx.logger.warn(`corum/subagent/child emit failed: ${String(error)}`)
+      }
+    }
+
     const spawnOne = async (
       runtimeCtx: Context,
-      exec: { agent: Agent; signal: AbortSignal },
+      exec: { agent: Agent; signal: AbortSignal; callId?: string },
       args: {
         label: string
         prompt: string
@@ -617,6 +728,13 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：orchestrate 任务级隔离/只读覆盖（subagent 工具不传，用配置终值）。
         taskIsolation?: 'always' | 'write-tasks' | 'off'
         taskResearch?: boolean
+        // fork（corum）：本次调用内的 fan-out 任务数（并发感知隔离信号①；
+        // subagent 工具不传 = 1）。
+        fanoutCount?: number
+        // fork（corum）：前台 settle 后是否向父会话注入 settlement notice
+        // （subagent 工具注入；orchestrate 任务与 integrate 不注入——结果已由
+        // 工具结果汇总，避免 N 条重复通知）。
+        notifyParent?: boolean
       },
       subagentProvider: SubagentProvider,
     ): Promise<ForegroundToolResult | { kind: 'continuable'; subagentId: string } | { kind: 'background'; jobId: string }> => {
@@ -698,7 +816,20 @@ export function apply(ctx: Context, config: Config): void {
       const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
       const effIsolationMode = args.taskIsolation ?? corumIsolationMode
       const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, corumDenyDirectFs)
-      let corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch)
+      // fork（corum）：并发感知（2026-09-09 用户实机反馈「只派遣一个 TASK 时还是走了
+      // 隔离工作区」）——隔离的存在理由是并发写冲突，没有并发就没有隔离的必要。
+      // 四个并发信号（任一成立即视为「可能并发」）：
+      //   ① 本次 orchestrate 的 tasks.length ≥ 2（同一调用内的 fan-out）；
+      //   ② 本次委托走后台/continuable（父 Agent 继续干活，随时可能再发一个）；
+      //   ③ 该会话台账仍有 active 条目（已隔离的写子 Agent 还在跑）；
+      //   ④ 该会话有在跑的非隔离开写子 Agent（同一条消息里的并发前台调用）。
+      const corumRunSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
+      const corumSessionId = parent.session.id
+      const corumConcurrent = (args.fanoutCount ?? 1) > 1
+        || corumRunSpec.runInBackground
+        || orchestration.entriesOf(corumSessionId).some(entry => entry.status === 'active')
+        || orchestration.runningWriteChildrenOf(corumSessionId) > 0
+      let corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch, corumConcurrent)
       // fork（corum）：非 git 工作区自动降级（2026-09-09 用户需求）——隔离依赖 git
       // 仓库（worktree/branch/verify/integrate 全在 git 上），非 git 目录下强制不隔离，
       // 避免 `git worktree add` 报 `fatal: not a git repository`（实测 ai-lab）。即使用户
@@ -778,6 +909,8 @@ export function apply(ctx: Context, config: Config): void {
       // 条目先登记（run id 尚不可知），start 返回后立刻经 corumBindRun 绑定 id——
       // 这是 settle 精确匹配（并行安全）的前置（docs/TODO.md 2026-09-09 修复）。
       let corumEntry: { sessionId: string; slug: string } | undefined
+      // fork（corum）：广播用 worktree 三件套（无隔离时 undefined）。
+      let corumEntryInfo: { slug: string; branch: string; path: string } | undefined
       if (corumIsolate) {
         const parentCwd = parent.session.header.cwd ?? process.cwd()
         const sessionId = parent.session.id
@@ -798,18 +931,28 @@ export function apply(ctx: Context, config: Config): void {
         }
         orchestration.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath })
         corumEntry = { sessionId, slug }
+        corumEntryInfo = { slug, branch, path: worktreePath }
         request.cwd = worktreePath
         request.toolFilter = corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs)
         const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is read-denied by the sandbox. Commit your changes on branch ${branch} inside this worktree; do not attempt to touch paths outside it.\n\n`
         request.prompt = [{ type: 'text', text: isolationNotice + args.prompt }] as ContentBlock[]
+      } else if (corumIsWrite && !effReadonlyResearch) {
+        // fork（corum）：不隔离的写任务（单发前台，无并发）直接在主工作区改——必须明确
+        // 告诉它「不要碰版本控制」：主工作区可能有父 Agent 未提交的无关改动，
+        // 子 Agent 一句 `git add -A` 就会把它们一起卷进自己的提交。
+        const directNotice = '[corum orchestration] This delegation has no concurrent write task, so you work DIRECTLY in the delegating agent\'s working tree (no isolated worktree). Edit files in place and leave version control to the delegating agent: do NOT run git add / commit / checkout / stash / reset, and do not create branches.\n\n'
+        request.prompt = [{ type: 'text', text: directNotice + args.prompt }] as ContentBlock[]
       }
       /** fork（corum）：把 run/child id 绑定到本次 spawn 的台账条目（无隔离时 no-op）。 */
       const corumBindRun = (runId: string): void => {
         if (corumEntry !== undefined) orchestration.bindRunId(corumEntry.sessionId, corumEntry.slug, runId)
       }
+      // fork（corum）：非隔离的前台写子 Agent 登记进并发计数（同消息并发调用时，
+      // 后一个 spawn 才能看到「已经有一个在写主工作区」而选择隔离）。后台/continuable
+      // 的子 Agent 由 runSpec 信号②恒判并发，无需计数，避免跨调用泄漏。
+      const corumTrackWrite = corumIsWrite && !effReadonlyResearch && !corumRunSpec.runInBackground
 
-      const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
-      if (runSpec.runInBackground) {
+      if (corumRunSpec.runInBackground) {
         if (continuable) {
           const started = await runtimeCtx.subagents.startContinuable({
             provider: config.provider,
@@ -819,6 +962,7 @@ export function apply(ctx: Context, config: Config): void {
           })
           // continuable 登记的是 childId（settle 事件按 childId 精确匹配）。
           corumBindRun(String(started.childId))
+          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, corumEntryInfo)
           return { kind: 'continuable' as const, subagentId: started.childId }
         }
         const jobs = runtimeCtx.get('jobs')
@@ -833,7 +977,10 @@ export function apply(ctx: Context, config: Config): void {
             const controller = new AbortController()
             const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal })
             // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
-            void start.then((startedRun) => { corumBindRun(String(startedRun.id)) }).catch(() => {})
+            void start.then((startedRun) => {
+              corumBindRun(String(startedRun.id))
+              corumEmitChildStarted(parent.session.id, exec.callId, String(startedRun.id), args.label, corumIsolate, corumEntryInfo)
+            }).catch(() => {})
             return {
               cancel: (reason?: string) => {
                 controller.abort(reason ?? 'background subagent task killed')
@@ -845,12 +992,27 @@ export function apply(ctx: Context, config: Config): void {
         return { kind: 'background' as const, jobId: id }
       }
 
-      const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
-        ...request,
-        signal: exec.signal,
-      })
-      corumBindRun(String(run.id))
-      return settleForegroundRun(run)
+      if (corumTrackWrite) orchestration.beginWriteChild(corumSessionId)
+      try {
+        const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
+          ...request,
+          signal: exec.signal,
+        })
+        corumBindRun(String(run.id))
+        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, corumEntryInfo)
+        const outcome = await settleForegroundRun(run)
+        // fork（corum）：前台子 Agent 的最终汇报注入父会话（2026-09-09 用户反馈
+        // 「子 Agent 结束后反馈没有注入主 Agent」）。工具结果里本来就有汇报，但它埋在
+        // 工具卡里、容易被忽略，且子会话卡片只显示进度与任务提示词——这里按后台子
+        // Agent 的同款「settlement notice」形态再注入一条正式消息（form:'notice'，
+        // 会话流里渲染成一条可见的注入行），汇报以一等消息出现。
+        if (args.notifyParent !== false) {
+          corumNotifyForegroundResult(parent, String(run.id), args.label, outcome, runtimeCtx.logger)
+        }
+        return outcome
+      } finally {
+        if (corumTrackWrite) orchestration.endWriteChild(corumSessionId)
+      }
     }
 
     const mount = (subagentProvider: SubagentProvider): void => {
@@ -860,7 +1022,7 @@ export function apply(ctx: Context, config: Config): void {
       const disposeTool = runtimeCtx.tools.register(defineTool({
         name: toolName,
         // fork（corum）：描述头追加隔离语义（英文，接在官方 wording 前）。
-        description: 'Delegates run in isolated git worktrees when this instance has isolation configured; each write-capable child gets its own worktree and branch automatically. '
+        description: 'Delegates run in isolated git worktrees when this instance has isolation configured and the delegation can run concurrently with another write child; a lone write delegation edits the parent working tree directly (no worktree, no branch). ' 
           + wording.description + (backgroundEnabled
           // The completion notice is the continuation service's own behavior, not
           // a separately installed capability, so this promise holds whenever the
@@ -951,7 +1113,7 @@ export function apply(ctx: Context, config: Config): void {
           }
           // fork（corum）：单任务隔离 spawn 已抽取为 spawnOne（install 作用域闭包），
           // subagent 工具 execute 是它的薄壳。
-          return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
+          return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal, callId: String(exec.callId) }, {
             label: args.description,
             prompt: args.prompt,
             ...args.run_in_background !== undefined ? { run_in_background: args.run_in_background } : {},
@@ -966,7 +1128,7 @@ export function apply(ctx: Context, config: Config): void {
         ? (() => {}) as () => void
         : runtimeCtx.tools.register(defineTool({
             name: 'orchestrate',
-            description: 'Run a structured multi-task orchestration: delegate a list of independent tasks to isolated subagents in one call, then merge the isolated worktrees back and verify. Use this for parallel development, multi-angle research, or any work that fans out across independent pieces — you declare the task list (what each subagent does, how to isolate it, how to verify the merge), and the mechanism runs them concurrently and collects the results. Each write-capable task gets its own git worktree and branch automatically; read-only research tasks inherit the parent working tree. Prefer this over several separate subagent calls when the tasks are independent and can run in parallel.',
+            description: 'Run a structured multi-task orchestration: delegate a list of independent tasks to isolated subagents in one call, then merge the isolated worktrees back and verify. Use this for parallel development, multi-angle research, or any work that fans out across independent pieces — you declare the task list (what each subagent does, how to isolate it, how to verify the merge), and the mechanism runs them concurrently and collects the results. A fan-out of 2+ write tasks gives each task its own git worktree and branch automatically; a single task (and read-only research tasks) runs directly in the parent working tree. Prefer this over several separate subagent calls when the tasks are independent and can run in parallel.',
             parameters: {
               tasks: {
                 type: 'array',
@@ -978,7 +1140,7 @@ export function apply(ctx: Context, config: Config): void {
                   properties: {
                     prompt: { type: 'string', required: true, description: 'The complete, self-contained task for this subagent. It does not share this conversation, so include everything it needs.' },
                     label: { type: 'string', description: 'A short (3-5 word) label for display.' },
-                    isolation: { type: 'string', enum: ['always', 'write-tasks', 'off'], description: 'Override isolation for this task (always=force a worktree; write-tasks=isolate only write tasks; off=never isolate). Defaults to the instance policy.' },
+                    isolation: { type: 'string', enum: ['always', 'write-tasks', 'off'], description: 'Override isolation for this task (always=force a worktree; write-tasks=isolate only when the task can run concurrently with another write task; off=never isolate). Defaults to the instance policy.' },
                     research: { type: 'boolean', description: 'Set true for a read-only research task (write tools denied, no worktree).' },
                     model: {
                       type: 'object',
@@ -1073,7 +1235,7 @@ export function apply(ctx: Context, config: Config): void {
               const run = (index: number): Promise<{ index: number; ok: boolean; output?: string; error?: string; label?: string }> => {
                 const task = tasks[index]
                 const base = { index, ...task.label !== undefined ? { label: task.label } : {} }
-                return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
+                return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal, callId: String(exec.callId) }, {
                   label: task.label ?? `task ${index}`,
                   prompt: task.prompt,
                   // fork（corum）：orchestrate 任务默认前台 one-shot（fan-in 汇合要求）；
@@ -1083,6 +1245,11 @@ export function apply(ctx: Context, config: Config): void {
                   run_in_background: task.background === true,
                   ...task.isolation !== undefined ? { taskIsolation: task.isolation } : {},
                   ...task.research !== undefined ? { taskResearch: task.research } : {},
+                  // fork（corum）：并发感知隔离的两个入参——① 本次 fan-out 任务数
+                  // （≥2 才需要 worktree）；② 不向父会话逐条注入 notice（结果由
+                  // orchestrate 的汇总结果承载，避免 N 条重复通知）。
+                  fanoutCount: tasks.length,
+                  notifyParent: false,
                 }, subagentProvider).then((outcome) => {
                   if (outcome.kind === 'foreground') {
                     return { ...base, ok: true, output: outputValueText(outcome.output) }
@@ -1106,7 +1273,7 @@ export function apply(ctx: Context, config: Config): void {
                   // 逐条报 `[task N] done`，主 Agent 据此以为全部完成。integrate 恒前台
                   // （机制强制），非 foreground 即装配异常；集成未落地由 spawnOne 抛错
                   // （机制真值门禁），此处让错误向上冒泡，orchestrate 整体报失败。
-                  const integrateOutcome = await spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
+                  const integrateOutcome = await spawnOne(runtimeCtx, { agent: parent, signal: exec.signal, callId: String(exec.callId) }, {
                     label: 'integrate',
                     prompt: 'Integrate the isolated worktrees and commit after all checks pass.',
                     integrate: true,
@@ -1178,7 +1345,7 @@ export function apply(ctx: Context, config: Config): void {
               '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- Write-capable children run in ISOLATED git worktrees with their own branch automatically; the parent tree outside a worktree is read-denied to that child. Requires the workspace to be a git repository — if it is not, set `isolation: "off"` for write tasks (forced `isolation: "always"` fails with a git error in a non-repo).',
+              '- Write-capable children get ISOLATED git worktrees (own branch, parent tree read-denied) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and must leave git to you. Isolation requires the workspace to be a git repository — if it is not, set `isolation: "off"` for write tasks (forced `isolation: "always"` fails with a git error in a non-repo).',
               '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Set `merge.autoIntegrate: true` to merge+commit the isolated branches after all checks pass, or false to only report and decide yourself.',
               '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',

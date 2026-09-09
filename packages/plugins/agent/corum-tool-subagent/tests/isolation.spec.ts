@@ -88,13 +88,47 @@ describe('corumShouldIsolate — fork（corum）隔离触发', () => {
   it('always 恒隔离（只读任务也隔离）', () => {
     expect(corumShouldIsolate('always', false, false)).toBe(true)
   })
-  it('write-tasks 按写任务判定（默认）', () => {
+  it('write-tasks 按写任务判定（默认；未给并发信号时保持旧语义）', () => {
     expect(corumShouldIsolate('write-tasks', true, false)).toBe(true)
     expect(corumShouldIsolate('write-tasks', false, false)).toBe(false)
   })
   it('off 不隔离；readonlyResearch 恒不隔离', () => {
     expect(corumShouldIsolate('off', true, false)).toBe(false)
     expect(corumShouldIsolate('always', true, true)).toBe(false)
+  })
+  it('并发感知（2026-09-09 用户实机反馈）：无并发不隔离、有并发才隔离', () => {
+    // 单发前台写任务：没有并发 → 不建 worktree（用户报的正是这条）。
+    expect(corumShouldIsolate('write-tasks', true, false, false)).toBe(false)
+    // 有并发（fan-out ≥2 / 后台 / 已有在跑写子 Agent）→ 隔离。
+    expect(corumShouldIsolate('write-tasks', true, false, true)).toBe(true)
+    // 只读任务即使并发也不隔离。
+    expect(corumShouldIsolate('write-tasks', false, false, true)).toBe(false)
+    expect(corumShouldIsolate('write-tasks', false, true, true)).toBe(false)
+  })
+  it('always 压过并发判定（显式强制隔离）', () => {
+    expect(corumShouldIsolate('always', true, false, false)).toBe(true)
+  })
+})
+
+describe('CorumOrchestration — 在跑写子 Agent 计数（并发感知隔离信号④）', () => {
+  it('begin/end 成对计数，归零即删表', () => {
+    const orchestration = new CorumOrchestration(new Context())
+    expect(orchestration.runningWriteChildrenOf('s1')).toBe(0)
+    orchestration.beginWriteChild('s1')
+    expect(orchestration.runningWriteChildrenOf('s1')).toBe(1)
+    orchestration.beginWriteChild('s1')
+    expect(orchestration.runningWriteChildrenOf('s1')).toBe(2)
+    orchestration.endWriteChild('s1')
+    expect(orchestration.runningWriteChildrenOf('s1')).toBe(1)
+    orchestration.endWriteChild('s1')
+    expect(orchestration.runningWriteChildrenOf('s1')).toBe(0)
+  })
+  it('多余 end 不会出现负计数；会话之间互不串扰', () => {
+    const orchestration = new CorumOrchestration(new Context())
+    orchestration.endWriteChild('s1')
+    expect(orchestration.runningWriteChildrenOf('s1')).toBe(0)
+    orchestration.beginWriteChild('s1')
+    expect(orchestration.runningWriteChildrenOf('s2')).toBe(0)
   })
 })
 

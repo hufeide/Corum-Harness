@@ -268,14 +268,33 @@ export function corumIsWriteTask(
   return !presentWriteTools.every(tool => deny.includes(tool))
 }
 
-/** fork（corum）：隔离触发判定（readonlyResearch 实例恒不隔离）。 */
+/**
+ * fork（corum）：隔离触发判定（readonlyResearch 实例恒不隔离）。
+ *
+ * 2026-09-09 并发感知（用户实机反馈「只派遣一个 TASK 时还是走了隔离工作区」）：
+ * 隔离的存在理由是**并发写冲突**——没有并发就没有冲突，而 worktree 有实打实的
+ * 代价（子 Agent 要重装依赖、沙箱默认写不了主仓 .git 管理目录）。因此默认模式
+ * `write-tasks` 只在「本次派遣可能与其他写子 Agent 并发」时隔离：
+ * - `always`：显式强制，无条件隔离（只读任务除外）；
+ * - `write-tasks`（默认）：写任务 **且** 可能并发才隔离；
+ * - `off`：永不隔离。
+ *
+ * @param mode - 生效隔离模式（任务级覆盖 > 预设 > 全局 > 默认）。
+ * @param isWriteTask - 有效工具面判定出的写任务（corumIsWriteTask）。
+ * @param readonlyResearch - 只读研究实例/任务（恒不隔离）。
+ * @param concurrent - 本次派遣是否可能与其他写子 Agent 并发。缺省 true =
+ *   旧语义（只要写就隔离），供不掌握并发信号的调用点保持行为等价。
+ */
 export function corumShouldIsolate(
   mode: 'always' | 'write-tasks' | 'off',
   isWriteTask: boolean,
   readonlyResearch: boolean,
+  concurrent = true,
 ): boolean {
   if (readonlyResearch) return false
-  return mode === 'always' || (mode === 'write-tasks' && isWriteTask)
+  if (mode === 'always') return true
+  if (mode === 'off') return false
+  return isWriteTask && concurrent
 }
 
 /** fork（corum）：清理选项——`force` 为无条件强删（仅集成成功后调用）。 */
@@ -656,6 +675,34 @@ export class CorumOrchestration extends Service {
     if (entry === undefined || entry.runId !== undefined) return
     entry.runId = runId
     this.persist(sessionId)
+  }
+
+  /**
+   * fork（corum）：会话级「在跑写子 Agent」计数——并发感知隔离的输入。
+   *
+   * 与台账的区别：台账只登记**已隔离**的条目（worktree 路径/分支是它的语义），
+   * 而并发判定必须连**不隔离**的在跑写子 Agent 一起算——否则同一条消息里并发发出
+   * 的两个 `subagent` 前台调用会各自认为「没有并发」，双双写主工作区。
+   * 计数在 spawn 前同步自增（JS 单线程，第二个调用必然看到第一个），settle/异常
+   * 路径 `finally` 自减；不落盘（进程内事实）。
+   */
+  private readonly runningWriteChildren = new Map<string, number>()
+
+  /** 登记一个在跑写子 Agent（spawn 前同步调用）。 */
+  beginWriteChild(sessionId: string): void {
+    this.runningWriteChildren.set(sessionId, (this.runningWriteChildren.get(sessionId) ?? 0) + 1)
+  }
+
+  /** 注销一个在跑写子 Agent（settle/异常后调用；计数归零即删表）。 */
+  endWriteChild(sessionId: string): void {
+    const next = (this.runningWriteChildren.get(sessionId) ?? 0) - 1
+    if (next <= 0) this.runningWriteChildren.delete(sessionId)
+    else this.runningWriteChildren.set(sessionId, next)
+  }
+
+  /** 该会话当前在跑的写子 Agent 数（>0 表示新派遣与它并发）。 */
+  runningWriteChildrenOf(sessionId: string): number {
+    return this.runningWriteChildren.get(sessionId) ?? 0
   }
 
   /**

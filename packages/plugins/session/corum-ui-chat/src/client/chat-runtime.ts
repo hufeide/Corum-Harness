@@ -32,7 +32,7 @@
 
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientRemote } from '@corum/corum-api-remotes/client'
-import type { CorumWorktreeLedgerFrameEvent, SubagentProgressEvent } from '@corum/corum-api-remotes/corum-events'
+import type { CorumWorktreeLedgerFrameEvent, SubagentChildEvent, SubagentProgressEvent } from '@corum/corum-api-remotes/corum-events'
 
 /** uSES 源契约（getSnapshot 稳定引用 + subscribe）。 */
 export interface SessionIdSource {
@@ -197,4 +197,61 @@ export function worktreeLedgerSubscribe(
       }
     },
   }
+}
+
+// ── 'corum/subagent/child' 订阅（卡片精确 childSessionId；fork #10 发射）──────
+//
+// 2026-09-09：卡片过去只能靠会话列表「时间就近」猜 childSessionId，运行期猜不
+// 出来（父会话等工具结果 → 不产生事件 → 卡片不重算）→ goto 按钮恒 disabled、
+// 进度帧也过滤不了。宿主在 spawn 那一刻按父侧 tool/call id 广播真实 id，卡片据
+// 此在运行中即可跳转/订阅；历史回放仍走原有 summary 兜底匹配。
+let subagentChildDispose: (() => void) | null = null
+const subagentChildListeners = new Set<(frame: SubagentChildEvent) => void>()
+/** callId → childSessionId 进程内缓存（本 bundle 单例；页面刷新后由 summary 兜底）。 */
+const subagentChildByCall = new Map<string, string>()
+
+/**
+ * 已观测到的精确子会话 id（'corum/subagent/child' 广播过即命中）。
+ *
+ * 供卡片与 conversation fold 在同一进程内复用精确映射——fold 过去只能按时间
+ * 就近猜，多子 Agent 并行时会串；精确值优先、猜值兜底。
+ * @param callId - 父侧 tool/call id。
+ * @returns 子会话 id，未广播过时 undefined。
+ */
+export function subagentChildOf(callId: string): string | undefined {
+  return subagentChildByCall.get(callId)
+}
+
+/** 注册一个 'corum/subagent/child' 帧监听（每卡一个；自行按 callId 过滤）。 */
+export function subagentChildSubscribe(
+  listener: (frame: SubagentChildEvent) => void,
+): { unsubscribe: () => void } {
+  subagentChildListeners.add(listener)
+  if (subagentChildDispose === null) {
+    const remote = chatRuntimeRef.current?.remote
+    if (remote !== undefined) {
+      subagentChildDispose = remote.$on('corum/subagent/child', (frame) => {
+        subagentChildByCall.set(frame.callId, frame.childSessionId)
+        for (const fn of subagentChildListeners) fn(frame)
+      })
+    }
+  }
+  return {
+    unsubscribe: () => {
+      subagentChildListeners.delete(listener)
+      if (subagentChildListeners.size === 0 && subagentChildDispose !== null) {
+        subagentChildDispose()
+        subagentChildDispose = null
+      }
+    },
+  }
+}
+
+/**
+ * apply 激活期提前建立订阅：即使卡片尚未挂载，spawn 广播也会进缓存——卡片挂载后
+ * 经 {@link subagentChildOf} 立刻拿到精确 id（避免「广播早于订阅」的竞态）。
+ * @returns 退订函数（挂到 ctx.effect 随插件生命周期释放）。
+ */
+export function primeSubagentChildCache(): () => void {
+  return subagentChildSubscribe(() => {}).unsubscribe
 }
