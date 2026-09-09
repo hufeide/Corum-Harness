@@ -69,6 +69,7 @@ import {
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
+  corumVisibleToolNames,
   corumWriteToolsForPlatform,
 } from './orchestration.ts'
 import type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
@@ -851,14 +852,12 @@ export function apply(ctx: Context, config: Config): void {
       // standard/ptc/cordis 挂的是 write/edit）。不收敛则子 Agent 创建直接抛错
       // （2026-09-10 实机：官方三模式全部派不出子 Agent）。口径与边界见
       // corumNarrowDenyFilter 的注释。
-      const corumVisibleToolNames = (): ReadonlySet<string> =>
-        new Set(parent.ctx.tools.schemas(scopeOf(parent.ctx)).map(schema => schema.name))
       const corumSetMechanismFilter = (
         filter: { allow?: string[]; deny?: string[] } | undefined,
       ): void => {
         const narrowed = filter === undefined
           ? undefined
-          : corumNarrowDenyFilter(filter, corumVisibleToolNames())
+          : corumNarrowDenyFilter(filter, corumVisibleToolNames(parent.ctx))
         if (narrowed === undefined) delete request.toolFilter
         else request.toolFilter = narrowed
       }

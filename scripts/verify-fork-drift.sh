@@ -609,7 +609,32 @@ row_disabled() {
 # 行 id 列表（顺序保留）。
 preset_row_ids() { grep -oE '^[[:space:]]*- id: [A-Za-z0-9._-]+' "$1" | sed -E 's/.*- id: //'; }
 if [ -d "$VENDORED_PRESETS" ]; then
-  for preset in standard ptc cordis minimal; do
+  # conductor（指挥模式）与 standard 共用同一份 corum 编排替换，但语义不同：
+  # 主 Agent 的执行工具由 corum-agent 运行时裁剪（agent scope），preset 工具面
+  # 必须与 standard 完全一致（否则子 Agent 也失去执行工具）。下面额外断言二者
+  # 行面逐字节一致 + 代码常量与目录/显示名对账。
+  CONDUCTOR_SRC="$REPO_ROOT/packages/plugins/agent/corum-agent/src/conductor.ts"
+  if [ -f "$CONDUCTOR_SRC" ] && grep -qF "CONDUCTOR_PRESET_ID = 'conductor'" "$CONDUCTOR_SRC"; then
+    pass "指挥模式常量 CONDUCTOR_PRESET_ID = 'conductor'"
+  else
+    fail "conductor.ts 缺 CONDUCTOR_PRESET_ID = 'conductor'（指挥模式判定失效）"
+  fi
+  if [ -f "$VENDORED_PRESETS/conductor/agent.cordis.yml" ] && [ -f "$VENDORED_PRESETS/standard/agent.cordis.yml" ]; then
+    if [ "$(sed -n '/^- id: /,$p' "$VENDORED_PRESETS/conductor/agent.cordis.yml")"       = "$(sed -n '/^- id: /,$p' "$VENDORED_PRESETS/standard/agent.cordis.yml")" ]; then
+      pass "指挥模式工具面与标准模式逐行一致（裁剪只在运行时 agent scope）"
+    else
+      fail "指挥模式 agent.cordis.yml 行面与标准模式不一致——preset 裁行会连子 Agent 一起裁掉"
+    fi
+    if grep -qF 'name: 指挥模式' "$VENDORED_PRESETS/conductor/preset.yml" \
+      && grep -qF "CONDUCTOR_MODE_LABEL = '指挥模式'" "$CONDUCTOR_SRC"; then
+      pass "指挥模式显示名（preset.yml ↔ 代码常量）一致"
+    else
+      fail "指挥模式显示名漂移（preset.yml name 与 CONDUCTOR_MODE_LABEL 必须同为「指挥模式」）"
+    fi
+  else
+    fail "缺 shipped-presets/official/conductor（指挥模式基准 preset）"
+  fi
+  for preset in standard ptc cordis minimal conductor; do
     vendored="$VENDORED_PRESETS/$preset/agent.cordis.yml"
     if [ ! -f "$vendored" ]; then
       fail "shipped-presets/official/$preset/agent.cordis.yml 缺失"
@@ -683,7 +708,7 @@ if [ -d "$VENDORED_PRESETS" ]; then
   for stale in "$VENDORED_PRESETS"/*/; do
     [ -d "$stale" ] || continue
     case "$(basename "$stale")" in
-      standard|ptc|cordis|minimal) ;;
+      standard|ptc|cordis|minimal|conductor) ;;
       *) fail "shipped-presets/official/$(basename "$stale") 不是官方 preset id（改名残留会让 agent-presets 挂载失败）" ;;
     esac
   done

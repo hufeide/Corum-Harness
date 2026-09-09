@@ -1,0 +1,3 @@
+name: 指挥模式
+description: 只思考、规划与裁决的指挥者：主 Agent 的执行工具被机制裁掉，实现与调研全部派给子 Agent（单发 subagent / 只读 subagent_research / 并行 orchestrate），由主 Agent 最终验收。
+order: 2

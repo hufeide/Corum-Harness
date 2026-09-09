@@ -23,6 +23,7 @@
   "dependencies": {
     "@corum/corum-api-remotes": "workspace:*",
     "@corum/corum-mcp-manager": "workspace:*",
+    "@corum/corum-orchestration": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.3-alpha.1",
     "@deepseek-ai/dsh-agent-default-model": "^0.1.3-alpha.1",

@@ -17,6 +17,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-scope": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.3-alpha.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

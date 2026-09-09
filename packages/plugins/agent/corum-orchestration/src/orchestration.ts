@@ -26,6 +26,8 @@ import path from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { scopeOf } from '@deepseek-ai/dsh-scope'
+import type {} from '@deepseek-ai/dsh-tools'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
@@ -233,6 +235,24 @@ export function corumResearchToolFilter(
     ...toolFilter?.allow !== undefined ? { allow: toolFilter.allow } : {},
     deny: [...new Set([...(toolFilter?.deny ?? []), ...corumWriteToolsForPlatform()])],
   }
+}
+
+/**
+ * fork（corum）：某个 scope 当前**可见**的全局工具名集合——`tools.restrict()` 的合法
+ * 名字面。
+ *
+ * `dsh-tools` 的 `restrict()` 按「该 scope 的 known names」校验（未知名 fail-loud），而
+ * preset 常驻层注册的工具属于该 scope 的祖先层：只有 `scopeOf(ctx)` + `schemas(scope)`
+ * 这一对才能看到它们。任何「机制按名字裁工具/追加 deny」的调用点都应先过这里
+ * （`corumNarrowDenyFilter` 的 `known` 参数即本函数返回值）。
+ *
+ * 注意：返回的是**可见**名（已应用链上既有 restriction）——它一定是 known 的子集，用作
+ * deny 收敛只会多丢「本来就不存在/已被裁掉」的名字，不会漏掉真实存在的工具。
+ * @param ctx - 目标 Agent 的 scoped 上下文（`agent.ctx` / agent scope 的创建窗口）。
+ * @returns 该 scope 可见的工具名（省略 scope 时退化为全局视图，调用方应始终传 scoped ctx）。
+ */
+export function corumVisibleToolNames(ctx: Context): ReadonlySet<string> {
+  return new Set(ctx.tools.schemas(scopeOf(ctx)).map(schema => schema.name))
 }
 
 /**

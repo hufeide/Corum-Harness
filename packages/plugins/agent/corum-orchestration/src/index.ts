@@ -58,6 +58,7 @@ export {
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
+  corumVisibleToolNames,
   corumWorktreeHasUncommitted,
   corumWriteToolsForPlatform,
   corumOrchestrationDomainSpec,

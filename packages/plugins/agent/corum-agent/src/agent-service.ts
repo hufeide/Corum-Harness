@@ -46,6 +46,19 @@ import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, lo
 import type { PolishConfig } from './profile-store.ts'
 import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID, TASK_PROJECT_ID } from './builtin-profiles.ts'
 import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './event-projection.ts'
+// fork（corum）：指挥模式（基准模式 `conductor`）——主 Agent 运行时裁剪 + 人格段。
+import {
+  CONDUCTOR_PERSONA,
+  CONDUCTOR_PRESET_ID,
+  CONDUCTOR_SECTION,
+  CONDUCTOR_STALE_SECTIONS,
+  conductorExecutionDeny,
+  conductorModeOf,
+} from './conductor.ts'
+import type { ConductorMode } from './conductor.ts'
+// fork（corum）：机制 deny 的收敛口径与 scope 可见工具名——与 fork #10 同源
+// （docs/LESSONS.md §6.18：机制生成的名字必须按运行时注册面收敛）。
+import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
 
 /**
  * fork（corum）：官方 0.1.3 session-persistence 改 handle seam —— 顶层
@@ -333,6 +346,14 @@ export class CorumAgentService extends TypertRemoteService {
    * （见 {@link rememberPendingPermission}）——这样未发消息的会话不留磁盘记录。
    */
   private readonly pendingPermissions = new Map<string, string>()
+
+  /**
+   * 指挥模式在**主 Agent scope** 注册的效应撤销器（sessionId → dispose）。
+   * 只在内存：限制/人格段都是 scope 内的运行时注册，进程重启后由 setup 重新注册。
+   * blank 泳道切换 Agent 时先撤销旧注册再按新 preset 决定是否重注册
+   * （见 {@link applyConductorMode}）。
+   */
+  private readonly conductorEffects = new Map<string, () => void>()
 
   /**
    * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
@@ -800,7 +821,7 @@ export class CorumAgentService extends TypertRemoteService {
     const corumIds = new Set(corumProfiles.map(p => p.id))
     // 官方 preset 目录——只保留用户点名的四种模式（cordis/minimal/ptc/standard）；
     // shipped-presets 的 `code`（PTC 的桌面发货变体）与 corum 重名项/broken 过滤。
-    const OFFICIAL_MODE_IDS = new Set(['cordis', 'minimal', 'ptc', 'standard'])
+    const OFFICIAL_MODE_IDS = new Set([CONDUCTOR_PRESET_ID, 'cordis', 'minimal', 'ptc', 'standard'])
     const officialPresets = (await this.ctx.agentPresets.list())
       .filter(p => OFFICIAL_MODE_IDS.has(p.id) && p.broken === undefined && !corumIds.has(p.id))
     const defaultModel = this.ctx.agentDefaultModel.currentSelection()
@@ -1115,6 +1136,12 @@ export class CorumAgentService extends TypertRemoteService {
           if (!isOfficialPreset) this.writeAgentDir(profile, agentDirPath(profile.id))
           this.registerTaskSession(resolved.sessionId, resolved.cwd, profile.id)
           this.taskAgents.set(String(resolved.sessionId), { ...resolved, profileId: profile.id })
+          // fork（corum）：换绑后指挥模式口径必须跟随新 preset（旧限制先撤销）。
+          this.applyConductorMode(
+            String(resolved.sessionId),
+            resolved.agent.ctx,
+            conductorModeOf(profile.id, isOfficialPreset, profile.executionTools),
+          )
           this.ctx.logger.info(`corum-agent(task): reused lane preset switched — ${reuse} → ${profile.id}`)
         }
         const reuseSelection: ModelSelectionRef = {
@@ -1146,35 +1173,13 @@ export class CorumAgentService extends TypertRemoteService {
     const setup = async (agentCtx: Context): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, profile.id)
       installTaskModelSelection(agentCtx, selection)
-      // fork（corum）：orchestrator 模式（profile.executionTools === 'orchestrator'）——
-      // 主 Agent 只思考规划、子 Agent 全权执行。preset 已全量编译（子 Agent composeFrom
-      // parent 复用后仍全功能），这里用 tools.restrict 只作用于**主 Agent 自己的 scope**，
-      // 裁掉它亲手执行的工具（写/编辑/命令），保留只读（read/read_image/glob/grep）+
-      // 编排全家（subagent/orchestrate/send_message/list_agents）+ 规划辅助。
-      // 子 Agent join 全量 preset + 自己的 toolFilter 收窄，不受本 restrict 影响。
-      // （docs/plan/PLAN-deepseek-orchestrator-agent.md；路线 B——实机证实 preset 裁行
-      // 会让子 Agent 也没工具，必须运行时只裁主 Agent。）
-      if (profile.executionTools === 'orchestrator') {
-        // fork（corum）：deny 名单只能含已注册工具——tools.restrict 对未知名 fail-loud
-        // （实测 macOS 报错「names unknown global tool pwsh」，pwsh 仅 win32 装载）。
-        // 与 compile.ts / orchestration.ts 的 corumWriteToolsForPlatform 同款平台口径。
-        const deny = ['str_replace_editor', 'write', 'edit', 'bash',
-          ...process.platform === 'win32' ? ['pwsh'] : []]
-        agentCtx.tools.restrict({ deny })
-        // fork（corum）：裁掉工具后，官方 fs 插件注册的 `tool:write` / `tool:edit`
-        // 提示词段落还在（它们是 preset 常驻层的静态段，不随 restrict 消失），
-        // 于是主 Agent 的提示词里留着「Use the write tool …」这种它没有的工具指引
-        // （2026-09-09 提示词体检发现：模型可能因此尝试调用不存在的工具）。
-        // 系统提示词层是「内层覆盖外层」：在 Agent scope 注册同名空段即可覆盖 preset
-        // 常驻层的段落（子 Agent 走自己的 scope，仍看得到全局指引）。
-        for (const staleToolSection of ['tool:write', 'tool:edit']) {
-          agentCtx.systemPrompt.section({
-            name: staleToolSection,
-            order: agentCtx.systemPrompt.getSectionOrder('TOOL_WRITE'),
-            text: '',
-          })
-        }
-      }
+      // fork（corum）：指挥模式 / orchestrator profile——主 Agent 只思考规划、子 Agent
+      // 全权执行。实现与边界见 {@link applyConductorMode}。
+      this.applyConductorMode(
+        String(sessionId),
+        agentCtx,
+        conductorModeOf(profile.id, isOfficialPreset, profile.executionTools),
+      )
     }
     const agentOptions = { provider: effectiveModel.provider, model: effectiveModel.model }
 
@@ -1308,6 +1313,66 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * fork（corum）：指挥模式的运行时生效/撤销（2026-09-10 用户需求「把编排者固化为
+   * 与标准模式同级的基准模式」）。
+   *
+   * 为什么在**运行时**而不是 preset 里裁：preset 的 standing mount 是所有 join 它的
+   * Agent（含子 Agent）的父 scope，scope 链上的 restriction 会把子 Agent 一起裁掉
+   * （实机证实 preset 裁行 → 子 Agent 没工具，见 PLAN-deepseek-orchestrator-agent §3.2
+   * 路线 B）。因此这里只在**主 Agent 自己的 scope** 注册三件事：
+   *   ① `tools.restrict({deny})` 裁掉亲手执行工具（写/编辑/命令）——只读调查 + 编排全家
+   *      保留；子 Agent join 全量 preset + 自己的 toolFilter，不受影响；
+   *   ② 同名空段覆盖 preset 常驻层的 `tool:write` / `tool:edit` 指引（工具已裁掉，
+   *      提示词不能还教模型去用）；
+   *   ③ 指挥者角色段（`preset` 形态用独立段名 `corum:conductor` 追加在部署人格之后；
+   *      `profile` 形态的人格来自它自己的 preset）——**只给主 Agent**（子 Agent 若也被
+   *      告知「你绝不亲手执行」，会在没有编排工具的情况下空转；角色段留在 agent scope
+   *      正是为了不污染子 Agent）。
+   *
+   * deny 名单必须按该 scope **真实可见**的工具名收敛（`corumNarrowDenyFilter` +
+   * `corumVisibleToolNames`）——`tools.restrict()` 对未知名 fail-loud，而
+   * `str_replace_editor` 只在挂 str-replace-editor 行的 preset 里存在（官方标准模式
+   * 没有；2026-09-10 官方三模式全崩的根因，见 docs/LESSONS.md §6.18）。
+   *
+   * 幂等：同一 sessionId 再次调用先撤销上一次注册（blank 泳道切换 Agent 时口径必须
+   * 跟随新 preset，不能残留旧限制）。撤销器按 sessionId 存内存表，不落盘。
+   * @param sessionId - 泳道 id（撤销键）。
+   * @param agentCtx - 主 Agent 的 scoped 创建/存活上下文。
+   * @param mode - 生效形态（`off` / `profile` / `preset`，见 {@link conductorModeOf}）。
+   */
+  private applyConductorMode(sessionId: string, agentCtx: Context, mode: ConductorMode): void {
+    const previous = this.conductorEffects.get(sessionId)
+    if (previous !== undefined) {
+      this.conductorEffects.delete(sessionId)
+      previous()
+    }
+    if (mode === 'off') return
+    const disposers: Array<() => void> = []
+    const deny = corumNarrowDenyFilter(
+      { deny: conductorExecutionDeny() },
+      corumVisibleToolNames(agentCtx),
+    )
+    if (deny?.deny !== undefined && deny.deny.length > 0) disposers.push(agentCtx.tools.restrict({ deny: deny.deny }))
+    for (const staleToolSection of CONDUCTOR_STALE_SECTIONS) {
+      disposers.push(agentCtx.systemPrompt.section({
+        name: staleToolSection,
+        order: agentCtx.systemPrompt.getSectionOrder('TOOL_WRITE'),
+        text: '',
+      }))
+    }
+    // 基准模式（preset）追加指挥者角色段——部署人格（`deployment:persona`）保留；
+    // orchestrator profile 的人格来自它自己的 preset（persona 行），不再追加（否则重复）。
+    if (mode === 'preset') {
+      disposers.push(agentCtx.systemPrompt.section({
+        name: CONDUCTOR_SECTION,
+        order: agentCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA') + 1,
+        text: CONDUCTOR_PERSONA,
+      }))
+    }
+    this.conductorEffects.set(sessionId, () => { for (const dispose of disposers) dispose() })
+  }
+
+  /**
    * 按 sessionId 解析（或冷恢复）一个 task 会话的 Agent。
    * 已存活直接返回；未存活但已持久化则 resume（官方 session-persistence 冷恢复历史）。
    */
@@ -1320,17 +1385,22 @@ export class CorumAgentService extends TypertRemoteService {
     // 泳道经官方对象层可能已被激活（侧栏选中/官方 sessions 收录）——此时 ctx.agents
     // 已有活 agent，直接复用，**不能再 resume**（官方 agents.resume 拒绝 live 会话：
     // 「cannot prepare session while it is live」）。
+    // profileId 双源：corum profile 或官方 preset id（冷恢复官方模式泳道——
+    // 官方 preset 不绑定固定模型，跟随部署默认）。
+    const isOfficialPreset = meta.profileId !== TASK_PROFILE_ID && loadProfile(meta.profileId) === undefined
+    const profile = meta.profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(meta.profileId)
+    // fork（corum）：指挥模式口径（conductor preset 或 executionTools:'orchestrator'）——
+    // 下面三条恢复路径（复用活 agent / resume / 由官方层激活）都要按它决定是否
+    // 在主 Agent scope 注册裁剪+人格。
+    const conductor = conductorModeOf(meta.profileId, isOfficialPreset, profile?.executionTools)
     const sid0 = SessionId(sessionId)
     const activated = this.ctx.agents.get(sid0)
     if (activated !== undefined) {
       const entry = { agent: activated, sessionId: sid0, cwd: meta.cwd, profileId: meta.profileId }
       this.taskAgents.set(sessionId, entry)
+      this.applyConductorMode(sessionId, activated.ctx, conductor)
       return entry
     }
-    // profileId 双源：corum profile 或官方 preset id（冷恢复官方模式泳道——
-    // 官方 preset 不绑定固定模型，跟随部署默认）。
-    const isOfficialPreset = meta.profileId !== TASK_PROFILE_ID && loadProfile(meta.profileId) === undefined
-    const profile = meta.profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(meta.profileId)
     if (!isOfficialPreset && profile === undefined) return undefined
     const resumeModel = profile !== undefined && profile !== null
       ? profile.model
@@ -1346,6 +1416,7 @@ export class CorumAgentService extends TypertRemoteService {
     const setup = async (agentCtx: Context): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, meta.profileId)
       installTaskModelSelection(agentCtx, selection)
+      this.applyConductorMode(sessionId, agentCtx, conductor)
     }
     const agentOptions = { provider: resumeModel.provider, model: resumeModel.model }
     const sid = SessionId(sessionId)
@@ -1383,6 +1454,12 @@ export class CorumAgentService extends TypertRemoteService {
     if (!isOfficialPreset && profile !== undefined) this.writeAgentDir(profile, agentDirPath(profile.id))
     this.registerTaskSession(resolved.sessionId, resolved.cwd, profileId)
     this.taskAgents.set(String(sessionId), { ...resolved, profileId })
+    // fork（corum）：指挥模式口径随切换重算（切出指挥模式即撤销裁剪与人格段）。
+    this.applyConductorMode(
+      String(sessionId),
+      resolved.agent.ctx,
+      conductorModeOf(profileId, isOfficialPreset, profile?.executionTools),
+    )
     this.ctx.logger.info(`corum-agent(task): preset switched — ${sessionId} → ${profileId}`)
     return { ok: true }
   }

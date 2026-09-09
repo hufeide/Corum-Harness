@@ -1506,3 +1506,43 @@ fork 扩大非 worktree 会话的面。
 修复前的实机现象（同一路径）：每次 `subagent` 调用报
 `tools.restrict() names unknown global tool "str_replace_editor"`、三个会话各泄漏数条
 worktree。根因与修复见 §11.22 与 `docs/LESSONS.md` §6.18/§6.19。
+
+### 10.8 指挥模式（`conductor`）：编排者固化为基准模式（2026-09-10，用户需求）
+
+**需求**：用户「对于编排者 我希望固化为一个基准的模式和标准模式同等级，叫做指挥模式」——
+把原先只存在于 corum 自建 profile（`deepseek-orchestrator`，见 §11.18）的编排能力，做成
+与「标准模式」同级的**基准模式**。
+
+**为什么必须是「preset 数据 + 运行时语义」两半**：preset 的 standing mount 是所有 join
+它的 Agent（含子 Agent）的父 scope，scope 链上的 `tools.restrict` 会把子 Agent 一起裁掉
+（实机证实 preset 裁行 → 子 Agent 无工具，`PLAN-deepseek-orchestrator-agent` §3.2 路线 B）。
+故：
+
+| 半 | 位置 | 内容 |
+|---|---|---|
+| 工具面 | `packages/desktop/shipped-presets/official/conductor/agent.cordis.yml` | 与 `standard/agent.cordis.yml` **行面逐字节一致**（含 corum subagent 双实例、fork/workflow/ralph 退役）——子 Agent 才有全功能执行面 |
+| 显示元数据 | 同目录 `preset.yml` | `name: 指挥模式`、`order: 2`（排在标准模式之后）、描述 |
+| 主 Agent 语义 | `corum-agent/src/conductor.ts` + `agent-service.ts` | 按 preset id 在 **agent scope** 注册：执行工具 deny（按可见工具面收敛）+ 清空 `tool:write`/`tool:edit` 陈旧指引 + 追加角色段 `corum:conductor` |
+
+**三种生效形态**（`conductorModeOf(profileId, isOfficialPreset, executionTools)`）：
+
+| 形态 | 触发 | 主 Agent 裁剪 | 人格 |
+|---|---|---|---|
+| `preset` | 官方 preset id `conductor` | ✅ | 追加 `corum:conductor` 段（**保留** `deployment:persona` 部署人格） |
+| `profile` | corum profile `executionTools: 'orchestrator'`（旧入口，兼容） | ✅ | 由该 profile 编译出的 preset 自带（不重复追加） |
+| `off` | 其他一切 | ❌ | — |
+
+**四条生效路径**（否则会出现「切成指挥模式却没裁工具」或「切出后仍被裁」）：
+建会话 `setup` / 冷恢复 `resolveTaskAgent` 的 setup / 复用活 agent（官方层已激活）/ 切换
+Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 sessionId 存内存表
+（`conductorEffects`），再次调用先撤销再按新形态重注册。
+
+**角色段为什么不覆盖部署人格**：`deployment:persona` 承载部署事实（通过 Corum 桌面应用
+交互、checkout 位置、`{{model}}`/`{{cwd}}` 模板）——基准模式抹掉它会让 Agent 失去部署
+上下文。指挥者身份是**叠加的角色**，故用独立段名 `corum:conductor`（order =
+`DEPLOYMENT_PERSONA + 1`）。corum 旧 profile 形态不受影响（它的人格来自自己的 preset）。
+
+**验证**：`corum-agent/tests/conductor.spec.ts` 15 例（判定 / 平台 deny 口径 / 人格写作
+纪律 / preset 数据面与常量对账）；CDP 实机见 `docs/TODO.md` 2026-09-10「指挥模式」条。
+**守卫**：`verify-fork-drift.sh` §17 断言 conductor 与 standard 行面逐字节一致、常量
+`CONDUCTOR_PRESET_ID`/`CONDUCTOR_MODE_LABEL` 与目录/显示名对账。

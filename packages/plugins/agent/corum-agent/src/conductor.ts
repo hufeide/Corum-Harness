@@ -1,0 +1,121 @@
+/**
+ * fork（corum）：指挥模式（`conductor`）——把「编排者」固化为与「标准模式」同级的
+ * **基准模式**（2026-09-10 用户需求）。
+ *
+ * 为什么需要本文件：官方 preset 只能声明**组合**（挂哪些插件行），无法表达「主 Agent
+ * 裁掉执行工具、子 Agent 仍全功能」——因为 preset 的 standing mount 是所有 join 它的
+ * Agent（含子 Agent）的父 scope，scope 链上的 `tools.restrict` 会连子 Agent 一起裁掉
+ * （实测：preset 裁行会让子 Agent 也没工具，见 docs/plan/PLAN-deepseek-orchestrator-agent.md
+ * §3.2 路线 B）。因此指挥模式的语义分两半：
+ *
+ * 1. **工具面**（数据）：`packages/desktop/shipped-presets/official/conductor/`
+ *    —— 与标准模式同款工具面（子 Agent 全功能继承）；
+ * 2. **主 Agent 裁剪 + 人格**（运行时）：本文件提供常量，`agent-service.ts` 在建会话
+ *    /冷恢复/切换 Agent 时按 preset id 在 **agent scope** 注册 `tools.restrict` 与
+ *    `deployment:persona` 段——只作用于主 Agent，子 Agent 不受影响，且可随切换撤销。
+ *
+ * 判定口径：**preset id 是唯一事实源**（`conductor`）。不再新增「哪个 profile 是编排者」
+ * 的隐式约定——corum 自建 profile 的 `executionTools: 'orchestrator'` 仍兼容（既有用户
+ * 数据），但新模式不再走 profile 编译。
+ *
+ * @module @corum/corum-agent/conductor
+ */
+
+/** 指挥模式的 preset id（= `shipped-presets/official/conductor/` 目录名，守卫 §17 对账）。 */
+export const CONDUCTOR_PRESET_ID = 'conductor'
+
+/** 指挥模式在 UI 里的显示名（与 preset.yml 的 `name` 必须一致，守卫 §17 对账）。 */
+export const CONDUCTOR_MODE_LABEL = '指挥模式'
+
+/**
+ * 指挥模式裁掉的「亲手执行」工具。
+ *
+ * 平台口径与 `corumWriteToolsForPlatform()` 一致（`pwsh` 仅 win32 装载；`str_replace_editor`
+ * 只在挂 `str-replace-editor` 行的 preset 里存在）。这里**不**做未知名收敛——收敛由
+ * `@corum/corum-orchestration` 的 `corumNarrowDenyFilter` 在子 Agent 侧完成；主 Agent 侧的
+ * deny 必须按真实注册面过滤，见 {@link conductorExecutionDeny}。
+ */
+const CONDUCTOR_EXECUTION_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh'] as const
+
+/**
+ * 按平台过滤后的执行工具名单（未装载的名字不进 deny——`tools.restrict()` 对未知名
+ * fail-loud，见 docs/LESSONS.md §6.18）。
+ * @returns 本平台实际装载的写/执行工具名。
+ */
+export function conductorExecutionDeny(): string[] {
+  return CONDUCTOR_EXECUTION_TOOLS.filter(tool => process.platform === 'win32' || tool !== 'pwsh')
+}
+
+/**
+ * 主 Agent 裁掉执行工具后必须一并清空的**陈旧提示词段**。
+ *
+ * 官方 fs 插件注册的 `tool:write` / `tool:edit` 段落来自 preset 常驻层，不随
+ * `tools.restrict` 消失；不清空的话主 Agent 的提示词里留着「Use the write tool …」这种
+ * 它已经没有的工具指引（2026-09-09 提示词体检发现模型会因此尝试调用不存在的工具）。
+ * 系统提示词层是「内层覆盖外层」：在 Agent scope 注册同名空段即可覆盖。
+ */
+export const CONDUCTOR_STALE_SECTIONS = ['tool:write', 'tool:edit'] as const
+
+/**
+ * 指挥模式人格段（`deployment:persona`）。
+ *
+ * 写作纪律（docs/PROMPT-INVENTORY.md §1）：人格段只讲「我是谁 / 怎么干」，**不重复机制
+ * 事实**——隔离触发条件、模型锁、声明式验收、结果回传形态都由 `corum-tool-subagent` 的
+ * 机制段单一事实源负责。此前 orchestrator profile 的人格段因重复机制细节与机制段相悖
+ * （2026-09-09 已修），这里保持同一口径。
+ */
+export const CONDUCTOR_PERSONA = [
+  '你是「指挥模式」的指挥者——只思考、规划与裁决，不亲手执行的 Agent。',
+  '',
+  '铁律：你绝不亲手写代码、改文件、跑命令。机制已裁掉你的执行工具：你物理上无法 write / edit / bash，',
+  '这不是限制，而是这个模式的工作方式。',
+  '',
+  '工作循环：',
+  '1. 理解：用只读工具（read / glob / grep）读懂目标与现场，看懂代码结构与调用关系。',
+  '2. 拆解：把目标拆成彼此独立、可并行的子任务；每个子任务都要自包含（子 Agent 看不到本次对话）。',
+  '3. 派活：单个聚焦任务用 subagent；只读调研（看懂某模块 / 追踪调用 / 回答问题）用 subagent_research；',
+  '   多个独立任务可并行时用 orchestrate 一次 fan-out。实现、修改、调研一律交给子 Agent，绝不自己做。',
+  '4. 裁决：子 Agent 完成后，你基于原始目标做最终验收——机制只挡「声明的失败」，功能对错由你裁决；',
+  '   不通过就指出问题再派一轮，通过才向用户汇报。',
+  '',
+  '子 Agent 的产出会经工具结果或通知回到你这里，你读它们继续思考、确认与生成。',
+  '模型路由由机制锁定，你无需（也无法）为子 Agent 选模型。',
+].join('\n')
+
+/**
+ * 指挥模式的三种生效形态。
+ *
+ * - `preset`：基准模式 `conductor`（官方 preset 目录，无 corum profile 实体）——主 Agent
+ *   裁执行工具 + 追加指挥者角色段；**保留**部署人格（「你通过 Corum 桌面应用与用户交互」
+ *   等信息是部署事实，基准模式不该抹掉）。
+ * - `profile`：corum 自建 profile 的 `executionTools: 'orchestrator'`（2026-09-09 的旧
+ *   入口，兼容既有用户数据）——主 Agent 裁执行工具；人格由该 profile 编译出的 preset
+ *   自带（persona 行已替换部署人格），故这里**不**再追加角色段（否则两段人格重复）。
+ * - `off`：普通模式。
+ */
+export type ConductorMode = 'off' | 'profile' | 'preset'
+
+/**
+ * 该 profile / preset 应按哪种指挥模式形态生效。
+ * @param profileId - 本次会话的 profile / preset id。
+ * @param isOfficialPreset - 该 id 是否为官方 preset（`loadProfile` 未命中）。
+ * @param executionTools - corum profile 的执行工具策略（官方 preset 恒 undefined）。
+ * @returns 生效形态（见 {@link ConductorMode}）。
+ */
+export function conductorModeOf(
+  profileId: string,
+  isOfficialPreset: boolean,
+  executionTools?: 'full' | 'orchestrator',
+): ConductorMode {
+  if (executionTools === 'orchestrator') return 'profile'
+  if (isOfficialPreset && profileId === CONDUCTOR_PRESET_ID) return 'preset'
+  return 'off'
+}
+
+/**
+ * 指挥者角色段的段名（基准模式用：**追加**在部署人格之后，不覆盖部署人格）。
+ *
+ * 与 `deployment:persona` 分开是有意的：`deployment:persona` 承载部署事实（桌面应用交互
+ * 方式、checkout 位置、模型/工作目录模板），基准模式必须保留；指挥者身份是**叠加的角色**。
+ */
+export const CONDUCTOR_SECTION = 'corum:conductor'
