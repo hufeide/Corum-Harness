@@ -634,6 +634,30 @@ if [ -d "$VENDORED_PRESETS" ]; then
   else
     fail "builtin-profiles.ts 缺 conductor-lead 角色或未用 baseMode: 'conductor'"
   fi
+  # 全能/通用助手（2026-09-10 用户需求「岗位要有全能/通用助手，不能只限于编程」）：
+  # 岗位 + 新增「通用」维度必须在后端联合类型、后端校验、UI 下拉三处同步。
+  if grep -qF "id: 'general-assistant'" "$BUILTIN_SRC" && grep -qF "dimension: '通用'" "$BUILTIN_SRC"; then
+    pass "内置岗位「全能助手」（general-assistant，通用维度）存在"
+  else
+    fail "builtin-profiles.ts 缺 general-assistant 岗位或未用 dimension: '通用'"
+  fi
+  if grep -qE "^export type AgentDimension = .*'通用'" "$PROFILE_SRC" \
+    && grep -qE "v === '通用'" "$PROFILE_SRC" \
+    && grep -qE "AGENT_DIMENSIONS = \[[^]]*'通用'" "$UI_PRESET_SRC"; then
+    pass "「通用」维度在后端类型/校验/UI 下拉三处同步"
+  else
+    fail "「通用」维度三处未同步（AgentDimension / isValidAgentDimension / AGENT_DIMENSIONS）"
+  fi
+  # 只读搜索子 Agent 的指引必须与 orchestrate 可见性解耦（2026-09-10 用户需求
+  # 「每个 Agent 都配备了 search Agent，所有模式都应该提到这一点」）。
+  SUBAGENT_TOOL_SRC="$REPO_ROOT/packages/plugins/agent/corum-tool-subagent/src/index.ts"
+  if grep -qF 'hasResearch' "$SUBAGENT_TOOL_SRC" \
+    && grep -qF 'ANY read-only work' "$SUBAGENT_TOOL_SRC" \
+    && grep -qF 'subagent_research' "$SUBAGENT_TOOL_SRC"; then
+    pass "只读搜索子 Agent 指引与 orchestrate 可见性解耦（所有带 worker 的模式都会提到）"
+  else
+    fail "机制段缺「只读搜索子 Agent」指引或仍绑在 orchestrate 可见性上"
+  fi
   if grep -qF "'deepseek-orchestrator'" "$BUILTIN_SRC"; then
     if grep -qF "RETIRED_BUILTIN_ROLE_IDS" "$BUILTIN_SRC"; then
       pass "旧「Deepseek 编排者」已退役（仅在 RETIRED_BUILTIN_ROLE_IDS 里作清理项）"

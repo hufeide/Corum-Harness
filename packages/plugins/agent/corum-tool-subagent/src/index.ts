@@ -1386,23 +1386,34 @@ export function apply(ctx: Context, config: Config): void {
       })
     }
 
-    // fork（corum）：子 Agent 编排机制运用指引——让 Agent 主动判断何时用
-    // subagent / subagent_research / orchestrate，而非等用户显式点名。仅 worker
-    // 实例注入（research 只读实例无 orchestrate，注入会误导）；worker 实例的
-    // toolName 是 'subagent'。research 实例自己只需要「只读研究」一句话语义，
-    // 已由工具 description 承载，无需额外 section。
+    // fork（corum）：子 Agent 机制运用指引——让 Agent 主动判断何时用哪种委托形式
+    // （含只读搜索子 Agent），而非等用户显式点名。仅 worker 实例注入（research
+    // 只读实例无这些工具，注入会误导）；worker 实例的 toolName 是 'subagent'。
+    //
+    // 2026-09-10 用户要求「每个 Agent 都配备了 search Agent，所有模式都应该提到
+    // 这一点，让 LLM 灵活指派」：只读搜索子 Agent 的指引**不再依赖 orchestrate
+    // 可见性**——只要 worker 实例可见就注入；orchestrate 段落按可见性条件拼接
+    // （PTC 模式经 run_code SDK 呈现，同样可见）。
     if (!corumReadonlyResearch) {
       runtimeCtx.systemPrompt.section({
         name: 'corum:subagent-orchestration',
         order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 1,
-        text: context => mounted === undefined || runtimeCtx.tools.get('orchestrate', context.scope) === undefined
-          ? ''
-          : [
-              `${corumPtcPrefix(context.scope)}You have a subagent orchestration capability. Use it PROACTIVELY — do not wait for the user to name a tool.`,
-              '',
-              'Choose the right delegation form by the shape of the work:',
-              '- ONE focused, self-contained subtask (an implementation, a scoped analysis) → call `subagent`.',
-              '- A READ-ONLY investigation (review code, trace a call path, summarize a module, answer "how does X work") → call `subagent_research`. It is pre-denied all write tools, so it is safe for exploration and cannot modify the repo.',
+        text: context => {
+          if (mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined) return ''
+          const hasOrchestrate = runtimeCtx.tools.get('orchestrate', context.scope) !== undefined
+          const hasResearch = runtimeCtx.tools.get('subagent_research', context.scope) !== undefined
+          if (!hasOrchestrate && !hasResearch) return ''
+          const lines = [
+            `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
+            '',
+            'Choose the right delegation form by the shape of the work:',
+            '- ONE focused, self-contained subtask (an implementation, a scoped analysis) → call `subagent`.',
+          ]
+          if (hasResearch) {
+            lines.push('- ANY read-only work — searching the codebase, reading files, tracing a call path, summarizing a module, gathering facts, answering "how does X work" → call `subagent_research`. This read-only child is pre-denied every write tool, so it can never modify the repo: delegate exploration to it freely instead of spending your own context, and fan out several such searches when you need answers from different angles.')
+          }
+          if (hasOrchestrate) {
+            lines.push(
               '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
@@ -1410,9 +1421,17 @@ export function apply(ctx: Context, config: Config): void {
               '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Set `merge.autoIntegrate: true` to merge+commit the isolated branches after all checks pass, or false to only report and decide yourself.',
               '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
+            )
+          } else {
+            lines.push(
               '',
-              'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.',
-            ].join('\n'),
+              'How the mechanism works (rely on it, do not re-implement):',
+              '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
+            )
+          }
+          lines.push('', 'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.')
+          return lines.join('\n')
+        },
       })
     }
   }

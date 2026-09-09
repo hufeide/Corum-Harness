@@ -58,7 +58,7 @@ interface ParallelWorkDraft {
   integrateChecks?: string[]
 }
 
-const AGENT_DIMENSIONS = ['研发', '产品', '设计', '市场', '自媒体', '创作'] as const
+const AGENT_DIMENSIONS = ['研发', '产品', '设计', '市场', '自媒体', '创作', '通用'] as const
 
 /** 按 prompt 生成「擅长什么」摘要（取首行，去 markdown 标记）。 */
 function promptToMotto(prompt: string): string {

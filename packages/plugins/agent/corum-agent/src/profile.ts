@@ -94,8 +94,8 @@ export interface ParallelWorkPolicy {
   integrateChecks?: string[]
 }
 
-/** Agent 岗位维度（名片筛选维度）。 */
-export type AgentDimension = '研发' | '产品' | '设计' | '市场' | '自媒体' | '创作'
+/** Agent 岗位维度（名片筛选维度；`通用` = 不限编程/跨领域岗位，2026-09-10 新增）。 */
+export type AgentDimension = '研发' | '产品' | '设计' | '市场' | '自媒体' | '创作' | '通用'
 
 /** 工作场景人格预设。 */
 export type PersonaPreset =
@@ -172,5 +172,5 @@ export function isValidProfileId(id: string): boolean {
 
 /** 校验岗位维度值（可选；不合法值在 saveProfile 处丢弃）。 */
 export function isValidAgentDimension(v: string): v is AgentDimension {
-  return v === '研发' || v === '产品' || v === '设计' || v === '市场' || v === '自媒体' || v === '创作'
+  return v === '研发' || v === '产品' || v === '设计' || v === '市场' || v === '自媒体' || v === '创作' || v === '通用'
 }

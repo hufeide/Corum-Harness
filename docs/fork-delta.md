@@ -1542,6 +1542,18 @@ Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 
 上下文。指挥者身份是**叠加的角色**，故用独立段名 `corum:conductor`（order =
 `DEPLOYMENT_PERSONA + 1`）。corum 旧 profile 形态不受影响（它的人格来自自己的 preset）。
 
+**2026-09-10 后续（用户三条）**：
+1. **指挥模式只是「主 Agent 只思考决策」，不是「必须用 orchestrate」**——`CONDUCTOR_PERSONA`
+   重写：新增「Delegation is your instrument, not a ritual」段落，按任务形状给最轻的委托
+   形式（只读搜索 → `subagent_research`、单点实现 → `subagent` 前台、可并行 → 后台 `subagent`
+   + `send_message`/`list_agents`、多个真正独立任务 → `orchestrate`、规划 → todo/goal），并
+   明确「never fan out just to look busy」。
+2. **只读搜索子 Agent 指引与 orchestrate 可见性解耦**（`corum-tool-subagent` 机制段）：
+   只要 worker 实例可见就注入「ANY read-only work … → `subagent_research`」，不再要求
+   `orchestrate` 同时可见（PTC 经 `run_code` SDK 同样可见）。
+3. **新增内置岗位「全能助手」**（`general-assistant`，维度「通用」）——见 §10.8 末表；
+   `AgentDimension` 增加 `'通用'`（后端联合类型 + 校验 + UI 下拉三处同步）。
+
 **「继承指挥模式」= 新增 `baseMode: 'conductor'`**（同日用户追加：「删除，然后继承指挥模式
 新建一个 Agent 角色」）：
 
