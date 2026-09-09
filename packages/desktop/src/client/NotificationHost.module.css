@@ -97,6 +97,49 @@
 }
 .btnX:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
 
+/* 收起态：右下角常驻 bell（design.pen `drawer-tab` cZ9D4 —— 28×52、左侧圆角 14、
+   贴右边缘、bell 18 + $state-error 未读数）。点击全部展开。 */
+.tab {
+  position: fixed;
+  right: 0;
+  bottom: 120px;
+  z-index: 9999;
+  width: 28px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border);
+  border-right: none;
+  border-radius: 14px 0 0 14px;
+  background: var(--corum-glass-1);
+  box-shadow: 0 6px 16px #0000004D;
+  backdrop-filter: blur(12px);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.tab:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+.tabIcon { flex: none; }
+.tabBadge {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-error-primary, #FF5C8A);
+  color: #FFFFFF;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 /* 降级：减少动画偏好 */
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }

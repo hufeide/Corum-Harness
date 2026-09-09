@@ -29,6 +29,11 @@ export interface CorumNotification {
   message?: string
   /** 创建时间戳（ms），相对时间显示用。 */
   createdAt: number
+  /**
+   * 已自动收起（design.pen `drawer-tab`：右下角 bell 常驻图标 + 未读数）。
+   * 由 NotificationHost 在 5s 未处理后置位；点击 bell 全部展开（清零）。
+   */
+  collapsed: boolean
 }
 
 /** 通知 store 的可订阅快照。 */
@@ -36,9 +41,13 @@ export interface NotificationStore {
   getSnapshot(): readonly CorumNotification[]
   subscribe(listener: () => void): () => void
   /** 发一条通知，返回其 id（供调用方后续 dismiss）。 */
-  notify(input: Omit<CorumNotification, 'id' | 'createdAt'> & { createdAt?: number }): string
+  notify(input: Omit<CorumNotification, 'id' | 'createdAt' | 'collapsed'> & { createdAt?: number }): string
   /** 关闭指定通知。 */
   dismiss(id: string): void
+  /** 收起一条通知（5s 未处理 → 右下角 bell）。 */
+  collapse(id: string): void
+  /** 展开全部已收起通知（点 bell）。 */
+  expandAll(): void
   /** 清空全部通知。 */
   clear(): void
 }
@@ -69,6 +78,7 @@ export function createNotificationStore(): NotificationStore {
         tone: input.tone ?? 'info',
         title: input.title,
         createdAt: input.createdAt ?? Date.now(),
+        collapsed: false,
         ...(input.message !== undefined ? { message: input.message } : {}),
       }
       items = [...items, next]
@@ -78,6 +88,16 @@ export function createNotificationStore(): NotificationStore {
     dismiss: (id) => {
       if (!items.some(n => n.id === id)) return
       items = items.filter(n => n.id !== id)
+      emit()
+    },
+    collapse: (id) => {
+      if (!items.some(n => n.id === id && !n.collapsed)) return
+      items = items.map(n => (n.id === id ? { ...n, collapsed: true } : n))
+      emit()
+    },
+    expandAll: () => {
+      if (!items.some(n => n.collapsed)) return
+      items = items.map(n => (n.collapsed ? { ...n, collapsed: false } : n))
       emit()
     },
     clear: () => {
