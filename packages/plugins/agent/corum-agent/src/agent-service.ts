@@ -1063,6 +1063,22 @@ export class CorumAgentService extends TypertRemoteService {
     const setup = async (agentCtx: Context): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, profile.id)
       installModelSelection(agentCtx, selection)
+      // fork（corum）：orchestrator 模式（profile.executionTools === 'orchestrator'）——
+      // 主 Agent 只思考规划、子 Agent 全权执行。preset 已全量编译（子 Agent composeFrom
+      // parent 复用后仍全功能），这里用 tools.restrict 只作用于**主 Agent 自己的 scope**，
+      // 裁掉它亲手执行的工具（写/编辑/命令），保留只读（read/read_image/glob/grep）+
+      // 编排全家（subagent/orchestrate/send_message/list_agents）+ 规划辅助。
+      // 子 Agent join 全量 preset + 自己的 toolFilter 收窄，不受本 restrict 影响。
+      // （docs/plan/PLAN-deepseek-orchestrator-agent.md；路线 B——实机证实 preset 裁行
+      // 会让子 Agent 也没工具，必须运行时只裁主 Agent。）
+      if (profile.executionTools === 'orchestrator') {
+        // fork（corum）：deny 名单只能含已注册工具——tools.restrict 对未知名 fail-loud
+        // （实测 macOS 报错「names unknown global tool pwsh」，pwsh 仅 win32 装载）。
+        // 与 compile.ts / orchestration.ts 的 corumWriteToolsForPlatform 同款平台口径。
+        const deny = ['str_replace_editor', 'write', 'edit', 'bash',
+          ...process.platform === 'win32' ? ['pwsh'] : []]
+        agentCtx.tools.restrict({ deny })
+      }
     }
     const agentOptions = { provider: effectiveModel.provider, model: effectiveModel.model }
 

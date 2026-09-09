@@ -149,6 +149,16 @@ interface BuiltinRoleSpec {
   dimension: NonNullable<AgentProfile['dimension']>
   baseMode: AgentProfile['baseMode']
   prompt: string
+  /** 主 Agent 执行工具策略（可选；'orchestrator' = 编排者模式，裁亲手执行工具）。 */
+  executionTools?: AgentProfile['executionTools']
+  /** 子 Agent 模型锁（可选；编排专用 Agent 用，锁到本地 deepseek 省费用）。 */
+  subagentModel?: AgentProfile['subagentModel']
+  /** 研究子 Agent 模型锁（可选；缺省同 subagentModel）。 */
+  researchModel?: AgentProfile['researchModel']
+  /** 并行开发策略（可选；编排专用 Agent 的隔离/合并策略）。 */
+  parallelWork?: AgentProfile['parallelWork']
+  /** 主 Agent 默认模型（可选；编排专用 Agent 指定本地模型，缺省用兜底 flash）。 */
+  model?: AgentProfile['model']
 }
 
 /** 预置角色清单（25 个；事实源 prompt 随版本演进幂等刷新）。 */
@@ -353,6 +363,43 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     baseMode: 'standard',
     prompt: '你是用户体验研究员，擅长用研方法（访谈/问卷/可用性测试/数据分析）洞察用户。工作方式：明确研究问题 → 选择合适方法并执行 → 分析定性/定量数据 → 提炼用户画像/痛点/机会点 → 用报告与证据驱动设计决策。严谨、客观、有洞察。',
   },
+  {
+    // fork（corum）：Deepseek 编排专用 Agent（2026-09-09 用户需求，
+    // docs/plan/PLAN-deepseek-orchestrator-agent.md）——主 Agent 极简只思考规划，
+    // 所有执行交给全功能子 Agent，充分发挥 orchestrate 编排增强提示词。
+    // baseMode 用 standard（非 minimal——官方 minimal 无 subagent/orchestrate 工具，
+    // 无法派活）；executionTools:'orchestrator' 让 compile 裁掉亲手执行工具；
+    // 子 Agent 模型锁到本地 deepseek（省费用）；maxDepth 收紧到 1（子 Agent 只执行）。
+    id: 'deepseek-orchestrator',
+    nickname: 'Deepseek 编排者',
+    title: '编排规划',
+    dimension: '研发',
+    baseMode: 'standard',
+    executionTools: 'orchestrator',
+    model: { provider: 'localhost', model: 'deepseek-v4-pro' },
+    subagentModel: { provider: 'localhost', model: 'deepseek-v4-flash' },
+    researchModel: { provider: 'localhost', model: 'deepseek-v4-flash' },
+    parallelWork: { isolation: 'write-tasks' },
+    prompt:
+      '你是 Deepseek 编排者——一个只负责思考、规划与裁决的编排 Agent。\n\n'
+      + '铁律：你绝不亲手执行任何实现、修改、删除或命令。你的工具面已被机制裁剪到只有'
+      + '编排（subagent / subagent_research / orchestrate / send_message / list_agents）、'
+      + '只读调查（glob / grep）与规划辅助——你物理上无法亲手写代码或跑命令，'
+      + '这不是限制，而是你的工作方式。\n\n'
+      + '你的工作循环：\n'
+      + '1. 理解：读懂用户目标与当前现场（用 glob / grep 定位文件，看懂代码结构）。\n'
+      + '2. 拆解：把目标拆成一组彼此独立、可并行的子任务。独立的实现/修改/调研一律交给'
+      + '子 Agent，绝不自己做。\n'
+      + '3. 派活：单个聚焦子任务用 subagent（worker 全功能，写任务自动 git worktree 隔离）；'
+      + '只读调研（看懂某模块 / 追踪调用 / 回答问题）用 subagent_research（只读安全）；'
+      + '多个独立子任务可并行时用 orchestrate（一次提交 fan-out，用 merge.verify 声明怎么'
+      + '验收这个仓库，autoIntegrate 决定全部通过后是否自动合并提交）。\n'
+      + '4. 裁决：子 Agent 全部完成后，你基于原始目标做最终验收——机制只挡「声明的失败」，'
+      + '功能对错由你裁决。不通过就指出问题再派一轮，通过才向用户汇报。\n\n'
+      + '子 Agent 的产出会经工具结果直接返回给你，你读取这些结果继续思考、确认与生成。'
+      + '模型路由由机制锁定，你无需（也无法）为子 Agent 选模型。工作区是 git 仓库时写任务'
+      + '自动隔离，不是 git 仓库时自动降级为不隔离，你无需干预。',
+  },
 ]
 
 /**
@@ -366,7 +413,14 @@ export function ensureBuiltinRoleProfiles(): void {
     const existing = loadProfile(spec.id)
     if (existing !== undefined) {
       // system profile：prompt/名片字段随版本演进幂等刷新（保留模型/能力配置）。
-      if (existing.trust === 'system' && existing.prompt !== spec.prompt) {
+      // fork（corum）：编排专用 Agent 的新字段（executionTools/模型锁/parallelWork）
+      // 也随版本幂等刷新——system profile 的这些机制字段以 spec 为事实源。
+      if (existing.trust === 'system' && (
+        existing.prompt !== spec.prompt
+        || existing.executionTools !== spec.executionTools
+        || existing.subagentModel?.model !== spec.subagentModel?.model
+        || existing.researchModel?.model !== spec.researchModel?.model
+      )) {
         saveProfile({
           ...existing,
           nickname: spec.nickname,
@@ -374,6 +428,11 @@ export function ensureBuiltinRoleProfiles(): void {
           dimension: spec.dimension,
           baseMode: spec.baseMode,
           prompt: spec.prompt,
+          ...(spec.executionTools !== undefined ? { executionTools: spec.executionTools } : {}),
+          ...(spec.subagentModel !== undefined ? { subagentModel: spec.subagentModel } : {}),
+          ...(spec.researchModel !== undefined ? { researchModel: spec.researchModel } : {}),
+          ...(spec.parallelWork !== undefined ? { parallelWork: spec.parallelWork } : {}),
+          ...(spec.model !== undefined ? { model: spec.model } : {}),
         })
       }
       continue
@@ -385,7 +444,13 @@ export function ensureBuiltinRoleProfiles(): void {
       dimension: spec.dimension,
       baseMode: spec.baseMode,
       prompt: spec.prompt,
-      model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      // fork（corum）：模型兜底——spec.model 优先（编排专用 Agent 指定本地模型），
+      // 否则沿用原 deepseek-official flash 兜底。
+      model: spec.model ?? { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      ...(spec.executionTools !== undefined ? { executionTools: spec.executionTools } : {}),
+      ...(spec.subagentModel !== undefined ? { subagentModel: spec.subagentModel } : {}),
+      ...(spec.researchModel !== undefined ? { researchModel: spec.researchModel } : {}),
+      ...(spec.parallelWork !== undefined ? { parallelWork: spec.parallelWork } : {}),
       skills: [],
       mcpServers: [],
       terminal: { mode: 'sandbox' },

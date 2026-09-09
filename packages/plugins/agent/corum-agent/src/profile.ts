@@ -131,6 +131,17 @@ export interface AgentProfile {
   researchModel?: ProfileModel
   /** 并行开发策略（可选；缺省 = write-tasks 语义由 fork #10 默认兜底）。 */
   parallelWork?: ParallelWorkPolicy
+  /**
+   * 主 Agent 执行工具策略（可选，缺省 'full'）。
+   * - 'full'：standard 全量工具（现状不变）。
+   * - 'orchestrator'：编排者模式——主 Agent 只留「编排（subagent/subagent_research/
+   *   orchestrate/send_message/list_agents）+ 只读调查（glob/grep）+ 规划辅助
+   *   （todo/ask_user/goal/jobs）」，编译时裁掉一切亲手执行工具（bash 命令、
+   *   文件写/编辑），主 Agent 物理上无法亲手实现，只能派子 Agent 干活。
+   *   用于「主 Agent 只思考规划、子 Agent 全权执行」的编排专用 Agent
+   *   （docs/plan/PLAN-deepseek-orchestrator-agent.md）。
+   */
+  executionTools?: 'full' | 'orchestrator'
   /** 技能绑定列表（引用全局 skill + pin 版本）。 */
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */

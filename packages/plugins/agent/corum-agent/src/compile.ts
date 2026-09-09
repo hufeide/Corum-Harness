@@ -82,7 +82,7 @@ export interface CompiledPreset {
  */
 function corumSubagentConfig(
   role: 'worker' | 'research',
-  profile: { subagentModel?: ProfileModel; researchModel?: ProfileModel; parallelWork?: ParallelWorkPolicy },
+  profile: { subagentModel?: ProfileModel; researchModel?: ProfileModel; parallelWork?: ParallelWorkPolicy; executionTools?: 'full' | 'orchestrator' },
   mcpDenyNames: readonly string[],
 ): Record<string, unknown> {
   const pw = profile.parallelWork
@@ -91,6 +91,12 @@ function corumSubagentConfig(
     toolName: role === 'worker' ? 'subagent' : 'subagent_research',
     modelSelectionSettings: false,
     backgroundMode: 'continuable',
+  }
+  // fork（corum）：orchestrator 模式收紧 worker 的 maxDepth 为 1——子 Agent 只执行、
+  // 不再派孙 Agent（编排职责完全收归主 Agent，避免多层嵌套失控 + 省 token）。
+  // （PLAN-deepseek-orchestrator-agent.md §6 决策：maxDepth 收紧到 1）
+  if (role === 'worker' && profile.executionTools === 'orchestrator') {
+    config.maxDepth = 1
   }
   // 模型锁（机制固化，设什么跑什么；research 缺省同 worker）。
   const model = role === 'worker' ? profile.subagentModel : (profile.researchModel ?? profile.subagentModel)
@@ -430,6 +436,12 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
         ...(isComplete ? { complete: true, includeRuntimeContext: false } : {}),
       },
     },
+    // fork（corum）：preset 恒全量编译（含执行工具行）——orchestrator 模式的「主 Agent
+    // 裁执行工具」**不能**在 preset 编译裁行实现：fork #9 applyChildComposition 让子 Agent
+    // composeFrom(parent.ctx) 复用父 preset，preset 裁了什么子 Agent 也没什么（实机暴露：
+    // 裁 filesystem/tool-fs 后子 Agent 也没写工具无法执行）。正确做法：preset 全量，
+    // 主 Agent 裁执行工具走运行时 tools.restrict 只作用于主 Agent scope（见
+    // agent-service.ts 的 orchestrator 分支），子 Agent join 全量 preset 仍全功能。
     ...standardRows(),
   ]
 
