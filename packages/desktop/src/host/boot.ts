@@ -53,6 +53,7 @@ import { resolveDesktopHome } from './home.ts'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
 import { CorumFsService } from './corum-fs.ts'
 import { CorumTerminalService } from './corum-terminal.ts'
+import { CorumGitService } from './corum-git.ts'
 
 /**
  * Resolve the desktop UI mode. The shell injects `CORUM_DESKTOP_MODE` per
@@ -405,6 +406,11 @@ export async function bootDesktop(): Promise<Context> {
       // 面板 xterm.js 的 node-pty 会话源（create/write/resize/poll/kill），
       // 与 corumFs 同一注册时机，api-gateway SRC 发现自动认领。
       new CorumTerminalService(hostCtx)
+      // 工作区 git 侦测/初始化 Host 半（Typert Remote，service 名 corumGit）：
+      // 新建工作区时侦测 git 仓库 + 按需初始化（子 Agent 编排隔离/verify/integrate
+      // 的 git 依赖前置），同时注册 corum-workspace settings namespace（「新工作区
+      // 始终初始化 git」通用开关的持久化面）。与 corumFs 同一注册时机。
+      new CorumGitService(hostCtx)
       // ui-onboarding 命名空间注册：官方 ui-settings-general 的 host 半负责本
       // 注册，IDE overlay 禁用它后无人注册 → settings.describe 找不到 →
       // WelcomeNotice（内测声明）load/acknowledge 失败，弹窗卡「暂时无法保存

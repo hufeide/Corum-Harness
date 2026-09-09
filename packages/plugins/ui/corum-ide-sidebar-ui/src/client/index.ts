@@ -52,7 +52,7 @@ export interface SidebarSkeletonInjected {
 }
 
 /** Required services: the slots registry + the runtime object layer + the official connection rpc + the layout face (ctx.layout.openNewTaskForm)。 */
-export const inject = ['slots', 'sessions', 'workspaces', 'uiSession', 'connection', 'layout']
+export const inject = ['slots', 'sessions', 'workspaces', 'uiSession', 'connection', 'layout', 'settingsScope']
 
 /**
  * 调 host 的 corumAgent Typert remote（task 泳道端点，IDE combo 注入 corum-agent-dev 后可用）。
@@ -188,6 +188,27 @@ export function apply(ctx: ClientContext): void {
           },
           addWorkspace: async (path) => {
             await ctx.workspaces.create({ path })
+          },
+          // fork（corum）：工作区 git 侦测/初始化（2026-09-09 用户需求）——新建
+          // 工作区时侦测 git 仓库，没有则询问初始化（子 Agent 编排隔离等 git 依赖
+          // 能力的前置）。调 host corumGit Remote，与 directoryPicker 同一 connection.rpc
+          // 通道（不经 fiber remote 命名空间代理，PROGRESS §4 同款坑规避）。
+          gitWorkspaceStatus: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumGit/status', { args: { path } })
+            if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+            return (result.value as { isRepo: boolean }).isRepo
+          },
+          gitWorkspaceInit: async (path) => {
+            const result = await connection.rpc.call('/api', 'corumGit/init', { args: { path } })
+            if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+            return result.value as { initialized: boolean; alreadyRepo: boolean }
+          },
+          // fork（corum）：读「新工作区始终初始化 git」开关（corum-workspace.autoInitGit）。
+          // 默认 true（开关开=始终初始化免打扰）；用户显式关后才在添加工作区时逐次询问。
+          autoInitGitEnabled: () => {
+            const scope = (ctx as unknown as { settingsScope: { bind: (spec: { namespace: string }) => { getSnapshot: () => { value: { autoInitGit?: boolean } | undefined } } } }).settingsScope
+            const value = scope.bind({ namespace: 'corum-workspace' }).getSnapshot().value
+            return value?.autoInitGit ?? true
           },
           // 0.1.2：IWorkspaces.pickDirectory 移除，目录选择走 directoryPicker Remote。
           pickDirectory: pickDir,

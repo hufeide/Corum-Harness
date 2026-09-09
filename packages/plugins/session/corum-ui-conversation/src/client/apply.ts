@@ -381,6 +381,22 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             if (cwd === undefined || cwd === '') {
               const path = await pickDir()
               if (path === null || path === '') return
+              // fork（corum）：新建工作区的 git 初始化（2026-09-09 用户需求）。「始终
+              // 初始化 git」开关开时静默初始化（建任务流程不插入确认框打断）；开关关时
+              // 不在此初始化——隔离等 git 依赖能力由 spawnOne 的非 git 降级自动关闭
+              // （corum-tool-subagent corumIsGitRepo 判定），工作区照常可用。
+              const autoInit = (ctx as unknown as { settingsScope: { bind: (spec: { namespace: string }) => { getSnapshot: () => { value: { autoInitGit?: boolean } | undefined } } } }).settingsScope
+                .bind({ namespace: 'corum-workspace' }).getSnapshot().value?.autoInitGit ?? true
+              if (autoInit) {
+                try {
+                  const st = await connection.rpc.call('/api', 'corumGit/status', { args: { path } })
+                  if (st.ok && !(st.value as { isRepo: boolean }).isRepo) {
+                    await connection.rpc.call('/api', 'corumGit/init', { args: { path } })
+                  }
+                } catch {
+                  // git 初始化失败不阻断建任务（降级已兜底）；静默继续。
+                }
+              }
               await ctx.workspaces.create({ path })
               await startTaskLane(path)
               return
