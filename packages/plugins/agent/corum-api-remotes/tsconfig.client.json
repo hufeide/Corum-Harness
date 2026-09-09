@@ -1,0 +1,22 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ],
+    "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo"
+  },
+  "include": [
+    "src/client",
+    "src/corum-events.ts",
+    "src/remote-events.ts",
+    "src/types.ts"
+  ]
+}
