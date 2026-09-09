@@ -34,6 +34,8 @@ import {
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/corum-ui-base/client'
 import { IDE_GRID_SLOTS, IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
+// fork（corum）：开发者模式开关（同 bundle 设置域，localStorage + 同 bundle 事件）。
+import { useDeveloperMode } from './settings/developer-mode.ts'
 import css from './AppFrame.module.css'
 
 /**
@@ -356,6 +358,8 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
   const titleRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
+  // 开发者模式（同 bundle 设置域；关闭时轨迹按钮不渲染）。
+  const developerMode = useDeveloperMode()
   const title = sessionTitle || '新会话'
   // 当前会话的统计投影（session/list 行 projectionValues）——真实数据，替代硬编码。
   const projections = useSessions((s: SessionListState) => {
@@ -425,12 +429,16 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
         {detailOpen && <AgentStatusDetail title={title} projections={projections} anchor={sessionAnchor} />}
       </span>
       <span className={css.agentSpacer} />
-      <button
-        type="button" className={css.agentTrajBtn} title="轨迹" aria-label="打开轨迹视图"
-        onClick={() => { onOpenTrajectory() }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
-      </button>
+      {/* fork（corum）：轨迹按钮是开发者功能——仅在「设置 → 高级 → 开发者模式」
+          开启时可见（用户 2026-09-09 定调）。 */}
+      {developerMode && (
+        <button
+          type="button" className={css.agentTrajBtn} title="轨迹" aria-label="打开轨迹视图"
+          onClick={() => { onOpenTrajectory() }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+        </button>
+      )}
     </div>
   )
 }
@@ -763,6 +771,8 @@ export function IdeAppFrame({
   // 点亮编辑器，「终端」钮点亮终端。
   const DEFAULT_HIDDEN = ['corum.editor', 'corum.trajectory', 'corum.panel'] as const
   const [userShown, setUserShown] = useState<ReadonlySet<string>>(new Set())
+  // 开发者模式（同 bundle 设置域；与 AgentTitleBar 各自订阅，互不影响）。
+  const developerMode = useDeveloperMode()
   // 快捷按钮显示某区域：移出 userShown 隐藏集（显示）+ 保证树里 hidden=false。
   const showRegion = useCallback((slots: readonly GridSlot[]) => {
     setUserShown((prev) => {
@@ -801,6 +811,11 @@ export function IdeAppFrame({
       showRegion(slots)
     }
   }, [userShown, showRegion, saveIdeGrid])
+  // fork（corum）：开发者模式关闭时收起轨迹区域——按钮是唯一开关，按钮消失后
+  // 区域必须一起收起（否则用户无法关闭它）。
+  useEffect(() => {
+    if (!developerMode) onCloseSlot('corum.trajectory' as GridSlot)
+  }, [developerMode, onCloseSlot])
   const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor']) }, [toggleRegionVisibility])
   // fork（corum）：右上角轨迹按钮 → 右侧「轨迹」区域显隐开关（fork #12；2026-09-09
   // 用户定调：抽屉形态不好用，改为与编辑器/终端同构的独立区域）。用 toggle 而非

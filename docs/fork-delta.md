@@ -1172,7 +1172,7 @@ fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
 | 面 | 改动 |
 |---|---|
 | `cordis.ide.patch.yml` | 顶层 `- id: ui-trajectory disabled: true`（与 fork 互斥：槽声明唯一）+ insert 块 `- id: corum-ui-trajectory` |
-| `corum-ide-ui`（壳） | `IDE_GRID_SLOTS` + `registerSlot('corum.trajectory', {label:'轨迹', minWidth:320, visibility:'fixed'})` + 默认网格右列 `[编辑器, 轨迹, 终端]`；SlotMap + root children 声明 `'corum.trajectory': { kind:'single', scope:'session-maybe' }`；`DEFAULT_HIDDEN` 加该槽；右上角轨迹按钮 → `showRegion(['corum.trajectory'])` |
+| `corum-ide-ui`（壳） | `IDE_GRID_SLOTS` + `registerSlot('corum.trajectory', {label:'轨迹', minWidth:320, visibility:'fixed'})` + 默认网格右列 `[编辑器, 轨迹, 终端]`；SlotMap + root children 声明 `'corum.trajectory': { kind:'single', scope:'session-maybe' }`；`DEFAULT_HIDDEN` 加该槽；右上角轨迹按钮 → `toggleRegionVisibility(['corum.trajectory'])`，且**仅开发者模式可见**（`useDeveloperMode()`；关闭时按钮消失并自动收起区域） |
 | `corum-ui-trajectory`（fork） | `apply` 注册 `corum.trajectory` occupant（`session-maybe`：无当前会话时空态），声明 `conversation.trajectory.images` 子槽（ui-attachment 经 inject 跟进注册），按会话解析轨迹快照源 + duration store |
 | `corum-ui-chat` | **零改动**（抽屉方案的 DetailsPanel tabs / inject 面 / details 子槽全部回退；`details/trajectory-details.ts` 骨架一并删除） |
 
@@ -1197,3 +1197,8 @@ fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
   内部滚动容器 776/1578 可滚，文案全部走 trajectory 字典。
 - details 抽屉回到纯工具详情（无「轨迹」tab）；官方「对话 / 轨迹」tab 已随
   `ui-trajectory` 禁用而消失；console 全程零报错。
+- **开发者模式门禁**（2026-09-09 用户要求「轨迹按钮只在开发者选项开启时才看得到」）：
+  开发者模式关 → 按钮不渲染（会话已打开也不渲染）；开 → 按钮出现、点击点亮区域；
+  开着区域时再关 → 按钮消失**且区域自动收起**（按钮是唯一开关，避免区域无法关闭）。
+  开关读 `settings/developer-mode.ts` 的 `useDeveloperMode()`（同 bundle，localStorage
+  `corum.settings.developerMode` + 同 bundle 事件）。CDP 三条路径全部验证通过。
