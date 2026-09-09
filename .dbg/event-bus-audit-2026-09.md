@@ -24,12 +24,12 @@
 
 - `__corumMonacoEditor` window 全局可变单例（unmount 写 undefined，可同 bundle 内消解为模块 ref/context）。
 - `collapsedSlots` 模块级可变 Set（grid.ts，当前单写者幸存，同 __corumSidebarMode 前夜，建议收进 layout 服务）。
-- 3 处 `ctx.get('connection')` 未 inject 声明（corum-ui-conversation/apply.ts:260,449、corum-ui-chat/apply.ts、ide-statusbar-ui/index.ts）。
+- ~~3 处 `ctx.get('connection')` 未 inject 声明（corum-ui-conversation/apply.ts:260,449、corum-ui-chat/apply.ts、ide-statusbar-ui/index.ts）~~ → **2026-09-09 复核更正**：statusbar 已补 inject；剩余 = corum-ui-chat/apply.ts ×3 + corum-ui-conversation/apply.ts ×2（2 包 5 处）。
 - fork 包缺 tests（官方 `remote-events.host.spec.ts` 232 行可移植，corum 追加事件只有编译期校验无运行时守护）。
 - fork tsconfig 单文件合并双 face，削弱 host 面无 DOM 隔离（rebase 时考虑恢复官方双 tsconfig）。
 - `TaskRef.transferNote`/`laneLabel` 声明可选 vs 构造保证非空的文档级漂移。
 - artgen/ollama 长任务进度轮询（短生命周期，事件化收益低，非必须）。
-- `corumFs` 16 个 RPC 封装散在 desktop apply 闭包（上帝对象注入面，可收进 `corumFsClient` 服务）。
+- `corumFs` ~~16 个~~ **11 个**（2026-09-09 复核）RPC 封装散在 desktop apply 闭包（上帝对象注入面，可收进 `corumFsClient` 服务）。
 - fork drift 机器校验脚本（verify-fork-api-remotes.sh：cmp 核心文件 + 事件名交集检查）。
 
 ## 三期批次（用户拍板全做）
@@ -45,3 +45,50 @@
 - waterfall 形态 corum 事件——agent scope 映射验证点未解，无业务驱动。
 - terminal/file 事件写入 scheduler-events.jsonl——高频帧污染调度事实源。
 - 12 个 `corum/task|group` 死转发事件暂不从 allowlist 移除——保留作团队看板 UI 的消费预留（第一个真实业务消费者候选）。
+
+---
+
+## 复核（2026-09-09，逐项对代码）
+
+> 结论：**无「文档标已完成、代码其实没做」的情况**。一期/二期/三期全部 ✅ 项均在代码里
+> 核实到；P2 九项确实都仍未做（文档原本就标「记录，非本期」，不算误标）。仅两处**描述
+> 过期**（不是完成度误标）需更正。
+
+### 已完成项（逐项证据）
+
+| 项 | 代码证据 |
+|---|---|
+| 一期 fork 包核心逐字节一致 | `diff packages/plugins/agent/corum-api-remotes/src/{index,types}.ts /Users/kukucai/dsh/packages/api/remotes/src/` → **0 行差异**（remote-events.ts 为 allowlist 增量、corum-events.ts 为 corum 新增，符合台账） |
+| 一期/二期/三期事件接入 | `remote-events.ts` 转发事件 **34 条**；`corum-events.ts` 声明 **16 个 `corum/*` 事件**（12 领域 + terminal/output + file/changed + subagent/progress + worktree-ledger） |
+| 二期 window 全局迁移 | `__corumChatRuntime` / `__corumOpenSession` 在源码中**只剩注释**（实现已迁 `chatRuntime` cordis 服务）；`__corumSlotRegistry` 按 §1 例外保留（2 文件） |
+| 三-1 删 poll | host `corumTerminal/poll`、`corumFs/pollChanges` 端点已删（`corum-fs.ts` 仅存「三期删 pollChanges」注释）；BottomPanel/EditorColumn 的 poll 分支已删（仅注释） |
+| 三-1 观测面 | `__corumEventStats` 存在**且实测可用**：CDP 打开终端后 `corum/terminal/output {frames:3, listeners:1}` |
+| 三-2 CustomEvent 服务化 | `corum:open-in-editor` / `corum:open-plugin-manager` **无任何 dispatchEvent/addEventListener**（只剩注释）；实现走 `corumEditor` 服务 + grid actions 订阅面 |
+| 三-3 子 Agent 轮询 | `SubagentCard.tsx` 无 `setInterval`；进度走 `$on('corum/subagent/progress')`（4s 模型轮询注释标明已删） |
+| 三-4 台账刷新 | `docs/fork-delta.md` §8.1 已登记 alpha.2→0.1.3 漂移面 |
+| 明确不做四项 | 同 bundle CustomEvent（developer-mode-change / open-settings-section / workspace-root-changed）仍在；12 个 `corum/task|group` 事件**确认无消费者**（仅 allowlist + 声明，预留语义准确）；terminal/file 未进 `scheduler-events.jsonl` |
+
+### P2 九项：全部仍未做（与文档一致）
+
+`__corumMonacoEditor`（2 文件）｜`collapsedSlots` 模块级 Set（`corum-ui-base/src/client/grid.ts:148`）｜
+`ctx.get('connection')` 未 inject｜corum-api-remotes 无运行时测试（官方 `remote-events.host.spec.ts` 232 行确认存在可移植）｜
+fork 单 tsconfig（19 个 corum 包均 tsconfig×1）｜`transferNote?`/`laneLabel` 可选声明｜
+artgen + ollama 仍 setInterval 轮询｜`corumFs` RPC 仍在 desktop apply 闭包（无 `corumFsClient` 服务）｜无 fork drift 校验脚本（`scripts/` 下无 verify-fork-*）
+
+### 文档需更正的两处（描述过期，非完成度误标）
+
+1. **P2-3 位置清单过期**：原写「3 处：conversation:260,449 / chat / ide-statusbar」——
+   实际 `corum-ide-statusbar-ui` **已声明 `'connection'`**（不再违规）；
+   真实剩余违规 = `corum-ui-chat/src/client/apply.ts` **3 处** +
+   `corum-ui-conversation/src/client/apply.ts` **2 处**（2 包 5 处调用点）。
+2. **P2-8 数量过期**：原写「16 个 RPC 封装」——`desktop/src/client/index.ts` 里实际
+   `corumFs/*` **11 个不同方法**（absolutePath/delete/list/mkdir/read/readBinary/rename/
+   reveal/setRoot/watch/write）。
+
+### 一处实质遗留（文档已归入「后续可选」，但影响面值得重申）
+
+删 poll 同时删掉了**唯一断链补帧路径**：forwarded event 无 replay/generation 语义
+（`corum-api-remotes/src/client/index.ts` 无补帧实现），连接闪断窗口内的终端/文件帧
+永久丢失（终端 pty 若随 host 重启则本来就没了；纯 WS 抖动则出现输出空洞）。
+原审计只论证了「host 版本错配永不发生」，未覆盖断链场景——**SRC stream（或帧序号补拉）
+是这条的正解**，当前无业务驱动，暂不动。
