@@ -62,13 +62,15 @@
 - id: ui-goal
   disabled: true
 
-# 官方轨迹视图 ui-trajectory：**启用**（2026-09-07，0.1.3 轨迹功能）。它注册进
-# conversation.view 槽成为「对话 / 轨迹」选项卡（id 'trajectory'），corum-ui-chat
-# 的 ConversationSession 已渲染 tabs（tabs.length>1 时出现），点击即切轨迹时间线。
-# 与 ui-workflow-run/ui-deliverables/ui-goal 不同——那些面板硬 inject uiConversation
-# 且 IDE 用不到；ui-trajectory 是 conversation.view 的一个 view，数据通路走官方
-# uiConversation.binding(sessionId).target('trajectory')，泳道会话在官方对象层可用。
+# 官方轨迹视图 ui-trajectory：**禁用**（2026-09-09，fork #12 接管）。
+# 原形态是 conversation.view 槽的「对话 / 轨迹」选项卡；corum 定调的形态是
+# 「右上角轨迹按钮 → details 独立抽屉」（HANDOFF-0.1.3 §5），故由 fork 包
+# @corum/corum-ui-trajectory 接管 ctx 级注册（轨迹节点定义 / view 构建器 / 字典 /
+# uiSession hook），视图本体由 corum-ui-chat 的 DetailsPanel 在 details 抽屉里渲染。
+# 两行必须互斥：fork 与官方都注册 conversation.view + 声明
+# conversation.trajectory.images 槽（槽声明唯一），同时启用会撞「already declared」。
 - id: ui-trajectory
+  disabled: true
 
 # 官方 Agent 预设设置面板：IDE 模式由 @corum/corum-ide-ui 自建的 AgentPresetsSection
 # 替代（1:1 复刻 design.pen 设置中心）。官方 section 注册 id 'agent-presets'，
@@ -174,6 +176,14 @@
       name: '@corum/corum-ui-conversation'
     - id: corum-chat
       name: '@corum/corum-ui-chat'
+    # 轨迹视图 fork：@corum/corum-ui-trajectory（官方 ui-trajectory 定制版，
+    # fork #12，docs/fork-delta.md §14）——保留官方全部 ctx 级注册（轨迹节点定义 /
+    # conversation view 构建器 / 字典 / uiSession trajectory hook），**不注册**
+    # conversation.view（details 槽 kind:'single'，occupant 归 corum-ui-chat 的
+    # DetailsPanel，它在抽屉里渲染本包导出的 TrajectoryView）。上方顶层
+    # `- id: ui-trajectory disabled: true` 与之互斥（槽声明唯一）。
+    - id: corum-ui-trajectory
+      name: '@corum/corum-ui-trajectory'
     # 审批呈现层 fork：@corum/corum-ui-approval（fork 自官方 dsh-client-ui-approval）。
     # remote.$on('approval/request') answerer + uiSession.registerPendingInteraction 与
     # 官方一致（pendingInteractions 审批通路不变）；ApprovalPanel 挂 fork conversation 的

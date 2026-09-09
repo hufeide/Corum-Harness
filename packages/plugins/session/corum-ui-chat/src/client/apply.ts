@@ -16,7 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {
   ChatNodeTurnDataInjected, ChatScrollPosition, ChatViewInjected, DetailsInjected,
-  TurnTailOwnerProps,
+  DetailsViewMode, TurnTailOwnerProps,
 } from './contract/slots.ts'
 import type { ChatSnapshot } from './contract/snapshot.ts'
 import { EMPTY_CHAT_SNAPSHOT } from './contract/snapshot.ts'
@@ -28,6 +28,11 @@ import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
 import { createReviewSource, type ReviewSource } from './chat/review-source.ts'
 import { DetailsPanel } from './details/DetailsPanel.tsx'
+// fork（corum）：轨迹视图（fork #12 包）——组件由 DetailsPanel 渲染，duration store
+// 与空快照供 details 槽 inject 装配。
+import {
+  createTrajectoryDurationStore, EMPTY_TRAJECTORY_SNAPSHOT, TRAJECTORY_NS,
+} from '@corum/corum-ui-trajectory/view'
 import { en, NS, zh } from './locale.ts'
 import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'
 import { createChatStore } from './stores.ts'
@@ -68,6 +73,12 @@ declare module '@deepseek-ai/cordis' {
      * 保障、零运行时耦合；改面时两侧同步——注释锚定 corum-editor.ts 源）。
      */
     corumEditor: EditorOpenCapable
+    /**
+     * fork（corum）：轨迹抽屉视图状态（fork #12）——由**壳**（corum-ide-ui）
+     * provide（抽屉归壳），本包经 inject 消费（红线 4）。能力接口收窄（红线 3）：
+     * 只取 view/subscribe/showTool/showTrajectory 四个成员。
+     */
+    trajectoryDetails: TrajectoryDetailsCapable
   }
 }
 
@@ -80,6 +91,17 @@ interface EditorOpenCapable {
   openFile?: (absolutePath: string) => Promise<{ ok: boolean; error?: string }>
 }
 
+/**
+ * ctx.trajectoryDetails 的能力接口收窄（提供者=壳 corum-ide-ui；红线 2/3）：
+ * 本包只读 view / 订阅 / 两个切换动作，不耦合壳的实现包。
+ */
+interface TrajectoryDetailsCapable {
+  readonly view: DetailsViewMode
+  showTool: () => void
+  showTrajectory: () => void
+  subscribe: (listener: () => void) => () => void
+}
+
 /** Services required by the Chat target and its presentation registrations. */
 export const inject = [
   'slots', 'sessions', 'uiSession', 'uiConversation', 'layout', 'locale',
@@ -87,6 +109,8 @@ export const inject = [
   // 统一事件中心三-2：corum:open-in-editor 跨 bundle CustomEvent → corumEditor
   // cordis 服务（desktop client provide；红线 4 必须 inject 声明）。
   'corumEditor',
+  // fork（corum）：抽屉视图状态（壳 provide，fork #12；红线 4 inject 声明）。
+  'trajectoryDetails',
 ]
 
 /**
@@ -286,11 +310,56 @@ export function apply(ctx: Context): void {
   ctx.slots.inject('conversation.approval.detail', () =>
     ctx.slots.register({ name: 'conversation.approval.detail' }, ApprovalCommand))
 
+  // fork（corum）：轨迹 duration store（fork #12）——官方组件侧的
+  // 「实际耗时 / 预估」开关；抽屉视图状态本身归壳（ctx.trajectoryDetails）。
+  const trajectoryDuration = createTrajectoryDurationStore()
+
   ctx.slots.inject('details', () => ctx.slots.register({
     name: 'details',
     locale: NS,
-    children: { 'conversation.details.tool': { kind: 'single', scope: 'session' } },
+    children: {
+      'conversation.details.tool': { kind: 'single', scope: 'session' },
+      // fork（corum）：轨迹视图的图片渲染槽——官方 ui-trajectory 原把它挂在
+      // conversation.view 条目下；注册点随轨迹视图迁到 details（槽声明唯一，
+      // ui-attachment 经 inject 自动跟进注册）。
+      'conversation.trajectory.images': { kind: 'single', scope: 'session' },
+    },
     store: chatStore,
-    inject: (): DetailsInjected => ({ closeDetails: () => { ctx.layout.closeDetails() } }),
+    inject: (sessionId: SessionId): DetailsInjected => {
+      // fork（corum）：轨迹视图数据面（fork #12）。照官方 ui-trajectory 的
+      // conversation.view inject 逐项装配；details 槽没有对话区的 focus/inspect
+      // 请求面（viewRequest/completeViewRequest），由 DetailsPanel 传 undefined。
+      const session = ctx.sessions.binding(sessionId)?.session
+      const trajectory = ctx.uiConversation.binding(sessionId).target('trajectory')
+      return {
+        closeDetails: () => { ctx.layout.closeDetails() },
+        hooks: {
+          trajectory: {
+            getSnapshot: () => trajectory.getSnapshot() ?? EMPTY_TRAJECTORY_SNAPSHOT,
+            subscribe: listener => trajectory.subscribe(listener),
+          },
+          duration: trajectoryDuration,
+          // 抽屉视图模式（壳 provide 的 trajectoryDetails 服务；uSES 契约）。
+          detailsView: {
+            getSnapshot: () => ctx.trajectoryDetails.view,
+            subscribe: listener => ctx.trajectoryDetails.subscribe(listener),
+          },
+        },
+        showTool: () => { ctx.trajectoryDetails.showTool() },
+        showTrajectory: () => { ctx.trajectoryDetails.showTrajectory() },
+        loadOlder: async () => {
+          if (session === undefined) return false
+          const before = trajectory.getSnapshot()
+          await session.loadOlder()
+          return trajectory.getSnapshot() !== before
+        },
+        loadImage: Object.assign(
+          (attachment: ImageAttachmentRef) => ctx.uiConversation.imageUrl(sessionId, attachment),
+          { peek: (attachment: ImageAttachmentRef) => ctx.uiConversation.peekImageUrl(sessionId, attachment) },
+        ),
+        setActualDuration: (actualDuration: boolean) => { trajectoryDuration.set(actualDuration) },
+        trajectoryT: ctx.locale.bind(TRAJECTORY_NS),
+      }
+    },
   }, DetailsPanel))
 }

@@ -342,7 +342,7 @@ function AgentStatusDetail({ title, projections: p, anchor }: {
   )
 }
 
-function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor }: {
+function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor, onOpenTrajectory }: {
   sessionTitle?: string | undefined
   /** 当前会话 id（AppFrame 从 useSessions 取 current 下发；空态/blank 为 undefined）。 */
   currentSessionId?: string | undefined
@@ -350,6 +350,8 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
   useSessions: AppFrameProps['useSessions']
   /** 会话区在视口中的水平锚点（left/width），详情卡据此在会话区水平居中。 */
   sessionAnchor: { left: number; width: number }
+  /** fork（corum）：轨迹按钮 → details 抽屉轨迹视图（fork #12）。 */
+  onOpenTrajectory: () => void
 }) {
   const titleRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
@@ -423,7 +425,10 @@ function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnc
         {detailOpen && <AgentStatusDetail title={title} projections={projections} anchor={sessionAnchor} />}
       </span>
       <span className={css.agentSpacer} />
-      <button type="button" className={css.agentTrajBtn} title="轨迹">
+      <button
+        type="button" className={css.agentTrajBtn} title="轨迹" aria-label="打开轨迹视图"
+        onClick={() => { onOpenTrajectory() }}
+      >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
       </button>
     </div>
@@ -567,6 +572,12 @@ export type AppFrameProps =
      */
     openPluginManager: () => void
     /**
+     * fork（corum）：右上角轨迹按钮触发（fork #12）——经 root cordis 服务
+     * `ctx.trajectoryDetails.openTrajectory()`（chat 提供）：打开 details 抽屉
+     * 并切到轨迹视图。壳不持轨迹视图（业务面在 corum-ui-chat 的 DetailsPanel）。
+     */
+    openTrajectory: () => void
+    /**
      * 壳内部桥：根注册 inject 面下发的 attach 函数，把 AppFrame 的区域操作面
      * 经 attachGrid 挂进 LayoutController（AppFrame 是纯组件拿不到 cordis
      * 服务，靠这个 props 面反向连接；与 setTheme 同一注入模式）。
@@ -583,6 +594,7 @@ export function IdeAppFrame({
   useTheme,
   setTheme,
   openPluginManager: onOpenPluginManager,
+  openTrajectory: onOpenTrajectory,
   attachGridActions,
 }: AppFrameProps) {
   const panels = useStore(s => s)
@@ -1167,6 +1179,7 @@ export function IdeAppFrame({
               currentSessionId={detailsSession}
               useSessions={useSessions}
               sessionAnchor={{ left: convoBox.x, width: convoBox.width }}
+              onOpenTrajectory={onOpenTrajectory}
             />
           )}
         </div>
