@@ -201,6 +201,24 @@ export function corumWorktreeHasUncommitted(worktreePath: string): boolean {
 }
 
 /**
+ * fork（corum）：台账条目是否已**彻底失效**——worktree 目录与分支都不存在。
+ *
+ * 这类条目既不能集成（无分支可并）也不能再跑，却会在 `maxParallelChildren` 里永久
+ * 占用额度。来源是 2026-09-09 之前的强删清理（`worktree remove --force` + `branch -D`
+ * 之后条目仍留在台账/落盘记录里，见 docs/TODO.md 的 4 条 `active` 实证）。任一留存
+ * （目录在 / 分支在）都算活条目——分支还在就仍可集成。
+ */
+export function corumEntryDead(cwd: string, entry: Pick<CorumWorktreeEntry, 'path' | 'branch'>): boolean {
+  if (existsSync(entry.path)) return false
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${entry.branch}`], { cwd, stdio: 'pipe' })
+    return false
+  } catch {
+    return true
+  }
+}
+
+/**
  * fork（corum）：research 任务的 toolFilter——当任务声明只读（research=true）且
  * 实例 config 未显式 deny 全部写工具时，补 deny 全部写工具（与 subagent_research
  * 只读实例同款口径）。allow 保持 config 原值（只读任务不扩权）。
@@ -334,19 +352,23 @@ export function corumPendingIntegration(entries: CorumWorktreeEntry[]): CorumWor
 }
 
 /**
- * fork（corum）：subagent/end settle 联动——按 runId 精确翻转 active→settled；
- * runId 未登记时回退匹配唯一 active 条目（continuable 登记的是 childId）。
+ * fork（corum）：subagent/end settle 联动——按 runId/childId 精确翻转 active→settled。
+ *
+ * 2026-09-09 修复：条目在 spawn 后经 `bindRunId` 绑定 id（前台 one-shot 绑 run.id、
+ * continuable 绑 childId），故**先按 runId 再按 childId 精确匹配**——并行多个子 Agent
+ * 时各自精确命中，不再依赖「唯一 active 回退」（该回退在 ≥2 并行时必然失败，是
+ * docs/TODO.md「settle 联动未生效」的第二半）。回退分支保留给未绑定 id 的存量条目。
  */
 export function corumMarkSettled(
   entries: CorumWorktreeEntry[],
   settle: { runId?: string; childId?: string },
 ): boolean {
-  if (settle.runId !== undefined) {
-    const byRunId = entries.find(entry => entry.status === 'active' && entry.runId === settle.runId)
-    if (byRunId !== undefined) {
-      byRunId.status = 'settled'
-      return true
-    }
+  const match = (id: string | undefined): CorumWorktreeEntry | undefined =>
+    id === undefined ? undefined : entries.find(entry => entry.status === 'active' && entry.runId === id)
+  const byId = match(settle.runId) ?? match(settle.childId)
+  if (byId !== undefined) {
+    byId.status = 'settled'
+    return true
   }
   if (settle.childId === undefined) return false
   const candidates = entries.filter(entry => entry.status === 'active' && entry.runId === undefined)
@@ -549,9 +571,22 @@ export class CorumOrchestration extends Service {
     })
   }
 
-  /** 读某会话台账条目（不存在返回空数组，不自动建）。 */
+  /**
+   * 读某会话台账条目（不存在返回空数组，不自动建）。
+   *
+   * 2026-09-09：顺带剔除**彻底失效**的条目（worktree 与分支都不存在）——旧强删清理
+   * 遗留的 active 条目会永久占用 `maxParallelChildren` 额度（实证：本仓
+   * `corum-task-7cebf463` 的 3 条死条目使后续 spawn 只剩 1 个名额）。剔除后落盘。
+   */
   entriesOf(sessionId: string): CorumWorktreeEntry[] {
-    return this.ledger.get(sessionId) ?? []
+    const entries = this.ledger.get(sessionId) ?? []
+    const cwd = this.ledgerCwds.get(sessionId)
+    if (cwd === undefined || entries.length === 0) return entries
+    const alive = entries.filter(entry => !corumEntryDead(cwd, entry))
+    if (alive.length === entries.length) return entries
+    this.ledger.set(sessionId, alive)
+    this.persist(sessionId)
+    return alive
   }
 
   /** 登记一条 active 条目并记录父 cwd（worktree 创建成功后调用）。 */
@@ -608,9 +643,50 @@ export class CorumOrchestration extends Service {
     this.emitFrame(sessionId)
   }
 
-  /** subagent/end settle 联动（翻转成功时发射台账帧）。 */
-  settleFromEnd(info: SubagentRunEndInfo, parentAgent: Agent): boolean {
-    const sessionId = String(parentAgent.session.id)
+  /**
+   * fork（corum）：把 spawn 得到的 run/child id 绑定到台账条目（精确 settle 的前置）。
+   *
+   * 2026-09-09 修复（docs/TODO.md「台账 settle 联动未生效」）：worktree 条目在
+   * `subagents.start` 之前创建（request 需要 worktree 路径），此时 run id 未知；
+   * start 返回后立刻绑定，`subagent/end` 到达时即可按 id 精确匹配——并行多个子 Agent
+   * 时不再依赖「唯一 active 回退」（该回退在 ≥2 并行时必然失败）。
+   */
+  bindRunId(sessionId: string, slug: string, runId: string): void {
+    const entry = this.ledger.get(sessionId)?.find(item => item.slug === slug)
+    if (entry === undefined || entry.runId !== undefined) return
+    entry.runId = runId
+    this.persist(sessionId)
+  }
+
+  /**
+   * fork（corum）：解析 `subagent/end` 对应的父会话 id。
+   *
+   * 优先用 dispatch carrier 解出的父 Agent（调用方经 `carrierKeyOf(this)` 取）；
+   * carrier 缺失时用子会话 id 经 `agents` 服务反查 `session.header.parentSession`
+   * （与 corum-tool-subagent 模型选择路径同款用法）。拿不到就返回 undefined——
+   * 调用方静默跳过，绝不抛错（旧实现在此处抛错导致 settle 静默失效）。
+   */
+  private parentSessionIdOf(info: SubagentRunEndInfo, parentAgent?: Agent): string | undefined {
+    if (parentAgent !== undefined) return String(parentAgent.session.id)
+    // 红线 3：跨包类型用局部能力接口收窄，不耦合官方实现包。
+    const agents = this.ctx.get('agents') as
+      | { get: (id: unknown) => { session: { header: { parentSession?: unknown } } } | undefined }
+      | undefined
+    const parent = agents?.get(info.id)?.session.header.parentSession
+    return parent === undefined ? undefined : String(parent)
+  }
+
+  /**
+   * subagent/end settle 联动（翻转成功时发射台账帧）。
+   *
+   * 2026-09-09 修复：`parentAgent` 改为可选——fork #9 的 `subagent/end` 声明父 Agent 是
+   * dispatch 的 `this`（scope carrier）而非第二参数，监听端若拿不到就传 undefined；
+   * 此时用 `info.id`（子会话 id）经 agents 服务反查父会话（session.header.parentSession）
+   * 兜底，绝不抛错（旧实现 `parentAgent.session.id` 恒抛、被 emitter 吞掉 → settle 从未生效）。
+   */
+  settleFromEnd(info: SubagentRunEndInfo, parentAgent?: Agent): boolean {
+    const sessionId = this.parentSessionIdOf(info, parentAgent)
+    if (sessionId === undefined) return false
     const entries = this.ledger.get(sessionId)
     if (entries === undefined) return false
     const flipped = corumMarkSettled(entries, { runId: String(info.runId), childId: String(info.id) })

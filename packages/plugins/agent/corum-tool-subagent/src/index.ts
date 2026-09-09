@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
+import { carrierKeyOf, scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -450,6 +450,7 @@ export {
   corumCleanupWorktree,
   corumDetectIntegrateChecks,
   corumEffectiveToolFilter,
+  corumEntryDead,
   corumGit,
   corumGitHead,
   corumGitStatusPorcelain,
@@ -532,9 +533,17 @@ export function apply(ctx: Context, config: Config): void {
   // worktree 等 integrate）。as never 窄化原因：cordis Events 合并声明来自
   // @corum/corum-subagent 包，与本包 import 的官方 @deepseek-ai/dsh-subagent
   // 类型面同源但模块实例不同，类型系统认不出。
-  ctx.on('subagent/end' as never, ((info: SubagentRunEndInfo, parentAgent: Agent) => {
+  // fork（corum）：`subagent/end` 的父 Agent 是 dispatch 的 `this`（scope carrier），
+  // **不是第二参数**——fork #9 声明为 `'subagent/end'(this: Scoped<SubagentRuntime>,
+  // info)`，发射端只 `callback(info)`（lifecycle.ts）。此前写成 `(info, parentAgent)`
+  // 恒收 undefined，`settleFromEnd` 里 `parentAgent.session.id` 抛错被 emitter 的
+  // per-listener 容错吞掉 → 台账 settle 从未生效（docs/TODO.md，2026-09-09 修复）。
+  // 用普通函数取 `this`，经 carrierKeyOf 解出父 Agent（dsh-scope 与 corum-subagent
+  // 同实例：tsdown 已 external）。
+  ctx.on('subagent/end' as never, (function (this: unknown, info: SubagentRunEndInfo) {
     // fork（corum）：settle 联动已下沉编排器 service（台账实例字段 + 帧发射）。
-    orchestration.settleFromEnd(info, parentAgent)
+    const parent = carrierKeyOf(this) as Agent | undefined
+    orchestration.settleFromEnd(info, parent)
   }) as never, { global: true })
 
   // fork（corum）：全局设置的 RPC 面（「子 Agent」设置 section 读写；
@@ -766,6 +775,9 @@ export function apply(ctx: Context, config: Config): void {
       }
 
       // fork（corum）：worktree 创建（隔离触发时，父会话 header.cwd 下）。
+      // 条目先登记（run id 尚不可知），start 返回后立刻经 corumBindRun 绑定 id——
+      // 这是 settle 精确匹配（并行安全）的前置（docs/TODO.md 2026-09-09 修复）。
+      let corumEntry: { sessionId: string; slug: string } | undefined
       if (corumIsolate) {
         const parentCwd = parent.session.header.cwd ?? process.cwd()
         const sessionId = parent.session.id
@@ -785,10 +797,15 @@ export function apply(ctx: Context, config: Config): void {
           throw error
         }
         orchestration.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath })
+        corumEntry = { sessionId, slug }
         request.cwd = worktreePath
         request.toolFilter = corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs)
         const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is read-denied by the sandbox. Commit your changes on branch ${branch} inside this worktree; do not attempt to touch paths outside it.\n\n`
         request.prompt = [{ type: 'text', text: isolationNotice + args.prompt }] as ContentBlock[]
+      }
+      /** fork（corum）：把 run/child id 绑定到本次 spawn 的台账条目（无隔离时 no-op）。 */
+      const corumBindRun = (runId: string): void => {
+        if (corumEntry !== undefined) orchestration.bindRunId(corumEntry.sessionId, corumEntry.slug, runId)
       }
 
       const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
@@ -800,6 +817,8 @@ export function apply(ctx: Context, config: Config): void {
             request,
             signal: exec.signal,
           })
+          // continuable 登记的是 childId（settle 事件按 childId 精确匹配）。
+          corumBindRun(String(started.childId))
           return { kind: 'continuable' as const, subagentId: started.childId }
         }
         const jobs = runtimeCtx.get('jobs')
@@ -813,6 +832,8 @@ export function apply(ctx: Context, config: Config): void {
           run: () => {
             const controller = new AbortController()
             const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal })
+            // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
+            void start.then((startedRun) => { corumBindRun(String(startedRun.id)) }).catch(() => {})
             return {
               cancel: (reason?: string) => {
                 controller.abort(reason ?? 'background subagent task killed')
@@ -828,6 +849,7 @@ export function apply(ctx: Context, config: Config): void {
         ...request,
         signal: exec.signal,
       })
+      corumBindRun(String(run.id))
       return settleForegroundRun(run)
     }
 

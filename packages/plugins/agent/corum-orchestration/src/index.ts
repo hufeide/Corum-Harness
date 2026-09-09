@@ -44,6 +44,7 @@ export {
   corumCleanupWorktree,
   corumDetectIntegrateChecks,
   corumEffectiveToolFilter,
+  corumEntryDead,
   corumGit,
   corumGitHead,
   corumGitStatusPorcelain,

@@ -983,6 +983,45 @@ spawn 后绑定 `entry.runId` 精确 settle。
 
 ---
 
+### 11.20 台账 settle 联动修复 + 死条目剔除（2026-09-09）
+
+> 来源：§11.19 实机验证中顺带暴露（落盘台账条目在子 Agent 结束后仍为 `active`）。用户
+> 选定「继续」后落地。缺陷性质：台账状态不实 + `maxParallelChildren` 被已结束的子 Agent
+> 长期占用。
+
+**根因（两半）**：
+1. **监听签名错误**：`ctx.on('subagent/end', (info, parentAgent) => …)` —— fork #9 的声明
+   是 `'subagent/end'(this: Scoped<SubagentRuntime>, info: SubagentRunEndInfo)`，**父 Agent
+   是 dispatch 的 `this`（scope carrier）**，发射端只 `callback(info)`（`lifecycle.ts`）。
+   `parentAgent` 恒 `undefined` → `settleFromEnd` 抛错 → 被 emitter 的 per-listener 容错
+   吞掉 → settle 永不发生。
+2. **匹配面过窄**：条目先于 `subagents.start` 创建（request 需 worktree 路径），`runId`
+   恒空，只能靠「唯一 active 回退」——≥2 个并行隔离任务必然失败。
+
+**修复落点**：
+
+| 面 | 内容 |
+|---|---|
+| 监听 | 改普通函数取 `this`，`carrierKeyOf(this)`（`@deepseek-ai/dsh-scope`；tsdown 已 external，与 corum-subagent 同实例）解出父 Agent |
+| `settleFromEnd` | `parentAgent?` 可选 + 绝不抛错；缺失时 `info.id` 经 `agents` 服务反查 `session.header.parentSession` 兜底（局部能力接口收窄，红线 3） |
+| `bindRunId` | 新增 service 方法：spawn 返回后绑定 run/child id（前台绑 `run.id`、continuable 绑 `childId`、后台 job 在 start 解析时绑）；幂等 |
+| `corumMarkSettled` | 先按 runId 再按 childId 精确匹配（并行安全），回退分支仅留给未绑定 id 的存量条目 |
+| 死条目剔除 | 新增 `corumEntryDead(cwd, entry)`（worktree 目录与分支都不存在 = 彻底失效）；`entriesOf` 读取时剔除并落盘——旧强删清理遗留的 `active` 条目会永久占用并发额度 |
+
+**验证（三层 CDP + 单测）**：
+- 单测 **58/58**（新增 10 例：并行精确匹配 3 / bindRunId+carrier 兜底 4 / 死条目 3）。
+- **CDP 多轮**：scratch 仓库会话 3 轮 × 2 个并行隔离任务（无 autoIntegrate）→ 6 条台账
+  条目全部 `settled` 且各带独立 `runId`（修复前恒 `active`）；无 `limit reached`、console 零报错。
+- **CDP 死条目实证**：修复前 `corum-task-7cebf463`（3 条死条目）跑 2 任务 → 第 2 个撞
+  `parallel child limit reached`；prune 修复后同会话再跑 2 任务 → **两个都 done**，落盘
+  台账的死条目已剔除。
+- 两包 typecheck + build 绿；无 renderer 改动（chip 的数据面即台账条目，帧发射路径未改）。
+
+**遗留（未做，非阻塞）**：chip 的实机截图本轮未重拍（帧为瞬态、非回放；renderer 零改动）。
+「app 重启后旧死条目在下次 spawn 才被剔除」是设计如此（读取时 prune，不额外扫盘）。
+
+---
+
 ## 13. 待执行重构（2026-09-09 盘点定调，PLAN 已就绪，放新会话执行）
 
 > 来源：架构盘点（用户问「目前的功能分布在哪些插件上，切得是否合理」）后的两项

@@ -16,6 +16,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   corumDetectIntegrateChecks,
+  corumEntryDead,
   corumIntegratorPersona,
   corumEffectiveToolFilter,
   corumGit,
@@ -40,6 +41,19 @@ function entry(overrides: Partial<CorumWorktreeEntry> = {}): CorumWorktreeEntry 
     status: 'active',
     ...overrides,
   }
+}
+
+
+/** 建临时 git 仓库并预建分支——台账「活条目」判定需要分支真实存在（worktree 目录可不存在）。 */
+function repoWithBranch(name: string, branch: string): string {
+  const repo = join(scratch, name)
+  rmSync(repo, { recursive: true, force: true })
+  execFileSync('git', ['init', '-q', '-b', 'main', repo], { stdio: 'pipe' })
+  execFileSync('git', ['-C', repo, 'config', 'user.email', 'test@corum.local'], { stdio: 'pipe' })
+  execFileSync('git', ['-C', repo, 'config', 'user.name', 'corum-test'], { stdio: 'pipe' })
+  execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init'], { stdio: 'pipe' })
+  corumGit(repo, ['branch', branch])
+  return repo
 }
 
 describe('corumIsWriteTask — fork（corum）写工具判定', () => {
@@ -178,6 +192,107 @@ describe('corumMarkSettled — fork（corum）subagent/end settle 联动', () =>
   it('已非 active 的条目不再翻转', () => {
     const entries = [entry({ runId: 'run-2', status: 'settled' })]
     expect(corumMarkSettled(entries, { runId: 'run-2', childId: 'child-2' })).toBe(false)
+  })
+})
+
+describe('corumMarkSettled — fork（corum）并行精确匹配（2026-09-09 settle 修复）', () => {
+  it('按绑定的 runId 精确翻转，只动命中条目', () => {
+    const entries = [entry({ slug: 'wt-a', runId: 'run-1' }), entry({ slug: 'wt-b', runId: 'run-2' })]
+    expect(corumMarkSettled(entries, { runId: 'run-2', childId: 'child-2' })).toBe(true)
+    expect(entries[0].status).toBe('active')
+    expect(entries[1].status).toBe('settled')
+  })
+
+  it('按 childId 命中（continuable 绑定的就是 childId）', () => {
+    const entries = [entry({ slug: 'wt-a', runId: 'child-7' })]
+    expect(corumMarkSettled(entries, { runId: 'run-7', childId: 'child-7' })).toBe(true)
+    expect(entries[0].status).toBe('settled')
+  })
+
+  it('并行两条都未绑定时不误翻转（唯一 active 回退在 ≥2 并行时本就不成立）', () => {
+    const entries = [entry({ slug: 'wt-a' }), entry({ slug: 'wt-b' })]
+    expect(corumMarkSettled(entries, { runId: 'run-x', childId: 'child-x' })).toBe(false)
+    expect(entries.every(item => item.status === 'active')).toBe(true)
+  })
+})
+
+describe('CorumOrchestration — bindRunId + settleFromEnd（settle 修复）', () => {
+  it('绑定 runId 后 settleFromEnd 精确翻转（父 Agent 经 carrier 传入）', () => {
+    const repo = repoWithBranch('settle-repo-1', 'wt/wt-s1')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-settle-1'
+    orchestration.addActiveEntry(sessionId, repo, {
+      slug: 'wt-s1', branch: 'wt/wt-s1', path: join(repo, '.corum-worktrees', 'wt-s1'),
+    })
+    orchestration.bindRunId(sessionId, 'wt-s1', 'run-42')
+    // 旧实现：监听端把父 Agent 当第二参数收，恒 undefined → parentAgent.session.id
+    // 抛错被 emitter 吞掉，settle 从未生效（docs/TODO.md）。
+    const parent = { session: { id: sessionId } } as never
+    expect(orchestration.settleFromEnd({ runId: 'run-42', id: 'child-42' } as never, parent)).toBe(true)
+    expect(orchestration.entriesOf(sessionId)[0].status).toBe('settled')
+  })
+
+  it('bindRunId 幂等（已绑定的条目不被覆盖）', () => {
+    const repo = repoWithBranch('settle-repo-2', 'wt/wt-s2')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-settle-idem'
+    orchestration.addActiveEntry(sessionId, repo, {
+      slug: 'wt-s2', branch: 'wt/wt-s2', path: join(repo, '.corum-worktrees', 'wt-s2'),
+    })
+    orchestration.bindRunId(sessionId, 'wt-s2', 'run-first')
+    orchestration.bindRunId(sessionId, 'wt-s2', 'run-second')
+    expect(orchestration.entriesOf(sessionId)[0].runId).toBe('run-first')
+  })
+
+  it('carrier 缺失时经 agents 服务反查父会话（子会话 header.parentSession 兜底）', () => {
+    const ctx = new Context()
+    ctx.provide('agents', {
+      get: (id: unknown) => id === 'child-9'
+        ? { session: { header: { parentSession: 'spec-settle-2' } } }
+        : undefined,
+    })
+    const repo = repoWithBranch('settle-repo-3', 'wt/wt-s3')
+    const orchestration = new CorumOrchestration(ctx)
+    orchestration.addActiveEntry('spec-settle-2', repo, {
+      slug: 'wt-s3', branch: 'wt/wt-s3', path: join(repo, '.corum-worktrees', 'wt-s3'),
+    })
+    orchestration.bindRunId('spec-settle-2', 'wt-s3', 'run-9')
+    expect(orchestration.settleFromEnd({ runId: 'run-9', id: 'child-9' } as never)).toBe(true)
+    expect(orchestration.entriesOf('spec-settle-2')[0].status).toBe('settled')
+  })
+
+  it('解析不出父会话时静默返回 false（旧实现在此处抛错）', () => {
+    const orchestration = new CorumOrchestration(new Context())
+    expect(() => orchestration.settleFromEnd({ runId: 'r', id: 'c' } as never)).not.toThrow()
+    expect(orchestration.settleFromEnd({ runId: 'r', id: 'c' } as never)).toBe(false)
+  })
+})
+
+describe('corumEntryDead / entriesOf 死条目剔除（2026-09-09）', () => {
+  it('worktree 目录与分支都不存在 → 死条目', () => {
+    expect(corumEntryDead(scratch, { path: join(scratch, 'nope'), branch: 'wt/nope' })).toBe(true)
+  })
+
+  it('分支仍在（worktree 已回收）→ 活条目（仍可集成，不剔除）', () => {
+    const repo = join(scratch, 'dead-repo')
+    execFileSync('git', ['init', '-q', '-b', 'main', repo], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 'test@corum.local'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'corum-test'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init'], { stdio: 'pipe' })
+    corumGit(repo, ['branch', 'wt/alive'])
+    expect(corumEntryDead(repo, { path: join(repo, 'gone'), branch: 'wt/alive' })).toBe(false)
+    expect(corumEntryDead(repo, { path: join(repo, 'gone'), branch: 'wt/gone' })).toBe(true)
+  })
+
+  it('entriesOf 剔除死条目（旧强删遗留不再占用 maxParallelChildren 额度）', () => {
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-dead-1'
+    orchestration.addActiveEntry(sessionId, scratch, {
+      slug: 'wt-dead', branch: 'wt/wt-dead', path: join(scratch, 'gone'),
+    })
+    expect(orchestration._testLedger().get(sessionId)?.length).toBe(1)
+    expect(orchestration.entriesOf(sessionId)).toEqual([])
+    expect(orchestration._testLedger().get(sessionId)?.length).toBe(0)
   })
 })
 
