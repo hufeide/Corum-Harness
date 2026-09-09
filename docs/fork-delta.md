@@ -14,6 +14,7 @@
 >   **本章 §10/§11/§12 的文件台账与升级 runbook 仍有效**（fork
 >   包升级仍按 §5 runbook 执行），但「provider-only 挂载」「fork #10 工具隔离层」
 >   的架构形态不再作为实施基准。后续实施以新方案为准。
+> - 2026-09-09 增补：第 12 个 fork 包 `@corum/corum-ui-trajectory`（client 侧，fork 自官方 `@deepseek-ai/dsh-client-ui-trajectory`）登记于 **§14**——轨迹视图注册点从 conversation.view 迁到 details 抽屉。
 > - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
 
 ---
@@ -794,16 +795,44 @@ true }` 保留（空 realm 无害，移除 realm 隔离会连带改 delegation �
 **P-A · orchestrate 任务无子 Agent 卡片（用户反馈，可见性问题）**
 - 现象：调用 orchestrate 后，对话流里**不出现子 Agent 卡片**，用户无法看每个子 Agent
   的工作过程（只有 orchestrate 一张结果卡）。
-- 根因（已定位）：SubagentCard 由 `subagent-call` 节点渲染（`conversation-nodes/subagent.ts`），
-  数据源是 **`origin:'subagent'` 的独立 continuable 子会话**（kkc-desktop git 仓库那次的
-  后台 continuable 子 Agent 产生了独立会话目录，所以有卡片）。而 orchestrate 任务被
-  `run_in_background: task.background === true` 强制为**前台 one-shot**（fan-in 汇合要求，
-  index.ts:1010），前台 one-shot 子 Agent 是一次性运行、**不落 continuable 持久子会话** →
-  无 `subagent-call` 节点 → 无卡片。
+- 根因（精确定位，双重）：① SubagentCard 由 `subagent-call` 节点渲染
+  （`conversation-nodes/subagent.ts`），其 `isSubagentDelegationTool(name)`
+  （`contract/turn-process.ts:59`）**只认 `subagent` / `subagent_*`，不含 `orchestrate`**；
+  ② orchestrate 任务被 `run_in_background: task.background === true` 强制**前台 one-shot**
+  （fan-in 汇合要求），前台 one-shot 不落 continuable 持久子会话 → 也无 `subagent-call`
+  节点数据源。现状 orchestrate 的 presentCall/presentResult 是 `card:'generic'` 静态文本卡
+  （标题 + rawInput 任务标签 + 结果行），无进度、不可点进子 Agent。
 - 影响：用户看不到 orchestrate 各任务的执行细节，只有最终汇总。
-- 待解决方向（未实施）：orchestrate 的 presentCall/presentResult 已展示任务清单与成败，
-  但缺「点开看某任务子 Agent 完整轨迹」的能力；需评估是否为前台 one-shot 子运行也建
-  `subagent-call` 节点（或在其结果卡内嵌子轨迹入口）。
+
+**→ 设计已完成（2026-09-09，design.pen，待实施）**：
+- **产物**：`doc/UXDesign/design.pen` 组件库新增可复用组件 **`orchestrate-flow-card`**
+  （并行工作流卡）+ 3 状态形态（运行中 / 全部完成 / 部分失败）+ **goto 钻取交互**
+  （指向 hover → 过渡箭头 → 复用现有「子Agent会话视图」稿② hGy32）。
+- **卡片结构**（经多轮用户反馈定稿）：
+  - **head（折叠态起点行，恒定）**：layers 图标 +「编排工作流 · N 任务并行」+ 进度 chip
+    （青 running / 绿 done / 红 fail）+ **箭头（查看工作流详情）** + **展开/收起按钮**。
+    （注：曾有 card-start 起点卡，因与 head 重复已删——head 即折叠态起点。）
+  - **3 条并行支路**（真 `Promise.all` 并发，**无"待处理"串行语义**——3 任务同时启动全
+    running）：起点节点（青 halo）→ 主干 → 每支路 = 状态节点（done 绿 check / running 橙
+    双层 halo / fail 红 x）+ 状态连线（绿/橙/红）+ 任务卡（label + worktree/research 副信息
+    + 状态 chip + **goto 子会话按钮**）。
+  - **集成者子 Agent 卡（底部，串行汇总）**：git-merge 图标 +「集成者 · 合并+验证+提交」+
+    「全部并行任务完成后 · 串行启动」+ 状态 chip（待集成/已集成/未启动）+ goto。失败时正确
+    显示「存在失败任务 · 集成未启动」。
+  - **goto 钻取**：点支路箭头 → **复用现有「子Agent会话视图」**（浅色，`#5B21F5` 紫底返回
+    父会话条 + 只读消息流），**不新造卡片**（子 Agent 会话保持单一呈现；曾画深色卡片版已删）。
+- **实现路径（待实施）**：
+  1. `isSubagentDelegationTool`（turn-process.ts:59）纳入 `orchestrate`，或新建
+     `orchestrate-flow` 节点类型（定义于 `conversation-nodes/`），数据源 = orchestrate 调用的
+     tasks[] + 每任务的 spawn/settle/fail 实时事件。
+  2. 任务级进度事件源：orchestrate fan-out 的每个 spawnOne 的 run（start → settle/fail）
+     推送到卡片（参考 `corum/subagent/progress` 推送 + `corum/worktree-ledger` 帧的既有通道）。
+  3. goto 跳子会话桥：复用 `chatRuntimeRef.current?.openSession(childSessionId)`
+     （SubagentCard.tsx:243 已有）——orchestrate 任务虽是前台 one-shot，但子 Agent 会话仍有
+     sessionId 可跳（需确认 one-shot 子会话是否留可查的 session 摘要）。
+  4. 集成者节点状态 = integrate 调用的实时状态（待集成/运行/已集成/未启动）。
+- **待决策（实施前）**：orchestrate 前台 one-shot 任务的子 Agent **是否有可跳转的持久子会话**
+  （continuable 有，one-shot 待查）；若无，goto 改为「展开该任务的执行细节」而非跳独立会话。
 
 **P-B · 无 git 仓库时 `isolation:always` 整任务失败 → 已解决（2026-09-09 自动降级）**
 - 原现象：ai-lab（无 `.git`）下任务C（`isolation:always`）报 `fatal: not a git repository`，
@@ -1109,3 +1138,56 @@ WIP 的 `corum-git.ts` `this.logger`→`this.ctx.logger` 3 处，使 desktop typ
 在 AGENT 组；「插件管理/技能/MCP」在扩展组；无「其他」组；无「插件」入口；「插件管理」
 内三张配置卡 + 插件列表（含 `@corum/corum-orchestration`）渲染；「工作区」git 开关在
 通用组可读写（settings.mutate 落盘）；console 零错误。
+
+---
+
+## 14. 第 12 个 fork 包：`@corum/corum-ui-trajectory`（2026-09-09，轨迹按钮 → details 抽屉）
+
+> 来源：`docs/HANDOFF-0.1.3-upgrade.md` §5「唯一未完项」——轨迹功能形态从
+> conversation.view 的「对话 / 轨迹」tab 改为「右上角轨迹按钮 → details 独立抽屉」
+> （2026-09-07 用户定调）。交接文档的续做路径（在 details 槽手工装配官方
+> `TrajectoryView` 的 props）经核实有**框架硬约束**：官方组件内部调
+> `renderSlot('conversation.trajectory.images', …)`，而槽位系统规定一个槽只能被声明一次
+> （`ui-slots/src/index.ts:860`），该槽已被官方 ui-trajectory 在其 conversation.view
+> 条目下声明；且 `renderSlot` 对未声明键抛 `SlotOwnershipError`。据此用户拍板方案 C：
+> **fork 官方包、把注册点迁到 details 形态**。
+
+**包**：`packages/plugins/session/corum-ui-trajectory`（name `@corum/corum-ui-trajectory`，
+fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
+
+**差异面（38 文件 vs 官方 37 文件）**：
+
+| 分类 | 内容 |
+|---|---|
+| 仅 import 改名（13 文件） | `@deepseek-ai/dsh-client-ui-conversation/client` → `@corum/corum-ui-conversation/client`（每文件 2-4 行；官方 ui-conversation 在 IDE 模式被 fork 取代） |
+| 实质修改（2 文件） | `src/client/index.ts`：**不注册 conversation.view**（保留全部 ctx 级注册：轨迹节点定义 / request-header / assistant / tool / compaction 定义、conversation view 构建器、locale 字典、`uiSession.provide` trajectory hook）；`src/index.ts`：host 半注释 |
+| corum 新增（1 文件） | `src/client/view.ts`：`exports["./view"] → TS 源码` 的组件消费面（插件包的 `./client` 是 loader 闭包产物、无模块导出，另一 bundle 无法 import 值；惯例同 `@corum/corum-ui-base/client`） |
+| 其余 | 逐字节相同 |
+
+**rebase 风险：低**。升级官方时：`sed` 一把梭改 import 路径 + 重放 `index.ts` 的
+「删 conversation.view 注册」补丁（两处，已用 `// fork（corum）：` 注释锚定）。
+
+**接线**：
+
+| 面 | 改动 |
+|---|---|
+| `cordis.ide.patch.yml` | 顶层 `- id: ui-trajectory disabled: true`（与 fork 互斥：槽声明唯一）+ insert 块 `- id: corum-ui-trajectory` |
+| `corum-ui-chat` details 条目 | 声明 `conversation.trajectory.images` 子槽（注册点随轨迹视图迁入；ui-attachment 经 inject 自动跟进）；inject 面新增 `hooks.{trajectory,duration,detailsView}` + `loadOlder/loadImage/setActualDuration/trajectoryT` + `showTool/showTrajectory` |
+| `DetailsPanel` | 头部「工具详情 ⟷ 轨迹」两个 tab；轨迹态渲染 `TrajectoryView`（props 由 details 槽装配，`viewRequest/completeViewRequest` 属对话区 view 的 focus 面，抽屉形态传 undefined） |
+| `corum-ide-ui` | 右上角轨迹按钮接 `trajectoryDetails.openTrajectory()`（打开抽屉 + 切轨迹视图） |
+| `trajectoryDetails` 服务 | **壳 provide**（抽屉归壳），chat 经 inject + 能力接口收窄消费 |
+
+**关键教训（实机踩到）**：初版把 `trajectoryDetails` 放在 chat 侧 provide、壳 inject，
+形成 **chat inject `layout`（壳 provide）↔ 壳 inject `trajectoryDetails`（chat provide）
+的循环等待**——boot 报「7 entries did not activate / pending (waiting for service)」。
+依赖方向必须单一：抽屉归壳 → 状态归壳 → 壳 provide、chat 消费。
+
+**验证（三层 CDP）**：
+- 三包（fork / corum-ui-chat / corum-ide-ui）typecheck + build 绿；全仓 35 包 typecheck 绿。
+- boot：fork 在 client entries 内、无插件 pending、console 零报错。
+- 行为：点右上角轨迹按钮 → details 抽屉打开且 `data-view="trajectory"`（357×771 可见），
+  官方轨迹视图完整渲染——工具条「时长/轮次/调用」+ 列头「输入/模型/工具」+ 真实轮次
+  （第 1 轮 / 上下文 / 用户 / 助手 / 初始系统提示词，19k 字符内容），**文案全部走
+  trajectory 字典**（无 `toolbar.duration` 之类原始 key）。
+- 切回「工具详情」tab → `data-view="tool"`、回到工具详情空态；console 全程零报错。
+- 官方「对话 / 轨迹」tab 已随 `ui-trajectory` 禁用而消失（无重复入口）。
