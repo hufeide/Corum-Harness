@@ -7,9 +7,11 @@ import type {
 } from '@corum/corum-ui-conversation/client'
 import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import { Button, IconChevronDownOutline14, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ArrowLeft } from 'lucide-react'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import type { ChatSnapshot } from '../contract/snapshot.ts'
 import { AgentNameContext } from './agent-name-context.ts'
+import { chatRuntimeRef } from '../chat-runtime.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
 import { ReviewCard } from './ReviewCard.tsx'
@@ -257,6 +259,12 @@ export function ChatView({
   const inbox = useSession(s => s.queue)
   // Workspace root off the session list row: path summaries display relative to it.
   const cwd = useSessions(s => s.byId[sessionId]?.cwd)
+  // fork（corum）：当前会话是子会话时，给出返回父会话的入口（见下方 parentBar）。
+  const parentSessionId = useSessions(s => {
+    const summary = s.byId[sessionId]
+    return summary?.origin === 'subagent' ? summary.parentId : undefined
+  })
+  const parentTitle = useSessions(s => (parentSessionId === undefined ? undefined : s.byId[parentSessionId]?.displayTitle))
   const running = useSession(s => s.running)
   const openState = useSession(s => s.openState)
   const openError = useSession(s => s.openError)
@@ -774,6 +782,24 @@ export function ChatView({
   return (
     <AgentNameContext.Provider value={agentName}>
     <div className={css.root}>
+      {/* fork（corum）：子会话（origin=subagent）的返回父会话条——官方 header 的
+          lineage 面包屑随 titleRow 一起被移除（2026-08-29 去重复标题），子会话视图
+          因此没有任何回到父会话的入口（用户 2026-09-09 反馈：进得去出不来）。 */}
+      {parentSessionId !== undefined && (
+        <div className={css.parentBar}>
+          <button
+            type="button"
+            className={css.parentBack}
+            title={t('subagent.backToParentTitle')}
+            aria-label={t('subagent.backToParent')}
+            onClick={() => { chatRuntimeRef.current?.openSession(parentSessionId) }}
+          >
+            <ArrowLeft size={14} strokeWidth={2} aria-hidden />
+            <span className={css.parentLabel}>{t('subagent.backToParent')}</span>
+            {parentTitle !== undefined && <span className={css.parentTitle}>{parentTitle}</span>}
+          </button>
+        </div>
+      )}
       <div ref={listRef} className={css.scroll}>
         <TurnNavigator
           items={railItems}

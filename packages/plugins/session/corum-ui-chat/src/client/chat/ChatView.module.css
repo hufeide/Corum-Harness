@@ -241,3 +241,46 @@
   max-width: 100%;
   min-width: 0;
 }
+
+/* fork（corum）：子会话的「返回父会话」条——官方 header 的 lineage 面包屑随
+   titleRow 一起被移除，子会话视图需要一个明确的回程入口（2026-09-09 用户反馈）。 */
+.parentBar {
+  display: flex;
+  align-items: center;
+  padding: 8px calc(var(--dsh-composer-side-clearance) + 16px) 0;
+  flex: 0 0 auto;
+}
+
+.parentBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.parentBack:hover {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--corum-glass-border-active);
+}
+
+.parentLabel {
+  flex: 0 0 auto;
+}
+
+.parentTitle {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+}

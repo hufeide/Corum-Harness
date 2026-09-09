@@ -9,6 +9,7 @@
  */
 
 import { grantArgs as landlockGrantArgs } from '@deepseek-ai/node-addon-landlock-run'
+import { existsSync } from 'node:fs'
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { corumGitWriteRoots } from './git-write-roots.ts'
@@ -23,8 +24,10 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
   if (policy.mode === 'workspace-write') {
     args.push('--tmpfs', '/tmp')
     args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
-    // fork（corum）：git 元数据根也必须 bind 可写，否则 worktree 里 commit 不了。
-    for (const root of corumGitWriteRoots(policy)) args.push('--bind', root, root)
+    // fork（corum）：git 数据根也必须 bind 可写，否则 worktree 里 commit 不了。
+    // `--bind-try`：packed-refs / packed-refs.lock 可能尚不存在（git 仍会去锁），
+    // 源缺失时静默跳过而不是让 bwrap 失败。
+    for (const root of corumGitWriteRoots(policy)) args.push('--bind-try', root, root)
   }
   return args
 }
@@ -38,8 +41,9 @@ export function landlockProfileArgs(policy: SandboxPolicy): string[] {
   const readWrite = ['/dev/null']
   if (policy.mode === 'workspace-write') {
     readWrite.push('/tmp', policy.workspaceRoot)
-    // fork（corum）：git 元数据根（worktree gitdir + common dir）。
-    readWrite.push(...corumGitWriteRoots(policy))
+    // fork（corum）：git 数据根（worktree gitdir + common 的数据子目录）。
+    // Landlock 按路径建规则，路径必须存在——过滤掉尚不存在的 packed-refs*。
+    readWrite.push(...corumGitWriteRoots(policy).filter(entry => existsSync(entry)))
   }
   return landlockGrantArgs({ readOnly: ['/'], readWrite })
 }

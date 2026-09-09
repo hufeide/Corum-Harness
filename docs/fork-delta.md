@@ -1305,3 +1305,71 @@ Windows 上隔离子 Agent 的 git 提交仍不可用（登记为已知限制）
 - CDP：orchestrate 2 任务的两个子 Agent 均成功 commit 并被集成合并；后台委托正确隔离。
 - 守卫：`scripts/verify-fork-drift.sh` §15（index.ts 逐字节一致 / profiles 含标记 /
   git-write-roots 有探测 / 装配行与 desktop 依赖在位）。
+
+---
+
+## 15.1 fork #13 的安全评估（2026-09-09，用户要求「评估 fork 沙箱后的修改是否有安全隐患」）
+
+### 攻击面：改了什么
+
+`workspace-write` 的官方可写根 = `[session workspace, /tmp, tmpdir()]`。fork 在
+**会话 workspace 是 git worktree** 时追加 **git 数据目录**：
+
+| 授权 | 用途 | 首次实测（未加固时） |
+|---|---|---|
+| `<gitdir>`（`<common>/worktrees/<slug>`） | `git add/commit` 的 index.lock/index/HEAD/reflog | 必要 |
+| `<common>/objects` | 新对象 | 必要 |
+| `<common>/refs` | 分支引用更新 | 必要 |
+| `<common>/logs` | 分支 reflog | 必要 |
+| `<common>/packed-refs` + `.lock` | git ≥2.50 的 ref 事务会锁 `packed-refs.lock`（即使文件不存在），不授权则每次 commit 打一行 EPERM 报错（exit 0） | 2026-09-09 加固时实测发现 |
+
+**第一版实现曾授权整个 `<common>`（整个 `.git`）**——安全评审后收窄为上表。收窄后的
+差异是「不再能写」：`config`、`config.worktree`、`hooks`、`info`、`modules`、`worktrees`
+（其它 worktree 的管理目录）、`packed-refs` 之外的杂项。
+
+### 为什么必须收窄（真正的危害）
+
+- **持久化逃逸（最高危）**：写 `.git/hooks/*` 或 `.git/config`（`core.hooksPath`、
+  `core.fsmonitor`、`core.sshCommand`、`diff.*.textconv`、`filter.*.clean`、
+  `url.*.insteadOf`、`credential.helper`）→ **在子 Agent 的沙箱之外**执行代码：
+  父 Agent 或用户的**下一次 git 命令**就会跑它。这直接打破「子 Agent 的影响留在
+  自己工作区」的承诺（`info/attributes`、`modules/*/config` 同类）。
+- **跨 worktree 破坏**：写 `<common>/worktrees/<其它>` 可篡改其它 worktree 的
+  index/HEAD。
+- 授予整个 `.git` 还包含 `.git/config` 之外的杂项（`gc.log`、`shallow` 等），
+  没有一个是提交所需。
+
+### 收窄后的边界（真内核实测，`sandbox-exec`）
+
+| 操作 | 结果 |
+|---|---|
+| worktree 内写文件 | ✅ 允许 |
+| `git add && git commit`（自己的分支） | ✅ 允许，**无 stderr 噪音** |
+| 写 `<repo>/.git/config` / `config.worktree` | ❌ EPERM |
+| 写 `<repo>/.git/hooks/pre-commit` | ❌ EPERM |
+| 写 `<repo>/.git/info/exclude` | ❌ EPERM |
+| 写父工作区文件（含 tracked 文件） | ❌ EPERM |
+| `git update-ref refs/heads/main <sha>`（改其它分支） | ⚠️ 允许（残留风险，见下） |
+
+范围也收窄了：只在 `gitdir ≠ common`（worktree）时生效；主仓会话返回空（`.git` 本就在
+workspace 内），仓库**子目录**会话返回空（维持「写不了 `.git`」的既有行为）——不因本
+fork 扩大非 worktree 会话的面。
+
+### 残留风险（有意接受，已登记）
+
+1. **refs/objects 可写**：子 Agent 能改写/删除本仓的引用与对象（含其它分支，实测
+   `update-ref refs/heads/main` 成功）。这与它已拥有的工作区写权限同级破坏力（能毁掉
+   未提交工作），但要完全堵住需要把授权收窄到「当前分支的 ref 文件 + 其 `.lock`」——
+   Seatbelt 的 literal 可做，bwrap 的 `--bind` 要求源文件存在（`.lock` 不存在即失败）、
+   Landlock 只支持已存在路径，跨平台无法一致，收益（防误删其它分支）与复杂度不成比例。
+2. **objects/info/alternates**：可写（在 `objects` 内），但对象按内容寻址，无法借此执行
+   代码或读取任意文件。
+3. **沙箱不是安全边界**：官方定位是 containment（同 UID、无特权分离）；本 fork 遵守
+   同一威胁模型——目标是「子 Agent 不会因为困惑/提示注入而把影响扩散到工作区之外」，
+   不是防御本机恶意进程。收窄后**代码执行类载体已全部移出**，这一点是本次评审的主要结论。
+
+### 守卫
+
+`scripts/verify-fork-drift.sh` §15 + `tests/profiles.spec.ts`（10 例）：断言可写根里
+**不含** `hooks/config/config.worktree/info/modules/packed-refs 之外的配置面`、**不含**
+整个 `.git`、主仓与子目录会话返回空、Seatbelt/bwrap/Landlock 三平台参数一致。

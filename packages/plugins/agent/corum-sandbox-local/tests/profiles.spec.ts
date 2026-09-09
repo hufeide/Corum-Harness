@@ -31,7 +31,7 @@ function repoWithWorktree(name: string): { repo: string; worktree: string; gitdi
   }
 }
 
-describe('corumGitWriteRoots — fork（corum）git 元数据可写根', () => {
+describe('corumGitWriteRoots — fork（corum）git 数据可写根', () => {
   it('非 git 目录：返回空（能力自动关闭，不抛错）', () => {
     const plain = join(scratch, 'plain')
     mkdirSync(plain, { recursive: true })
@@ -44,14 +44,45 @@ describe('corumGitWriteRoots — fork（corum）git 元数据可写根', () => {
     expect(corumGitWriteRoots({ mode: 'read-only', workspaceRoot: worktree })).toEqual([])
   })
 
-  it('worktree：返回 worktree gitdir + 公共 common dir（git add/commit 真正要写的两个目录）', () => {
+  it('worktree：只给 git 数据目录（worktree gitdir + objects/refs/logs）', () => {
     const { worktree, gitdir, common } = repoWithWorktree('repo-wt')
-    expect(corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: worktree })).toEqual([gitdir, common])
+    expect(corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: worktree })).toEqual([
+      gitdir,
+      join(common, 'objects'),
+      join(common, 'refs'),
+      join(common, 'logs'),
+      join(common, 'packed-refs'),
+      join(common, 'packed-refs.lock'),
+    ])
   })
 
-  it('主仓（非 worktree）：返回仓内 .git 一次（与官方 workspaceRoot 根并存，不重复）', () => {
+  it('安全边界：配置与代码目录绝不出现在可写根里（hooks/config/info/modules/其它 worktree）', () => {
+    const { worktree, common } = repoWithWorktree('repo-boundary')
+    const roots = corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: worktree })
+    for (const forbidden of [
+      join(common, 'hooks'),
+      join(common, 'config'),
+      join(common, 'config.worktree'),
+      join(common, 'info'),
+      join(common, 'modules'),
+      join(common, 'worktrees'),
+      common, // 整个 .git 也不给（只给它的数据子目录）
+    ]) {
+      expect(roots).not.toContain(forbidden)
+    }
+  })
+
+  it('主仓（gitdir === common）：返回空——不因本 fork 扩大非 worktree 会话的面', () => {
     const { repo } = repoWithWorktree('repo-main')
-    expect(corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: repo })).toEqual([join(repo, '.git')])
+    expect(corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: repo })).toEqual([])
+  })
+
+  it('仓库子目录（gitdir === common）：返回空——维持「子目录会话写不了 .git」的既有行为', () => {
+    const { repo } = repoWithWorktree('repo-subdir')
+    const sub = join(repo, 'packages', 'inner')
+    mkdirSync(sub, { recursive: true })
+    corumResetGitRootsCache()
+    expect(corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: sub })).toEqual([])
   })
 
   it('探测结果进程内缓存（同一 workspace 反复 confine 不重复 fork git）', () => {
@@ -59,19 +90,25 @@ describe('corumGitWriteRoots — fork（corum）git 元数据可写根', () => {
     const first = corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: worktree })
     const second = corumGitWriteRoots({ mode: 'workspace-write', workspaceRoot: worktree })
     expect(second).toEqual(first)
-    expect(second).toEqual([gitdir, expect.any(String)])
+    expect(second).toContain(gitdir)
   })
 })
 
-describe('平台 profile 的 git 元数据授权（fork 增量落点）', () => {
-  it('Seatbelt：SBPL 同时含 workspace 根与两个 git 目录的 subpath 授权', () => {
+describe('平台 profile 的 git 数据授权（fork 增量落点）', () => {
+  it('Seatbelt：SBPL 含 workspace 根与 git 数据目录，且不含 hooks/config/整个 .git', () => {
     const { worktree, gitdir, common } = repoWithWorktree('repo-seatbelt')
-    const args = seatbeltProfileArgs({ mode: 'workspace-write', workspaceRoot: worktree })
-    const profile = args[1]
+    const profile = seatbeltProfileArgs({ mode: 'workspace-write', workspaceRoot: worktree })[1]
     expect(profile).toContain(`(subpath "${worktree}")`)
     expect(profile).toContain(`(subpath "${gitdir}")`)
-    expect(profile).toContain(`(subpath "${common}")`)
-    // 写仍然被整体拒绝（(deny file-write*) 在授权之前），只是多两个白名单根。
+    expect(profile).toContain(`(subpath "${join(common, 'objects')}")`)
+    expect(profile).toContain(`(subpath "${join(common, 'refs')}")`)
+    expect(profile).toContain(`(subpath "${join(common, 'logs')}")`)
+    expect(profile).not.toContain(`(subpath "${join(common, 'hooks')}")`)
+    expect(profile).not.toContain(`(subpath "${join(common, 'config')}")`)
+    expect(profile).not.toContain(`(subpath "${common}")`)
+    // packed-refs 是引用数据（与 refs/ 同类），为消除 git commit 的 lock 报错而授权。
+    expect(profile).toContain(`(subpath "${join(common, 'packed-refs')}")`)
+    // 写仍然被整体拒绝（(deny file-write*) 在授权之前），只是多几个白名单根。
     expect(profile).toContain('(deny file-write*)')
   })
 
@@ -81,13 +118,16 @@ describe('平台 profile 的 git 元数据授权（fork 增量落点）', () => 
     expect(profile).not.toContain(`(subpath "${gitdir}")`)
   })
 
-  it('bwrap / Landlock：git 根进入 bind / readWrite 面', () => {
+  it('bwrap / Landlock：git 数据目录进入 bind / readWrite 面，整个 .git 不进', () => {
     const { worktree, gitdir, common } = repoWithWorktree('repo-linux')
-    const bwrap = bwrapProfileArgs({ mode: 'workspace-write', workspaceRoot: worktree })
-    expect(bwrap.join(' ')).toContain(`--bind ${gitdir} ${gitdir}`)
-    expect(bwrap.join(' ')).toContain(`--bind ${common} ${common}`)
+    const bwrap = bwrapProfileArgs({ mode: 'workspace-write', workspaceRoot: worktree }).join(' ')
+    expect(bwrap).toContain(`--bind-try ${gitdir} ${gitdir}`)
+    expect(bwrap).toContain(`--bind-try ${join(common, 'objects')} ${join(common, 'objects')}`)
+    expect(bwrap).not.toContain(`--bind-try ${common} ${common}`)
+    expect(bwrap).not.toContain(`--bind-try ${join(common, 'hooks')}`)
     const landlock = landlockProfileArgs({ mode: 'workspace-write', workspaceRoot: worktree })
     expect(landlock).toContain(gitdir)
-    expect(landlock).toContain(common)
+    expect(landlock).toContain(join(common, 'refs'))
+    expect(landlock).not.toContain(common)
   })
 })
