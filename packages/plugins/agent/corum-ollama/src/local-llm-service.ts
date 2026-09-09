@@ -21,7 +21,7 @@
 
 import { spawn } from 'node:child_process'
 import { totalmem, cpus, homedir } from 'node:os'
-import { existsSync, mkdirSync, renameSync, statSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 // P2-7：下载进度事件声明（cordis Events 合并面）。
@@ -473,6 +473,7 @@ export class LocalLlmService extends TypertRemoteService {
       activeModelCount,
       maxActiveModels: MAX_ACTIVE_MODELS,
       engineBundled: isBundled(),
+      enginePartialBytes: this.enginePartialBytes(),
       ...(running.version !== undefined ? { version: running.version } : {}),
     }
   }
@@ -611,75 +612,159 @@ export class LocalLlmService extends TypertRemoteService {
     return await this.engineDownloadTask
   }
 
-  /** 引擎下载主体：流式写入 + 停滞看门狗 + 速度/ETA 进度。 */
+  /** 断点残片大小（字节；`bin/ollama.part`，无则 0）——供设置页显示「继续下载」。 */
+  private enginePartialBytes(): number {
+    try {
+      return statSync(join(getCorumHome(), 'bin', process.platform === 'win32' ? 'ollama.exe.part' : 'ollama.part')).size
+    } catch {
+      return 0
+    }
+  }
+
+  /** 引擎下载主体：流式写入（支持 Range 续传）+ 停滞看门狗 + 速度/ETA 进度。 */
   private async runEngineDownload(): Promise<{ ok: boolean; error?: string }> {
     const binDir = join(getCorumHome(), 'bin')
     const exeName = process.platform === 'win32' ? 'ollama.exe' : 'ollama'
     const destPath = join(binDir, exeName)
     try { mkdirSync(binDir, { recursive: true }) } catch { /* 已存在 */ }
-    this.setDownloadProgress({ percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
-    try {
-      const url = ollamaDownloadUrl()
-      // 连接阶段给固定超时；进入 body 流后换成「停滞看门狗」（每收到数据就重置）。
-      const controller = new AbortController()
-      let watchdog: NodeJS.Timeout | null = null
-      const armWatchdog = (ms: number): void => {
-        if (watchdog !== null) clearTimeout(watchdog)
-        watchdog = setTimeout(() => { controller.abort(new Error(`下载停滞超过 ${Math.round(ms / 1000)} 秒（无数据流入）`)) }, ms)
-      }
-      armWatchdog(DOWNLOAD_CONNECT_TIMEOUT_MS)
+    // 断点续传（2026-09-09 用户要求）：半截文件保留为 `<exe>.part`，重试/重启应用后
+    // 用 HTTP Range 从已下载位置继续；服务端不支持 Range（回 200 全量）或回 416
+    // （本地残片比服务端新版本还大）时丢弃残片重来。
+    const partPath = join(binDir, `${exeName}.part`)
+    const metaPath = join(binDir, `${exeName}.part.json`)
+    // 清理旧版遗留的 .tmp（早期实现用 .tmp 且失败即删，无续传）
+    try { rmSync(join(binDir, `${exeName}.tmp`), { force: true }) } catch { /* 忽略 */ }
+    const url = ollamaDownloadUrl()
+    // 续传前校验残片来源：换镜像/上游换了构建时残片字节对不上，必须丢弃重来。
+    // sidecar 记录 { url, validator(ETag/Last-Modified) }，配 If-Range 让服务端判断。
+    let resumeFrom = 0
+    let resumeMeta: { url: string; validator?: string } | null = null
+    try { resumeFrom = statSync(partPath).size } catch { resumeFrom = 0 }
+    if (resumeFrom > 0) {
       try {
-        const r = await fetch(url, { redirect: 'follow', signal: controller.signal })
-        if (!r.ok) { this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: `HTTP ${r.status}` }); return { ok: false, error: `下载失败（HTTP ${r.status}）` } }
-        if (!r.body) { this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: '空响应体' }); return { ok: false, error: '下载返回空响应体' } }
-        // 从 Content-Length 获取总大小
-        const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
-        this.setDownloadProgress({ percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
-        // 流式写入临时文件 → 重命名为最终文件名（原子操作）
-        const tmpPath = join(binDir, `${exeName}.tmp`)
-        const fileStream = (await import('node:fs')).createWriteStream(tmpPath)
-        const reader = r.body.getReader()
-        let downloaded = 0
-        // 速度滑动窗口（最近 ~4s）+ 进度节流（250ms）
-        const samples: Array<{ at: number; bytes: number }> = [{ at: Date.now(), bytes: 0 }]
-        let lastEmit = 0
-        // pump: ReadableStream → Node WriteStream，更新进度
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          armWatchdog(DOWNLOAD_STALL_TIMEOUT_MS)
-          if (!fileStream.write(Buffer.from(value))) {
-            await new Promise<void>(resolve => fileStream.once('drain', () => resolve()))
-          }
-          downloaded += value.byteLength
-          const now = Date.now()
-          samples.push({ at: now, bytes: downloaded })
-          while (samples.length > 2 && now - samples[0].at > 4000) samples.shift()
-          if (now - lastEmit < DOWNLOAD_PROGRESS_THROTTLE_MS) continue
-          lastEmit = now
-          const first = samples[0]
-          const elapsedSec = (now - first.at) / 1000
-          const bytesPerSecond = elapsedSec > 0 ? Math.round((downloaded - first.bytes) / elapsedSec) : undefined
-          const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
-          this.setDownloadProgress({
-            percent,
-            downloadedBytes: downloaded,
-            totalBytes,
-            status: 'downloading',
-            ...(bytesPerSecond !== undefined && bytesPerSecond > 0 ? { bytesPerSecond } : {}),
-            ...(bytesPerSecond !== undefined && bytesPerSecond > 0 && totalBytes > downloaded
-              ? { etaSeconds: Math.round((totalBytes - downloaded) / bytesPerSecond) }
+        const parsed = JSON.parse(readFileSync(metaPath, 'utf8')) as { url?: unknown; validator?: unknown }
+        if (typeof parsed.url === 'string') {
+          resumeMeta = { url: parsed.url, ...(typeof parsed.validator === 'string' ? { validator: parsed.validator } : {}) }
+        }
+      } catch { resumeMeta = null }
+      if (resumeMeta === null || resumeMeta.url !== url) {
+        // 没有元数据（旧残片）或来源不同 → 不敢续，丢弃重来
+        try { rmSync(partPath, { force: true }) } catch { /* 忽略 */ }
+        try { rmSync(metaPath, { force: true }) } catch { /* 忽略 */ }
+        resumeFrom = 0
+        resumeMeta = null
+      }
+    }
+    this.setDownloadProgress({ percent: 0, downloadedBytes: resumeFrom, totalBytes: 0, status: 'downloading' })
+    try {
+      let attempt = 0
+      let completed = false
+      while (!completed) {
+        attempt += 1
+        // 连接阶段给固定超时；进入 body 流后换成「停滞看门狗」（每收到数据就重置）。
+        const controller = new AbortController()
+        let watchdog: NodeJS.Timeout | null = null
+        const armWatchdog = (ms: number): void => {
+          if (watchdog !== null) clearTimeout(watchdog)
+          watchdog = setTimeout(() => { controller.abort(new Error(`下载停滞超过 ${Math.round(ms / 1000)} 秒（无数据流入）`)) }, ms)
+        }
+        armWatchdog(DOWNLOAD_CONNECT_TIMEOUT_MS)
+        try {
+          const r = await fetch(url, {
+            redirect: 'follow',
+            signal: controller.signal,
+            ...(resumeFrom > 0
+              ? {
+                headers: {
+                  Range: `bytes=${resumeFrom}-`,
+                  // 服务端若发现对象已变（ETag/Last-Modified 不符）会回 200 全量 → 下面丢弃残片重写
+                  ...(resumeMeta?.validator !== undefined ? { 'If-Range': resumeMeta.validator } : {}),
+                },
+              }
               : {}),
           })
+          if (r.status === 416) {
+            // 残片比服务端对象还大（服务端换了构建）→ 丢弃重来一次
+            if (watchdog !== null) { clearTimeout(watchdog); watchdog = null }
+            try { rmSync(partPath, { force: true }) } catch { /* 忽略 */ }
+            resumeFrom = 0
+            if (attempt >= 2) throw new Error('断点续传失败：服务端拒绝 Range 请求（416）')
+            continue
+          }
+          if (!r.ok) { this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: `HTTP ${r.status}` }); return { ok: false, error: `下载失败（HTTP ${r.status}）` } }
+          if (!r.body) { this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: '空响应体' }); return { ok: false, error: '下载返回空响应体' } }
+          // 206 = 服务端接受了 Range（追加写）；200 = 忽略 Range（全量，需从头写）
+          const appending = r.status === 206 && resumeFrom > 0
+          if (resumeFrom > 0 && !appending) {
+            try { rmSync(partPath, { force: true }) } catch { /* 忽略 */ }
+            resumeFrom = 0
+          }
+          // 记录残片来源（URL + 校验器），供下次续传判断
+          const validator = r.headers.get('etag') ?? r.headers.get('last-modified') ?? undefined
+          try {
+            writeFileSync(metaPath, JSON.stringify({ url, ...(validator !== undefined ? { validator } : {}) }, null, 2))
+          } catch { /* 忽略 */ }
+          resumeMeta = { url, ...(validator !== undefined ? { validator } : {}) }
+          // 总大小：优先 Content-Range 的 `/total`，否则 残片 + Content-Length
+          const contentRange = r.headers.get('content-range')
+          const rangeTotal = contentRange === null ? 0 : Number(contentRange.split('/')[1] ?? '0')
+          const contentLength = parseInt(r.headers.get('content-length') ?? '0', 10)
+          const totalBytes = rangeTotal > 0 ? rangeTotal : (contentLength > 0 ? resumeFrom + contentLength : 0)
+          this.setDownloadProgress({ percent: totalBytes > 0 ? Math.round((resumeFrom / totalBytes) * 100) : 0, downloadedBytes: resumeFrom, totalBytes, status: 'downloading' })
+          const fileStream = (await import('node:fs')).createWriteStream(partPath, { flags: appending ? 'a' : 'w' })
+          const reader = r.body.getReader()
+          let downloaded = resumeFrom
+          // 速度滑动窗口（最近 ~4s）+ 进度节流（250ms）
+          const samples: Array<{ at: number; bytes: number }> = [{ at: Date.now(), bytes: downloaded }]
+          let lastEmit = 0
+          // pump: ReadableStream → Node WriteStream，更新进度
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            armWatchdog(DOWNLOAD_STALL_TIMEOUT_MS)
+            if (!fileStream.write(Buffer.from(value))) {
+              await new Promise<void>(resolve => fileStream.once('drain', () => resolve()))
+            }
+            downloaded += value.byteLength
+            const now = Date.now()
+            samples.push({ at: now, bytes: downloaded })
+            while (samples.length > 2 && now - samples[0].at > 4000) samples.shift()
+            if (now - lastEmit < DOWNLOAD_PROGRESS_THROTTLE_MS) continue
+            lastEmit = now
+            const first = samples[0]
+            const elapsedSec = (now - first.at) / 1000
+            const bytesPerSecond = elapsedSec > 0 ? Math.round((downloaded - first.bytes) / elapsedSec) : undefined
+            const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
+            this.setDownloadProgress({
+              percent,
+              downloadedBytes: downloaded,
+              totalBytes,
+              status: 'downloading',
+              ...(bytesPerSecond !== undefined && bytesPerSecond > 0 ? { bytesPerSecond } : {}),
+              ...(bytesPerSecond !== undefined && bytesPerSecond > 0 && totalBytes > downloaded
+                ? { etaSeconds: Math.round((totalBytes - downloaded) / bytesPerSecond) }
+                : {}),
+            })
+          }
+          if (watchdog !== null) { clearTimeout(watchdog); watchdog = null }
+          fileStream.end()
+          await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
+          // 完整性校验：服务端给了总大小却没收满 → 当失败处理（残片保留，下次续传）
+          if (totalBytes > 0 && downloaded < totalBytes) {
+            throw new Error(`下载不完整（${downloaded}/${totalBytes} 字节），已保留断点，可继续下载`)
+          }
+          resumeFrom = downloaded
+          completed = true
+        } finally {
+          if (watchdog !== null) clearTimeout(watchdog)
         }
-        if (watchdog !== null) { clearTimeout(watchdog); watchdog = null }
-        fileStream.end()
-        await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
+      }
       // macOS/Linux 加可执行权限
       if (process.platform !== 'win32') {
-        try { (await import('node:fs')).chmodSync(tmpPath, 0o755) } catch { /* 忽略 */ }
+        try { (await import('node:fs')).chmodSync(partPath, 0o755) } catch { /* 忽略 */ }
       }
-      renameSync(tmpPath, destPath)
+      renameSync(partPath, destPath)
+      try { rmSync(metaPath, { force: true }) } catch { /* 忽略 */ }
       // macOS/Linux：下载的是 .tgz 压缩包，需解压提取 ollama 二进制。
       if (process.platform !== 'win32') {
         try {
@@ -703,22 +788,26 @@ export class LocalLlmService extends TypertRemoteService {
       }
       // 启动服务：失败要落到 progress 的 error 状态——非阻塞调用方（设置页）只认事件，
       // 只看 RPC 返回值会把「下载完成但引擎起不来」显示成「完成」（2026-09-09 发现）。
+      const finalBytes = resumeFrom
+      const knownTotal = this.downloadProgress.totalBytes
       const startResult = await this.ensureServer()
       if (!startResult.ok) {
         const message = `下载成功但启动失败：${startResult.error ?? '未知错误'}`
-        this.setDownloadProgress({ percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'error', error: message })
+        this.setDownloadProgress({ percent: 100, downloadedBytes: finalBytes, totalBytes: knownTotal > 0 ? knownTotal : finalBytes, status: 'error', error: message })
         return { ok: false, error: message }
       }
-      this.setDownloadProgress({ percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'done' })
+      this.setDownloadProgress({ percent: 100, downloadedBytes: finalBytes, totalBytes: knownTotal > 0 ? knownTotal : finalBytes, status: 'done' })
       return { ok: true }
-      } finally {
-        if (watchdog !== null) clearTimeout(watchdog)
-      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      // 清理半截临时文件（下次重试从零开始；避免留下看不出用途的 .tmp）
-      try { rmSync(join(binDir, `${exeName}.tmp`), { force: true }) } catch { /* 忽略 */ }
-      this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: message })
+      // 保留 `<exe>.part`：断点续传靠它（下次点击 / 重启应用后从已下载位置继续）。
+      let partial = 0
+      try { partial = statSync(partPath).size } catch { partial = 0 }
+      this.setDownloadProgress({
+        ...this.downloadProgress,
+        status: 'error',
+        error: partial > 0 ? `${message}（已保留断点 ${Math.round(partial / 1048576 * 10) / 10} MB，可继续下载）` : message,
+      })
       return { ok: false, error: `下载引擎失败：${message}` }
     }
   }

@@ -60,6 +60,8 @@ interface LocalEngineStatus {
   maxActiveModels: number
   /** 引擎是否已内置。 */
   engineBundled: boolean
+  /** 引擎下载的断点残片大小（字节；>0 = 可继续下载）。 */
+  enginePartialBytes: number
 }
 
 interface RecommendedModel {
@@ -120,6 +122,17 @@ function formatBytesClient(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   const val = bytes / Math.pow(1024, i)
   return `${val.toFixed(val >= 100 ? 0 : val >= 10 ? 1 : 2)} ${units[i]}`
+}
+
+/** getDownloadProgress 的返回视图（与事件同形）。 */
+interface DownloadProgressView {
+  percent: number
+  downloadedBytes: number
+  totalBytes: number
+  status: string
+  error?: string
+  bytesPerSecond?: number
+  etaSeconds?: number
 }
 
 /** 剩余时间标签（秒 → 「x 分 y 秒」/「x 小时 y 分」）。 */
@@ -489,67 +502,80 @@ function OllamaSection({ call, subscribeProgress }: {
 
   // 下载引擎二进制（2026-09-09 改：`startDownloadEngine` 立即返回，进度与终态都走
   // `corum/ollama/download-progress` 推送——原先的阻塞 RPC 会撞 Node 的 300s
-  // requestTimeout，慢镜像下「每次都中途停止」）。
-  const downloadEngine = async () => {
-    setDownloading(true)
-    setError(null)
-    setDlProgress({ percent: 0, downloaded: '0 B', total: '0 B', status: 'downloading' })
-    let finished = false
-    const off = subscribeProgress((p) => {
-      setDlProgress({
-        percent: p.percent,
-        downloaded: formatBytesClient(p.downloadedBytes),
-        total: formatBytesClient(p.totalBytes),
-        status: p.status,
-        ...(p.bytesPerSecond !== undefined && p.bytesPerSecond > 0 ? { speed: `${formatBytesClient(p.bytesPerSecond)}/s` } : {}),
-        ...(p.etaSeconds !== undefined && p.etaSeconds > 0 ? { eta: formatEta(p.etaSeconds) } : {}),
-      })
-      if (p.status === 'error') {
-        finished = true
-        setError(p.error ?? '下载失败')
-        setDownloading(false)
-        off()
-      } else if (p.status === 'done') {
-        finished = true
-        setDownloading(false)
-        off()
-        void refresh()
-      }
+  // requestTimeout，慢镜像下「每次都中途停止」）。断点续传：残片保留在 host 侧，
+  // 重试/重启应用后自动从已下载位置继续。
+  const applyProgress = (p: OllamaDownloadProgressEvent | DownloadProgressView): void => {
+    setDlProgress({
+      percent: p.percent,
+      downloaded: formatBytesClient(p.downloadedBytes),
+      total: formatBytesClient(p.totalBytes),
+      status: p.status,
+      ...(p.bytesPerSecond !== undefined && p.bytesPerSecond > 0 ? { speed: `${formatBytesClient(p.bytesPerSecond)}/s` } : {}),
+      ...(p.etaSeconds !== undefined && p.etaSeconds > 0 ? { eta: formatEta(p.etaSeconds) } : {}),
     })
+  }
+
+  const downloadEngine = async () => {
+    setError(null)
+    setDownloading(true)
     try {
       const r = await call<{ ok: boolean; error?: string }>('startDownloadEngine', {})
-      if (!r.ok) { setError(r.error ?? '下载启动失败'); setDownloading(false); off() }
-      else if (!finished) {
-        // 启动成功：进度/终态由事件推送；这里轮询兜底（事件丢帧或已完成时收敛状态）。
-        void pollUntilSettled()
-      }
+      if (!r.ok) { setError(r.error ?? '下载启动失败'); setDownloading(false) }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setDownloading(false)
-      off()
     }
   }
 
-  /** 事件兜底：下载启动后每 2s 拉一次状态，直到 done/error（事件正常时只是幂等确认）。 */
-  const pollUntilSettled = async (): Promise<void> => {
-    for (let i = 0; i < 3600; i++) {
-      await new Promise(r => setTimeout(r, 2000))
+  // 进度订阅 + 挂载恢复（关设置/切页面后进度不再丢）：下载在 host 侧跑，UI 只是投影。
+  // downloading=true 期间订阅事件；挂载时先拉一次当前状态（可能已在下载中）。
+  useEffect(() => {
+    let alive = true
+    void (async () => {
       try {
-        const p = await call<{ percent: number; downloadedBytes: number; totalBytes: number; status: string; error?: string; bytesPerSecond?: number; etaSeconds?: number }>('getDownloadProgress', {})
-        if (p.status === 'idle') return
-        setDlProgress({
-          percent: p.percent,
-          downloaded: formatBytesClient(p.downloadedBytes),
-          total: formatBytesClient(p.totalBytes),
-          status: p.status,
-          ...(p.bytesPerSecond !== undefined && p.bytesPerSecond > 0 ? { speed: `${formatBytesClient(p.bytesPerSecond)}/s` } : {}),
-          ...(p.etaSeconds !== undefined && p.etaSeconds > 0 ? { eta: formatEta(p.etaSeconds) } : {}),
-        })
-        if (p.status === 'done') { setDownloading(false); await refresh(); return }
-        if (p.status === 'error') { setError(p.error ?? '下载失败'); setDownloading(false); return }
-      } catch { return }
-    }
-  }
+        const p = await call<DownloadProgressView>('getDownloadProgress', {})
+        if (!alive) return
+        if (p.status === 'downloading') { applyProgress(p); setDownloading(true) }
+        else if (p.status === 'error' && p.error !== undefined) { applyProgress(p); setError(p.error) }
+      } catch { /* 忽略 */ }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  useEffect(() => {
+    if (!downloading) return undefined
+    const off = subscribeProgress((p) => {
+      applyProgress(p)
+      if (p.status === 'error') {
+        // ⚠️ refresh() 内部会 setError(null)，必须等它完成后再落错误，否则错误被清掉
+        // （2026-09-09 实测：下载失败只剩「状态：失败」，具体原因看不到）。
+        const message = p.error ?? '下载失败'
+        setDownloading(false)
+        void refresh().finally(() => { setError(message) })
+      } else if (p.status === 'done') { setDownloading(false); void refresh() }
+    })
+    // 兜底轮询：事件丢帧时每 2s 收敛一次状态（非阻塞下载不会因为关页面中断）。
+    let stopped = false
+    const timer = setInterval(() => {
+      void (async () => {
+        if (stopped) return
+        try {
+          const p = await call<DownloadProgressView>('getDownloadProgress', {})
+          if (stopped) return
+          if (p.status === 'idle') return
+          applyProgress(p)
+          if (p.status === 'done') { setDownloading(false); await refresh() }
+          else if (p.status === 'error') {
+            const message = p.error ?? '下载失败'
+            setDownloading(false)
+            await refresh()
+            setError(message)
+          }
+        } catch { /* 忽略 */ }
+      })()
+    }, 2000)
+    return () => { stopped = true; clearInterval(timer); off() }
+  }, [downloading])
 
   const engineStatusText = (): string => {
     if (status === null) return '检测中…'
@@ -589,7 +615,11 @@ function OllamaSection({ call, subscribeProgress }: {
               padding: '5px 12px', borderRadius: 8, fontSize: 12, cursor: downloading ? 'wait' : 'pointer',
               border: '1px solid var(--corum-glass-border-active)', background: 'var(--corum-glass-3)',
               color: 'var(--dsw-alias-brand-primary)', whiteSpace: 'nowrap',
-            }}>{downloading ? '下载中…' : '下载引擎到本地'}</button>
+            }}>{downloading
+              ? '下载中…'
+              : status !== null && status.enginePartialBytes > 0
+                ? `继续下载（已下载 ${formatBytesClient(status.enginePartialBytes)}）`
+                : '下载引擎到本地'}</button>
           )}
           {/* 已内置标记 */}
           {status !== null && status.engineBundled && (

@@ -79,6 +79,8 @@ export interface LocalEngineStatus {
   maxActiveModels: number
   /** 引擎是否已内置（CORUM_HOME/bin/ollama 存在）。 */
   engineBundled: boolean
+  /** 引擎下载的断点残片大小（字节；`bin/ollama.part`，0 = 无残片）。2026-09-09 断点续传。 */
+  enginePartialBytes: number
   /** 引擎下载状态（仅 downloadEngine 过程中有值）。 */
   downloadStatus?: 'idle' | 'downloading' | 'done' | 'error'
   /** 下载进度（0-100，仅 downloading 时有值）。 */
