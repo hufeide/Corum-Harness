@@ -1141,7 +1141,7 @@ WIP 的 `corum-git.ts` `this.logger`→`this.ctx.logger` 3 处，使 desktop typ
 
 ---
 
-## 14. 第 12 个 fork 包：`@corum/corum-ui-trajectory`（2026-09-09，轨迹按钮 → details 抽屉）
+## 14. 第 12 个 fork 包：`@corum/corum-ui-trajectory`（2026-09-09，轨迹按钮 → 右侧区域 `corum.trajectory`）
 
 > 来源：`docs/HANDOFF-0.1.3-upgrade.md` §5「唯一未完项」——轨迹功能形态从
 > conversation.view 的「对话 / 轨迹」tab 改为「右上角轨迹按钮 → details 独立抽屉」
@@ -1155,13 +1155,13 @@ WIP 的 `corum-git.ts` `this.logger`→`this.ctx.logger` 3 处，使 desktop typ
 **包**：`packages/plugins/session/corum-ui-trajectory`（name `@corum/corum-ui-trajectory`，
 fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
 
-**差异面（38 文件 vs 官方 37 文件）**：
+**差异面（39 文件 vs 官方 37 文件）**：
 
 | 分类 | 内容 |
 |---|---|
 | 仅 import 改名（13 文件） | `@deepseek-ai/dsh-client-ui-conversation/client` → `@corum/corum-ui-conversation/client`（每文件 2-4 行；官方 ui-conversation 在 IDE 模式被 fork 取代） |
 | 实质修改（2 文件） | `src/client/index.ts`：**不注册 conversation.view**（保留全部 ctx 级注册：轨迹节点定义 / request-header / assistant / tool / compaction 定义、conversation view 构建器、locale 字典、`uiSession.provide` trajectory hook）；`src/index.ts`：host 半注释 |
-| corum 新增（1 文件） | `src/client/view.ts`：`exports["./view"] → TS 源码` 的组件消费面（插件包的 `./client` 是 loader 闭包产物、无模块导出，另一 bundle 无法 import 值；惯例同 `@corum/corum-ui-base/client`） |
+| corum 新增（1 文件） | `src/client/TrajectoryRegion.tsx`（+ `.module.css`）：注册 `corum.trajectory` 区域 occupant。**二轮修正**：抽屉形态下曾用 `src/client/view.ts`（`exports["./view"] → TS 源码`）把组件暴露给 chat 的 details 槽；改为区域后该出口与文件已删除——组件与 occupant 同包，不需要跨 bundle 值导出 |
 | 其余 | 逐字节相同 |
 
 **rebase 风险：低**。升级官方时：`sed` 一把梭改 import 路径 + 重放 `index.ts` 的

@@ -20,7 +20,9 @@
    (provide + inject); no externalization needed.
    - Exceptions (legal window mounts — all "written once, read-only", not shared
      mutable state): `window.corumDesktop` (IPC bridge), `__corumNotify`,
-     `__DSH_BOOT__` (the only client-side read path).
+     `__DSH_BOOT__` (the only client-side read path), `__corumSlotRegistry`
+     (the cordis-free `ui-base/grid.ts` handoff — deleting it breaks the
+     slotRegistry singleton).
 2. **Don't casually externalize `@corum/*`**: the dsh module table has only 8
    hardcoded seeds; a custom shared module via the `dsh.client` plugin path
    white-screens the app (proof in `.dbg/b1-boot-graph-findings.md`). Route
@@ -40,13 +42,22 @@
 
 ## Key Documents (read as needed)
 
-- `docs/dev-conventions.md` — **full development conventions** (decision tree,
-  code do/don't examples, evidence index; §4a = subagent dual-instance discipline
-  for the isolation mechanism).
+- `docs/dev-conventions.md` — **the single home for rules** (must/never, decision
+  trees, code do/don't, evidence index; §4a = subagent dual-instance discipline,
+  §8 = event bus, §9 = mounting, §10 = agent/LLM mechanism, §11 = documentation
+  discipline, §12 = team scheduler log, §13 = UI interaction red lines).
+- `docs/LESSONS.md` — **the single home for experience**: phenomenon → root cause
+  → practice, with source anchors (build/bundling, cordis, cross-bundle state,
+  UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
+  recipes, collaboration). Rules do **not** go here; they graduate into
+  `dev-conventions.md`.
 - `docs/audit/NEXT-PHASE-DEFERRED.md` — deferred/closed architecture items
-  (sidebarMode service done, slot-registry service done).
-- `docs/fork-delta.md` — diff ledger of the 6 session-domain fork packages +
-  official-upgrade runbook (required reading before touching fork packages).
+  (sidebarMode service done, slot-registry service done). Note
+  `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md` §C1 carries a superseded
+  "precondition not met" conclusion — this file wins.
+- `docs/fork-delta.md` — diff ledger of the fork packages (now 12, incl. the
+  trajectory fork) + official-upgrade runbook (required reading before touching
+  fork packages).
 - `docs/plugin-template.md` — new-plugin package template and setup steps.
 - `.dbg/cordis-singleton-probe.md`, `.dbg/c3a-sidebar-mode-service.md` — the
   cordis cross-bundle singleton proof + the sidebarMode service implementation

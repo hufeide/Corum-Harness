@@ -57,3 +57,9 @@ pnpm --filter corum-shell run pack       # 打包 .app/.dmg
 ## 插件开发约定
 
 每个插件包是标准的 `dsh.client`（UI）或 `dsh.bundle`（配置层）/ Service Provider。新增一个插件 = 在对应分组下建包 + 在 `cordis.patch.yml` 加一行。详见 `docs/plugin-template.md`。
+
+动手前先读两份沉淀（分工不同，不要混放）：
+
+- **规则（必须/禁止、决策树）** → [`docs/dev-conventions.md`](docs/dev-conventions.md)（唯一规范沉淀，含 rule ↔ evidence 索引）
+- **经验（现象 → 根因 → 做法 + 验证手法）** → [`docs/LESSONS.md`](docs/LESSONS.md)（唯一经验沉淀）
+- 另：fork 差异台账 [`docs/fork-delta.md`](docs/fork-delta.md)（改 fork 前必读）、逐轮历史日志 [`docs/ide-formal/PROGRESS.md`](docs/ide-formal/PROGRESS.md)（当前状态以末条为准）。
