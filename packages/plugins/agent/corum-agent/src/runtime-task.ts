@@ -121,11 +121,11 @@ export function taskRef(task: Task): TaskRef {
 
 /** 把任务渲染成一条 followup 消息（摘要 + 增量 + 完成指令）。 */
 export function renderTaskMessage(task: Task): ReturnType<typeof createUserMessage> {
-  const lines = [`【任务】${task.summary}`, `【路由】${task.label}（实体 ${task.entityType}${task.entityId !== undefined ? `#${task.entityId}` : ''}）`]
+  const lines = [`[TASK] ${task.summary}`, `[ROUTE] ${task.label} (entity ${task.entityType}${task.entityId !== undefined ? `#${task.entityId}` : ''})`]
   if (task.transferNote !== undefined && task.transferNote !== '') {
-    lines.push(`【上下文】${task.transferNote}`)
+    lines.push(`[CONTEXT] ${task.transferNote}`)
   }
-  lines.push('请开始处理该任务；完成后调用 complete_task 上报。')
+  lines.push('Start working on this task; when you are done, report it with complete_task.')
   return createUserMessage({
     content: [{ type: 'text', text: lines.join('\n\n') }],
     source: { kind: 'plugin', plugin: '@corum/corum-agent' },

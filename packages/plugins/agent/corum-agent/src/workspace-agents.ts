@@ -11,12 +11,12 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** 新工作区的 AGENTS.md 模板骨架（用户可自由改写；注入器只负责读）。 */
-const AGENTS_TEMPLATE = `# AGENTS.md — 工作区自定义指令
+const AGENTS_TEMPLATE = `# AGENTS.md — workspace instructions
 
-> 本文件由 corum 在选定工作区时创建；内容交给你/团队维护。
-> dsh-agent-instructions 会在每个 Agent 会话的首个请求前把本文件注入上下文
-> （另有 AGENTS.local.md / CLAUDE.md / CLAUDE.local.md 同机制）。
-> 在这里写：项目红线、技术栈约定、构建/测试入口、目录结构约定。
+> Corum creates this file when a workspace is selected; its content is yours (and your team's) to maintain.
+> dsh-agent-instructions injects this file into context before the first request of every agent session
+> (AGENTS.local.md / CLAUDE.md / CLAUDE.local.md work the same way).
+> Write here: project red lines, stack conventions, build/test entry points, directory conventions.
 `
 
 /**

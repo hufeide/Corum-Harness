@@ -1246,8 +1246,8 @@ export function apply(ctx: Context, config: Config): void {
               const tasks = (args as { tasks?: Array<{ label?: string }> }).tasks ?? []
               return {
                 card: 'generic' as const,
-                title: `orchestrate · ${tasks.length} 任务`,
-                rawInput: tasks.map((t, i) => `[${i}] ${t.label ?? '(未命名)'}`),
+                title: `orchestrate · ${tasks.length} task(s)`,
+                rawInput: tasks.map((t, i) => `[${i}] ${t.label ?? '(unnamed)'}`),
               }
             },
             presentResult: (_args, value) => {
@@ -1256,7 +1256,7 @@ export function apply(ctx: Context, config: Config): void {
               const failed = results.length - done
               return {
                 card: 'generic' as const,
-                title: `orchestrate · ${done} 成功 / ${failed} 失败`,
+                title: `orchestrate · ${done} ok / ${failed} failed`,
                 content: [{ type: 'text', text: results.map(r => `[task ${r.index}] ${r.ok ? '✓ done' : `✗ ${r.error ?? 'failed'}`}`).join('\n') }],
               }
             },

@@ -642,7 +642,7 @@ export class CorumProjectDataService extends TypertRemoteService {
 
     agentCtx.tools.register(defineTool({
       name: 'list_requirements',
-      description: '列出本项目的需求（共享实体；平级协作黑板的需求主线）。',
+      description: 'List this project\'s requirements (shared entities; the requirement backbone of the peer collaboration board).',
       parameters: {},
       output: textOutput,
       execute: async () => json(await this.listRequirements(projectId)),
@@ -651,17 +651,17 @@ export class CorumProjectDataService extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'create_task',
       description: [
-        '在指定需求下创建一个项目任务（共享实体，不是调度队列条目）。',
-        '创建后可用调度工具 assign_task 把执行工作派给对应成员泳道。',
-      ].join(''),
+        'Create a project task under the given requirement (a shared entity, not a scheduler queue item).',
+        'After creating it, use the scheduler tool assign_task to hand the actual work to a member lane.',
+      ].join(' '),
       parameters: {
-        requirementId: { type: 'string', required: true, description: '所属需求 id' },
-        title: { type: 'string', required: true, description: '任务标题' },
-        desc: { type: 'string', description: '任务描述/验收补充' },
-        assigneeId: { type: 'string', description: '执行者 profileId（缺省=调用者）' },
-        isFeature: { type: 'boolean', description: '是否功能单元（缺省 true，参与需求完成度聚合）' },
-        priority: { type: 'integer', description: '优先级 0-3（缺省 1）' },
-        acceptance: { type: 'string', description: '验收标准' },
+        requirementId: { type: 'string', required: true, description: 'requirement id this task belongs to' },
+        title: { type: 'string', required: true, description: 'task title' },
+        desc: { type: 'string', description: 'task description / acceptance notes' },
+        assigneeId: { type: 'string', description: 'executor profileId (default: the caller)' },
+        isFeature: { type: 'boolean', description: 'whether this is a feature unit (default true; counts toward requirement completion)' },
+        priority: { type: 'integer', description: 'priority 0-3 (default 1)' },
+        acceptance: { type: 'string', description: 'acceptance criteria' },
       },
       output: textOutput,
       execute: async (args, exec) => json(await this.createTask(this.resolveCaller(exec, projectId), args)),
@@ -669,9 +669,9 @@ export class CorumProjectDataService extends TypertRemoteService {
 
     agentCtx.tools.register(defineTool({
       name: 'list_tasks',
-      description: '列出项目任务（可按需求过滤）。',
+      description: 'List project tasks (optionally filtered by requirement).',
       parameters: {
-        requirementId: { type: 'string', description: '可选：只看该需求下的任务' },
+        requirementId: { type: 'string', description: 'optional: only tasks under this requirement' },
       },
       output: textOutput,
       execute: async (args) => json(await this.listTasks(projectId, args.requirementId)),
@@ -680,13 +680,13 @@ export class CorumProjectDataService extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'update_task_status',
       description: [
-        '流转项目任务状态。合法边：todo→doing，doing→todo/dev_done，dev_done→completed（仅 PM），completed→doing（PM 驳回返工）。',
-        '这是共享实体状态机，不等同于调度上报 complete_task。',
-      ].join(''),
+        'Transition a project task status. Legal edges: todo→doing, doing→todo/dev_done, dev_done→completed (PM only), completed→doing (PM rejects and reopens).',
+        'This is the shared-entity state machine; it is not the same as the scheduler report complete_task.',
+      ].join(' '),
       parameters: {
         taskId: { type: 'string', required: true },
         status: { type: 'string', enum: ['todo', 'doing', 'dev_done', 'completed'], required: true },
-        expectedVersion: { type: 'integer', description: '可选乐观锁版本（冲突即拒）' },
+        expectedVersion: { type: 'integer', description: 'optional optimistic-lock version (a mismatch rejects the write)' },
       },
       output: textOutput,
       execute: async (args, exec) => json(await this.updateTaskStatus(
@@ -699,15 +699,15 @@ export class CorumProjectDataService extends TypertRemoteService {
 
     agentCtx.tools.register(defineTool({
       name: 'report_bug',
-      description: '上报一个 BUG（QA 直写；关联需求，严重度 blocker/critical/major/minor）。',
+      description: 'Report a BUG (QA writes it directly; linked to a requirement, severity blocker/critical/major/minor).',
       parameters: {
         requirementId: { type: 'string', required: true },
         title: { type: 'string', required: true },
         severity: { type: 'string', enum: ['blocker', 'critical', 'major', 'minor'], required: true },
         description: { type: 'string' },
         reproSteps: { type: 'string' },
-        assigneeId: { type: 'string', description: '处理人 profileId（缺省=调用者）' },
-        taskId: { type: 'string', description: '可选关联任务 id' },
+        assigneeId: { type: 'string', description: 'handler profileId (default: the caller)' },
+        taskId: { type: 'string', description: 'optional related task id' },
       },
       output: textOutput,
       execute: async (args, exec) => json(await this.createBug(this.resolveCaller(exec, projectId), args)),
@@ -716,15 +716,15 @@ export class CorumProjectDataService extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'transition_bug',
       description: [
-        '流转 BUG 状态。Dev：processing/fixed/rejected；QA：pending_verify/closed/reopened。',
-        'fixed 必须带 fixReleaseId；rejected 必须带 rejectReason；closed 仅 QA 可执行。',
-      ].join(''),
+        'Transition a BUG status. Dev: processing/fixed/rejected; QA: pending_verify/closed/reopened.',
+        'fixed requires fixReleaseId; rejected requires rejectReason; closed may only be done by QA.',
+      ].join(' '),
       parameters: {
         bugId: { type: 'string', required: true },
         status: { type: 'string', enum: ['processing', 'fixed', 'rejected', 'pending_verify', 'closed', 'reopened'], required: true },
-        fixReleaseId: { type: 'string', description: 'fixed 必填：修复版本 id' },
-        rejectReason: { type: 'string', description: 'rejected 必填：驳回理由' },
-        expectedVersion: { type: 'integer', description: '可选乐观锁版本' },
+        fixReleaseId: { type: 'string', description: 'required for fixed: the release id containing the fix' },
+        rejectReason: { type: 'string', description: 'required for rejected: why it is rejected' },
+        expectedVersion: { type: 'integer', description: 'optional optimistic-lock version' },
       },
       output: textOutput,
       execute: async (args, exec) => json(await this.transitionBug(this.resolveCaller(exec, projectId), args.bugId, args.status, {
@@ -736,7 +736,7 @@ export class CorumProjectDataService extends TypertRemoteService {
 
     agentCtx.tools.register(defineTool({
       name: 'get_requirement_readiness',
-      description: '重算需求结束判定（功能任务完成度 + 阻断/严重 BUG 是否清零）。',
+      description: 'Recompute whether a requirement can be closed (feature-task completion plus blocker/critical BUG count).',
       parameters: {
         requirementId: { type: 'string', required: true },
       },
@@ -746,10 +746,10 @@ export class CorumProjectDataService extends TypertRemoteService {
 
     agentCtx.tools.register(defineTool({
       name: 'finish_requirement',
-      description: 'PM 裁决结束需求：服务端重算 Readiness，空需求或未清阻断/严重 BUG 必拒。',
+      description: 'PM closes a requirement: the server recomputes Readiness and rejects empty requirements or any remaining blocker/critical BUG.',
       parameters: {
         requirementId: { type: 'string', required: true },
-        expectedVersion: { type: 'integer', description: '可选乐观锁版本' },
+        expectedVersion: { type: 'integer', description: 'optional optimistic-lock version' },
       },
       output: textOutput,
       execute: async (args, exec) => json(await this.finishRequirement(

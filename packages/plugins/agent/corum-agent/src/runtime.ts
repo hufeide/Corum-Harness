@@ -207,7 +207,7 @@ export class AgentRuntime extends TypertRemoteService {
     const task = rt?.current
     if (rt === undefined || task === undefined || rt.agent === undefined) return false
     rt.agent.steer(createUserMessage({
-      content: [{ type: 'text', text: `【调度引导】${note}` }],
+      content: [{ type: 'text', text: `[SCHEDULER GUIDANCE] ${note}` }],
       source: { kind: 'plugin', plugin: '@corum/corum-agent' },
     }))
     this.record('corum/task/steered', { task: taskRef(task), note, by })
@@ -271,7 +271,7 @@ export class AgentRuntime extends TypertRemoteService {
     if (rt === undefined || task === undefined) return false
     const summary = task.summary
     const type = task.type
-    const transfer = `【改派】原执行者 ${profileId} 被中止。${note}${task.transferNote !== undefined && task.transferNote !== '' ? `\n【原上下文】${task.transferNote}` : ''}`
+    const transfer = `[REASSIGNED] The previous executor ${profileId} was aborted. ${note}${task.transferNote !== undefined && task.transferNote !== '' ? `\n[ORIGINAL CONTEXT] ${task.transferNote}` : ''}`
     const cancelledEvt = (() => {
       this.cancelTask(projectId, profileId, note, by, 'reassigned')
       // cancelTask 内 record 的返回值拿不到的折中：重新读最后一条事件 id 太重，
@@ -593,11 +593,11 @@ export class AgentRuntime extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'complete_task',
       description: [
-        '上报当前任务已完成。调用前必须逐项核对验收标准，确认达标后才可调用；',
-        '未达标时继续工作，不要调用。',
-      ].join(''),
+        'Report that the current task is complete. Verify every acceptance criterion one by one before calling;',
+        'if it does not meet them, keep working — do not call this.',
+      ].join(' '),
       parameters: {
-        summary: { type: 'string', required: true, description: '完成说明：做了什么、结果如何、验收项核对结论' },
+        summary: { type: 'string', required: true, description: 'Completion report: what you did, the outcome, and your verdict on each acceptance item' },
       },
       output: {
         schema: { type: 'string' },
@@ -605,7 +605,7 @@ export class AgentRuntime extends TypertRemoteService {
       },
       execute: async (args: { summary: string }) => {
         await this.onTaskDone(rt, args.summary)
-        return `任务已上报完成：${args.summary}`
+        return `Task reported complete: ${args.summary}`
       },
     }))
 
@@ -614,15 +614,15 @@ export class AgentRuntime extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'report_blocked',
       description: [
-        '当前任务遇阻塞（缺前置信息/依赖）时调用：立即停止本任务，派生一个「解除阻塞」任务给能解决的成员。',
-        '阻塞即停止——不要自行补全/想象缺失条件继续往下做（会衍生不存在的错误任务）。',
-        '对方完成解除阻塞任务后，调度器会自动把你唤醒继续本任务（你无需知道唤醒细节）。',
-      ].join(''),
+        'Call this when the current task is blocked (missing prerequisite information or a dependency): stop the task immediately and derive an "unblock" task for the member who can resolve it.',
+        'Blocked means stop — never invent or assume the missing condition and keep going (that spawns tasks that do not exist).',
+        'When the other member finishes the unblock task, the scheduler wakes you automatically to continue this task (you do not need to know how the wake-up works).',
+      ].join(' '),
       parameters: {
-        reason: { type: 'string', required: true, description: '阻塞原因：缺什么前置信息、为什么无法继续' },
-        unblockProfileId: { type: 'string', required: true, description: '能解决该阻塞的项目组成员 profileId（先 list_team_tasks 感知）' },
-        unblockSummary: { type: 'string', required: true, description: '派生给对方的解除阻塞任务摘要（要对方做什么/提供什么）' },
-        unblockType: { type: 'string', description: '对方任务的泳道（缺省 general）' },
+        reason: { type: 'string', required: true, description: 'Why you are blocked: what prerequisite information is missing and why you cannot continue' },
+        unblockProfileId: { type: 'string', required: true, description: 'profileId of the project member who can resolve this block (observe with list_team_tasks first)' },
+        unblockSummary: { type: 'string', required: true, description: 'Summary of the unblock task derived for that member (what they must do or provide)' },
+        unblockType: { type: 'string', description: "Lane for the other member's task (default general)" },
       },
       output: {
         schema: { type: 'string' },
@@ -638,20 +638,20 @@ export class AgentRuntime extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'assign_task',
       description: [
-        '把一个新任务派给团队里的某个成员（转达指令 / 转交 / 派生解除阻塞任务）。',
-        '该任务会进入目标成员的任务队列，由调度器唤起该成员处理。',
-        '你必须先用 list_team_tasks 感知团队，确认把任务派给哪个角色、进它的哪个工作类型泳道。',
-      ].join(''),
+        'Assign a new task to a team member (relay an instruction / transfer work / derive an unblock task).',
+        "The task enters the target member's queue and the scheduler wakes that member to handle it.",
+        'You must observe the team with list_team_tasks first to confirm which role to assign and which work-type lane to use.',
+      ].join(' '),
       parameters: {
-        profileId: { type: 'string', required: true, description: '目标成员的 profile id（派给谁）' },
-        type: { type: 'string', required: true, description: '工作类型泳道 slug（进目标成员的哪个会话，如 general/ui/debug 或项目自定义泳道）' },
-        summary: { type: 'string', required: true, description: '任务摘要：要做什么、目标是什么' },
-        transferNote: { type: 'string', description: '增量上下文（可选）：你的推理结论 / 转交说明 / 关联状态，帮助接收方理解任务来龙去脉' },
-        requirementId: { type: 'string', description: '可选：关联需求 id；提供后泳道标签 = 需求ID:类型（同需求同类型复用/隔离）' },
-        entityType: { type: 'string', enum: ['task', 'bug', 'requirement', 'discussion', 'review'], description: '可选：指向的共享实体类型（缺省 task）' },
-        entityId: { type: 'string', description: '可选：指向 ctx.project 共享实体 id（配合 entityType）' },
-        priority: { type: 'integer', description: '可选：优先级 0-3' },
-        via: { type: 'string', enum: ['transfer', 'bug-report', 'user-instruction', 'dependency', 'pm-decision'], description: '可选：来源通道（缺省按调用者推导）' },
+        profileId: { type: 'string', required: true, description: 'profile id of the target member (who gets the task)' },
+        type: { type: 'string', required: true, description: "Work-type lane slug (which session of the target member, e.g. general/ui/debug or a project-defined lane)" },
+        summary: { type: 'string', required: true, description: 'Task summary: what to do and what the goal is' },
+        transferNote: { type: 'string', description: 'Optional incremental context: your reasoning, transfer notes, related state — helps the receiver understand the background' },
+        requirementId: { type: 'string', description: 'Optional: related requirement id; when provided the lane label becomes requirementID:type (same requirement + type reuses/isolates)' },
+        entityType: { type: 'string', enum: ['task', 'bug', 'requirement', 'discussion', 'review'], description: 'Optional: shared entity type this task points at (default task)' },
+        entityId: { type: 'string', description: 'Optional: ctx.project shared entity id (used with entityType)' },
+        priority: { type: 'integer', description: 'Optional: priority 0-3' },
+        via: { type: 'string', enum: ['transfer', 'bug-report', 'user-instruction', 'dependency', 'pm-decision'], description: 'Optional: source channel (default derived from the caller)' },
       },
       output: {
         schema: { type: 'string' },
@@ -686,7 +686,7 @@ export class AgentRuntime extends TypertRemoteService {
           },
         )
         this.ctx.logger.info(`corumRuntime: [${projectId}] ${profileId} assign_task → ${args.profileId}/${task.label} "${task.id}"`)
-        return `任务已派给 ${args.profileId}（泳道 ${task.label}），任务 id：${task.id}。对方处理完成后会经调度器闭环。`
+        return `Task assigned to ${args.profileId} (lane ${task.label}), task id: ${task.id}. The scheduler closes the loop when they finish.`
       },
     }))
 
@@ -702,9 +702,9 @@ export class AgentRuntime extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'list_team_tasks',
       description: [
-        '查看本项目组各成员当前的任务队列与正在执行的任务（含每个任务所在泳道），以及谁在忙、谁空闲。',
-        '用于感知团队状态：项目组有哪些成员、谁能接活，从而决定把新任务派给谁、进哪个泳道。',
-      ].join(''),
+        "Show every member's task queue and current task (with each task's lane), plus who is busy and who is idle.",
+        'Use it to observe team state: who is on the project and who can take work, so you can decide whom to assign and which lane to use.',
+      ].join(' '),
       parameters: {},
       output: {
         schema: { type: 'string' },
@@ -713,27 +713,27 @@ export class AgentRuntime extends TypertRemoteService {
       execute: async () => {
         const project = loadProject(projectId)
         const members = project?.group?.members ?? []
-        if (members.length === 0) return `项目 ${projectId} 的项目组暂无成员。`
+        if (members.length === 0) return `Project ${projectId} has no team members yet.`
         const lines: string[] = []
         for (const member of members) {
           const rt = this.profiles.get(AgentRuntime.queueKey(projectId, member.profileId))
-          const roleTag = member.role === 'pm' ? '（PM）' : ''
-          let current = '空闲'
+          const roleTag = member.role === 'pm' ? ' (PM)' : ''
+          let current = 'idle'
           if (rt?.current !== undefined && rt !== undefined) {
             const runSec = rt.currentStartedAt !== undefined ? Math.round((Date.now() - rt.currentStartedAt) / 1000) : 0
             const idleSec = Math.round((Date.now() - this.lastActivityAt(rt)) / 1000)
-            const stallMark = idleSec > STALL_THRESHOLD_MS / 1000 ? ' ⚠疑似卡住' : ''
-            current = `执行中「${rt.current.summary}」（泳道 ${rt.current.type} · 已执行 ${Math.floor(runSec / 60)}分${runSec % 60}秒 · 最后活动 ${idleSec}秒前${stallMark}）`
+            const stallMark = idleSec > STALL_THRESHOLD_MS / 1000 ? ' ⚠ suspected stall' : ''
+            current = `running "${rt.current.summary}" (lane ${rt.current.type} · elapsed ${Math.floor(runSec / 60)}m${runSec % 60}s · last activity ${idleSec}s ago${stallMark})`
           }
           const queued = rt !== undefined && rt.queue.length > 0
-            ? `，队列 ${rt.queue.length} 个：${rt.queue.map(t => `「${t.summary}」(${t.type})`).join('、')}`
+            ? `, queue ${rt.queue.length}: ${rt.queue.map(t => `"${t.summary}" (${t.type})`).join(', ')}`
             : ''
           const suspended = rt !== undefined && rt.suspended.size > 0
-            ? `，挂起 ${rt.suspended.size} 个：${[...rt.suspended.values()].map(t => `「${t.summary}」`).join('、')}（等依赖解除）`
+            ? `, suspended ${rt.suspended.size}: ${[...rt.suspended.values()].map(t => `"${t.summary}"`).join(', ')} (waiting for dependencies)`
             : ''
-          lines.push(`- ${member.profileId}${roleTag}：${current}${queued}${suspended}`)
+          lines.push(`- ${member.profileId}${roleTag}: ${current}${queued}${suspended}`)
         }
-        return `项目 ${projectId} 项目组成员状态：\n${lines.join('\n')}`
+        return `Team status for project ${projectId}:\n${lines.join('\n')}`
       },
     }))
   }
@@ -751,7 +751,7 @@ export class AgentRuntime extends TypertRemoteService {
   ): string {
     const { projectId, profileId } = rt
     const task = rt.current
-    if (task === undefined) return '当前没有执行中的任务，无需挂起。'
+    if (task === undefined) return 'There is no task in progress, nothing to suspend.'
 
     // 挂起当前任务（泳道释放；session 冻结——不再进新消息，上下文完整保留待恢复）。
     rt.current = undefined
@@ -777,7 +777,7 @@ export class AgentRuntime extends TypertRemoteService {
       rt.queue.unshift(task)
       rt.wakeTask?.()
       rt.wakeTask = undefined
-      return `挂起失败："${args.unblockProfileId}" 不是项目 "${projectId}" 的项目组成员。任务已回队列。`
+      return `Suspend failed: "${args.unblockProfileId}" is not a member of project "${projectId}". The task went back to the queue.`
     }
     const blockedEvt = this.record('corum/task/blocked', {
       task: blockedRef,
@@ -789,7 +789,7 @@ export class AgentRuntime extends TypertRemoteService {
       args.unblockProfileId,
       args.unblockType ?? '',
       args.unblockSummary,
-      `【解除阻塞】${args.reason}\n【被阻塞任务】${task.summary}`,
+      `[UNBLOCK] ${args.reason}\n[BLOCKED TASK] ${task.summary}`,
       profileId, // actor = 被阻塞的角色
       [blockedEvt.id], // 因果边：派生任务因 blocked 而生
       derivedId,
@@ -805,7 +805,7 @@ export class AgentRuntime extends TypertRemoteService {
     // 唤醒本循环取下一个任务。
     rt.wakeDone?.()
     rt.wakeDone = undefined
-    return `任务已挂起。已派生解除阻塞任务给 ${args.unblockProfileId}（id：${derived.id}）；对方完成后你会被自动唤醒继续。`
+    return `Task suspended. An unblock task was derived for ${args.unblockProfileId} (id: ${derived.id}); you will be woken automatically to continue once they finish.`
   }
 
   /**
@@ -817,52 +817,52 @@ export class AgentRuntime extends TypertRemoteService {
     agentCtx.tools.register(defineTool({
       name: 'steer_task',
       description: [
-        '对执行中任务插入一句引导（不打断，下一步边界生效）。',
-        '用于任务方向对但节奏拖（如自测过重）：提示收敛（"编译通过即可，直接 complete_task"）。',
-      ].join(''),
+        'Insert a guidance note into a running task (non-interrupting; takes effect at the next step boundary).',
+        'Use when the direction is right but the pace drags (e.g. over-testing): ask for convergence ("compiling is enough, just call complete_task").',
+      ].join(' '),
       parameters: {
-        profileId: { type: 'string', required: true, description: '目标成员 profileId' },
-        note: { type: 'string', required: true, description: '引导内容（给执行者的收敛指令）' },
+        profileId: { type: 'string', required: true, description: 'target member profileId' },
+        note: { type: 'string', required: true, description: 'Guidance text (a converging instruction for the executor)' },
       },
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
       execute: async (args: { profileId: string; note: string }) => {
         const ok = this.steerTask(projectId, args.profileId, args.note, 'pm')
-        return ok ? `已对 ${args.profileId} 插入引导。` : `${args.profileId} 当前没有执行中的任务。`
+        return ok ? `Guidance inserted for ${args.profileId}.` : `${args.profileId} has no task in progress.`
       },
     }))
     agentCtx.tools.register(defineTool({
       name: 'cancel_task',
       description: [
-        '中止成员的执行中/挂起任务（明显跑偏/死循环时用）。',
-        '默认任务回队首重派（泳道会话保留上下文续跑）；fate=evicted 则废弃任务。',
-      ].join(''),
+        "Abort a member's running or suspended task (use when it is clearly off-track or looping).",
+        'By default the task goes back to the head of the queue (the lane session keeps its context); fate=evicted discards it.',
+      ].join(' '),
       parameters: {
-        profileId: { type: 'string', required: true, description: '目标成员 profileId' },
-        reason: { type: 'string', required: true, description: '中止原因' },
-        fate: { type: 'string', description: 'requeue（默认，回队重派）| evicted（废弃）' },
+        profileId: { type: 'string', required: true, description: 'target member profileId' },
+        reason: { type: 'string', required: true, description: 'Why you are aborting' },
+        fate: { type: 'string', description: 'requeue (default, back to the queue) | evicted (discard)' },
       },
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
       execute: async (args: { profileId: string; reason: string; fate?: string }) => {
         const fate = args.fate === 'evicted' ? 'evicted' : 'requeue'
         const ok = this.cancelTask(projectId, args.profileId, args.reason, 'pm', fate)
-        return ok ? `已中止 ${args.profileId} 的任务（${fate}）。` : `${args.profileId} 当前没有执行中/挂起的任务。`
+        return ok ? `Aborted ${args.profileId}'s task (${fate}).` : `${args.profileId} has no running or suspended task.`
       },
     }))
     agentCtx.tools.register(defineTool({
       name: 'reassign_task',
       description: [
-        '中止成员当前任务并改派给另一成员（卡住原因是能力不足/方向不对时用）。',
-        '原任务中止（reassigned），同 summary+上下文入队新成员。',
-      ].join(''),
+        "Abort a member's current task and reassign it to another member (use when the stall is caused by capability or direction).",
+        'The original task is aborted (reassigned) and re-queued to the new member with the same summary and context.',
+      ].join(' '),
       parameters: {
-        profileId: { type: 'string', required: true, description: '当前执行者 profileId' },
-        targetProfileId: { type: 'string', required: true, description: '改派目标成员 profileId' },
-        note: { type: 'string', required: true, description: '改派说明（为什么换、给新执行者的提示）' },
+        profileId: { type: 'string', required: true, description: 'current executor profileId' },
+        targetProfileId: { type: 'string', required: true, description: 'target member profileId' },
+        note: { type: 'string', required: true, description: 'Reassignment note (why the switch, plus hints for the new executor)' },
       },
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
       execute: async (args: { profileId: string; targetProfileId: string; note: string }) => {
         const ok = this.reassignTask(projectId, args.profileId, args.targetProfileId, args.note, 'pm')
-        return ok ? `已把 ${args.profileId} 的任务改派给 ${args.targetProfileId}。` : `${args.profileId} 当前没有执行中的任务。`
+        return ok ? `Reassigned ${args.profileId}'s task to ${args.targetProfileId}.` : `${args.profileId} has no task in progress.`
       },
     }))
   }

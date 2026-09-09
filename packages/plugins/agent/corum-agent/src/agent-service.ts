@@ -1733,10 +1733,10 @@ export class CorumAgentService extends TypertRemoteService {
     const config = this.requirePolishConfig()
     const kindText = typeof kind === 'string' && kind.trim() !== '' ? kind.trim() : 'prompt'
     const system = [
-      '你是提示词润色助手。把用户给的文本改写得更清晰、更具体、更便于 AI 执行，',
-      '保持原意与语言（中文进中文出，英文进英文出），不要回答问题、不要解释、不要加前后缀。',
-      `文本类型：${kindText}。只输出润色后的文本本身。`,
-    ].join('')
+      'You are a prompt-polishing assistant. Rewrite the text the user gives you so it is clearer, more specific, and easier for an AI to execute,',
+      'Preserve the original meaning and language (Chinese in, Chinese out; English in, English out). Do not answer the question, do not explain, and do not add any prefix or suffix.',
+      `Text kind: ${kindText}. Output only the polished text itself.`,
+    ].join(' ')
     const polished = await this.runPolishEngine(config, system, source)
     return { polished: polished.trim() }
   }
@@ -1756,17 +1756,17 @@ export class CorumAgentService extends TypertRemoteService {
     const config = this.requirePolishConfig()
     const recent = Array.isArray(history) ? history.slice(-6) : []
     const context = recent.length === 0
-      ? '（无历史对话）'
-      : recent.map(h => `${h.role === 'user' ? '用户' : 'AI'}：${h.text}`).join('\n')
+      ? '(no conversation history)'
+      : recent.map(h => `${h.role === 'user' ? 'User' : 'AI'}: ${h.text}`).join('\n')
     const system = [
-      '你是提示词润色助手。下面给你最近的对话上下文和用户刚输入的草稿。',
-      '把草稿改写成意图明确、衔接上下文顺畅、便于 AI 直接执行的输入：',
-      '补全省略的指代、把含糊要求具体化，但**不要**替用户做决定、不要添加用户没说的需求。',
-      '保持用户的语言。',
-      '只输出一个 JSON 对象，不要 markdown 代码块、不要多余文字，形如：',
-      '{"polished":"润色后的文本","intent":"continue|new-topic|bug-report|other"}',
-    ].join('')
-    const prompt = `对话上下文：\n${context}\n\n草稿：\n${source}`
+      'You are a prompt-polishing assistant. You are given the recent conversation context and the draft the user just typed.',
+      'Rewrite the draft into input that states its intent clearly, flows with the context, and can be executed by an AI directly:',
+      'Fill in omitted references and make vague requests concrete, but do **not** make decisions for the user and do not add requirements the user did not state.',
+      "Keep the user's language.",
+      'Output exactly one JSON object, with no markdown code fence and no extra text, shaped like:',
+      '{"polished":"the polished text","intent":"continue|new-topic|bug-report|other"}',
+    ].join(' ')
+    const prompt = `Conversation context:\n${context}\n\nDraft:\n${source}`
     const raw = await this.runPolishEngine(config, system, prompt)
     const parsed = parsePolishEnvelope(raw)
     return parsed ?? { polished: raw.trim(), intent: 'unknown' }
@@ -1779,9 +1779,9 @@ export class CorumAgentService extends TypertRemoteService {
     if (source === '') return { translated: '' }
     const config = this.requirePolishConfig()
     const system = [
-      '你是翻译助手。中文译成英文，英文译成中文，其它语言译成中文。',
-      '只输出译文本身，不要解释、不要加引号。',
-    ].join('')
+      'You are a translation assistant. Translate Chinese into English, English into Chinese, and any other language into Chinese.',
+      'Output only the translation itself: no explanation and no quotation marks.',
+    ].join(' ')
     const translated = await this.runPolishEngine(config, system, source)
     return { translated: translated.trim() }
   }

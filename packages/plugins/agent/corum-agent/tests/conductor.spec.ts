@@ -76,9 +76,13 @@ describe('conductorExecutionDeny — 执行工具平台口径', () => {
 })
 
 describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
-  it('声明「不亲手执行」与四个工作阶段', () => {
-    expect(CONDUCTOR_PERSONA).toContain('绝不亲手')
-    for (const stage of ['理解', '拆解', '派活', '裁决']) expect(CONDUCTOR_PERSONA).toContain(stage)
+  it('声明「不亲手执行」与四个工作阶段（英文提示词）', () => {
+    expect(CONDUCTOR_PERSONA).toContain('you never write code, edit files, or run commands yourself')
+    for (const stage of ['1. Understand:', '2. Split:', '3. Delegate:', '4. Decide:']) {
+      expect(CONDUCTOR_PERSONA).toContain(stage)
+    }
+    // 全英文：人格段不得含中日韩字符（2026-09-10 用户要求「提示词都以英文编写」）。
+    expect(CONDUCTOR_PERSONA).not.toMatch(/[\u4e00-\u9fff]/)
   })
 
   it('不重复机制事实（隔离触发/模型锁/验收门禁由机制段单一事实源负责）', () => {
