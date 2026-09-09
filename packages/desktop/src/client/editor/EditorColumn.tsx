@@ -39,6 +39,7 @@ import { Code, Eye, PanelRightOpen, X } from 'lucide-react'
 import type {} from '@corum/corum-ide-ui/client'
 import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { MonacoEditor, languageFromPath } from './MonacoEditor.tsx'
+import { getCorumMonacoInstance } from './monaco-bridge.ts'
 import { ExplorerPane, type ExplorerPaneInjected } from './ExplorerPane.tsx'
 import { DiffViewer } from './DiffViewer.tsx'
 import { ImagePreview, MarkdownPreview, SvgPreview, VideoPreview } from './PreviewView.tsx'
@@ -528,10 +529,11 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       // 同一事件；用 editor.trigger 走 command 层，语义与 keybinding 一致）。
       const editContext = monacoHost?.querySelector('.native-edit-context, textarea.inputarea') as HTMLElement | null
       editContext?.focus()
-      const monacoGlobal = (window as unknown as { __corumMonacoEditor?: { trigger: (source: string, handlerId: string) => void } }).__corumMonacoEditor
-      if (monacoGlobal !== undefined) {
+      // P2-1：同 bundle 模块引用桥（替代 window.__corumMonacoEditor）。
+      const monacoInstance = getCorumMonacoInstance()
+      if (monacoInstance !== undefined) {
         const cmd = e.key === 'f' ? 'actions.find' : e.key === 'z' && !e.shiftKey ? 'undo' : e.key === 'z' && e.shiftKey ? 'redo' : 'editor.action.selectAll'
-        monacoGlobal.trigger('keyboard', cmd)
+        monacoInstance.trigger('keyboard', cmd)
       }
     }
     window.addEventListener('keydown', onKey)

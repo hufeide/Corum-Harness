@@ -68,7 +68,10 @@ export interface Task {
   readonly requirementId?: string
   /** 任务摘要（提交方生成）。 */
   readonly summary: string
-  /** 增量 context（提交方组装，可选）。 */
+  /**
+   * 增量 context（提交方组装，可选）。空串与缺省同义——`taskRef` 落领域事件载荷时
+   * 空值不进 JSON（P2-6：声明可选与构造口径一致，消费方按 `undefined` 判空即可）。
+   */
   readonly transferNote?: string
   /** 来源追溯（提交方/通道/时间/因果）。 */
   readonly source: TaskSource
@@ -103,7 +106,10 @@ export function taskRef(task: Task): TaskRef {
     profileId: task.profileId,
     entityType: task.entityType,
     ...(task.entityId !== undefined ? { entityId: task.entityId } : {}),
-    label: task.label,
+    // P2-6（2026-09-09）：label 用 normalizeTask 同口径兜底——历史事件/旧调用可能
+    // 缺 label（normalizeTask 的 undefined 检查即为此），而 TaskRef.label 声明必填；
+    // 直接透传会把 undefined 写进领域事件载荷（corum/task/* 的路由键）。
+    label: task.label !== undefined && task.label !== '' ? task.label : laneLabel(task.type, task.requirementId),
     type: task.type,
     ...(task.requirementId !== undefined ? { requirementId: task.requirementId } : {}),
     summary: task.summary,

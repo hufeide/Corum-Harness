@@ -72,6 +72,9 @@ export const inject = [
   // layout 补入：「新建任务表单」打开信号面（newTaskForm）桥到 ctx.layout 的
   // grid actions（AppFrame 持有），替代原 OPEN_NEW_TASK_FORM_EVENT 窗口事件桥。
   'slots', 'sessions', 'fileUpload', 'uiSession', 'locale', 'settingsScope', 'workspaces', 'layout',
+  // P2-3（2026-09-09 复核补齐）：空态操作卡 2 处 ctx.get('connection')（RPC 桥 /
+  // 润色 RPC）此前未声明 inject——红线 4 违规，补齐后由 cordis 保证激活时序。
+  'connection',
 ]
 
 /** Conversation runtime configuration. */

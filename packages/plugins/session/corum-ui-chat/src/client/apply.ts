@@ -87,6 +87,11 @@ export const inject = [
   // 统一事件中心三-2：corum:open-in-editor 跨 bundle CustomEvent → corumEditor
   // cordis 服务（desktop client provide；红线 4 必须 inject 声明）。
   'corumEditor',
+  // P2-3（2026-09-09 复核补齐）：本包 3 处 ctx.get('connection')（reviewSource /
+  // chatRuntime.setSession / getAgentName RPC）此前未声明 inject——红线 4 违规。
+  // connection 是官方 client 平台服务（ui-conversation/desktop 同款注入），
+  // 声明后 cordis 保证激活时序、ctx.get 不再依赖「碰巧已装配」。
+  'connection',
 ]
 
 /**

@@ -141,29 +141,16 @@ export function isPinnedSlot(key: string): boolean {
 }
 
 /**
- * 槽位折叠运行时状态（GridView `collapsedSlots` 的镜像，供 leafMinSize 取
- * 折叠宽）。由 AppFrame 这类壳在切换折叠时同步写入；与 collapsedWidth 声明
- * 配合——只有声明了 collapsedWidth 的槽位才接受折叠（未声明时写入被忽略）。
+ * 折叠态的空集缺省（调用方不传 collapsed 时用）。
+ *
+ * P2-2（2026-09-09，.dbg/event-bus-audit-2026-09.md）：原实现在本模块持有一个
+ * 模块级可变 `collapsedSlots` Set（`setSlotCollapsed` 写 / `leafMinSize` 读）。
+ * ui-base 是**被各 bundle 内联的纯库**——同一份源码在每个 bundle 各有一份模块
+ * 实例，Set 因此按 bundle 分裂（与 `__corumSidebarMode` 同型风险，当时靠
+ * 「写读同 bundle」幸存）。现改为**显式参数**：折叠态由壳（AppFrame 的
+ * sidebarCollapsed）持有并传入 grid 数学与 GridView，本模块不再有任何可变状态。
  */
-const collapsedSlots = new Set<string>()
-
-/** 折叠/展开一个槽位（未声明 collapsedWidth 的槽位调用无效）。 */
-export function setSlotCollapsed(key: string, collapsed: boolean): void {
-  const meta = getSlotMeta(key)
-  if (meta?.collapsedWidth === undefined) return
-  if (collapsed) collapsedSlots.add(key)
-  else collapsedSlots.delete(key)
-}
-
-/** 该槽位当前是否处于折叠态。 */
-export function isSlotCollapsed(key: string): boolean {
-  return collapsedSlots.has(key)
-}
-
-/** 槽位折叠后的宽度（未声明/未折叠返回 undefined）。 */
-export function slotCollapsedWidth(key: string): number | undefined {
-  return collapsedSlots.has(key) ? getSlotMeta(key)?.collapsedWidth : undefined
-}
+const EMPTY_COLLAPSED: ReadonlySet<string> = new Set()
 
 /** 列出所有已注册的槽位 key（有序）。 */
 export function getAllRegisteredSlots(): string[] {
@@ -179,11 +166,11 @@ export const SLOT_FALLBACK_MIN_WIDTH = 200
 export const SLOT_FALLBACK_MIN_HEIGHT = 200
 
 /** 叶子在指定轴上的最小尺寸：折叠态取 collapsedWidth；否则 SlotMeta 声明优先，缺省走兜底。 */
-function leafMinSize(slot: GridSlot, isRow: boolean): number {
+function leafMinSize(slot: GridSlot, isRow: boolean, collapsed: ReadonlySet<string>): number {
   const meta = getSlotMeta(slot)
   // 折叠态（仅 row 轴的宽度方向生效——折叠收的是宽）：min 取折叠宽，
   // 窗口自适应 rescaleGrid 不会把它拉回展开宽。
-  if (isRow && collapsedSlots.has(slot) && meta?.collapsedWidth !== undefined) {
+  if (isRow && collapsed.has(slot) && meta?.collapsedWidth !== undefined) {
     return meta.collapsedWidth
   }
   const declared = isRow ? meta?.minWidth : meta?.minHeight
@@ -202,9 +189,9 @@ function leafMinSize(slot: GridSlot, isRow: boolean): number {
  * 部分隐藏的 branch 仍按可见子树计 min（可见部分需要下限）；单 leaf hidden 同理
  * 取 0。
  */
-export function subtreeMinSize(node: GridNode, isRow: boolean): number {
-  if (node.type === 'leaf') return node.hidden === true ? 0 : leafMinSize(node.slot, isRow)
-  const sizes = node.children.map(c => subtreeMinSize(c, isRow))
+export function subtreeMinSize(node: GridNode, isRow: boolean, collapsed: ReadonlySet<string> = EMPTY_COLLAPSED): number {
+  if (node.type === 'leaf') return node.hidden === true ? 0 : leafMinSize(node.slot, isRow, collapsed)
+  const sizes = node.children.map(c => subtreeMinSize(c, isRow, collapsed))
   return node.direction === (isRow ? 'row' : 'column')
     ? sizes.reduce((a, b) => a + b, 0)
     : sizes.reduce((a, b) => Math.max(a, b), 0)
@@ -522,7 +509,7 @@ export function prune(node: GridNode): GridNode {
  * 各格最小份额 = 各侧子树的 subtreeMinSize（SlotMeta 声明 + 兜底）；minWeight
  * 显式传入时覆盖紧贴 sash 的两侧（保留给特殊调方）。
  */
-export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight?: number): GridNode {
+export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight?: number, collapsed: ReadonlySet<string> = EMPTY_COLLAPSED): GridNode {
   if (delta === 0) return root
   const tree = cloneNode(root)
   const found = findNode(tree, branchId)
@@ -531,7 +518,7 @@ export function resizeBranch(root: GridNode, branchId: string, sashIndex: number
   const i = sashIndex
   if (i < 0 || i >= branch.weights.length - 1) return root
   const isRow = branch.direction === 'row'
-  const mins = branch.children.map(c => subtreeMinSize(c, isRow))
+  const mins = branch.children.map(c => subtreeMinSize(c, isRow, collapsed))
   if (minWeight !== undefined) { mins[i] = minWeight; mins[i + 1] = minWeight }
 
   if (delta > 0) {
@@ -566,11 +553,11 @@ export function resizeBranch(root: GridNode, branchId: string, sashIndex: number
  * weights 是像素；窗口缩放时各列等比缩放，不截断、不溢出。row 分支沿宽度
  * 缩放、column 分支沿高度缩放——按方向分别处理。
  */
-export function rescaleGrid(node: GridNode, width: number, height: number): GridNode {
+export function rescaleGrid(node: GridNode, width: number, height: number, collapsed: ReadonlySet<string> = EMPTY_COLLAPSED): GridNode {
   const scale = (branch: BranchNode, span: number): void => {
     // 主轴方向各格最小尺寸 = 各子树的 subtreeMinSize（SlotMeta 声明 + 兜底）。
     const isRow = branch.direction === 'row'
-    const mins = branch.children.map(c => subtreeMinSize(c, isRow))
+    const mins = branch.children.map(c => subtreeMinSize(c, isRow, collapsed))
     const total = branch.weights.reduce((a, b) => a + b, 0)
     if (total <= 0 || span <= 0) return
     // 先按比例分配。

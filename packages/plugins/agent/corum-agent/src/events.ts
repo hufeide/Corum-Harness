@@ -75,7 +75,10 @@ export interface TaskRef {
   readonly requirementId?: string
   /** 任务摘要。 */
   readonly summary: string
-  /** 增量 context（提交方组装，可选）。 */
+  /**
+   * 增量 context（提交方组装，可选）。空串与缺省同义（`taskRef` 空值不进载荷）；
+   * P2-6：声明可选即构造口径——消费方只判 `undefined`。
+   */
   readonly transferNote?: string
   /** 来源追溯（提交方/通道/时间/因果）。 */
   readonly source: TaskSource

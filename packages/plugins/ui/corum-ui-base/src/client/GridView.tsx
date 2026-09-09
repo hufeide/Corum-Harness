@@ -8,7 +8,7 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
-import { subtreeMinSize, isPinnedSlot, slotCollapsedWidth } from './grid.ts'
+import { subtreeMinSize, isPinnedSlot, getSlotMeta } from './grid.ts'
 import { RegionCard, INTERACTIVE_SELECTOR, CARD_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
 
@@ -38,8 +38,9 @@ export interface GridViewProps {
   /**
    * 折叠收起的槽位集合（如 IDE 侧栏收成 56px 图标轨）：这些 leaf 渲染为各自
    *  SlotMeta.collapsedWidth 的固定宽（不参与 weight 分配、两侧 sash 隐藏不可
-   *  拖），不再是 detached 的 0 宽。与 grid.ts 的 setSlotCollapsed 同步——
-   *  subtreeMinSize 在折叠态取 collapsedWidth，窗口自适应不会拉回展开宽。
+   *  拖），不再是 detached 的 0 宽。P2-2：折叠态由本 prop 显式传入
+   *  （grid.ts 不再持有模块级折叠 Set），subtreeMinSize 在折叠态取
+   *  collapsedWidth，窗口自适应不会拉回展开宽。
    */
   collapsedSlots?: ReadonlySet<string>
   /**
@@ -349,8 +350,8 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
       ? ((rest.detachedSlots?.has(c.slot) ?? false) || c.hidden === true)
       : allDetached(c))
   // 折叠收起（collapsedSlots）：leaf 锁定为各自 collapsedWidth 的固定宽（非 0），
-  // 不参与 weight 分配、两侧 sash 隐藏不可拖。取 grid.ts 的运行时折叠态（与
-  // setSlotCollapsed 同步）——leafMinSize 同时已把 min 换成 collapsedWidth。
+  // 不参与 weight 分配、两侧 sash 隐藏不可拖。折叠态直接来自本 prop（P2-2：
+  // grid.ts 无状态，leafMinSize 经 collapsed 参数取同一份声明值）。
   // lockedSlots（壳层运行时锁定宽，如右侧全隐藏时侧栏锁 300）优先——同一
   // locked 机制，宽度由壳直给。
   const locked = branch.children.map((c) => {
@@ -358,7 +359,7 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
     const runtimeLocked = rest.lockedSlots?.get(c.slot)
     if (runtimeLocked !== undefined) return runtimeLocked
     if (!(rest.collapsedSlots?.has(c.slot) ?? false)) return null
-    return slotCollapsedWidth(c.slot) ?? null
+    return getSlotMeta(c.slot)?.collapsedWidth ?? null
   })
 
   // 每次渲染重建的最新 layout 闭包（读最新 branch/detached/locked），供 RO/rAF 调用。
@@ -375,7 +376,7 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
     // subtreeMinSize 只看 leaf.hidden，detachedSlots（右侧三区域默认隐藏/浮动窗
     // 脱出）不在其内；否则全 detached 支的 min 仍计入 minTotal，兄弟格被「隐形
     // min」顶住无法铺满空缺（2026-08-30：right-col 全隐藏后对话区不填满）。
-    const mins = branch.children.map((c, i) => (detached[i] ? 0 : subtreeMinSize(c, isRow)))
+    const mins = branch.children.map((c, i) => (detached[i] ? 0 : subtreeMinSize(c, isRow, rest.collapsedSlots)))
     const sizes = computeCellSizes(branch.weights, detached, mins, span, locked)
     // 顶层 row 的 leafTopOffset：内容格 top 下移、height 相应缩短（绝对定位格
     // 自身仍占满全高，内容格让位）。只作用于 depth=0 的 row 分支。

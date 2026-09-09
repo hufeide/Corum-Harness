@@ -44,6 +44,7 @@ import 'monaco-editor/nls/lang/zh-cn.js'
 import { editor } from 'monaco-editor'
 import type { editor as MonacoEditorApi } from 'monaco-editor'
 import { installMonacoWorkerEnvironment } from './worker.ts'
+import { setCorumMonacoInstance, type CorumMonacoInstance } from './monaco-bridge.ts'
 
 /** One code file shown in the editor. */
 export interface MonacoFileModel {
@@ -341,10 +342,10 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         formatOnType: false,
       })
       editorRef.current = instance
-      // 编辑器实例挂 window（EditorColumn 快捷键兜底走 editor.trigger 调
-      // command——keydown 已派发完 Monaco 接不到，focus 后直接 trigger command
-      // 语义与 keybinding 一致）。合法 window 挂载：written once read-only。
-      ;(window as unknown as { __corumMonacoEditor?: typeof instance }).__corumMonacoEditor = instance
+      // P2-1（2026-09-09）：原挂 window.__corumMonacoEditor（可写可清的可变单例，
+      // 红线 1 形态）→ 同 bundle 模块引用桥（monaco-bridge.ts）。EditorColumn 的
+      // 快捷键兜底经 getCorumMonacoInstance() 取同一实例。
+      setCorumMonacoInstance(instance as unknown as CorumMonacoInstance)
       instance.onDidChangeModelContent(() => {
         const model = instance.getModel()
         if (model !== null) {
@@ -366,7 +367,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     }
     return () => {
       findWidgetFix.disconnect()
-      ;(window as unknown as { __corumMonacoEditor?: unknown }).__corumMonacoEditor = undefined
+      setCorumMonacoInstance(undefined)
       editorRef.current?.dispose()
       editorRef.current = null
     }

@@ -29,7 +29,7 @@ import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, 
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
-  rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots, setSlotCollapsed,
+  rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots,
   FloatingLayer, useFloatingLayer,
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/corum-ui-base/client'
@@ -663,6 +663,9 @@ export function IdeAppFrame({
   // 最新 grid 的镜像（事件桥等需要读最新树的回调用，避免闭包捕获过期值）。
   const gridRef = useRef<GridNode>(grid)
   gridRef.current = grid
+  // 折叠槽位集的镜像（P2-2）：grid 数学（rescaleGrid/resizeBranch）与 GridView
+  // 都要读折叠态，而折叠 state 声明在下方——用 ref 镜像让上方回调读到最新值。
+  const collapsedRef = useRef<ReadonlySet<string>>(new Set())
   // saveGrid（JSON.stringify + setItem 同步阻塞主线程）在 sash 拖动/窗口
   // resize 的高频回调里会每帧跑——用 trailing debounce 落盘，UI 仍实时更新。
   const saveTimer = useRef<number | null>(null)
@@ -678,7 +681,7 @@ export function IdeAppFrame({
   }, [])
   const onGridResize = useCallback((branchId: string, sashIndex: number, deltaFraction: number) => {
     setGrid((g) => {
-      const next = resizeBranch(g, branchId, sashIndex, deltaFraction)
+      const next = resizeBranch(g, branchId, sashIndex, deltaFraction, undefined, collapsedRef.current)
       saveGridDebounced(next)
       return next
     })
@@ -689,7 +692,7 @@ export function IdeAppFrame({
       // 尺寸重标定，让所有 weights 归一到合法像素，避免新格塌陷成 1px。
       const dropped = dropLeaf(g, sourceId, targetId, zone)
       const { width, height } = frameBox.current
-      const next = width > 0 && height > 0 ? rescaleGrid(dropped, width, height) : dropped
+      const next = width > 0 && height > 0 ? rescaleGrid(dropped, width, height, collapsedRef.current) : dropped
       saveIdeGrid(next)
       return next
     })
@@ -734,7 +737,7 @@ export function IdeAppFrame({
   // 并持久化（等价初次启动的几何）。
   const resetLayout = useCallback(() => {
     const { width, height } = frameBox.current
-    const next = width > 0 && height > 0 ? rescaleGrid(ideDefaultGrid(), width, height) : ideDefaultGrid()
+    const next = width > 0 && height > 0 ? rescaleGrid(ideDefaultGrid(), width, height, collapsedRef.current) : ideDefaultGrid()
     setGrid(next)
     saveIdeGrid(next)
     notifyGridListeners.current()
@@ -745,21 +748,20 @@ export function IdeAppFrame({
   // 终端/侧栏单独切换的语义统一。
   // 侧栏折叠（2026-08-28 重实现，design L1 侧栏折叠态 J0PbdL）：GridView 把
   // sidebar leaf 收成 56px 图标轨（collapsedWidth），leaf 内容换成竖排图标栏
-  // （含展开按钮）。grid.ts 的 setSlotCollapsed 同步运行时折叠态——leafMinSize
-  // 取 56，窗口自适应/sash 传导不会把侧栏拉回 300。
+  // （含展开按钮）。P2-2：折叠态只存本组件 state，经 COLLAPSED_SIDEBAR 显式传给
+  // GridView 与 grid 数学（rescaleGrid/resizeBranch）——grid.ts 不再持模块级
+  // 折叠 Set（ui-base 被各 bundle 内联，模块状态会按 bundle 分裂）。
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const onToggleSidebar = useCallback(() => {
-    setSidebarCollapsed(c => {
-      const next = !c
-      setSlotCollapsed('corum.sidebar', next)
-      return next
-    })
+    setSidebarCollapsed(c => !c)
   }, [])
   // 传给 GridView 的折叠槽位集（useMemo 稳引用，折叠时才含 sidebar）。
   const COLLAPSED_SIDEBAR = useMemo<ReadonlySet<string>>(
     () => (sidebarCollapsed ? new Set(['corum.sidebar']) : new Set()),
     [sidebarCollapsed],
   )
+  // 同步给上方 grid 数学用的 ref 镜像（渲染期赋值，与 gridRef 同款）。
+  collapsedRef.current = COLLAPSED_SIDEBAR
   // 右侧两区域默认隐藏（2026-08-30 用户定调：编辑器/终端默认
   // 不展示——不只空态，进入项目/会话后也不显示；**只有点左上角快捷按钮
   // （面板/终端切换）才显示**，后续显示规则再定义）。userShown 记录用户
@@ -982,7 +984,7 @@ export function IdeAppFrame({
           lastH = h
           frameBox.current = { width: w, height: h }
           setGrid((g) => {
-            const next = rescaleGrid(g, w, h)
+            const next = rescaleGrid(g, w, h, collapsedRef.current)
             saveGridDebounced(next)
             return next
           })
