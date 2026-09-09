@@ -8,8 +8,8 @@ import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import { isSubagentDelegationTool } from '../contract/turn-process.ts'
 import { subagentChildOf } from '../chat-runtime.ts'
 import {
-  decodeSubagentTurn, encodeSubagentTurn, subagentDelegationFields,
-  type SubagentInvocation, type SubagentTurnSignature,
+  subagentDelegationFields,
+  type SubagentInvocation,
 } from '../contract/subagent.ts'
 import { chatNode } from './common.ts'
 
@@ -20,26 +20,12 @@ declare module '../contract/chat-nodes.ts' {
   }
 }
 
-declare module '@corum/corum-ui-conversation/client' {
-  interface ConversationTurnDataMap {
-    /** Encoded subagent invocation list for this Turn. */
-    'subagent-progress': SubagentTurnSignature
-  }
-}
-
-interface SubagentTurnState {
-  readonly turn: number
-  readonly invocations: readonly SubagentInvocation[]
-  /** Whether this Context saw a delegation tool/call in the live feed. */
-  readonly sawDelegation: boolean
+/** One delegation call's own Context state（2026-09-10：按次建节点）。 */
+interface SubagentCallState {
+  readonly invocation: SubagentInvocation
 }
 
 type ConversationEvent = Parameters<ConversationNodeDefinition['match']>[0]
-
-function eventTurn(event: ConversationEvent): number | undefined {
-  const data = event.data as unknown as { turn?: unknown }
-  return typeof data.turn === 'number' ? data.turn : undefined
-}
 
 /**
  * Best-effort correlation of one delegation call to its child Session:
@@ -62,35 +48,25 @@ function correlateChild(
   return later[0]?.summary.id
 }
 
+/** Re-correlate one invocation against the live session list. */
 function refreshCorrelation(
-  invocations: readonly SubagentInvocation[],
-  summaries: Readonly<Record<string, SessionSummary>>,
-): readonly SubagentInvocation[] {
-  const children = Object.values(summaries).filter(summary => summary.origin === 'subagent')
-  return invocations.map((invocation) => {
-    // 精确优先：宿主 spawn 广播（'corum/subagent/child'）已在本进程缓存了真实 id
-    // 与前台/后台模式（2026-09-09 修复「运行期进不去子会话」）；没有才退回
-    // summary 时间就近匹配（时间匹配拿不到模式，卡片改用工具参数兜底）。
-    const exact = subagentChildOf(invocation.callId)
-    if (exact !== undefined) {
-      return { ...invocation, childSessionId: exact.childSessionId, mode: exact.mode }
-    }
-    if (invocation.childSessionId !== undefined) return invocation
-    const childSessionId = correlateChild(children, invocation.time)
-    return childSessionId === undefined ? invocation : { ...invocation, childSessionId }
-  })
-}
-
-function withInvocation(
-  state: SubagentTurnState,
   invocation: SubagentInvocation,
-): SubagentTurnState {
-  const index = state.invocations.findIndex(candidate => candidate.callId === invocation.callId)
-  return index < 0
-    ? { ...state, invocations: [...state.invocations, invocation] }
-    : { ...state, invocations: state.invocations.map((candidate, at) => at === index ? invocation : candidate) }
+  summaries: Readonly<Record<string, SessionSummary>>,
+): SubagentInvocation {
+  // 精确优先：宿主 spawn 广播（'corum/subagent/child'）已在本进程缓存了真实 id
+  // 与前台/后台模式（2026-09-09 修复「运行期进不去子会话」）；没有才退回
+  // summary 时间就近匹配（时间匹配拿不到模式，卡片改用工具参数兜底）。
+  const exact = subagentChildOf(invocation.callId)
+  if (exact !== undefined) {
+    return { ...invocation, childSessionId: exact.childSessionId, mode: exact.mode }
+  }
+  if (invocation.childSessionId !== undefined) return invocation
+  const children = Object.values(summaries).filter(summary => summary.origin === 'subagent')
+  const childSessionId = correlateChild(children, invocation.time)
+  return childSessionId === undefined ? invocation : { ...invocation, childSessionId }
 }
 
+/** Fold one delegation `tool/call` into its invocation identity. */
 function startInvocation(match: ConversationMatch): SubagentInvocation {
   if (match.event.type !== 'tool/call') throw new Error('subagent start requires tool/call')
   const fields = subagentDelegationFields(match.event.data.arguments)
@@ -105,100 +81,53 @@ function startInvocation(match: ConversationMatch): SubagentInvocation {
   }
 }
 
-function fallbackState(context: ConversationNodeContext<SubagentTurnState>): SubagentTurnState | undefined {
-  const turn = context.matches.map(match => eventTurn(match.event)).find(candidate => candidate !== undefined)
-  if (turn === undefined) return undefined
-  let state: SubagentTurnState = { turn, invocations: [], sawDelegation: false }
-  for (const match of context.matches) {
-    if (match.event.type === 'tool/call' && isSubagentDelegationTool(match.event.data.name)) {
-      state = { ...withInvocation(state, startInvocation(match)), sawDelegation: true }
-    }
-  }
-  return state
+/** Rebuild the invocation from the Context's own start Match (cold feeds). */
+function fallbackInvocation(context: ConversationNodeContext<SubagentCallState>): SubagentInvocation | undefined {
+  const match = context.matches.find(entry => entry.event.type === 'tool/call')
+  return match === undefined ? undefined : startInvocation(match)
 }
 
-/** Latest invocation list of one turn, correlated against the live session list. */
-function currentInvocations(
-  context: ConversationNodeContext<SubagentTurnState>,
+/** This Context's invocation, re-correlated against the live session list. */
+function currentInvocation(
+  context: ConversationNodeContext<SubagentCallState>,
   summaries: Readonly<Record<string, SessionSummary>>,
-): readonly SubagentInvocation[] {
-  const state = context.state ?? fallbackState(context)
-  if (state === undefined) return []
-  return refreshCorrelation(state.invocations, summaries)
-}
-
-/** Decode rows of one encoded turn, re-attaching its turn coordinate. */
-function decodeSubagentTurnRows(
-  signature: SubagentTurnSignature,
-  turn: number,
-): readonly SubagentInvocation[] {
-  return decodeSubagentTurn(signature).map(invocation => ({ ...invocation, turn }))
+): SubagentInvocation | undefined {
+  const invocation = context.state?.invocation ?? fallbackInvocation(context)
+  return invocation === undefined ? undefined : refreshCorrelation(invocation, summaries)
 }
 
 /**
- * Build the Turn-scoped subagent Definition bound to the sessions service for
+ * Build the per-delegation subagent Definition bound to the sessions service for
  * summary-based child correlation at Location-data evaluation time.
+ *
+ * 2026-09-10（用户 P8 定调）：**每次委托一个节点**——`match` 以 `tool/call` 的
+ * `callId` 为 Context id，`buildViewNode` 用该次委托自己的 `seq` 当 `anchorSeq`。
+ * 此前是「每个 turn 一个节点 + 锚点取该 turn 最早一次委托」，同 turn 后续委托的
+ * 卡片全部堆到最早位置（新的在上面，必须上翻才看到）。逐次成节点后，卡片落在
+ * 它发生的那一步，与瀑布流顺序一致。
  * @param sessions - sessions service face exposing the live summary list.
  * @returns subagent progress-card Definition.
  */
 export function subagentTurnDefinition(
   sessions: ISessions,
-): ConversationNodeDefinition<SubagentTurnState> {
+): ConversationNodeDefinition<SubagentCallState> {
   return {
     kind: 'subagent-progress',
     target: 'chat',
-    match: (event) => {
-      // Anchor each Turn Context on its durable `turn/start` (the engine folds
-      // any earlier same-id updates into a replay of matches[0] = start).
-      // Everything else is an update — pre-start leftovers replay through
-      // start(), live events fold through update().
-      if (event.type === 'turn/start') return { id: String(event.data.turn), role: 'start' }
-      const turn = eventTurn(event)
-      if (turn === undefined) return null
-      return { id: String(turn), role: 'update' }
+    match: (event: ConversationEvent) => {
+      if (event.type !== 'tool/call' || !isSubagentDelegationTool(event.data.name)) return null
+      return { id: String(event.data.callId), role: 'start' }
     },
-    start: (context, match) => {
-      if (match.event.type !== 'turn/start') throw new Error('subagent start requires turn/start')
-      // Replay every pre-start update folded into this Context (the turn's
-      // delegation tool/call may precede its projected `turn/start` in cold
-      // feeds, and matches[0] must be the start Match — same anchor
-      // discipline as turn-process / turn-error).
-      const base: SubagentTurnState = { turn: match.event.data.turn, invocations: [], sawDelegation: false }
-      return context.matches.slice(1).reduce<SubagentTurnState>((state, entry) => {
-        if (entry.event.type === 'tool/call' && isSubagentDelegationTool(entry.event.data.name)) {
-          return { ...withInvocation(state, startInvocation(entry)), sawDelegation: true }
-        }
-        return state
-      }, base)
-    },
-    update: (context, match) => {
-      if (match.event.type === 'tool/call' && isSubagentDelegationTool(match.event.data.name)) {
-        return { ...withInvocation(context.state, startInvocation(match)), sawDelegation: true }
-      }
-      return context.state
-    },
-    buildLocationData: (context, scope) => {
-      if (scope !== 'turn') return null
-      const location = context.start?.location ?? context.matches.at(-1)?.location
-      if (location?.kind !== 'turn' && location?.kind !== 'step') return null
-      const invocations = currentInvocations(context, sessions.list.getSnapshot().byId)
-      if (invocations.length === 0) return null
-      return {
-        kind: 'turn',
-        turn: location.turn.turn,
-        key: 'subagent-progress',
-        value: encodeSubagentTurn(invocations),
-      }
-    },
+    start: (_context, match) => ({ invocation: startInvocation(match) }),
+    // 逐次成节点后本 Context 不再接收后续事件；保留 no-op 以满足 Definition 契约
+    // （子会话 id 的相关性由 buildViewNode 每次重算时对 live sessions 列表求）。
+    update: context => context.state,
     buildViewNode: (context) => {
       const location = context.start?.location ?? context.matches.at(-1)?.location
       if (location?.kind !== 'turn' && location?.kind !== 'step') return null
-      const signature = location.turn.data.get('subagent-progress')
-      if (signature === undefined) return null
-      const invocations = decodeSubagentTurnRows(signature, location.turn.turn)
-      if (invocations.length === 0) return null
-      const anchor = Math.min(...invocations.map(invocation => invocation.anchorSeq))
-      return chatNode(context, 'subagent-call', anchor, { invocations })
+      const invocation = currentInvocation(context, sessions.list.getSnapshot().byId)
+      if (invocation === undefined) return null
+      return chatNode(context, 'subagent-call', invocation.anchorSeq, { invocations: [invocation] })
     },
   }
 }

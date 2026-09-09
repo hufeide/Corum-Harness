@@ -414,17 +414,6 @@ function WorktreeLedgerChip({ sessionId }: { sessionId: string | undefined }) {
 
 export const SubagentCard = memo(function SubagentCard({ node, t }: ChatNodeViewProps<'subagent-call'>) {
   const invocations = node.data.invocations
-  // 「并行工作区」chip：当前会话（父）的隔离台账——chatRuntime uSES 源取会话 id。
-  // hooks 必须在 early return 之前且顺序恒定（React #310：服务引用可能晚挂载，
-  // 用 setState 函数式更新 + 防御性订阅）。
-  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(undefined)
-  useEffect(() => {
-    setCurrentSessionId(chatRuntimeRef.current?.sessionIdSnapshot().getSnapshot())
-    const dispose = chatRuntimeRef.current?.onSessionIdChange(() => {
-      setCurrentSessionId(chatRuntimeRef.current?.sessionIdSnapshot().getSnapshot())
-    })
-    return typeof dispose === 'function' ? dispose : undefined
-  }, [])
   if (invocations.length === 0) return null
   return (
     <>
@@ -439,7 +428,8 @@ export const SubagentCard = memo(function SubagentCard({ node, t }: ChatNodeView
           t={t}
         />
       ))}
-      <WorktreeLedgerChip sessionId={currentSessionId} />
+      {/* 台账 chip 已移出卡片（2026-09-10 P8）：每次委托一个节点后，卡内渲染会
+          随节点数重复 N 份；「并行工作区」改由会话条/统计浮层承载（下一轮）。 */}
     </>
   )
 })
