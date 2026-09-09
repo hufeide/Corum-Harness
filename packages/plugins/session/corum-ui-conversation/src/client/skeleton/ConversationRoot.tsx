@@ -666,11 +666,25 @@ export function ConversationRoot({
   )
 
   const phase = settling ? 'settling' : (!hasSession || isNewSessionHero) ? 'hero' : 'active'
-  const composer = renderSlotChain(
-    'conversation.composer',
-    { sessionId, session, pendingInteraction },
-    { fallback: composerBar, fallbackOnly: sessionId === undefined, overlay: true },
-  )
+  /**
+   * fork（corum）：子 Agent 会话**绕过 composer 链**，直接渲染 corum 的
+   * `subagentReturnBar`。
+   *
+   * 2026-09-09 回归修复：官方 `ui-subagent` 在 `conversation.composer` 注册了
+   * 只读 composer 占位（priority -10），对一次性子会话 `select` 命中即**当选**；
+   * 而本槽用 `overlay: true` 渲染——按 ui-slots 契约，当选时 fallback 不是被
+   * 卸载而是 **`display:none` 隐藏**，于是设计稿 q0T81 稿②的底部「返回父会话」
+   * 撑满条被官方「一次性子代理记录」提示盖掉，用户进得去出不来。
+   * 子 Agent 会话的底部交互由 corum 独占（与后台/continuable 子会话一致：
+   * 隐藏输入框、只留返回条），因此这里不做链式派发。
+   */
+  const composer = hasSession && isSubagentSession
+    ? composerBar
+    : renderSlotChain(
+        'conversation.composer',
+        { sessionId, session, pendingInteraction },
+        { fallback: composerBar, fallbackOnly: sessionId === undefined, overlay: true },
+      )
 
   // Sticky wraps the whole chain output (fallback + elected overlay), not
   // only `.composerStack`: overlay:true renders those as siblings, and sticky
