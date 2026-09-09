@@ -248,7 +248,19 @@ async function main(): Promise<void> {
   if (noSandbox) {
     app.commandLine.appendSwitch('no-sandbox')
   }
-  app.commandLine.appendSwitch('disable-gpu')
+  // GPU 合成：默认开启。历史上这里无条件 appendSwitch('disable-gpu')，让整个渲染
+  // 走软件光栅——corum 的「液态玻璃」皮肤到处是 backdrop-filter，代价变成每帧全屏
+  // 重算模糊：设置面板打开（整屏 mask blur 8px + 面板 blur 16px）时若背后内容在动
+  // （串流对话/动画），实测整机从 44 FPS 掉到 7 FPS（2026-09-09 用户报障，CDP 实测
+  // 复现：只去掉两层 backdrop-filter 立刻回到 42 FPS）。开启 GPU 后这些模糊交给合成
+  // 器，代价可忽略。需要回退到软件渲染时设 CORUM_DISABLE_GPU=1。
+  // Must run before app.whenReady().
+  const disableGpuEnv = process.env.CORUM_DISABLE_GPU
+  const disableGpu = disableGpuEnv !== undefined && disableGpuEnv !== ''
+    && disableGpuEnv !== '0' && disableGpuEnv.toLowerCase() !== 'false'
+  if (disableGpu) {
+    app.commandLine.appendSwitch('disable-gpu')
+  }
   // CDP walkthrough (scripts/walkthrough-s4-shot.mjs): an opt-in remote-debugging
   // port so geometry/theme assertions and screenshots can run against the
   // live window. Off by default; zero effect on normal launches.

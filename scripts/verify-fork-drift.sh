@@ -369,6 +369,28 @@ else
   fi
 fi
 
+# ── 12. GPU 合成不得被无条件关闭（防「设置页卡成 7 FPS」回归）──────────────
+# 背景：main.ts 曾无条件 appendSwitch('disable-gpu')，而 corum 的玻璃皮肤到处是
+# backdrop-filter：设置面板打开时整屏 mask blur(8px) + 面板 blur(16px) 每帧重算，
+# 串流对话下实测从 44 FPS 掉到 7 FPS（2026-09-09 用户报障，PROGRESS 第 58 轮）。
+# 断言：禁用 GPU 必须走 CORUM_DISABLE_GPU 显式开关（默认开启 GPU）。
+section "[12] GPU 合成默认开启（CORUM_DISABLE_GPU 显式回退）"
+DESKTOP_MAIN="$REPO_ROOT/packages/desktop/src/electron/main.ts"
+if [ ! -f "$DESKTOP_MAIN" ]; then
+  skip "找不到 packages/desktop/src/electron/main.ts"
+else
+  if grep -qE "^  app\.commandLine\.appendSwitch\('disable-gpu'\)" "$DESKTOP_MAIN"; then
+    fail "main.ts 仍无条件 appendSwitch('disable-gpu')——玻璃 UI 会退回软件光栅，设置页打开即掉帧"
+  else
+    pass "未无条件禁用 GPU"
+  fi
+  if grep -q "CORUM_DISABLE_GPU" "$DESKTOP_MAIN"; then
+    pass "保留 CORUM_DISABLE_GPU 显式回退开关"
+  else
+    fail "缺少 CORUM_DISABLE_GPU 回退开关（需要软件渲染时无路可走）"
+  fi
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then
