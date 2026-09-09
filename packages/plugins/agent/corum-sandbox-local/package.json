@@ -1,0 +1,41 @@
+{
+  "name": "@corum/corum-sandbox-local",
+  "version": "0.1.0",
+  "description": "corum 定制版本地进程沙箱 provider（fork 官方 dsh-sandbox-local 0.1.3-alpha.1）：唯一增量 = 可写根并集 workspace 的 git 元数据目录（worktree gitdir + 公共 common dir），让隔离子 Agent 能在自己的 worktree 里 git add/commit（官方口径下 .git 在 workspace 之外，实测 index.lock: Operation not permitted）。index.ts 与官方逐字节一致，增量全在 profiles.ts + git-write-roots.ts。",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-sandbox-windows-acl": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-util-values": "^0.1.3-alpha.1",
+    "@deepseek-ai/node-addon-landlock-run": "^0.1.1",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-sandbox": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session": "^0.1.3-alpha.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-sandbox": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session": "^0.1.3-alpha.1",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
+  }
+}

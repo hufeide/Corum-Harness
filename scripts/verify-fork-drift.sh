@@ -124,6 +124,12 @@ for ev in $declared; do
         && pass "${ev}：corum-agent 有 emit" \
         || fail "${ev}：corum-agent 无 emit"
       ;;
+    corum/subagent/child)
+      # spawn 精确父子映射（2026-09-09）：emit 在 fork #10 工具包的 corumEmitChildStarted。
+      grep -rqF "'$ev'" "$REPO_ROOT/packages/plugins/agent/corum-tool-subagent/src" 2>/dev/null \
+        && pass "${ev}：corum-tool-subagent 有 emit" \
+        || fail "${ev}：corum-tool-subagent 无 emit"
+      ;;
     corum/worktree-ledger)
       grep -rqF "'$ev'" "$REPO_ROOT/packages/plugins/agent/corum-orchestration/src" 2>/dev/null \
         && pass "${ev}：corum-orchestration 有 emit" \
@@ -454,6 +460,51 @@ if [ -f "$DESKTOP_MAIN" ]; then
   fi
 else
   skip "找不到 packages/desktop/src/electron/main.ts"
+fi
+
+# ── 15. 沙箱 fork：git 元数据可写根（隔离子 Agent 能不能提交）──────────────
+# 背景（2026-09-09 用户实机复现）：官方 sandbox-local 的可写根 = workspaceRoot +
+# /tmp + tmpdir；隔离 worktree 的 git 状态在主仓 .git（在 workspace 之外）→
+# `git add` 报 index.lock: Operation not permitted，子 Agent 永远提交不了。
+# 断言：① index.ts 与官方逐字节一致（增量只能在 profiles/git-write-roots）；
+#       ② profiles.ts 确实含并集标记；③ git 探测模块在位；④ 装配面完整
+#       （禁官方行 + 挂 fork 行 + desktop 依赖）。
+section "[15] 沙箱 fork（@corum/corum-sandbox-local）：git 元数据可写根"
+SANDBOX_FORK="$REPO_ROOT/packages/plugins/agent/corum-sandbox-local"
+OFFICIAL_SANDBOX_LOCAL="$DSH_CHECKOUT/packages/sandbox/sandbox-local"
+if [ -f "$OFFICIAL_SANDBOX_LOCAL/src/index.ts" ]; then
+  if cmp -s "$SANDBOX_FORK/src/index.ts" "$OFFICIAL_SANDBOX_LOCAL/src/index.ts"; then
+    pass "src/index.ts 与官方逐字节一致"
+  else
+    fail "src/index.ts 与官方有差异——增量必须只在 profiles.ts / git-write-roots.ts（否则每次升级三方合并面扩大）"
+  fi
+else
+  skip "官方检出缺 packages/sandbox/sandbox-local/src/index.ts（跳过逐字节断言）"
+fi
+if grep -qF 'corumGitWriteRoots' "$SANDBOX_FORK/src/profiles.ts"; then
+  pass "profiles.ts 三个平台 builder 都并集 git 元数据可写根"
+else
+  fail "profiles.ts 未接 corumGitWriteRoots——隔离子 Agent 的 git 提交会退回 EPERM"
+fi
+if grep -qF -- "--git-common-dir" "$SANDBOX_FORK/src/git-write-roots.ts"; then
+  pass "git-write-roots.ts 用 git rev-parse 探测 gitdir + common dir"
+else
+  fail "git-write-roots.ts 缺 git rev-parse 探测（拿不到主仓 .git）"
+fi
+if grep -qE '^- id: sandbox$' "$REPO_ROOT/packages/desktop/cordis.patch.yml" && grep -qE "name: '@corum/corum-sandbox-local'" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+  pass "desktop patch 禁官方 sandbox 行 + 挂 fork 行"
+else
+  fail "desktop patch 缺「禁官方 sandbox 行 + 挂 fork 行」——fork 不会生效"
+fi
+if grep -qF '"@corum/corum-sandbox-local"' "$REPO_ROOT/packages/desktop/package.json"; then
+  pass "desktop package.json 已链 fork 包"
+else
+  fail "desktop package.json 未链 @corum/corum-sandbox-local——打包闭包缺包"
+fi
+if grep -qF '"@corum/corum-sandbox-local"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+  pass "desktop-host deploy 清单已含 fork 包（打包闭包）"
+else
+  fail "desktop-host/package.json 缺 @corum/corum-sandbox-local——正式包 host 闭包会缺包（本轮教训：新插件必须同时进 desktop 与 desktop-host 依赖）"
 fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────

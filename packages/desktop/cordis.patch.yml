@@ -118,6 +118,18 @@
 - id: subagent
   disabled: true
 
+# 隔离子 Agent 的 git 提交（2026-09-09 用户实机复现，docs/TODO.md）：官方
+# dsh-sandbox-local 的可写根 = workspaceRoot + /tmp + tmpdir；隔离 worktree 的
+# cwd 是 `.corum-worktrees/wt-xxxx`，而 `git add/commit` 要写的是**主仓 .git**
+# （worktrees/<slug>/index.lock、objects、refs）——在 workspace 之外，Seatbelt
+# 直接 EPERM（实测 `index.lock: Operation not permitted`），子 Agent 永远提交
+# 不了。fork 包 @corum/corum-sandbox-local 唯一增量 = 三个平台 profile builder
+# 的可写根并集 workspace 的 git 元数据目录（index.ts 与官方逐字节一致）。
+# 先禁用官方 sandbox 行，再在下方 insert 段挂 fork（服务名 `sandbox` 不变 →
+# bash/pwsh-sandbox 与 shell 对 ctx.sandbox 的消费零感知）。
+- id: sandbox
+  disabled: true
+
 # ── desktop persona ─────────────────────────────────────────────────────────
 
 - id: system-prompt
@@ -161,6 +173,13 @@
     # （消除 REVIEW 的「SEAM 死代码」硬伤：continuable 路径隔离从此生效）。
     - id: corum-subagent
       name: '@corum/corum-subagent'
+
+    # Fork #12：本地沙箱 provider 的 corum 版（取代上方禁用的官方 sandbox 行）。
+    # 服务名 `sandbox` 不变（fork 的 LocalSandboxProvider super(ctx,'sandbox')
+    # 与官方一致）；增量 = 可写根并集 workspace 的 git 元数据目录，让隔离子
+    # Agent 能在自己的 worktree 里正常 git add/commit。
+    - id: corum-sandbox
+      name: '@corum/corum-sandbox-local'
 
     # Fork #9 spawn provider：注册 'corum-spawn' provider 进 fork 的 subagents
     # seam——与官方 spawn/fork provider 并存不冲突。provider 行与完整服务行

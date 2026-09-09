@@ -22,6 +22,7 @@
     "@corum/corum-mcp-manager": "workspace:*",
     "@corum/corum-ollama": "workspace:*",
     "@corum/corum-orchestration": "workspace:*",
+    "@corum/corum-sandbox-local": "workspace:*",
     "@corum/corum-session-archive": "workspace:*",
     "@corum/corum-skill-manager": "workspace:*",
     "@corum/corum-subagent": "workspace:*",
