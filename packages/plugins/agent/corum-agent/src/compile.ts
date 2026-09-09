@@ -218,9 +218,15 @@ function standardRows(): CordisRow[] {
         { id: 'tool-subagent-list-agents', name: '@deepseek-ai/dsh-tool-subagent-control/list-agents' },
         // fork（corum）：tool-subagent 行由 compilePreset 的 fork #10 双实例替换
         // （corumSubagentRows），此处仅占位注释——行序保持 delegation 组语义。
+        // 官方 fork provider 实例 2026-09-09 退役（用户拍板 A 案，
+        // docs/PROMPT-INVENTORY.md §4）：它不走 corum 机制（无隔离/模型锁/settlement
+        // notice/并发感知），提示词里的「后台默认」段落又与 subagent 近乎逐字重复，
+        // 人格段也没提它（模型可能误选）。若将来需要「带父会话上下文的子会话」，
+        // 应作为能力并入 corum worker 的 provider 选择，而不是复活本行。
         {
           id: 'tool-subagent-fork',
           name: '@deepseek-ai/dsh-tool-subagent',
+          disabled: true,
           config: { provider: 'fork', toolName: 'subagent_fork', backgroundMode: 'continuable' },
         },
         {
