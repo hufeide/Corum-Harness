@@ -53,12 +53,16 @@ import {
 // fork（corum）：隔离编排纯函数从 orchestration.ts 引入（含 re-export 到下游）。
 import {
   CorumOrchestration,
-  corumCleanupLedgerEntries,
   corumCleanupWorktree,
   corumDetectIntegrateChecks,
   corumEffectiveToolFilter,
   corumGit,
+  corumGitHead,
+  corumGitStatusPorcelain,
+  corumIntegrationFailure,
+  corumIntegrationTruth,
   corumIntegratorPersona,
+  corumIsGitRepo,
   corumIsWriteTask,
   corumMarkSettled,
   corumPendingIntegration,
@@ -440,20 +444,28 @@ function resolveDelegationRun(
 // 上方 import 引入局部作用域（apply 内部使用），此处 re-export 保持对外 API
 // 兼容（单测/下游 import 路径不变）。
 export {
+  corumBranchIntegrated,
+  corumBranchMerged,
   corumCleanupLedgerEntries,
   corumCleanupWorktree,
   corumDetectIntegrateChecks,
   corumEffectiveToolFilter,
   corumGit,
+  corumGitHead,
+  corumGitStatusPorcelain,
+  corumIntegrationFailure,
+  corumIntegrationTruth,
   corumIntegratorPersona,
+  corumIsGitRepo,
   corumIsWriteTask,
   corumMarkSettled,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
+  corumWorktreeHasUncommitted,
   corumWriteToolsForPlatform,
 } from './orchestration.ts'
-export type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
+export type { CorumCleanupOptions, CorumIntegrationTruth, CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 export { CorumOrchestration } from './orchestration.ts'
 
 export function apply(ctx: Context, config: Config): void {
@@ -468,13 +480,19 @@ export function apply(ctx: Context, config: Config): void {
   const continuable = (config.backgroundMode ?? 'one-shot') === 'continuable'
   const toolName = config.toolName ?? 'subagent'
 
-  // fork（corum）：编排器 service 幂等 provide 到根上下文（红线 1：跨会话/跨
-  // bundle 单例）。本 apply 在 agent scope（preset delegation 组）运行，台账语义
-  // 是会话级（key=父 session id），必须在根上下文 provide 才能跨会话共享。已
-  // provide 则复用（worker/research 双实例 + 多 Agent 各自 apply 都不重复注册）。
-  const orchestration = ctx.root.get('corumOrchestration', false) as CorumOrchestration | undefined
-    ?? new CorumOrchestration(ctx.root)
-  void orchestration
+  // fork（corum）：编排器 service 只读消费（红线 1：跨会话/跨 bundle 单例）。
+  // 台账语义是会话级（key=父 session id），必须在根上下文共享。provide 职责已
+  // 移交给独立包 @corum/corum-orchestration（其 cordis 行在 patch.yml 中位于
+  // 本工具行之前 apply，保证先就绪）；本 apply 不再幂等自建兜底，缺则抛装配
+  // 错误——顺序由 patch.yml 行序承担（docs/plan/PLAN-refactor-orchestration-
+  // package-and-settings-center.md 重构 1）。
+  const orchestration = ctx.root.get('corumOrchestration') as CorumOrchestration
+  if (orchestration === undefined) {
+    throw new Error(
+      'tool-subagent: `corumOrchestration` service not provided — '
+      + '@corum/corum-orchestration must be mounted before this tool (cordis.patch.yml row order)',
+    )
+  }
 
   // fork（corum）：host settings namespace `corum-subagent`（三级配置第一级：
   // 全局默认；「子 Agent」设置 section 读写此面，preset config 逐键覆盖）。
@@ -671,7 +689,15 @@ export function apply(ctx: Context, config: Config): void {
       const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
       const effIsolationMode = args.taskIsolation ?? corumIsolationMode
       const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, corumDenyDirectFs)
-      const corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch)
+      let corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch)
+      // fork（corum）：非 git 工作区自动降级（2026-09-09 用户需求）——隔离依赖 git
+      // 仓库（worktree/branch/verify/integrate 全在 git 上），非 git 目录下强制不隔离，
+      // 避免 `git worktree add` 报 `fatal: not a git repository`（实测 ai-lab）。即使用户
+      // 在「新建工作区」时拒绝了 git 初始化，此降级保证 git 依赖能力自动关闭而非报错。
+      if (corumIsolate) {
+        const parentCwdForRepo = parent.session.header.cwd ?? process.cwd()
+        if (!corumIsGitRepo(parentCwdForRepo)) corumIsolate = false
+      }
 
       // fork（corum）：任务级 research 的只读硬约束——orchestrate 的 tasks[i].research
       // 名实相符：research=true 的任务预 deny 全部写工具（与 subagent_research 只读
@@ -679,17 +705,21 @@ export function apply(ctx: Context, config: Config): void {
       const researchFilter = corumResearchToolFilter(config.toolFilter, effReadonlyResearch)
       if (researchFilter !== undefined) request.toolFilter = researchFilter
 
-      // fork（corum）：integrate 召唤（fan-in/Manager）——骨架阶段仅前台路径。
+      // fork（corum）：integrate 召唤（fan-in/Manager）——恒前台路径（机制强制）。
+      // fan-in 汇合的本质是同步等待点：主 Agent 必须等到集成者 merge+verify 的结果
+      // 才能做最终验收，后台路径（continuable/one-shot background）拿不到结果无意义。
+      // 此前用「runSpec.runInBackground 时抛错」要求模型显式 run_in_background:false
+      // 压过 continuable 默认后台——把机制成本转嫁给模型（编排者等 continuable 实例
+      // 的 Agent 很难记住该约束，实机反复撞「integrate must run in foreground」）。
+      // 修正：integrate 恒由机制强制前台（integrate 是 corum 自研，非官方语义；
+      // 删 throw，不再读 run_in_background/continuable 默认值），既保 fan-in 语义
+      // 又消掉一类报错。下游 settleForegroundRun 本就是前台 settle，无需其它改动。
       if (args.integrate === true) {
         const sessionId = parent.session.id
         const entries = orchestration.entriesOf(sessionId)
         const pending = corumPendingIntegration(entries)
         if (pending.length === 0) {
           throw new Error('no isolated worktrees to integrate')
-        }
-        const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
-        if (runSpec.runInBackground) {
-          throw new Error('integrate must run in foreground (runInBackground: false)')
         }
         const parentCwd = parent.session.header.cwd ?? process.cwd()
         const effectiveChecks = corumIntegrateChecks ?? corumDetectIntegrateChecks(parentCwd)
@@ -703,14 +733,35 @@ export function apply(ctx: Context, config: Config): void {
             text: corumIntegratorPersona(pending, effectiveChecks, corumMerger, declaredVerify) + '\n\n' + String(args.prompt),
           }] as ContentBlock[],
         }
+        // fork（corum）：机制真值门禁的前置快照（主树 HEAD + 未提交基线）。
+        const corumHeadBefore = corumGitHead(parentCwd)
+        const corumDirtyBefore = corumGitStatusPorcelain(parentCwd)
         const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
           ...corumIntegrateRequest,
           signal: exec.signal,
         })
         const outcome = await settleForegroundRun(run)
-        for (const entry of pending) entry.status = 'integrated'
-        if (corumAutoCleanup) corumCleanupLedgerEntries(parentCwd, pending, ['integrated'])
-        orchestration.emitFrame(sessionId)
+        // fork（corum）：集成成功**不再由集成者自述决定**——`settleForegroundRun` 只
+        // 保证子 Agent 正常结束，不代表它真的把分支合进了主树。2026-09-09 事故：
+        // 集成者自称「已 merge + verify 通过」→ 机制无条件写 integrated 并
+        // `worktree remove --force` + `branch -D` → 子任务 commit 变 unreachable、
+        // 文件从主树消失（docs/TODO.md 高优先项）。此处按 git 实况判定：
+        //   ① 每个待集成分支必须已并入 HEAD（祖先或 patch 等价）；
+        //   ② 其 worktree 不得残留未提交改动（写了没提交 = 未持久化）。
+        // 未达标 → 抛错（附「集成者自述 vs git 实况」对照）+ **保留 worktree 与分支**
+        // + 台账保持 settled（PLAN 不变量「失败不 commit、保留现场」的机制化）。
+        const corumTruth = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
+        if (!corumTruth.integrated) {
+          orchestration.emitFrame(sessionId)
+          throw new Error(corumIntegrationFailure(
+            corumTruth,
+            corumHeadBefore,
+            pending,
+            outputValueText(outcome.output),
+          ))
+        }
+        // 真集成：翻转状态 + 落盘 + （可选）强清理（唯一合法的 force 清理点）。
+        orchestration.markIntegrated(sessionId, pending, corumAutoCleanup)
         return outcome
       }
 
@@ -1028,12 +1079,20 @@ export function apply(ctx: Context, config: Config): void {
               if (merge?.autoIntegrate === true) {
                 const pending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
                 if (pending.length > 0) {
-                  await spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
+                  // fork（corum）：integrate 结果**必须**被检查（2026-09-09 事故 RC4）
+                  // ——此前 `await spawnOne(...)` 丢弃返回值，集成没落地时任务结果照样
+                  // 逐条报 `[task N] done`，主 Agent 据此以为全部完成。integrate 恒前台
+                  // （机制强制），非 foreground 即装配异常；集成未落地由 spawnOne 抛错
+                  // （机制真值门禁），此处让错误向上冒泡，orchestrate 整体报失败。
+                  const integrateOutcome = await spawnOne(runtimeCtx, { agent: parent, signal: exec.signal }, {
                     label: 'integrate',
                     prompt: 'Integrate the isolated worktrees and commit after all checks pass.',
                     integrate: true,
                     ...merge.verify !== undefined ? { verify: merge.verify } : {},
                   }, subagentProvider)
+                  if (integrateOutcome.kind !== 'foreground') {
+                    throw new Error(`integrate ran in ${integrateOutcome.kind} mode; integrate must settle in the foreground`)
+                  }
                 }
               }
               return { results }
@@ -1074,6 +1133,36 @@ export function apply(ctx: Context, config: Config): void {
         text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
           ? ''
           : `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
+      })
+    }
+
+    // fork（corum）：子 Agent 编排机制运用指引——让 Agent 主动判断何时用
+    // subagent / subagent_research / orchestrate，而非等用户显式点名。仅 worker
+    // 实例注入（research 只读实例无 orchestrate，注入会误导）；worker 实例的
+    // toolName 是 'subagent'。research 实例自己只需要「只读研究」一句话语义，
+    // 已由工具 description 承载，无需额外 section。
+    if (!corumReadonlyResearch) {
+      runtimeCtx.systemPrompt.section({
+        name: 'corum:subagent-orchestration',
+        order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 1,
+        text: context => mounted === undefined || runtimeCtx.tools.get('orchestrate', context.scope) === undefined
+          ? ''
+          : [
+              'You have a subagent orchestration capability. Use it PROACTIVELY — do not wait for the user to name a tool.',
+              '',
+              'Choose the right delegation form by the shape of the work:',
+              '- ONE focused, self-contained subtask (an implementation, a scoped analysis) → call `subagent`.',
+              '- A READ-ONLY investigation (review code, trace a call path, summarize a module, answer "how does X work") → call `subagent_research`. It is pre-denied all write tools, so it is safe for exploration and cannot modify the repo.',
+              '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
+              '',
+              'How the mechanism works (rely on it, do not re-implement):',
+              '- Write-capable children run in ISOLATED git worktrees with their own branch automatically; the parent tree outside a worktree is read-denied to that child. Requires the workspace to be a git repository — if it is not, set `isolation: "off"` for write tasks (forced `isolation: "always"` fails with a git error in a non-repo).',
+              '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
+              '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Set `merge.autoIntegrate: true` to merge+commit the isolated branches after all checks pass, or false to only report and decide yourself.',
+              '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
+              '',
+              'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.',
+            ].join('\n'),
       })
     }
   }

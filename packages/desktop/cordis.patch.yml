@@ -168,6 +168,16 @@
     - id: corum-subagent-spawn
       name: '@corum/corum-subagent/spawn'
 
+    # Fork #10 编排器独立包（docs/plan/PLAN-refactor-orchestration-package-and-
+    # settings-center.md 重构 1）：新包自己挂 cordis 行 provide（独立性最彻底），
+    # apply 在根上下文幂等 provide `corumOrchestration`。行序**必须**在下方
+    # corum-tool-subagent 的 preset 双实例 apply 之前——tool-subagent 的 apply
+    # 已改「只读不建」（ctx.root.get('corumOrchestration') 缺则抛装配错误），
+    # 顺序由本行序承担，不再幂等自建兜底。挂载顺序需 CDP 实机验证：编排器
+    # 必须在 tool-subagent 双实例 apply 前就绪。
+    - id: corum-orchestration
+      name: '@corum/corum-orchestration'
+
     # Fork #10 工具包本体不单独挂行——工具实例由 corum preset 的 delegation 组
     # 双实例行（tool-subagent / tool-subagent-research，corum-agent compile.ts
     # 生成，name '@corum/corum-tool-subagent'）按会话挂载；host 侧只需包可

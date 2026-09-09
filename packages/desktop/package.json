@@ -111,6 +111,7 @@
     "@corum/corum-ide-test-statusbar-ui": "workspace:*",
     "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-mcp-manager": "workspace:*",
+    "@corum/corum-orchestration": "workspace:*",
     "@corum/corum-session-archive": "workspace:*",
     "@corum/corum-skill-manager": "workspace:*",
     "@corum/corum-subagent": "workspace:*",

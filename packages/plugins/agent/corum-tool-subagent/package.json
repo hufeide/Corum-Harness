@@ -21,6 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@corum/corum-orchestration": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
