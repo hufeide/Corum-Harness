@@ -585,7 +585,7 @@ export function IdeAppFrame({
   openPluginManager: onOpenPluginManager,
   attachGridActions,
 }: AppFrameProps) {
-  const panels = useStore((s: unknown) => s)
+  const panels = useStore(s => s)
   const detailsSession = useSessions((s: SessionListState) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined

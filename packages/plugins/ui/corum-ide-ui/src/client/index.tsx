@@ -29,7 +29,7 @@
  */
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { type Context as ClientContext } from '@deepseek-ai/cordis'
-import type { ReactElement } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -51,7 +51,9 @@ import type {
 } from './shell-contract.ts'
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
 import { GeneralSection } from './SettingsGeneralSection.tsx'
-import { SECTION_DEFS, CorumRpcContext, CorumSettingsContext, type CorumSettingsFace } from './settings/SettingsSections.tsx'
+import { SECTION_DEFS } from './settings/SettingsSections.tsx'
+import { ExtensionsSection } from './settings/sections/SettingsExtensionsSection.tsx'
+import { CorumRpcContext, CorumSettingsContext, type CorumSettingsFace } from './settings/shared.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
@@ -370,14 +372,6 @@ export function apply(ctx: ClientContext): void {
       ctx.slots.register({ name: 'settings.header', locale: NS }, HeaderContent))
     const disposeClose = ctx.slots.inject('settings.close', () =>
       ctx.slots.register({ name: 'settings.close', locale: NS }, CloseLabel))
-    const disposeGeneral = ctx.slots.inject('settings.section', () => ctx.slots.register({
-      name: 'settings.section',
-      id: 'general',
-      order: 0,
-      label: () => t('general.nav'),
-      locale: NS,
-    }, GeneralSection))
-
     // ── 批量注册设计稿 section（外观/通知/快捷键/权限/.../配置档案）──
     // 每个 section 用 SettingsSections.tsx 中的组件渲染。业务 section（技能等）
     // 需调 host RPC：这里构造全局 caller 并经 CorumRpcContext 下发（官方
@@ -397,8 +391,45 @@ export function apply(ctx: ClientContext): void {
         revision,
       ),
     }
-    const disposeSections = SECTION_DEFS.map(def =>
-      ctx.slots.inject('settings.section', () => ctx.slots.register({
+    // fork（corum）：general section 也包 CorumSettingsContext.Provider——其「工作区」
+    // 组（新工作区始终初始化 git 开关，2026-09-09 用户需求）是 GeneralSection 里第一个
+    // 真实持久化项，需要 settings 面；此前 GeneralSection 单独注册未包 Provider（纯静态
+    // 占位），导致 WorkspaceGitGroup 的 useContext(CorumSettingsContext) 拿 null 降级隐藏。
+    const disposeGeneral = ctx.slots.inject('settings.section', () => ctx.slots.register({
+      name: 'settings.section',
+      id: 'general',
+      order: 0,
+      label: () => t('general.nav'),
+      locale: NS,
+    }, () => (
+      <CorumRpcContext.Provider value={corumRpc}>
+        <CorumSettingsContext.Provider value={corumSettings}>
+          <GeneralSection />
+        </CorumSettingsContext.Provider>
+      </CorumRpcContext.Provider>
+    )))
+    const disposeSections = SECTION_DEFS.map(def => {
+      // 「插件管理」section 额外声明 settings.plugins.tab 子槽——corum-ui-settings-
+      // plugins 的「插件配置」tab（含 Bash/Agent Loop/Web Search 三卡）与官方
+      // plugin-inventory「插件列表」tab 都注册进此共享槽（官方 settings 底座声明）。
+      // 重构 2 决策 2：去掉独立「插件」入口，其 tab 内容并入「插件管理」扩展 section。
+      if (def.id === 'extensions') {
+        return ctx.slots.inject('settings.section', () => ctx.slots.register({
+          name: 'settings.section',
+          id: def.id,
+          order: def.order,
+          label: def.label,
+          locale: NS,
+          children: { 'settings.plugins.tab': { kind: 'list', scope: 'root' } },
+        }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.plugins.tab', owner: {}, opts?: { only?: string }) => ReactNode }) => (
+          <CorumRpcContext.Provider value={corumRpc}>
+            <CorumSettingsContext.Provider value={corumSettings}>
+              <SettingsSectionHost {...props} render={() => <ExtensionsSection renderTabSlot={() => props.renderSlot('settings.plugins.tab', {})} />} />
+            </CorumSettingsContext.Provider>
+          </CorumRpcContext.Provider>
+        )))
+      }
+      return ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
         id: def.id,
         order: def.order,
@@ -410,8 +441,8 @@ export function apply(ctx: ClientContext): void {
             <SettingsSectionHost {...props} render={def.Component} />
           </CorumSettingsContext.Provider>
         </CorumRpcContext.Provider>
-      ))),
-    )
+      )))
+    })
 
     return () => {
       for (const dispose of disposeSections) dispose()

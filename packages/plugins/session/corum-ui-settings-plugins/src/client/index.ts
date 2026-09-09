@@ -24,14 +24,11 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: the ctx.remote Context merge and the forwarded-event key face.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { AgentLoopCard } from './AgentLoopCard.tsx'
 import { BashCard } from './BashCard.tsx'
 import { ConfigurablePluginsTab } from './ConfigurablePluginsTab.tsx'
-import { PluginsSettingsSection } from './PluginsSettingsSection.tsx'
-import type { PluginsSettingsSectionInjected, PluginsSettingsTabEntry } from './PluginsSettingsSection.tsx'
 import { SubagentModelSelectionCard } from './SubagentModelSelectionCard.tsx'
 import { WebSearchCard } from './WebSearchCard.tsx'
 import { AGENT_LOOP_NS, AgentLoopCardController } from './agent-loop-card-controller.ts'
@@ -43,7 +40,6 @@ import {
 import { WEB_SEARCH_NS, WebSearchCardController } from './web-search-card-controller.ts'
 import { en, zh } from './locales.ts'
 
-export type { PluginsSettingsSectionInjected, PluginsSettingsSectionProps } from './PluginsSettingsSection.tsx'
 export type { ConfigurablePluginsTabProps } from './ConfigurablePluginsTab.tsx'
 export type { ConfigurablePluginsTabFace, ConfigurablePluginsTabState } from './tab-store.ts'
 export type { PluginCardProps } from './PluginCard.tsx'
@@ -112,52 +108,13 @@ export function apply(ctx: ClientContext): void {
     'ui-settings-plugins: card ledger',
   )
 
-  let tabsVersion = -1
-  let tabsRevision = -1
-  let tabs: readonly PluginsSettingsTabEntry[] = []
-  const sectionInjected = (): PluginsSettingsSectionInjected => ({
-    hooks: {
-      tabs: {
-        getSnapshot: () => {
-          const version = ctx.slots.getVersion('settings.plugins.tab')
-          const revision = ctx.locale.getSnapshot().revision
-          if (version !== tabsVersion || revision !== tabsRevision) {
-            tabsVersion = version
-            tabsRevision = revision
-            tabs = ctx.slots.entries('settings.plugins.tab')
-              .map(entry => ({
-                /* v8 ignore next -- list-slot registration requires id */
-                id: entry.options.id ?? '',
-                order: entry.options.order ?? 0,
-                label: resolveSlotLabel(entry.options.label) ?? '',
-              }))
-              .sort((a, b) => a.order - b.order)
-          }
-          return tabs
-        },
-        subscribe: (listener) => {
-          const offLedger = ctx.slots.subscribe('settings.plugins.tab', listener)
-          const offLocale = ctx.locale.subscribe(listener)
-          return () => {
-            offLedger()
-            offLocale()
-          }
-        },
-      },
-    },
-  })
-
-  // This package owns the one Plugins navigation entry and the tab chrome;
-  // feature plugins contribute pages without competing for Settings nav rows.
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'plugins',
-    order: 15,
-    label: () => t('nav'),
-    locale: NS,
-    inject: sectionInjected,
-    children: { 'settings.plugins.tab': { kind: 'list', scope: 'root' } },
-  }, PluginsSettingsSection))
+  // fork（corum，重构 2 决策 2）：不再注册独立的「插件」settings.section 导航入口
+  // ——该入口的 tab chrome（PluginsSettingsSection）由 @corum/corum-ide-ui 的
+  // 「插件管理」扩展 section 承接（它声明并渲染共享槽 settings.plugins.tab）。
+  // 本包保留：配置 tab（settings.plugins.tab 的 configurable entry）+ 三张卡
+  // （settings.plugin.item 的 shell/agent-loop/web-search 注册）。官方
+  // plugin-inventory 的「插件列表」tab 仍注册进 settings.plugins.tab，一并归入
+  // 「插件管理」。
 
   // The existing configuration page is one ordinary tab. It keeps ownership
   // of the card slot and the shipped card contributions below.

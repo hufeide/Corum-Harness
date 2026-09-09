@@ -28,7 +28,8 @@ import {
 import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-contract.ts'
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-import { SectionNavContext } from './settings/SettingsSections.tsx'
+import { SectionNavContext } from './settings/shared.tsx'
+import { NAV_GROUP_BY_ID, type SettingsNavGroup } from './settings/SettingsSections.tsx'
 import { OPEN_SETTINGS_SECTION_EVENT } from './service.ts'
 import css from './SettingsShell.module.css'
 
@@ -74,17 +75,22 @@ function navIcon(id: string): ReactNode {
 }
 
 /**
- * 导航分组：从注册的 section rows 中按 id 前缀分组。
- * 设计稿 5 个分组：通用 / AGENT / 数据与隐私 / 扩展 / 高级。
- * 动态分组：注册的 section 按其 id 匹配到分组，未匹配的归入「高级」。
+ * 导航分组：从注册的 section rows 中读每个 section 自声明的 `navGroup`（经
+ * NAV_GROUP_BY_ID 数据源），缺省归 'extensions'（扩展）。5 组标题/顺序保持现状
+ * （通用→AGENT→数据与隐私→扩展→高级），不再有「其他」桶——所有 section 都有归属。
  */
-const NAV_GROUPS: { title: string; ids: string[] }[] = [
-  { title: '通用', ids: ['general', 'appearance', 'notifications', 'shortcuts'] },
-  { title: 'AGENT', ids: ['models', 'agent-presets', 'permissions', 'rules', 'memory', 'terminal', 'hooks', 'agent-loop'] },
-  { title: '数据与隐私', ids: ['account', 'privacy', 'data'] },
-  { title: '扩展', ids: ['extensions', 'mcp', 'skills', 'ai-polish'] },
-  { title: '高级', ids: ['advanced', 'profiles'] },
+const NAV_GROUPS: { key: SettingsNavGroup; title: string }[] = [
+  { key: 'general', title: '通用' },
+  { key: 'agent', title: 'AGENT' },
+  { key: 'data', title: '数据与隐私' },
+  { key: 'extensions', title: '扩展' },
+  { key: 'advanced', title: '高级' },
 ]
+
+/** 读某 section 的归属分组（自声明；缺省归扩展）。 */
+function navGroupOf(id: string): SettingsNavGroup {
+  return NAV_GROUP_BY_ID[id] ?? 'extensions'
+}
 
 /* ── 面板 ────────────────────────────────────────────────────────── */
 
@@ -130,20 +136,12 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, onOpenPl
     ? rows
     : rows.filter(r => r.label.toLowerCase().includes(lowerQuery) || r.id.includes(lowerQuery))
 
-  // 为每个分组计算可见项
+  // 为每个分组计算可见项：读每个 section 自声明的 navGroup（缺省归扩展），
+  // 保持 5 组标题/顺序现状；无「其他」桶。
   const visibleGroups = NAV_GROUPS.map(group => ({
     title: group.title,
-    items: group.ids
-      .map(id => filteredRows.find(r => r.id === id))
-      .filter((r): r is SettingsSectionRow => r !== undefined),
+    items: filteredRows.filter(r => navGroupOf(r.id) === group.key),
   })).filter(g => g.items.length > 0)
-
-  // 未归入任何分组的项 → 放入「其他」
-  const groupedIds = new Set(NAV_GROUPS.flatMap(g => g.ids))
-  const otherRows = filteredRows.filter(r => !groupedIds.has(r.id))
-  if (otherRows.length > 0) {
-    visibleGroups.push({ title: '其他', items: otherRows })
-  }
 
   return (
     <div className={css.overlay} role="presentation">
@@ -249,9 +247,9 @@ export function SettingsShell(props: SettingsRootComponentProps) {
     return () => { window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, handler) }
   }, [openSection])
 
-  const rows = useSections((s: unknown) => s)
-  const onboardingSteps = useOnboardingSteps((s: unknown) => s)
-  const onboardingActive = useSessions((state: { phase: string; current?: string; byId: Record<string, { blank?: boolean }> }) =>
+  const rows = useSections(s => s)
+  const onboardingSteps = useOnboardingSteps(s => s)
+  const onboardingActive = useSessions(state =>
     state.phase === 'ready'
     && (state.current === undefined || state.byId[state.current]?.blank === true))
   const onboardingStep = onboardingActive
