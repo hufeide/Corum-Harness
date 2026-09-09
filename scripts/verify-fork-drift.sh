@@ -564,6 +564,133 @@ else
   fail "缺 assertChildCwd 入口（one-shot 或 continuable 之一漏校验）"
 fi
 
+# ── 17. 官方 preset 本地副本（shipped-presets/official）──────────────────────
+# 用户 2026-09-09 拍板「给官方换上」：官方四模式（standard/ptc/cordis/minimal）
+# 也必须走 corum 编排（并发感知隔离 / 模型锁 / settlement notice / orchestrate），
+# 因此本仓 `shipped-presets/official/` 是官方 preset 的**本地副本**，standard/
+# ptc/cordis 的 subagent 行被替换为 @corum/corum-tool-subagent 双实例。
+# 两条静默失效路径必须机器化守住：
+#   ① `agent-presets` 服务把**包内置** `presets/` 根无条件排在最前，本仓副本会被
+#      遮蔽 → 运行时毫无变化（2026-09-09 实机踩过）。故 boot.ts 必须带
+#      `includeShippedRoot: false`；
+#   ② 官方升级后本地副本与新版官方漂移（新行/改行没跟）→ 本节断言「官方行 id
+#      一个不少、退役行显式 disabled、新增行在登记表内」。
+section "[17] 官方 preset 本地副本：corum 编排替换 + 退役行显式 disabled"
+VENDORED_PRESETS="$REPO_ROOT/packages/desktop/shipped-presets/official"
+OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
+# 本仓副本允许出现的「官方没有的行」（新增 corum 实例）。
+PRESET_EXTRA_ROWS="tool-subagent-research"
+# 本仓副本显式退役的行（disabled: true）。
+PRESET_RETIRED_ROWS="tool-subagent-fork workflow-worker-thread tool-workflow tool-ralph"
+if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
+  if grep -qE '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
+    pass "boot.ts 关闭包内置 preset 根（否则 shipped-presets/official 被遮蔽、改动无效）"
+  else
+    fail "boot.ts 缺 includeShippedRoot: false——本仓 official 副本会被包内置版本静默遮蔽"
+  fi
+else
+  fail "缺 packages/desktop/src/host/boot.ts（无法校验 preset 根注入）"
+fi
+if grep -qF "join(DESKTOP_ROOT, 'shipped-presets', 'official')" "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
+  && grep -qF 'SHIPPED_PRESETS_DIR' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos.mjs 把本仓 official 副本物化进打包闭包"
+else
+  fail "pack-macos.mjs 未物化 shipped-presets/official——正式包会退回包内置 preset"
+fi
+# 退役行是否显式 disabled（读该行到下一个 `- id:` 之间的内容）。
+row_disabled() {
+  awk -v id="$2" '
+    $0 ~ ("^[[:space:]]*- id: " id "[[:space:]]*$") { hit=1; next }
+    hit && $0 ~ /^[[:space:]]*- id: / { exit }
+    hit && /disabled: true/ { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+# 行 id 列表（顺序保留）。
+preset_row_ids() { grep -oE '^[[:space:]]*- id: [A-Za-z0-9._-]+' "$1" | sed -E 's/.*- id: //'; }
+if [ -d "$VENDORED_PRESETS" ]; then
+  for preset in standard ptc cordis minimal; do
+    vendored="$VENDORED_PRESETS/$preset/agent.cordis.yml"
+    if [ ! -f "$vendored" ]; then
+      fail "shipped-presets/official/$preset/agent.cordis.yml 缺失"
+      continue
+    fi
+    if [ "$preset" = "minimal" ]; then
+      # minimal 不做 corum 替换（双工具极简面，无编排语义）——必须与官方逐字节一致。
+      if [ -f "$OFFICIAL_PRESETS/minimal/agent.cordis.yml" ]; then
+        if cmp -s "$vendored" "$OFFICIAL_PRESETS/minimal/agent.cordis.yml"; then
+          pass "minimal 副本与官方逐字节一致（未替换，无编排面）"
+        else
+          fail "minimal 副本与官方有差异——本仓未计划替换 minimal，请同步或登记为替换 preset"
+        fi
+      else
+        skip "官方检出缺 minimal preset（跳过逐字节断言）"
+      fi
+      continue
+    fi
+    # ① corum 编排替换：双实例 + provider + 只读研究实例。
+    if [ "$(grep -cF "name: '@corum/corum-tool-subagent'" "$vendored")" -eq 2 ]; then
+      pass "${preset}：subagent 双实例（worker + research）指向 @corum/corum-tool-subagent"
+    else
+      fail "${preset}：未找到 corum subagent 双实例（官方替换丢失？）"
+    fi
+    grep -qF 'provider: corum-spawn' "$vendored" \
+      && pass "${preset}：provider corum-spawn" \
+      || fail "${preset}：缺 provider: corum-spawn（子 Agent 会走官方 spawn provider，无 corum 机制）"
+    grep -qF 'readonlyResearch: true' "$vendored" \
+      && pass "${preset}：research 只读实例已挂" \
+      || fail "${preset}：缺 readonlyResearch: true（subagent_research 只读语义丢失）"
+    # ② 官方 subagent 工具行不得仍处于启用态（按行块判定：同一 `- id:` 块内
+    #    `name: '@deepseek-ai/dsh-tool-subagent'` 必须伴随 disabled: true）。
+    if awk '
+      /^[[:space:]]*- id: / { if (index(blk, OFFICIAL_SUBAGENT_ROW) > 0 && index(blk, "disabled: true") == 0) bad=1; blk="" }
+      { blk = blk $0 "\n" }
+      END { if (index(blk, OFFICIAL_SUBAGENT_ROW) > 0 && index(blk, "disabled: true") == 0) bad=1; exit bad ? 0 : 1 }
+    ' OFFICIAL_SUBAGENT_ROW="name: '@deepseek-ai/dsh-tool-subagent'" "$vendored"; then
+      fail "${preset}：官方 subagent 工具行仍启用（与 corum 工具重复，提示词/机制双份）"
+    else
+      pass "${preset}：官方 subagent 工具行已退役（disabled 或改挂 corum 实例）"
+    fi
+    # ③ 退役行显式 disabled（机制成本：不 disabled 就与 orchestrate 双编排面）。
+    for retired in $PRESET_RETIRED_ROWS; do
+      if row_disabled "$vendored" "$retired"; then
+        :
+      elif grep -qE "^[[:space:]]*- id: $retired[[:space:]]*$" "$vendored"; then
+        fail "${preset}：退役行 $retired 未标 disabled: true（编排面重复）"
+      fi
+    done
+    # ④ 官方行 id 一个不少（升级漂移检测）+ 新增行在登记表内。
+    if [ -f "$OFFICIAL_PRESETS/$preset/agent.cordis.yml" ]; then
+      missing=0
+      while IFS= read -r official_id; do
+        grep -qE "^[[:space:]]*- id: $official_id[[:space:]]*$" "$vendored" || { missing=1; fail "${preset}：官方行 $official_id 在本地副本中消失（升级漂移）"; }
+      done < <(preset_row_ids "$OFFICIAL_PRESETS/$preset/agent.cordis.yml")
+      [ "$missing" = 0 ] && pass "${preset}：官方行 id 全部保留"
+      extra=0
+      while IFS= read -r vendored_id; do
+        grep -qE "^[[:space:]]*- id: $vendored_id[[:space:]]*$" "$OFFICIAL_PRESETS/$preset/agent.cordis.yml" && continue
+        case " $PRESET_EXTRA_ROWS " in
+          *" $vendored_id "*) ;;
+          *) extra=1; fail "${preset}：新增行 $vendored_id 未登记（请同步本节 PRESET_EXTRA_ROWS 与 fork-delta §4.1）" ;;
+        esac
+      done < <(preset_row_ids "$vendored")
+      [ "$extra" = 0 ] && pass "${preset}：新增行均在登记表内"
+    else
+      skip "官方检出缺 $preset preset（跳过行 id 对账）"
+    fi
+  done
+  # ⑤ 改名残留（mode: code）目录不得存在——它会与 mode 枚举冲突、挂载即失败。
+  for stale in "$VENDORED_PRESETS"/*/; do
+    [ -d "$stale" ] || continue
+    case "$(basename "$stale")" in
+      standard|ptc|cordis|minimal) ;;
+      *) fail "shipped-presets/official/$(basename "$stale") 不是官方 preset id（改名残留会让 agent-presets 挂载失败）" ;;
+    esac
+  done
+else
+  fail "缺 packages/desktop/shipped-presets/official——官方 preset 的 corum 编排替换不存在"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then

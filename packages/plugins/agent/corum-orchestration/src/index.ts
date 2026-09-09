@@ -54,6 +54,7 @@ export {
   corumIsGitRepo,
   corumIsWriteTask,
   corumMarkSettled,
+  corumNarrowDenyFilter,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,

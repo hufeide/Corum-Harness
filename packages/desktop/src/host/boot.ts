@@ -358,6 +358,15 @@ export async function bootDesktop(): Promise<Context> {
   // compose step; the desktop shell skips that step, so the roster is empty
   // without this. Trust follows provenance: the official set is `system`,
   // the distribution's authored presets are `user` (see resolveAgentPresetRoots).
+  //
+  // fork（corum）：`includeShippedRoot: false` 是必需的——`agent-presets` 服务会把
+  // **包内置**的 `presets/` 根无条件排在最前（"a shipped preset shadows any
+  // directory that claimed its name"），于是本仓 `shipped-presets/official/` 里的
+  // standard/ptc/cordis 副本被包内置版本遮蔽：改本仓副本对运行时**完全无效**
+  // （2026-09-09 实机发现：换了 preset 里的 subagent 行，工具面却毫无变化）。
+  // 关掉内置根后，权威来源就是本函数注入的 roots——官方四种模式来自
+  // `shipped-presets/official/`（打包时随 host 闭包物化，见 pack-macos.mjs），
+  // 与包内置内容保持同步由 docs/fork-delta.md §5 runbook + 守卫 §17 负责。
   if (rows.has('agent-presets')) {
     const presetRoots = resolveAgentPresetRoots()
     if (presetRoots.length > 0) {
@@ -366,6 +375,7 @@ export async function bootDesktop(): Promise<Context> {
         config: {
           ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
           roots: presetRoots,
+          includeShippedRoot: false,
         },
       })
     }

@@ -65,6 +65,7 @@ import {
   corumIsGitRepo,
   corumIsWriteTask,
   corumMarkSettled,
+  corumNarrowDenyFilter,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
@@ -540,6 +541,7 @@ export {
   corumIsGitRepo,
   corumIsWriteTask,
   corumMarkSettled,
+  corumNarrowDenyFilter,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
@@ -843,11 +845,29 @@ export function apply(ctx: Context, config: Config): void {
         if (!corumIsGitRepo(parentCwdForRepo)) corumIsolate = false
       }
 
+      // fork（corum）：机制追加的 deny 必须收敛到「本 preset 真正注册的工具名」——
+      // `tools.restrict()` 对未知名 fail-loud，而 corum 的写工具名单是平台硬编码
+      // （str_replace_editor 只有挂 str-replace-editor 行的 preset 才有；官方
+      // standard/ptc/cordis 挂的是 write/edit）。不收敛则子 Agent 创建直接抛错
+      // （2026-09-10 实机：官方三模式全部派不出子 Agent）。口径与边界见
+      // corumNarrowDenyFilter 的注释。
+      const corumVisibleToolNames = (): ReadonlySet<string> =>
+        new Set(parent.ctx.tools.schemas(scopeOf(parent.ctx)).map(schema => schema.name))
+      const corumSetMechanismFilter = (
+        filter: { allow?: string[]; deny?: string[] } | undefined,
+      ): void => {
+        const narrowed = filter === undefined
+          ? undefined
+          : corumNarrowDenyFilter(filter, corumVisibleToolNames())
+        if (narrowed === undefined) delete request.toolFilter
+        else request.toolFilter = narrowed
+      }
+
       // fork（corum）：任务级 research 的只读硬约束——orchestrate 的 tasks[i].research
       // 名实相符：research=true 的任务预 deny 全部写工具（与 subagent_research 只读
       // 实例同款口径），不因「实例 config 未显式 deny」而带写工具直接写主工作区。
       const researchFilter = corumResearchToolFilter(config.toolFilter, effReadonlyResearch)
-      if (researchFilter !== undefined) request.toolFilter = researchFilter
+      if (researchFilter !== undefined) corumSetMechanismFilter(researchFilter)
 
       // fork（corum）：integrate 召唤（fan-in/Manager）——恒前台路径（机制强制）。
       // fan-in 汇合的本质是同步等待点：主 Agent 必须等到集成者 merge+verify 的结果
@@ -937,7 +957,7 @@ export function apply(ctx: Context, config: Config): void {
         corumEntry = { sessionId, slug }
         corumEntryInfo = { slug, branch, path: worktreePath }
         request.cwd = worktreePath
-        request.toolFilter = corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs)
+        corumSetMechanismFilter(corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs))
         const isolationNotice = `[corum isolation] You are working inside an isolated git worktree (branch ${branch}). Your working directory IS the worktree root; address every file by RELATIVE path only. The parent working tree outside this worktree is write-denied by the sandbox (reads are still allowed for reference). Commit your changes on branch ${branch} inside this worktree; do not attempt to write outside it.\n\n`
         request.prompt = [{ type: 'text', text: isolationNotice + args.prompt }] as ContentBlock[]
       } else if (corumIsWrite && !effReadonlyResearch) {
@@ -951,6 +971,28 @@ export function apply(ctx: Context, config: Config): void {
       const corumBindRun = (runId: string): void => {
         if (corumEntry !== undefined) orchestration.bindRunId(corumEntry.sessionId, corumEntry.slug, runId)
       }
+      /**
+       * fork（corum）：spawn 失败回滚（无隔离时 no-op）。
+       *
+       * 台账条目在 start **之前**登记，start 抛错会让它永远 active 且无 runId：占满
+       * maxParallelChildren 额度，并让该会话后续派遣恒命中并发信号③而强制隔离。
+       * 此时子 Agent 从未执行过任何工具，worktree/分支都是本次 spawn 的产物，强清理安全。
+       * （2026-09-10 实机：官方 preset 的子 Agent 因 deny 未知名创建失败，三个会话各泄漏数条。）
+       */
+      const corumDiscardEntry = (): void => {
+        if (corumEntry === undefined) return
+        orchestration.discardEntry(corumEntry.sessionId, corumEntry.slug)
+        corumEntry = undefined
+      }
+      /** fork（corum）：spawn 包装——start 抛错时先回滚台账条目（无隔离时 no-op）。 */
+      const corumStart = async <T>(start: () => Promise<T>): Promise<T> => {
+        try {
+          return await start()
+        } catch (error: unknown) {
+          corumDiscardEntry()
+          throw error
+        }
+      }
       // fork（corum）：非隔离的前台写子 Agent 登记进并发计数（同消息并发调用时，
       // 后一个 spawn 才能看到「已经有一个在写主工作区」而选择隔离）。后台/continuable
       // 的子 Agent 由 runSpec 信号②恒判并发，无需计数，避免跨调用泄漏。
@@ -958,12 +1000,12 @@ export function apply(ctx: Context, config: Config): void {
 
       if (corumRunSpec.runInBackground) {
         if (continuable) {
-          const started = await runtimeCtx.subagents.startContinuable({
+          const started = await corumStart(() => runtimeCtx.subagents.startContinuable({
             provider: config.provider,
             label: args.label,
             request,
             signal: exec.signal,
-          })
+          }))
           // continuable 登记的是 childId（settle 事件按 childId 精确匹配）。
           corumBindRun(String(started.childId))
           corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo)
@@ -979,7 +1021,7 @@ export function apply(ctx: Context, config: Config): void {
           owner: parent,
           run: () => {
             const controller = new AbortController()
-            const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal })
+            const start = corumStart(() => runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal }))
             // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
             void start.then((startedRun) => {
               corumBindRun(String(startedRun.id))
@@ -998,10 +1040,10 @@ export function apply(ctx: Context, config: Config): void {
 
       if (corumTrackWrite) orchestration.beginWriteChild(corumSessionId)
       try {
-        const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
+        const run: SubagentRun = await corumStart(() => runtimeCtx.subagents.start(config.provider, {
           ...request,
           signal: exec.signal,
-        })
+        }))
         corumBindRun(String(run.id))
         corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, 'foreground', corumEntryInfo)
         const outcome = await settleForegroundRun(run)
@@ -1319,6 +1361,19 @@ export function apply(ctx: Context, config: Config): void {
     // fork（corum）：只给 worker 实例注册这条「后台默认」段落。research 实例的
     // 工具 description 已逐字携带同一句（2026-09-09 用户指出提示词多处重叠——
     // 此前 worker/research/subagent_fork 三个实例各注册一段几乎相同的文字）。
+    /**
+     * fork（corum）：PTC 模式前缀——该模式下工具不直接暴露，全部经 `run_code` 的
+     * 生成式 SDK 调用（官方 ptc preset 的 `tool-presentation mode: ptc`）。2026-09-09
+     * 把 corum 编排工具换进官方 preset 后，提示词必须说明调用形态，否则模型会直接
+     * 点名 `subagent` 而找不到工具。
+     * @param scope - 当前渲染 scope。
+     * @returns PTC 说明句（非 PTC 为空串）。
+     */
+    const corumPtcPrefix = (scope: Parameters<typeof runtimeCtx.tools.get>[1]): string =>
+      runtimeCtx.tools.get('run_code', scope) === undefined
+        ? ''
+        : 'This agent runs in PTC mode: every tool below is called from inside `run_code` (e.g. `await tools.subagent({...})`), not as a direct tool call. '
+
     if (backgroundEnabled && continuable && !corumReadonlyResearch) {
       // The section follows provider availability without its own manual
       // lifecycle: empty text is omitted from rendered prompts while the tool is
@@ -1328,7 +1383,7 @@ export function apply(ctx: Context, config: Config): void {
         order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
         text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
           ? ''
-          : `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
+          : `${corumPtcPrefix(context.scope)}Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
       })
     }
 
@@ -1344,7 +1399,7 @@ export function apply(ctx: Context, config: Config): void {
         text: context => mounted === undefined || runtimeCtx.tools.get('orchestrate', context.scope) === undefined
           ? ''
           : [
-              'You have a subagent orchestration capability. Use it PROACTIVELY — do not wait for the user to name a tool.',
+              `${corumPtcPrefix(context.scope)}You have a subagent orchestration capability. Use it PROACTIVELY — do not wait for the user to name a tool.`,
               '',
               'Choose the right delegation form by the shape of the work:',
               '- ONE focused, self-contained subtask (an implementation, a scoped analysis) → call `subagent`.',

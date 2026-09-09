@@ -22,6 +22,7 @@ import {
   corumGit,
   corumIsWriteTask,
   corumMarkSettled,
+  corumNarrowDenyFilter,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
@@ -428,5 +429,79 @@ describe('corumResearchToolFilter — fork（corum）research 只读硬约束', 
   it('allow 保持 config 原值（只读任务不扩权）', () => {
     const filter = corumResearchToolFilter({ allow: ['grep', 'glob'], deny: ['bash'] }, true)
     expect(filter?.allow).toEqual(['grep', 'glob'])
+  })
+})
+
+describe('corumNarrowDenyFilter — fork（corum）deny 收敛到已注册工具（2026-09-10 官方 preset 全崩修复）', () => {
+  const known = new Set(['read', 'write', 'edit', 'bash'])
+
+  it('未知名从 deny 中剔除，已注册名保留（str_replace_editor 不在官方 preset）', () => {
+    // 实机根因：官方 standard/ptc/cordis 挂 write/edit 不挂 str_replace_editor，
+    // 机制追加的 deny 含未知名 → tools.restrict() fail-loud → 子 Agent 创建失败。
+    expect(corumNarrowDenyFilter({ deny: ['str_replace_editor', 'write', 'edit', 'bash'] }, known))
+      .toEqual({ deny: ['write', 'edit', 'bash'] })
+  })
+
+  it('deny 全部命中时原样返回（引用不变，避免无谓复制）', () => {
+    const filter = { deny: ['write', 'bash'] }
+    expect(corumNarrowDenyFilter(filter, known)).toBe(filter)
+  })
+
+  it('deny 全被剔除且无 allow → undefined（等于不限制）', () => {
+    expect(corumNarrowDenyFilter({ deny: ['str_replace_editor'] }, known)).toBeUndefined()
+  })
+
+  it('deny 全被剔除但有 allow → 只留 allow（不把只读实例变成无限制）', () => {
+    expect(corumNarrowDenyFilter({ allow: ['grep'], deny: ['str_replace_editor'] }, known))
+      .toEqual({ allow: ['grep'], deny: [] })
+  })
+
+  it('allow 名单不收敛（写错的 allow 必须继续 fail-loud）', () => {
+    expect(corumNarrowDenyFilter({ allow: ['no_such_tool'] }, known)).toEqual({ allow: ['no_such_tool'] })
+  })
+
+  it('无 deny / undefined 原样返回', () => {
+    expect(corumNarrowDenyFilter(undefined, known)).toBeUndefined()
+    const allowOnly = { allow: ['read'] }
+    expect(corumNarrowDenyFilter(allowOnly, known)).toBe(allowOnly)
+  })
+})
+
+describe('CorumOrchestration.discardEntry — fork（corum）spawn 失败回滚（2026-09-10 泄漏修复）', () => {
+  it('强清理 worktree + 分支并移除台账条目（active 泄漏会占额度并恒判并发）', () => {
+    const repo = repoWithBranch('discard-repo-1', 'wt/wt-d1')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-discard-1'
+    const wtPath = join(repo, '.corum-worktrees', 'wt-d1')
+    execFileSync('git', ['-C', repo, 'worktree', 'add', wtPath, 'wt/wt-d1'], { stdio: 'pipe' })
+    orchestration.addActiveEntry(sessionId, repo, { slug: 'wt-d1', branch: 'wt/wt-d1', path: wtPath })
+
+    orchestration.discardEntry(sessionId, 'wt-d1')
+
+    expect(orchestration.entriesOf(sessionId)).toEqual([])
+    expect(orchestration._testLedger().get(sessionId)).toEqual([])
+    expect(existsSync(wtPath)).toBe(false)
+    const branches = execFileSync('git', ['-C', repo, 'branch', '--list', 'wt/wt-d1'], { encoding: 'utf8' })
+    expect(branches.trim()).toBe('')
+  })
+
+  it('已绑定 runId 的条目不回滚（那条 run 真实存在，settle 路径负责它）', () => {
+    const repo = repoWithBranch('discard-repo-2', 'wt/wt-d2')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-discard-2'
+    const wtPath = join(repo, '.corum-worktrees', 'wt-d2')
+    execFileSync('git', ['-C', repo, 'worktree', 'add', wtPath, 'wt/wt-d2'], { stdio: 'pipe' })
+    orchestration.addActiveEntry(sessionId, repo, { slug: 'wt-d2', branch: 'wt/wt-d2', path: wtPath })
+    orchestration.bindRunId(sessionId, 'wt-d2', 'run-live')
+
+    orchestration.discardEntry(sessionId, 'wt-d2')
+
+    expect(orchestration.entriesOf(sessionId).map(item => item.slug)).toEqual(['wt-d2'])
+    expect(existsSync(wtPath)).toBe(true)
+  })
+
+  it('未知 slug 静默 no-op（无隔离的 spawn 失败路径）', () => {
+    const orchestration = new CorumOrchestration(new Context())
+    expect(() => orchestration.discardEntry('spec-discard-3', 'wt-none')).not.toThrow()
   })
 })

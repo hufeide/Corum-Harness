@@ -1,9 +1,16 @@
-# The `code` agent preset: the standard coding agent, presented as Code Mode.
+# fork（corum）：本文件 = 官方 preset 的本地副本 + corum 编排替换。
+# 替换内容：① 官方 subagent 工具行 → @corum/corum-tool-subagent 双实例
+# （worker + research，并发感知隔离/模型锁/orchestrate/notice）；② 官方 fork
+# provider 工具行退役；③ 官方 workflow/ralph 编排面退役（方案甲用 orchestrate
+# 取代，见 docs/plan/PLAN-subagent-orchestration.md §7；与 corum preset 一致）。
+# 其余与官方逐行一致；基座升级按 docs/fork-delta.md §5 runbook 重放，
+# scripts/verify-fork-drift.sh §17 守护。
+# The `ptc` agent preset: the standard coding agent, presented as PTC mode.
 #
-# Everything in `standard` is here unchanged. What is added is the `tool-presentation`
-# row: instead of one tool call per action, the model writes a TypeScript
-# program against a generated SDK and `run_code` executes it, so a sequence
-# that would be five round trips becomes one.
+# Most of `standard` is here unchanged. The deliberate exception is the
+# general-purpose `workflow` tool: PTC mode uses `run_code` as its model-authored
+# composition surface. The `tool-presentation` row turns the remaining registry
+# into a generated SDK, so a sequence that would be five round trips becomes one.
 #
 # The registry itself stays on the host plane — the agent loop's scheduler and
 # the API proxy's presenters are its consumers — so what this preset owns is
@@ -95,12 +102,12 @@
 
 # ── goals ───────────────────────────────────────────────────────────────────
 
-# Only the model-facing tool. The goal SERVICE, its session driver, and the
-# `/goal` command stay on the host plane: the Gateway serves the goal domain as
-# Remote endpoints whose receiver comes from a generated descriptor, so it
-# resolves `goals` on the host and an entry-local realm here would hide it. The
-# registry is keyed by session anyway, so one host instance serves every
-# session. What a preset chooses is whether its agent can call the goal tool.
+# The goal service and session driver stay on the host plane, where the Gateway
+# can resolve them. The human command and model-facing tool register into this
+# preset's scoped layers.
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
 
@@ -184,30 +191,46 @@
     - id: tool-subagent-list-agents
       name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 
+    # fork（corum）：官方 subagent 工具 → corum 编排工具（worker + research 双实例）。
+    # 与 corum 预设同款语义：并发感知隔离 / 模型锁 / orchestrate / settlement notice。
+    # 官方 spawn/fork provider 行仍留在 host 组合里，但本 preset 不再挂官方工具行。
     - id: tool-subagent
-      name: '@deepseek-ai/dsh-tool-subagent'
+      name: '@corum/corum-tool-subagent'
       config:
-        provider: spawn
+        provider: corum-spawn
         toolName: subagent
         backgroundMode: continuable
+        modelSelectionSettings: false
 
+    - id: tool-subagent-research
+      name: '@corum/corum-tool-subagent'
+      config:
+        provider: corum-spawn
+        toolName: subagent_research
+        backgroundMode: continuable
+        modelSelectionSettings: false
+        readonlyResearch: true
+    # fork（corum）：官方 fork provider 工具行退役（2026-09-09 用户拍板 A 案，
+    # 见 docs/PROMPT-INVENTORY.md §4）——不走 corum 机制且提示词与 subagent 重复。
     - id: tool-subagent-fork
       name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
       config:
         provider: fork
         toolName: subagent_fork
         backgroundMode: continuable
 
-    # Product providers are host-plane singletons. Copy this preset, then
-    # remove `disabled` from either ordinary tool row to expose that product
-    # only to agents composed from the copy.
+    # Production dsh does not install these optional providers. Install the
+    # matching Bundle in this Profile and restart the Host, then copy this
+    # preset and remove `disabled` from the matching tool row. Host availability
+    # alone grants no tool.
     - id: tool-subagent-codex
       name: '@deepseek-ai/dsh-tool-subagent'
       disabled: true
       config:
         provider: codex
         toolName: subagent_codex
-        enableRunInBackground: false
+        backgroundMode: one-shot
         maxDepth: provider-managed
 
     - id: tool-subagent-claude-code
@@ -216,19 +239,24 @@
       config:
         provider: claude-code
         toolName: subagent_claude_code
-        enableRunInBackground: false
+        backgroundMode: one-shot
         maxDepth: provider-managed
 
     - id: workflow-worker-thread
       name: '@deepseek-ai/dsh-workflow-worker-thread'
+      disabled: true
       config:
         provider: spawn
 
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'
+      # Keep the engine above for `ralph`, but do not publish a second
+      # model-authored orchestration surface beside `run_code` in PTC mode.
+      disabled: true
 
     - id: tool-ralph
       name: '@deepseek-ai/dsh-tool-ralph'
+      disabled: true
       config:
         subagentProvider: spawn
         maxRounds: 64
@@ -248,15 +276,15 @@
 - id: tool-web
   name: '@deepseek-ai/dsh-tool-web'
   config:
-    fetch: false
+    fetch: true
     searchTimeoutMs: 60000
 
 # ── presentation ────────────────────────────────────────────────────────────
 
-# Code Mode for this agent alone. The row waits for the host's `codeRuntime`
+# PTC mode for this agent alone. The row waits for the host's `codeRuntime`
 # rather than assuming it: a deployment that composes no TypeScript runtime
 # fails this preset at mount, naming this id, instead of at the first request.
 - id: tool-presentation
   name: '@deepseek-ai/dsh-agent-tool-presentation'
   config:
-    mode: code
+    mode: ptc

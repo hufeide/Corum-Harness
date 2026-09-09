@@ -236,6 +236,37 @@ export function corumResearchToolFilter(
 }
 
 /**
+ * fork（corum）：把机制生成的 deny 名单收敛到「子 Agent 真正注册的工具名」。
+ *
+ * 背景（2026-09-10 实机，官方 preset 三模式全部派不出子 Agent）：corum 的写工具
+ * 名单是**平台口径的硬编码**，其中 `str_replace_editor` 只有挂了
+ * `str-replace-editor` 行的 preset（corum 自己的 profile、官方 minimal）才有；
+ * 官方 standard/ptc/cordis 挂的是 `write`/`edit`。而 `tools.restrict()` 对未知名
+ * fail-loud（dsh-tools），于是机制追加的 deny（denyDirectFs 的 str_replace_editor、
+ * research 的写工具全家）让子 Agent 创建**直接抛错**：
+ * `tools.restrict() names unknown global tool "str_replace_editor"`。
+ *
+ * 语义边界：只收敛 `deny`——deny 一个不存在的工具本就无从谈起（它不可能被调用），
+ * 静默丢弃是正确结果；`allow` 原样保留，因为 allow 是「只留这些」的断言，写错必须
+ * 继续 fail-loud（那是配置错误，不是平台差异）。preset 里**手写**的 config.toolFilter
+ * 也不收敛（作者断言，同 allow 口径）。
+ *
+ * @param filter - 机制生成的过滤器（config 原样透传的除外，见调用点）。
+ * @param known - 目标 scope 可见的工具名（父 Agent scope 的可见名是其超集）。
+ * @returns 收敛后的过滤器；deny 全被丢弃且无 allow 时返回 undefined（等于不限制）。
+ */
+export function corumNarrowDenyFilter(
+  filter: { allow?: string[]; deny?: string[] } | undefined,
+  known: ReadonlySet<string>,
+): { allow?: string[]; deny?: string[] } | undefined {
+  if (filter === undefined || filter.deny === undefined) return filter
+  const deny = filter.deny.filter(name => known.has(name))
+  if (deny.length === filter.deny.length) return filter
+  if (deny.length === 0 && filter.allow === undefined) return undefined
+  return { ...filter.allow !== undefined ? { allow: filter.allow } : {}, deny }
+}
+
+/**
  * fork（corum）：有效 toolFilter——config.toolFilter 与 denyDirectFs 的 deny 并集
  * （denyDirectFs=false 时不附加；config.toolFilter 缺省时并集只有附加项）。
  */
@@ -675,6 +706,30 @@ export class CorumOrchestration extends Service {
     if (entry === undefined || entry.runId !== undefined) return
     entry.runId = runId
     this.persist(sessionId)
+  }
+
+  /**
+   * fork（corum）：回滚一条「worktree 已建、子 Agent 未起」的条目（spawn 抛错路径）。
+   *
+   * 条目在 `subagents.start` **之前**登记（request 需要 worktree 路径），因此 start
+   * 失败时台账会留下一条永远 active、且永不绑定 runId 的条目：它占满
+   * `maxParallelChildren` 额度，并让该会话后续每次派遣都命中并发信号③而强制隔离。
+   * （2026-09-10 实机：官方 preset 三个会话各泄漏数条 worktree。）
+   *
+   * 此时 worktree 目录与分支都是本次 spawn 的产物，子 Agent 从未执行过任何工具，
+   * 不可能有未合并提交——强清理安全。已绑定 runId 的条目一律不动（那条 run 真实
+   * 存在，settle 路径负责它）。
+   */
+  discardEntry(sessionId: string, slug: string): void {
+    const entries = this.ledger.get(sessionId)
+    const cwd = this.ledgerCwds.get(sessionId)
+    const entry = entries?.find(item => item.slug === slug)
+    if (entries === undefined || entry === undefined || cwd === undefined) return
+    if (entry.runId !== undefined) return
+    corumCleanupWorktree(cwd, entry, { force: true })
+    this.ledger.set(sessionId, entries.filter(item => item.slug !== slug))
+    this.persist(sessionId)
+    this.emitFrame(sessionId)
   }
 
   /**

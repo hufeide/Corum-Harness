@@ -1261,6 +1261,36 @@ fork 自 `@deepseek-ai/dsh-client-ui-trajectory` 0.1.3-alpha.1）。
 **验证**：`docs/TODO.md` 同条（CDP 三层 + 真内核 + 单测 62 例）；`verify-fork-drift.sh`
 §4 已登记本事件 emit 面映射。
 
+### 11.22 官方 preset 下子 Agent 全崩的两个缺陷（2026-09-10，官方三模式实机验证暴露）
+
+**现象**：官方 standard/ptc/cordis 三模式的每一条 `subagent` 调用都以
+`Error: tools.restrict() names unknown global tool "str_replace_editor"; known global
+tools: …` 结束；三个会话各泄漏数条 `.corum-worktrees/wt-*`，台账留下永不结算的
+`active` 条目（后续派遣恒判并发 → 强制隔离）。根因与教训见 `docs/LESSONS.md`
+§6.18/§6.19，此处登记本包（fork #10）与 `@corum/corum-orchestration` 的增量。
+
+**`@corum/corum-orchestration/src/orchestration.ts` 增量**：
+
+| 位置 | 增量 | 说明 |
+|---|---|---|
+| 新增 `corumNarrowDenyFilter(filter, known)` | 纯函数 | 机制生成的 deny 与目标 scope 可见工具名求交；只收敛 deny，allow 原样（写错要 fail-loud） |
+| 新增 `CorumOrchestration.discardEntry(sessionId, slug)` | 服务方法 | spawn 抛错回滚：强清 worktree+分支 + 移除台账条目；已绑定 runId 的条目不动 |
+
+**`src/index.ts` 增量**：
+
+| 位置 | 增量 | 说明 |
+|---|---|---|
+| `corumVisibleToolNames()` | 新局部函数 | `parent.ctx.tools.schemas(scopeOf(parent.ctx))` 取父 scope 可见名 |
+| `corumSetMechanismFilter(filter)` | 新局部函数 | 机制 filter 统一入口（research + 隔离两条路径）——收敛后为 `undefined` 则删除 `request.toolFilter` |
+| `corumDiscardEntry()` / `corumStart(fn)` | 新局部函数 | 三个 start 入口（foreground / continuable / background job）统一包装：抛错即回滚台账条目 |
+
+**边界**：preset 手写的 `config.toolFilter` 与 `allow` 不收敛（作者断言，写错必须
+fail-loud）；`discardEntry` 只对「未绑定 runId」的条目生效（真实存在的 run 由 settle 路径负责）。
+
+**验证**：`corum-tool-subagent/tests/isolation.spec.ts` 新增 12 例（收敛 6 + 回滚 3 +
+既有），`pnpm --filter @corum/corum-tool-subagent run test` **71/71 通过**；CDP 实机见
+§10.7 表格（三模式后台/前台/单发/只读/integrate 六类路径）。
+
 ---
 
 ## 15. 第 13 个 fork 包：`@corum/corum-sandbox-local`（2026-09-09，隔离子 Agent 的 git 提交）
@@ -1415,3 +1445,64 @@ fork 扩大非 worktree 会话的面。
 **守卫**：`scripts/verify-fork-drift.sh` §16（已做负向测试）——官方 src 除上表登记文件
 外必须逐字节一致、登记文件必须确有差异、`cwd` 缺省必须仍是 `cwd ?? parentHeader.cwd`、
 两个入口都必须 `assertChildCwd`。任何人在非 cwd 路径上改 fork #9 都会 fail loud。
+
+> **2026-09-09 决策更新（用户「给官方换上」）**：上述「官方模式=原味 dsh」的产品边界
+> 已被推翻——官方四模式现在也挂 corum 编排工具，见 §10.7。§16 的 opt-in 不变量仍然有效
+> （官方 `@deepseek-ai/dsh-tool-subagent` 包仍在 host 组合里、仍有其它调用方），只是不再
+> 由「官方 preset 用官方工具」来消费。
+
+### 10.7 官方 preset 本地副本换成 corum 编排工具（2026-09-09，用户拍板「给官方换上」）
+
+**背景**：用户在核对「orchestration 是否标准/PTC/创造三模式都启用」时发现只有 corum
+自建 profile 有 `orchestrate`，官方四模式（standard/ptc/cordis/minimal）挂的是官方
+`dsh-tool-subagent`——根因是 `corum-agent` 的 `isOfficialPreset` 分支跳过 corum 编译，
+官方 preset 完全由包内置 preset 文件决定。用户决策：**官方模式也要 corum 编排**
+（一个编排面、一套提示词、一套机制），遂把官方 preset 的副本落到本仓并替换 subagent 行。
+
+**落地形态**（`packages/desktop/shipped-presets/official/`，四份副本）：
+
+| preset | 与官方 dsh 检出的差异 | 说明 |
+|---|---|---|
+| `standard` | 仅 `agent.cordis.yml` | subagent 行 → corum 双实例 + fork/workflow/ralph 行退役 |
+| `ptc` | 仅 `agent.cordis.yml` | 同上 |
+| `cordis` | 仅 `agent.cordis.yml` | 同上 |
+| `minimal` | **无（逐字节一致）** | 双工具极简面（bash + str_replace_editor），无编排语义，不替换 |
+
+每个被替换的 preset 里：
+- `- id: tool-subagent` → `name: '@corum/corum-tool-subagent'`，`provider: corum-spawn`，
+  `modelSelectionSettings: false`（模型锁）；
+- 新增 `- id: tool-subagent-research`（同包，`toolName: subagent_research`，
+  `readonlyResearch: true`）——只读研究实例；
+- `- id: tool-subagent-fork` / `workflow-worker-thread` / `tool-workflow` / `tool-ralph`
+  显式 `disabled: true`（单一编排面：orchestrate 取代 workflow/ralph；A 案退役 fork）；
+- 其余行与官方逐行一致（守卫按「官方行 id 一个不少 + 新增行登记表」对账）。
+
+**两条静默失效路径**（都已机器化守卫）：
+1. `agent-presets` 服务把**包内置** `presets/` 根无条件排在最前（"a shipped preset
+   shadows any directory that claimed its name"）——本仓副本会被遮蔽，改它毫无效果
+   （2026-09-09 实机踩过：换了 subagent 行，工具面纹丝不动）。故 `boot.ts` 的
+   `agent-presets` overlay 必须带 `includeShippedRoot: false`；权威来源 = 本函数注入的
+   roots（corum + official 副本）。
+2. 官方升级后副本漂移（新版官方加了行/改了行没跟）→ 守卫 §17 对账行 id。
+
+**打包**：`scripts/pack-macos.mjs` 把 `shipped-presets/official` 物化进 host 闭包的
+`shipped-presets/`——正式包不读包内置副本。
+
+**守卫**：`scripts/verify-fork-drift.sh` §17（已做负向测试：改回官方包名 / 删
+`includeShippedRoot: false` / 留 `code/` 残留目录，三种都 fail）。
+
+**实机验证**（2026-09-09，dev 实例 `CORUM_HOME=/tmp/corum-off-home`，probe 仓
+`~/corum-off-probe`，三模式各一条泳道）：
+
+| 场景 | standard | ptc | cordis |
+|---|---|---|---|
+| 后台 `subagent`（写） | 隔离 worktree + 文件落 worktree | 同（经 `run_code` 嵌套派发） | 同 |
+| 前台 `subagent`（写，有并发） | 隔离 + 子 Agent 在 worktree 内 commit | 同 | 同 |
+| 前台单一写委托（无并发） | **不隔离**，直写主工作树（`solo5.txt`） | — | — |
+| `subagent_research`（只读） | 成功返回只读报告 | — | — |
+| settle notice | 后台官方措辞 + 前台 corum「final report」两条都注入 | 同 | 同 |
+| `integrate: true` | 合并 + commit（`6a33ea3`）+ worktree 清理 | — | — |
+
+修复前的实机现象（同一路径）：每次 `subagent` 调用报
+`tools.restrict() names unknown global tool "str_replace_editor"`、三个会话各泄漏数条
+worktree。根因与修复见 §11.22 与 `docs/LESSONS.md` §6.18/§6.19。
