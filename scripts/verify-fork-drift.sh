@@ -347,6 +347,28 @@ else
   fi
 fi
 
+# ── 11. 模型选择单一 owner（防「用户换模型被吞」回归）──────────────────────
+# 背景：官方 installModelSelection 的 agent/request 监听用安装时的选择覆盖结果，且
+# waterfall 先注册的是外层——corum 在 create setup 里装自己的 ref 会让官方
+# session/selectModel 永远失效（2026-09-09 用户实测，PROGRESS 第 57 轮）。
+# 断言：agent-service.ts 只用 corum 的 installTaskModelSelection，不得再出现官方
+# 包里的 installModelSelection 调用。
+section "[11] 模型选择单一 owner（corum-agent 用 installTaskModelSelection）"
+if [ ! -f "$AGENT_SERVICE" ]; then
+  skip "找不到 agent-service.ts"
+else
+  if grep -q "installTaskModelSelection(" "$AGENT_SERVICE"; then
+    pass "agent-service.ts 使用 installTaskModelSelection"
+  else
+    fail "agent-service.ts 未使用 installTaskModelSelection——模型选择会退回被官方 ref 覆盖的老毛病"
+  fi
+  if grep -qE "^import \{[^}]*installModelSelection[^}]*\} from '@deepseek-ai/dsh-agent'" "$AGENT_SERVICE"; then
+    fail "agent-service.ts 仍导入官方 installModelSelection（同一机制两个 owner，用户换模型会被吞）"
+  else
+    pass "未导入官方 installModelSelection"
+  fi
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then

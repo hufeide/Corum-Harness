@@ -348,14 +348,15 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 
 | 项 | 内容 |
 |---|---|
-| 落点 | `packages/plugins/agent/corum-agent/src/compile.ts` / `agent-service.ts` / 新增 `workspace-agents.ts` |
-| 关联官方机制 | dsh-agent-instructions（AGENTS.md 注入）、dsh-skill-filesystem（skill 发现）、dsh-agent-presets（select/mount） |
+| 落点 | `packages/plugins/agent/corum-agent/src/compile.ts` / `agent-service.ts` / 新增 `workspace-agents.ts` / 新增 `task-model-selection.ts` |
+| 关联官方机制 | dsh-agent-instructions（AGENTS.md 注入）、dsh-skill-filesystem（skill 发现）、dsh-agent-presets（select/mount）、dsh-agent 的 `installModelSelection`（模型选择 waterfall） |
 
 **实质差异/修正清单**：
 
 1. **AGENTS.md fs realm 断链修复**（compile.ts）：`agent-instructions` 从 standardRows 顶层移进 `filesystem` 组（与 `fs-local` 同 `isolate:{fs:true}` realm）。根因：`dsh-agent-instructions` 经 `ctx.get('fs')` 读 AGENTS.md 基线，此前 fs-local 隔离在组私有 realm、agent-instructions 在组外拿到 undefined → 静默不注入。fs-local 保持 realm 私有（不与 host 的 fs-sandbox 抢 root realm 的 `fs` 名，避免 mount 报 "service fs has been registered at <SandboxedFileSystem>"）。
 2. **AGENTS.md 选定工作区即创建**（新增 workspace-agents.ts + 接线）：`ensureWorkspaceAgentsMd(cwd)` 幂等创建（`wx` 旗标不覆盖用户/历史内容，只读/并发失败静默容错），挂到 `createAgentForTask`（task 泳道 cwd 选定）与 `createProject`（项目带 cwd）。
 3. **select 编译顺序修正**（agent-service.ts 两处：`createAgentForTask` reuse 块 + `selectTaskAgentProfileRemote`）：`writeAgentDir`（编译 agent.cordis.yml）**先于** `agentPresets.select`（mount 读该文件）。原顺序在产物缺失/陈旧时 select 报 "agent.cordis.yml is missing"、writeAgentDir 永远到不了。
+4. **模型选择让位**（新增 task-model-selection.ts，2026-09-09）：官方 `installModelSelection` 的 `agent/request` 监听用安装时的选择覆盖 `next()` 结果；corum 在 create setup 里先装了自己的 ref，官方 ref 更晚更内层 → 用户 `session/selectModel` 换的模型被吞。本文件是官方实现的「用户显式选择优先」变体（读会话 `modelSelection` 投影，pending 与安装时不同即永久让位），agent-service.ts 五处调用点全部改用它。官方若改 `installModelSelection` 的装配语义（assemble 快照 / request 应用两段），本文件需同步。见 `docs/LESSONS.md` §8.11。
 
 **设计事实（实测确认，非改动）**：skill 注入**按 Agent 隔离**——每个 Agent 的 `profile.skills` 独立编成 preset 的 `skill-filesystem.customSkillDirs`（`CORUM_HOME/skills/<name>`），`skill-filesystem` 是 preset（agent scope）级 provider，各 Agent 只见自己绑的 skill 目录。
 

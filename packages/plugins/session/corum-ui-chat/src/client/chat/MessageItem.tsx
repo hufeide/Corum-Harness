@@ -53,12 +53,21 @@ interface RetryCountdown {
   seconds: number
 }
 
+/**
+ * fork（corum）：网关返回 4xx 且正文读不出时，openai SDK 只给
+ * 「400 status code (no body)」——用户既看不懂也不知道改什么。
+ * 识别这一形状并补上可操作提示（自建网关最常见的成因是拒绝 developer role）。
+ */
+const GATEWAY_NO_BODY = /^\d{3}\s*status code\s*\(no body\)/i
+
 function failureMessage(
   message: string,
   code: unknown,
   t: ChatViewSlotProps['t'],
 ): string {
-  return code === 'AUTH' ? t('message.failure.auth') : message
+  if (code === 'AUTH') return t('message.failure.auth')
+  if (GATEWAY_NO_BODY.test(message)) return `${message} · ${t('message.failure.gatewayNoBody')}`
+  return message
 }
 
 function ModelRetryItem({ node, active, t }: {

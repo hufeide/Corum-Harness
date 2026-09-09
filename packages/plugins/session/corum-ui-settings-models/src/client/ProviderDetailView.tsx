@@ -18,7 +18,7 @@ import { BrandLogo } from './brands.tsx'
 import { useConnTest } from './useConnTest.ts'
 import {
   BackRow, ConnResult, GlassButton, IconCpu, IconPlus, IconTrash, IconZap,
-  SettingGroup, SettingRow, StatusPill,
+  SettingGroup, SettingRow, StatusPill, Switch,
 } from './controls.tsx'
 import styles from './ModelsSection.module.css'
 
@@ -39,9 +39,16 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
   provider = liveProvider
   const isOfficial = provider.settingsNs === 'llm-deepseek'
   const keyRef = provider.apiKeyEnv ?? deriveKeyRef(provider.provider)
+  // 兼容性：pi-ai 对 OpenAI 兼容网关默认按 URL 猜「支持 developer role」，自建/内网
+  // 网关普遍不认（system 提示词被拒 → 400 且正文读不出，见 2026-09-09 实测）。
+  // 开 = 写 compat.supportsDeveloperRole:false（改用 system role）。
+  const settingsNamespace = state.namespaces.get(provider.settingsNs)
+  const systemRoleStored = settingsNamespace !== undefined
+    && schema.getPath(settingsNamespace.value, [...provider.settingsPath, 'compat', 'supportsDeveloperRole']) === false
   const [keyDraft, setKeyDraft] = useState('')
   const [keyConfigured, setKeyConfigured] = useState(provider.row.credential?.configured === true)
   const [baseURL, setBaseURL] = useState(provider.baseURL ?? '')
+  const [systemRole, setSystemRole] = useState(systemRoleStored)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
@@ -93,6 +100,18 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
           namespace?.revision,
         )
         if (!res.ok) { setFailure(res.error.message); return }
+        // 兼容性开关只在改动时写：开 → false，关 → 删键（回到 pi-ai 的 URL 自动判定）。
+        if (systemRole !== systemRoleStored) {
+          const compatPath = [...provider.settingsPath, 'compat', 'supportsDeveloperRole']
+          const compatRes = await api.settings.mutate(
+            provider.settingsNs,
+            [systemRole
+              ? { op: 'set', path: compatPath, value: false }
+              : { op: 'unset', path: compatPath }],
+            namespace?.revision,
+          )
+          if (!compatRes.ok) { setFailure(compatRes.error.message); return }
+        }
       }
       setSaved(true)
       onChanged()
@@ -154,6 +173,25 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
             )}
           />
         )}
+        {isOfficial ? null : (
+          <SettingRow
+            label="消息角色兼容性"
+            desc={systemRole
+              ? 'system role · 适用于不认 developer role 的网关'
+              : '自动（按地址判定）· 网关报「400 无正文」时打开'}
+            control={(
+              <>
+                <span className={styles['fieldMeta']}>改用 system role</span>
+                <Switch
+                  on={systemRole}
+                  disabled={disabled}
+                  ariaLabel="改用 system role"
+                  onChange={on => { setSystemRole(on); setSaved(false) }}
+                />
+              </>
+            )}
+          />
+        )}
         <SettingRow
           label="连通性测试"
           desc={isOfficial ? '官方目录路由 · 读取内置模型目录' : '向该供应商发送一次模型列表请求'}
@@ -177,7 +215,7 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
         {failure === undefined ? null : <p className={styles['error']}>{failure}</p>}
         {saved ? <p className={styles['savedNotice']}>已保存。</p> : null}
         <div className={styles['footRight']}>
-          <GlassButton kind="primary" disabled={disabled || (keyDraft.trim() === '' && (isOfficial || baseURL === provider.baseURL))} onClick={() => { void save() }}>
+          <GlassButton kind="primary" disabled={disabled || (keyDraft.trim() === '' && (isOfficial || baseURL === provider.baseURL) && systemRole === systemRoleStored)} onClick={() => { void save() }}>
             {busy ? '保存中…' : '保存'}
           </GlassButton>
         </div>

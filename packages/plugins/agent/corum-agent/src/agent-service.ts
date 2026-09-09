@@ -18,8 +18,10 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+// fork（corum）：官方 installModelSelection 会用安装时的选择覆盖用户显式换的模型，
+// 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
+import { installTaskModelSelection } from './task-model-selection.ts'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -535,7 +537,7 @@ export class CorumAgentService extends TypertRemoteService {
         // 额外能力注入（如 complete_task 工具），在 mount preset 之后。
         extraSetup?.(agentCtx)
         // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
-        installModelSelection(agentCtx, selection)
+        installTaskModelSelection(agentCtx, selection)
       },
     })
 
@@ -620,7 +622,7 @@ export class CorumAgentService extends TypertRemoteService {
       await this.ctx.agentPresets.mount(agentCtx, profile.id)
       for (const hook of this.laneSetupHooks) hook(agentCtx, projectId, profileId)
       extraSetup?.(agentCtx)
-      installModelSelection(agentCtx, selection)
+      installTaskModelSelection(agentCtx, selection)
     }
     const agentOptions = { provider: profile.model.provider, model: profile.model.model }
 
@@ -1123,7 +1125,7 @@ export class CorumAgentService extends TypertRemoteService {
           },
           assembled: undefined,
         }
-        installModelSelection(resolved.agent.ctx, reuseSelection)
+        installTaskModelSelection(resolved.agent.ctx, reuseSelection)
         // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
         this.rememberPendingPermission(String(resolved.sessionId), permission)
         return { agent: resolved.agent, presetId: profile.id, sessionId: resolved.sessionId }
@@ -1143,7 +1145,7 @@ export class CorumAgentService extends TypertRemoteService {
     }
     const setup = async (agentCtx: Context): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, profile.id)
-      installModelSelection(agentCtx, selection)
+      installTaskModelSelection(agentCtx, selection)
       // fork（corum）：orchestrator 模式（profile.executionTools === 'orchestrator'）——
       // 主 Agent 只思考规划、子 Agent 全权执行。preset 已全量编译（子 Agent composeFrom
       // parent 复用后仍全功能），这里用 tools.restrict 只作用于**主 Agent 自己的 scope**，
@@ -1330,7 +1332,7 @@ export class CorumAgentService extends TypertRemoteService {
     }
     const setup = async (agentCtx: Context): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, meta.profileId)
-      installModelSelection(agentCtx, selection)
+      installTaskModelSelection(agentCtx, selection)
     }
     const agentOptions = { provider: resumeModel.provider, model: resumeModel.model }
     const sid = SessionId(sessionId)

@@ -100,6 +100,9 @@ export const zh = {
   'message.retry.delay': '重试延迟：',
   'message.retry.failure': '失败原因：',
   'message.failure.auth': 'API 密钥无效',
+  // fork（corum）：网关 4xx 无正文时 openai SDK 只吐「400 status code (no body)」，
+  // 用户看不懂也不知道改什么；补一句可操作提示（常见于自建网关拒绝 developer role）。
+  'message.failure.gatewayNoBody': '网关拒绝了请求但没返回可读原因——自建/内网网关常见于不支持 OpenAI 的 developer role，可在「模型」设置里把该供应商的「消息角色兼容性」改为 system role',
   'message.turnError': '本轮运行失败',
   'message.maxTokens': '已达到输出 token 上限',
   'message.maxTokens.hint': '回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。',
@@ -229,6 +232,7 @@ export const en = {
   'message.retry.delay': 'Retry delay: ',
   'message.retry.failure': 'Failure reason: ',
   'message.failure.auth': 'API key is invalid',
+  'message.failure.gatewayNoBody': 'The gateway rejected the request without a readable reason — self-hosted gateways often reject OpenAI\'s developer role; switch this provider\'s "message role compatibility" to system role in Models settings',
   'message.turnError': 'This turn failed',
   'message.maxTokens': 'Output token limit reached',
   'message.maxTokens.hint': 'The reply was cut off; earlier output is preserved in the conversation. Send "continue" to let the model resume.',
