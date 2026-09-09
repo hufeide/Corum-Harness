@@ -22,15 +22,15 @@
 
 ## P2 可选改进（记录，非本期）
 
-- `__corumMonacoEditor` window 全局可变单例（unmount 写 undefined，可同 bundle 内消解为模块 ref/context）。
-- `collapsedSlots` 模块级可变 Set（grid.ts，当前单写者幸存，同 __corumSidebarMode 前夜，建议收进 layout 服务）。
-- ~~3 处 `ctx.get('connection')` 未 inject 声明（corum-ui-conversation/apply.ts:260,449、corum-ui-chat/apply.ts、ide-statusbar-ui/index.ts）~~ → **2026-09-09 复核更正**：statusbar 已补 inject；剩余 = corum-ui-chat/apply.ts ×3 + corum-ui-conversation/apply.ts ×2（2 包 5 处）。
-- fork 包缺 tests（官方 `remote-events.host.spec.ts` 232 行可移植，corum 追加事件只有编译期校验无运行时守护）。
-- fork tsconfig 单文件合并双 face，削弱 host 面无 DOM 隔离（rebase 时考虑恢复官方双 tsconfig）。
-- `TaskRef.transferNote`/`laneLabel` 声明可选 vs 构造保证非空的文档级漂移。
-- artgen/ollama 长任务进度轮询（短生命周期，事件化收益低，非必须）。
-- `corumFs` ~~16 个~~ **11 个**（2026-09-09 复核）RPC 封装散在 desktop apply 闭包（上帝对象注入面，可收进 `corumFsClient` 服务）。
-- fork drift 机器校验脚本（verify-fork-api-remotes.sh：cmp 核心文件 + 事件名交集检查）。
+- ✅ **已做（2026-09-09，P2-1）**：`__corumMonacoEditor` → 同 bundle 模块引用桥 `desktop/client/editor/monaco-bridge.ts`（MonacoEditor 写 / EditorColumn 读）。
+- ✅ **已做（2026-09-09，P2-2）**：`collapsedSlots` 模块级 Set 删除——折叠态归壳（AppFrame state）经显式参数传入 `subtreeMinSize/rescaleGrid/resizeBranch` 与 GridView；grid.ts 零可变状态。新增 ui-base vitest 基建 + `tests/grid.spec.ts` 7 例。
+- ✅ **已做（2026-09-09，P2-3）**：corum-ui-chat / corum-ui-conversation 的 `'connection'` inject 声明补齐（statusbar 此前已修）。
+- ✅ **已做（2026-09-09，P2-4）**：`corum-api-remotes/tests/remote-events.host.spec.ts` 逐字移植官方 5 例 + 4 例 corum 守护（allowlist 19 事件 / 逐条转发 / 未登记不转发 / 非 JSON 拒收）。9/9。
+- ✅ **已做（2026-09-09，P2-5）**：三个双 face 包（api-remotes/artgen/ollama）拆 host/client 两段式 tsconfig（host 面 `lib: ["ES2024"]` 无 DOM，负向测试 `document` → TS2584）；其余 7 个 host-only 包本就无 DOM。
+- ✅ **已做（2026-09-09，P2-6）**：`taskRef()` 的 label 用 `normalizeTask` 同口径兜底（消除 undefined 路由键风险）；transferNote 空值不进载荷的口径写进声明注释。新增 `tests/runtime-task.spec.ts` 9 例。
+- ✅ **已做（2026-09-09，P2-7）**：4 个轮询（artgen 引擎/模型/在线模型下载 + 文生图生成、ollama 引擎下载）→ 三个新事件 `corum/artgen/download-progress` / `corum/artgen/job-progress` / `corum/ollama/download-progress`（host 写槽即 emit，renderer $on + 终态 Promise 汇合）。⚠️ 两插件当前未挂载于 coding combo，故仅代码级/类型级验证。
+- ✅ **已做（2026-09-09，P2-8）**：11 个封装收进 `desktop/client/editor/corum-fs-client.ts` 的 `CorumFsClient`，`ctx.provide('corumFsClient')` 供任意 bundle inject；EditorColumn 注入面签名不变。CDP 实测资源管理器列目录 + 打开 README.md。
+- ✅ **已做（2026-09-09，P2-9）**：`scripts/verify-fork-drift.sh`（核心文件逐字节一致 / 声明↔allowlist 双向 / 领域事件名字对齐 / host emit 面存在）；负向实测删一条 allowlist → 退出码 1。
 
 ## 三期批次（用户拍板全做）
 
@@ -92,3 +92,25 @@ artgen + ollama 仍 setInterval 轮询｜`corumFs` RPC 仍在 desktop apply 闭�
 永久丢失（终端 pty 若随 host 重启则本来就没了；纯 WS 抖动则出现输出空洞）。
 原审计只论证了「host 版本错配永不发生」，未覆盖断链场景——**SRC stream（或帧序号补拉）
 是这条的正解**，当前无业务驱动，暂不动。
+
+---
+
+## P2 收尾（2026-09-09，全部完成）
+
+| 项 | 结论 | 验证 |
+|---|---|---|
+| P2-1 monaco window 全局 | 同 bundle 模块引用桥 | typecheck + CDP 编辑器打开文件 |
+| P2-2 collapsedSlots 模块 Set | 折叠态归壳、grid.ts 无状态 | ui-base 7 例 + CDP 侧栏折叠 300→56px |
+| P2-3 connection inject | chat×3 + conversation×2 补齐 | 全仓 typecheck |
+| P2-4 fork 缺运行时测试 | 官方 5 例移植 + 4 例 corum 守护 | 9/9 |
+| P2-5 双 face tsconfig | 3 包拆分，host 面无 DOM | 负向 `document` → TS2584 |
+| P2-6 TaskRef 载荷口径 | label 兜底 + transferNote 口径注释 | 9 例 |
+| P2-7 artgen/ollama 轮询 | 4 个轮询 → 3 个事件 | 代码级（两插件未挂载） |
+| P2-8 corumFs 上帝注入面 | 11 封装 → `corumFsClient` 服务 | CDP 列目录 + 读文件 |
+| P2-9 fork drift 脚本 | `scripts/verify-fork-drift.sh` | 负向退出码 1 |
+| 断链补帧（原「后续可选」） | 终端 seq 补拉 + 文件全量补读 | CDP snapshot 端点实测 |
+
+**断链补帧落地形态（替代原计划的 SRC stream）**：不引 AsyncIterable stream，改为
+① 终端帧带单调 `seq` + host 256KB 环形缓冲 + `corumTerminal/snapshot(id, afterSeq)`
+补拉（renderer 发现 seq 跳号即补）；② 文件侧订阅官方连接 generation，重连后整树刷新
++ 重读已打开 tab（dirty 只标外部变更）。两条都不再引入轮询。

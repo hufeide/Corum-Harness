@@ -60,5 +60,9 @@
   `packages/desktop/package.json` deps + linked via `pnpm install`.
 - Build: `pnpm --filter <name> run build` (build dependency packages such as
   ui-base first). Typecheck uses the same package filter.
+- Fork drift guard: `./scripts/verify-fork-drift.sh` (byte-identity of fork core
+  files vs the dsh checkout, corum event declaration↔allowlist both ways,
+  domain-event name alignment, host emit presence). Run it after any fork or
+  event change.
 - On-device verification / CDP: see the `corum-cdp-verify` skill
   (`./scripts/cdp.sh start|status|stop`).
