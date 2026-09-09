@@ -1,6 +1,8 @@
-/* NotificationHost — design.pen「row-通知框」（YbfO9）toast 样式。
-   全部走设计 token（深/浅主题随 body[data-ds-dark-theme] 翻转），无 inline hex。
-   toast = $glass-1 底 + cornerRadius 16 + $glass-border 描边 + 外阴影 0 10 28 #0000003D。 */
+/* NotificationHost — design.pen「row-通知框」（YbfO9，深色 g5jAt / 浅色 QEM1e）toast 样式。
+   逐项对齐设计稿：单行 gap 9 / padding 10 12 / 宽 340 / 圆角 14 / 玻璃底 $glass-1 /
+   外阴影 0 10 28 #0000003D；**无描边、无操作行**（2026-09-09 对齐时删除旧 icon-box 与 r2）。
+   全部走设计 token（深/浅主题随 body[data-ds-dark-theme] 翻转），无 inline hex（阴影除外，
+   与设计稿数值一致）。 */
 
 /* 右下角纵向堆叠（设计稿容器 alignItems=end，新通知追加在下方）。 */
 .stack {
@@ -15,16 +17,16 @@
   pointer-events: none; /* 容器不挡点击，toast 自身恢复 pointer-events */
 }
 
+/* 单行 toast：图标 + col(title/msg) + 时间 + 关闭 ×。 */
 .toast {
   pointer-events: auto;
-  width: 384px;
+  width: 340px;
   max-width: calc(100vw - 32px);
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid var(--corum-glass-border);
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 14px;
   background: var(--corum-glass-1);
   box-shadow: 0 10px 28px #0000003D;
   backdrop-filter: blur(12px);
@@ -36,29 +38,17 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* r1 行：icon-box + title/msg + 关闭 × */
-.r1 {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+/* ① 状态图标：裸 16 图标（无 icon-box），颜色 = $state-*。
+   ⚠️ 运行时 token 名是 `--dsw-alias-state-*-primary`（2026-09-09 修正：旧代码写
+   成 `--dsw-alias-state-*`，变量不存在 → 一直吃 fallback，浅色主题下也是深色值）。 */
+.toneIcon { flex: none; }
 
-.iconBox {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: var(--corum-glass-2);
-}
-
-.toneSuccess { color: var(--dsw-alias-state-success, #22c55e); }
-.toneWarn { color: var(--dsw-alias-state-warn, #f59e0b); }
-.toneError { color: var(--dsw-alias-state-error, #ef4444); }
+.toneSuccess { color: var(--dsw-alias-state-success-primary, #3EE6B0); }
+.toneWarn { color: var(--dsw-alias-state-warn-primary, #FFB45C); }
+.toneError { color: var(--dsw-alias-state-error-primary, #FF5C8A); }
 .toneInfo { color: var(--dsw-alias-brand-primary); }
 
+/* ② 标题 + 副文案列（fill_container，纵向 gap 2）。 */
 .col {
   flex: 1;
   min-width: 0;
@@ -75,16 +65,26 @@
 }
 
 .msg {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--dsw-alias-label-secondary);
   line-height: 1.4;
   word-break: break-word;
 }
 
+/* ③ 相对时间（JetBrains Mono 9.5 $label-tertiary）。 */
+.time {
+  flex: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+/* ④ 关闭 ×：16 框内 9 图标。 */
 .btnX {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -92,43 +92,10 @@
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 0;
 }
 .btnX:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
-
-/* r2 行：时间戳 + 主/次操作 */
-.r2 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.time {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.spacer { flex: 1; min-width: 0; }
-
-.a1, .a2 {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 10px;
-  padding: 2px 4px;
-  border-radius: 5px;
-}
-.a1 {
-  font-weight: 600;
-  color: var(--dsw-alias-brand-primary);
-}
-.a1:hover { background: var(--corum-glass-2); }
-.a2 {
-  color: var(--dsw-alias-label-tertiary);
-}
-.a2:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
 
 /* 降级：减少动画偏好 */
 @media (prefers-reduced-motion: reduce) {

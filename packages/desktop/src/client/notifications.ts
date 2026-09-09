@@ -1,10 +1,13 @@
 /**
  * corum-desktop 通知服务（框架级）：任何 combo 可用的应用内 toast 通知。
  *
- * 设计来源：design.pen「row-通知框」（YbfO9）——右下角纵向堆叠 toast，
- * icon-box + title/msg + 关闭 × + 时间戳 + 主/次操作。本模块是无 React
- * 依赖的 store（subscribe/getSnapshot），UI 由 NotificationHost 挂载；
- * 生产方（HMR 失败、会话事件、任意插件）只调 notify()。
+ * 设计来源：design.pen「row-通知框」（YbfO9，深色 g5jAt / 浅色 QEM1e）——
+ * 右下角纵向堆叠的**单行** toast：状态图标（16，state-*）+ 标题（12/600
+ * label-primary）/副文案（10.5 label-secondary）+ 相对时间（JetBrains Mono
+ * 9.5 label-tertiary）+ 关闭 ×（16 框内 9 图标）。宽 340、圆角 14、
+ * padding 10/12、gap 9、玻璃底 $glass-1 + 外阴影 0 10 28 #0000003D。
+ * 本模块是无 React 依赖的 store（subscribe/getSnapshot），UI 由
+ * NotificationHost 挂载；生产方（HMR 失败、会话事件、任意插件）只调 notify()。
  *
  * 框架定位：这是 corum-desktop 提供的基础能力，不限 dev——HMR 失败只是
  * 第一个消费方。通知服务本身常驻，任何 combo 的生产方都可经 ctx 或
@@ -12,31 +15,19 @@
  * @module corum-desktop/client/notifications
  */
 
-/** 通知语义色（对应设计稿 icon-box 图标配色）。 */
+/** 通知语义色（对应设计稿状态图标配色 $state-*）。 */
 export type NotificationTone = 'success' | 'warn' | 'info' | 'error'
 
-/** 一个操作按钮（设计稿 r2 行的 a1 主操作 / a2 次操作）。 */
-export interface NotificationAction {
-  /** 按钮文案（如「立即刷新」「查看」）。 */
-  label: string
-  /** 主操作（brand 色高亮）或次操作（tertiary 灰）。 */
-  kind: 'primary' | 'secondary'
-  /** 点击回调；返回 true 或 undefined 均关闭该通知（除非显式返回 false）。 */
-  onClick: () => void | boolean
-}
-
-/** 一条通知。 */
+/** 一条通知（结构 = 设计稿 toast 单行四元素）。 */
 export interface CorumNotification {
   id: string
-  /** 语义色，决定 icon-box 图标与配色（默认 info）。 */
+  /** 语义色，决定状态图标与配色（默认 info）。 */
   tone: NotificationTone
   /** 标题（12/600 $label-primary）。 */
   title: string
-  /** 副文案（11 $label-secondary）。 */
+  /** 副文案（10.5 $label-secondary，缺省只显示标题）。 */
   message?: string
-  /** 操作按钮（r2 行，最多取前两个；缺省无操作行）。 */
-  actions?: NotificationAction[]
-  /** 创建时间戳（ms），r2 行相对时间显示用。 */
+  /** 创建时间戳（ms），相对时间显示用。 */
   createdAt: number
 }
 
@@ -79,7 +70,6 @@ export function createNotificationStore(): NotificationStore {
         title: input.title,
         createdAt: input.createdAt ?? Date.now(),
         ...(input.message !== undefined ? { message: input.message } : {}),
-        ...(input.actions !== undefined ? { actions: input.actions.slice(0, 2) } : {}),
       }
       items = [...items, next]
       emit()
