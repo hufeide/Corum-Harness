@@ -124,6 +124,42 @@ function send(message: unknown): void {
   process.stdout.write(`${JSON.stringify(message)}\n`)
 }
 
+/**
+ * 父进程探活看门狗：`CORUM_PARENT_PID` 指向 Electron main，每 2s `kill(pid, 0)`
+ * 一次；ESRCH = 父进程已死 → flush 后退出。
+ *
+ * 为什么不能只靠 stdin EOF：管道写端会被父进程之后 spawn 的其它子进程（renderer /
+ * GPU / utility helper）继承，主进程被 `kill -9` 时写端仍被它们握着，EOF 永远不来
+ * （2026-09-09 打包版实测：kill -9 主进程后 host 仍存活）。没有环境变量时退回
+ * `process.ppid === 1`（被 launchd 收养）判定。
+ */
+function watchParent(archive: CorumSessionArchive): void {
+  const raw = process.env.CORUM_PARENT_PID
+  const parentPid = raw === undefined ? Number.NaN : Number(raw)
+  const parentGone = (): boolean => {
+    if (Number.isSafeInteger(parentPid) && parentPid > 0) {
+      try {
+        process.kill(parentPid, 0)
+        return false
+      } catch {
+        return true
+      }
+    }
+    return process.ppid === 1
+  }
+  const timer = setInterval(() => {
+    if (!parentGone()) return
+    clearInterval(timer)
+    process.stderr.write('[corum-desktop] parent process gone — flushing and exiting\n')
+    void archive.flushAll()
+      .catch((error: unknown) => {
+        process.stderr.write(`[corum-desktop] shutdown flush failed: ${String(error)}\n`)
+      })
+      .finally(() => { process.exit(0) })
+  }, 2000)
+  timer.unref()
+}
+
 async function main(): Promise<void> {
   // 回收上一代孤儿（它可能还攥着会话锁），再登记本进程 PID，最后才 boot。
   await reapStaleHost()
@@ -255,6 +291,7 @@ async function main(): Promise<void> {
   }
 
   send({ type: 'ready', authenticatedUrl })
+  watchParent(archive)
 
   const readline = createInterface({ input: process.stdin })
   for await (const line of readline) {

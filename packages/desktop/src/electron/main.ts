@@ -181,6 +181,9 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
   // resolveMasterKeyB64 返回 undefined，host 侧进入「拒绝写密文」降级。
   const masterKey = resolveMasterKeyB64()
   if (masterKey !== undefined) env[MASTER_KEY_ENV] = masterKey
+  // 父进程 PID：host 侧据此定期探活（stdin EOF 在「管道的写端被其它 Electron
+  // 子进程继承」时不触发——实测打包版 kill -9 主进程后 host 仍活着）。
+  env.CORUM_PARENT_PID = String(process.pid)
   if (combo === null) return env
   // combo.env 先过黑名单（NODE_OPTIONS / DYLD_* / ELECTRON_RUN_AS_NODE 等解释器/
   // 链接器接管类 key 一律剔除并告警），再合并进子进程环境。

@@ -440,6 +440,11 @@ else
   else
     fail "bridge.ts 缺 reapStaleHost——老版本留下的孤儿会一直攥着 session.lock"
   fi
+  if grep -q "watchParent" "$BRIDGE_SRC" && grep -q "CORUM_PARENT_PID" "$BRIDGE_SRC"; then
+    pass "bridge.ts 有父进程探活看门狗（stdin EOF 会被继承的写端吞掉）"
+  else
+    fail "bridge.ts 缺父进程探活看门狗——打包版 kill -9 主进程后 host 会变孤儿"
+  fi
 fi
 if [ -f "$DESKTOP_MAIN" ]; then
   if grep -q "bridge?.dispose()" "$DESKTOP_MAIN"; then
