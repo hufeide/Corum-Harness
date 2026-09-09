@@ -275,6 +275,10 @@ export interface OllamaDownloadProgressEvent {
   readonly status: string
   /** 失败原因（status='error' 时）。 */
   readonly error?: string
+  /** 瞬时下载速度（字节/秒；滑动窗口，仅 downloading 时有）。2026-09-09 新增。 */
+  readonly bytesPerSecond?: number
+  /** 预计剩余秒数（有总大小且速度 > 0 时）。2026-09-09 新增。 */
+  readonly etaSeconds?: number
 }
 
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────

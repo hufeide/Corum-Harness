@@ -122,6 +122,14 @@ function formatBytesClient(bytes: number): string {
   return `${val.toFixed(val >= 100 ? 0 : val >= 10 ? 1 : 2)} ${units[i]}`
 }
 
+/** 剩余时间标签（秒 → 「x 分 y 秒」/「x 小时 y 分」）。 */
+function formatEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return ''
+  if (seconds < 60) return `${Math.round(seconds)} 秒`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`
+  return `${Math.floor(seconds / 3600)} 小时 ${Math.round((seconds % 3600) / 60)} 分`
+}
+
 const TIER_LABELS: Record<RecommendedModel['tier'], string> = {
   low: '低配可用（8-16 GB 内存）',
   mid: '中配推荐（16-32 GB 内存 / 8-12 GB VRAM）',
@@ -273,7 +281,7 @@ function OllamaSection({ call, subscribeProgress }: {
   const [expandedTier, setExpandedTier] = useState<RecommendedModel['tier'] | 'all'>('all')
   // 引擎下载状态
   const [downloading, setDownloading] = useState(false)
-  const [dlProgress, setDlProgress] = useState<{ percent: number; downloaded: string; total: string; status: string } | null>(null)
+  const [dlProgress, setDlProgress] = useState<{ percent: number; downloaded: string; total: string; status: string; speed?: string; eta?: string } | null>(null)
   // 线上搜索状态
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<OnlineModelTag[] | null>(null)
@@ -281,7 +289,7 @@ function OllamaSection({ call, subscribeProgress }: {
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   // 部署进度状态（renderer 直接调 Ollama /api/pull 流式 API）
-  const [pullProgress, setPullProgress] = useState<{ model: string; status: string; percent: number; total?: string; completed?: string } | null>(null)
+  const [pullProgress, setPullProgress] = useState<{ model: string; status: string; percent: number; total?: string; completed?: string; speed?: string } | null>(null)
 
   const refresh = async () => {
     try {
@@ -313,6 +321,9 @@ function OllamaSection({ call, subscribeProgress }: {
     const reader = r.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    // 速度滑动窗口（最近 ~3s 的 completed 增量；Ollama 的 pull 每层都会报 completed）
+    let lastCompleted = 0
+    let lastAt = Date.now()
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -328,14 +339,28 @@ function OllamaSection({ call, subscribeProgress }: {
           let percent = 0
           let totalStr: string | undefined
           let completedStr: string | undefined
+          let speedStr: string | undefined
           if (j.total !== undefined && j.total > 0 && j.completed !== undefined) {
             percent = Math.round((j.completed / j.total) * 100)
             totalStr = formatBytesClient(j.total)
             completedStr = formatBytesClient(j.completed)
+            const now = Date.now()
+            const dt = now - lastAt
+            if (dt >= 500 && j.completed >= lastCompleted) {
+              const bps = (j.completed - lastCompleted) / (dt / 1000)
+              if (bps > 0) speedStr = `${formatBytesClient(bps)}/s`
+              lastCompleted = j.completed
+              lastAt = now
+            }
           } else if (status === 'success') {
             percent = 100
           }
-          setPullProgress({ model: modelId, status, percent, ...(totalStr !== undefined ? { total: totalStr } : {}), ...(completedStr !== undefined ? { completed: completedStr } : {}) })
+          setPullProgress({
+            model: modelId, status, percent,
+            ...(totalStr !== undefined ? { total: totalStr } : {}),
+            ...(completedStr !== undefined ? { completed: completedStr } : {}),
+            ...(speedStr !== undefined ? { speed: speedStr } : {}),
+          })
         } catch { /* 跳过非 JSON 行 */ }
       }
     }
@@ -462,31 +487,67 @@ function OllamaSection({ call, subscribeProgress }: {
     }
   }
 
-  // 下载引擎二进制（P2-7：进度走 `$on('corum/ollama/download-progress')` 推送，
-  // 取代 500ms 轮询 getDownloadProgress；host downloadEngine RPC 阻塞到完成）。
+  // 下载引擎二进制（2026-09-09 改：`startDownloadEngine` 立即返回，进度与终态都走
+  // `corum/ollama/download-progress` 推送——原先的阻塞 RPC 会撞 Node 的 300s
+  // requestTimeout，慢镜像下「每次都中途停止」）。
   const downloadEngine = async () => {
     setDownloading(true)
     setError(null)
     setDlProgress({ percent: 0, downloaded: '0 B', total: '0 B', status: 'downloading' })
+    let finished = false
     const off = subscribeProgress((p) => {
       setDlProgress({
         percent: p.percent,
         downloaded: formatBytesClient(p.downloadedBytes),
         total: formatBytesClient(p.totalBytes),
         status: p.status,
+        ...(p.bytesPerSecond !== undefined && p.bytesPerSecond > 0 ? { speed: `${formatBytesClient(p.bytesPerSecond)}/s` } : {}),
+        ...(p.etaSeconds !== undefined && p.etaSeconds > 0 ? { eta: formatEta(p.etaSeconds) } : {}),
       })
+      if (p.status === 'error') {
+        finished = true
+        setError(p.error ?? '下载失败')
+        setDownloading(false)
+        off()
+      } else if (p.status === 'done') {
+        finished = true
+        setDownloading(false)
+        off()
+        void refresh()
+      }
     })
     try {
-      const r = await call<{ ok: boolean; error?: string }>('downloadEngine', {})
-      if (!r.ok) setError(r.error ?? '下载失败')
-      setDlProgress(null)
-      await refresh()
+      const r = await call<{ ok: boolean; error?: string }>('startDownloadEngine', {})
+      if (!r.ok) { setError(r.error ?? '下载启动失败'); setDownloading(false); off() }
+      else if (!finished) {
+        // 启动成功：进度/终态由事件推送；这里轮询兜底（事件丢帧或已完成时收敛状态）。
+        void pollUntilSettled()
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      setDlProgress(null)
-    } finally {
-      off()
       setDownloading(false)
+      off()
+    }
+  }
+
+  /** 事件兜底：下载启动后每 2s 拉一次状态，直到 done/error（事件正常时只是幂等确认）。 */
+  const pollUntilSettled = async (): Promise<void> => {
+    for (let i = 0; i < 3600; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      try {
+        const p = await call<{ percent: number; downloadedBytes: number; totalBytes: number; status: string; error?: string; bytesPerSecond?: number; etaSeconds?: number }>('getDownloadProgress', {})
+        if (p.status === 'idle') return
+        setDlProgress({
+          percent: p.percent,
+          downloaded: formatBytesClient(p.downloadedBytes),
+          total: formatBytesClient(p.totalBytes),
+          status: p.status,
+          ...(p.bytesPerSecond !== undefined && p.bytesPerSecond > 0 ? { speed: `${formatBytesClient(p.bytesPerSecond)}/s` } : {}),
+          ...(p.etaSeconds !== undefined && p.etaSeconds > 0 ? { eta: formatEta(p.etaSeconds) } : {}),
+        })
+        if (p.status === 'done') { setDownloading(false); await refresh(); return }
+        if (p.status === 'error') { setError(p.error ?? '下载失败'); setDownloading(false); return }
+      } catch { return }
     }
   }
 
@@ -550,8 +611,10 @@ function OllamaSection({ call, subscribeProgress }: {
               </div>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-brand-primary)', minWidth: 36, textAlign: 'right' }}>{dlProgress.percent}%</span>
             </div>
-            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', flexWrap: 'wrap' }}>
               <span>已下载：{dlProgress.downloaded} / {dlProgress.total}</span>
+              {dlProgress.speed !== undefined && <span style={{ color: 'var(--dsw-alias-brand-primary)' }}>速度：{dlProgress.speed}</span>}
+              {dlProgress.eta !== undefined && <span>剩余约 {dlProgress.eta}</span>}
               <span>状态：{dlProgress.status === 'downloading' ? '下载中' : dlProgress.status === 'done' ? '完成' : dlProgress.status === 'error' ? '失败' : dlProgress.status}</span>
             </div>
           </div>
@@ -698,6 +761,7 @@ function OllamaSection({ call, subscribeProgress }: {
           </div>
           <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>
             <span>状态：{pullProgress.status}</span>
+            {pullProgress.speed !== undefined && <span style={{ color: 'var(--dsw-alias-brand-primary)' }}>速度：{pullProgress.speed}</span>}
             {pullProgress.completed !== undefined && pullProgress.total !== undefined && (
               <span>已下载：{pullProgress.completed} / {pullProgress.total}</span>
             )}

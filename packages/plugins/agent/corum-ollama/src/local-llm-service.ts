@@ -52,8 +52,16 @@ const CHAT_TIMEOUT_MS = 180_000
 const MAX_ACTIVE_MODELS = 2
 /** 模型加载超时（ms；大模型冷启动需要时间）。 */
 const LOAD_TIMEOUT_MS = 120_000
-/** Ollama 二进制下载超时（ms；~150MB，给 5 分钟）。 */
-const DOWNLOAD_TIMEOUT_MS = 300_000
+/**
+ * 引擎下载**停滞**判定（ms）：只要还有字节流入就不算超时——连续这么久没收到数据
+ * 才中止。2026-09-09 用户报障「每次都中途停止」：原先用 `AbortSignal.timeout(5min)`
+ * 卡**总时长**，慢镜像（gh-proxy）下 5 分钟没下完就被砍；改停滞判定后「有速度就不停」。
+ */
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000
+/** 建连/首字节超时（ms）。 */
+const DOWNLOAD_CONNECT_TIMEOUT_MS = 30_000
+/** 进度推送节流（ms；避免每个 chunk 都发事件）。 */
+const DOWNLOAD_PROGRESS_THROTTLE_MS = 250
 
 /**
  * Ollama 官方下载地址（按平台+架构）。
@@ -61,6 +69,9 @@ const DOWNLOAD_TIMEOUT_MS = 300_000
  * 国内加速：通过 gh-proxy.com 镜像转发 GitHub 下载。
  */
 function ollamaDownloadUrl(): string {
+  // 可覆盖：换镜像（国内其它加速站）或端到端验证下载行为（指向本地测试服务）。
+  const override = process.env.CORUM_OLLAMA_DOWNLOAD_URL
+  if (override !== undefined && override.trim() !== '') return override.trim()
   const platform = process.platform
   const arch = process.arch // 'arm64' | 'x64'
   // GitHub 原始 URL
@@ -533,7 +544,20 @@ export class LocalLlmService extends TypertRemoteService {
    * 下载 Ollama 引擎二进制到 CORUM_HOME/bin/。
    * 下载完成后自动启动服务。下载进度可通过 getDownloadProgress 轮询。
    */
-  private downloadProgress: { percent: number; downloadedBytes: number; totalBytes: number; status: 'idle' | 'downloading' | 'done' | 'error'; error?: string } = { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'idle' }
+  private downloadProgress: {
+    percent: number
+    downloadedBytes: number
+    totalBytes: number
+    status: 'idle' | 'downloading' | 'done' | 'error'
+    error?: string
+    /** 瞬时速度（字节/秒；滑动窗口）。 */
+    bytesPerSecond?: number
+    /** 预计剩余秒数（有总大小且速度 > 0）。 */
+    etaSeconds?: number
+  } = { percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'idle' }
+
+  /** 引擎下载后台任务（startDownloadEngine 立即返回；这里持有共享 Promise）。 */
+  private engineDownloadTask: Promise<{ ok: boolean; error?: string }> | null = null
 
   /**
    * P2-7：写下载进度并推送 `corum/ollama/download-progress`（取代设置页 500ms
@@ -547,50 +571,110 @@ export class LocalLlmService extends TypertRemoteService {
       totalBytes: next.totalBytes,
       status: next.status,
       ...(next.error !== undefined ? { error: next.error } : {}),
+      ...(next.bytesPerSecond !== undefined ? { bytesPerSecond: next.bytesPerSecond } : {}),
+      ...(next.etaSeconds !== undefined ? { etaSeconds: next.etaSeconds } : {}),
     })
   }
 
   @Remote('getDownloadProgress')
-  getDownloadProgress(): { percent: number; downloadedBytes: number; totalBytes: number; status: string; error?: string } {
+  getDownloadProgress(): { percent: number; downloadedBytes: number; totalBytes: number; status: string; error?: string; bytesPerSecond?: number; etaSeconds?: number } {
     return { ...this.downloadProgress }
   }
 
+  /**
+   * 启动引擎下载（**非阻塞**：立即返回，进度走 `corum/ollama/download-progress`）。
+   *
+   * 为什么拆成 start + 事件（2026-09-09 用户报障「每次都中途停止」）：
+   * ① 原先 `downloadEngine` 是**阻塞 RPC**，下载期间一直挂着请求——Node http 服务端
+   *    默认 `requestTimeout = 300s`，超过就断连；
+   * ② 宿主侧又用 `AbortSignal.timeout(300s)` 卡**总时长**，慢镜像下 5 分钟没下完就被砍。
+   * 现在：RPC 立即返回 + 停滞判定（`DOWNLOAD_STALL_TIMEOUT_MS`，有字节流入就不中止）。
+   */
+  @Remote('startDownloadEngine')
+  startDownloadEngine(): { ok: boolean; error?: string } {
+    if (isBundled()) return { ok: true }
+    if (this.engineDownloadTask !== null) return { ok: true }
+    this.engineDownloadTask = this.runEngineDownload().finally(() => { this.engineDownloadTask = null })
+    return { ok: true }
+  }
+
+  /**
+   * 阻塞版（兼容旧调用方）：等到下载结束。内部复用同一个后台任务，
+   * 重复调用不会重复下载。
+   */
   @Remote('downloadEngine')
   async downloadEngine(): Promise<{ ok: boolean; error?: string }> {
-    if (isBundled()) return { ok: true } // 已下载
+    if (isBundled()) return { ok: true }
+    if (this.engineDownloadTask === null) {
+      this.engineDownloadTask = this.runEngineDownload().finally(() => { this.engineDownloadTask = null })
+    }
+    return await this.engineDownloadTask
+  }
+
+  /** 引擎下载主体：流式写入 + 停滞看门狗 + 速度/ETA 进度。 */
+  private async runEngineDownload(): Promise<{ ok: boolean; error?: string }> {
     const binDir = join(getCorumHome(), 'bin')
     const exeName = process.platform === 'win32' ? 'ollama.exe' : 'ollama'
     const destPath = join(binDir, exeName)
     try { mkdirSync(binDir, { recursive: true }) } catch { /* 已存在 */ }
-    // 立即标记为 downloading（让前端轮询能看到状态变化）
     this.setDownloadProgress({ percent: 0, downloadedBytes: 0, totalBytes: 0, status: 'downloading' })
     try {
       const url = ollamaDownloadUrl()
-      const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
-      if (!r.ok) { this.downloadProgress = { ...this.downloadProgress, status: 'error', error: `HTTP ${r.status}` }; return { ok: false, error: `下载失败（HTTP ${r.status}）` }
+      // 连接阶段给固定超时；进入 body 流后换成「停滞看门狗」（每收到数据就重置）。
+      const controller = new AbortController()
+      let watchdog: NodeJS.Timeout | null = null
+      const armWatchdog = (ms: number): void => {
+        if (watchdog !== null) clearTimeout(watchdog)
+        watchdog = setTimeout(() => { controller.abort(new Error(`下载停滞超过 ${Math.round(ms / 1000)} 秒（无数据流入）`)) }, ms)
       }
-      if (!r.body) return { ok: false, error: '下载返回空响应体' }
-      // 从 Content-Length 获取总大小
-      const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
-      this.setDownloadProgress({ percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
-      // 流式写入临时文件 → 重命名为最终文件名（原子操作）
-      const tmpPath = join(binDir, `${exeName}.tmp`)
-      const fileStream = (await import('node:fs')).createWriteStream(tmpPath)
-      const reader = r.body.getReader()
-      let downloaded = 0
-      // pump: ReadableStream → Node WriteStream，更新进度
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (!fileStream.write(Buffer.from(value))) {
-          await new Promise<void>(resolve => fileStream.once('drain', () => resolve()))
+      armWatchdog(DOWNLOAD_CONNECT_TIMEOUT_MS)
+      try {
+        const r = await fetch(url, { redirect: 'follow', signal: controller.signal })
+        if (!r.ok) { this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: `HTTP ${r.status}` }); return { ok: false, error: `下载失败（HTTP ${r.status}）` } }
+        if (!r.body) { this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: '空响应体' }); return { ok: false, error: '下载返回空响应体' } }
+        // 从 Content-Length 获取总大小
+        const totalBytes = parseInt(r.headers.get('content-length') ?? '0', 10)
+        this.setDownloadProgress({ percent: 0, downloadedBytes: 0, totalBytes, status: 'downloading' })
+        // 流式写入临时文件 → 重命名为最终文件名（原子操作）
+        const tmpPath = join(binDir, `${exeName}.tmp`)
+        const fileStream = (await import('node:fs')).createWriteStream(tmpPath)
+        const reader = r.body.getReader()
+        let downloaded = 0
+        // 速度滑动窗口（最近 ~4s）+ 进度节流（250ms）
+        const samples: Array<{ at: number; bytes: number }> = [{ at: Date.now(), bytes: 0 }]
+        let lastEmit = 0
+        // pump: ReadableStream → Node WriteStream，更新进度
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          armWatchdog(DOWNLOAD_STALL_TIMEOUT_MS)
+          if (!fileStream.write(Buffer.from(value))) {
+            await new Promise<void>(resolve => fileStream.once('drain', () => resolve()))
+          }
+          downloaded += value.byteLength
+          const now = Date.now()
+          samples.push({ at: now, bytes: downloaded })
+          while (samples.length > 2 && now - samples[0].at > 4000) samples.shift()
+          if (now - lastEmit < DOWNLOAD_PROGRESS_THROTTLE_MS) continue
+          lastEmit = now
+          const first = samples[0]
+          const elapsedSec = (now - first.at) / 1000
+          const bytesPerSecond = elapsedSec > 0 ? Math.round((downloaded - first.bytes) / elapsedSec) : undefined
+          const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
+          this.setDownloadProgress({
+            percent,
+            downloadedBytes: downloaded,
+            totalBytes,
+            status: 'downloading',
+            ...(bytesPerSecond !== undefined && bytesPerSecond > 0 ? { bytesPerSecond } : {}),
+            ...(bytesPerSecond !== undefined && bytesPerSecond > 0 && totalBytes > downloaded
+              ? { etaSeconds: Math.round((totalBytes - downloaded) / bytesPerSecond) }
+              : {}),
+          })
         }
-        downloaded += value.byteLength
-        const percent = totalBytes > 0 ? Math.round((downloaded / totalBytes) * 100) : 0
-        this.setDownloadProgress({ percent, downloadedBytes: downloaded, totalBytes, status: 'downloading' })
-      }
-      fileStream.end()
-      await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
+        if (watchdog !== null) { clearTimeout(watchdog); watchdog = null }
+        fileStream.end()
+        await new Promise<void>(resolve => fileStream.on('finish', () => resolve()))
       // macOS/Linux 加可执行权限
       if (process.platform !== 'win32') {
         try { (await import('node:fs')).chmodSync(tmpPath, 0o755) } catch { /* 忽略 */ }
@@ -602,7 +686,7 @@ export class LocalLlmService extends TypertRemoteService {
           // 解压到临时目录，找到 ollama 二进制后移动到最终位置。
           const extractDir = join(binDir, `${exeName}-extract`)
           try { mkdirSync(extractDir, { recursive: true }) } catch { /* 已存在 */ }
-          execSync(`tar xzf "${destPath}" -C "${extractDir}"`, { timeout: 30_000 })
+          execSync(`tar xzf "${destPath}" -C "${extractDir}"`, { timeout: 120_000 })
           // 查找解压后的 ollama 可执行文件
           const findResult = execSync(`find "${extractDir}" -name "ollama" -type f | head -1`, { encoding: 'utf-8' }).trim()
           if (findResult !== '') {
@@ -617,14 +701,25 @@ export class LocalLlmService extends TypertRemoteService {
           try { (await import('node:fs')).chmodSync(destPath, 0o755) } catch { /* 忽略 */ }
         }
       }
-      this.setDownloadProgress({ percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'done' })
-      // 启动服务
+      // 启动服务：失败要落到 progress 的 error 状态——非阻塞调用方（设置页）只认事件，
+      // 只看 RPC 返回值会把「下载完成但引擎起不来」显示成「完成」（2026-09-09 发现）。
       const startResult = await this.ensureServer()
-      if (!startResult.ok) return { ok: false, error: `下载成功但启动失败：${startResult.error ?? '未知错误'}` }
+      if (!startResult.ok) {
+        const message = `下载成功但启动失败：${startResult.error ?? '未知错误'}`
+        this.setDownloadProgress({ percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'error', error: message })
+        return { ok: false, error: message }
+      }
+      this.setDownloadProgress({ percent: 100, downloadedBytes: downloaded, totalBytes: totalBytes > 0 ? totalBytes : downloaded, status: 'done' })
       return { ok: true }
+      } finally {
+        if (watchdog !== null) clearTimeout(watchdog)
+      }
     } catch (e) {
-      this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: e instanceof Error ? e.message : String(e) })
-      return { ok: false, error: `下载引擎失败：${e instanceof Error ? e.message : String(e)}` }
+      const message = e instanceof Error ? e.message : String(e)
+      // 清理半截临时文件（下次重试从零开始；避免留下看不出用途的 .tmp）
+      try { rmSync(join(binDir, `${exeName}.tmp`), { force: true }) } catch { /* 忽略 */ }
+      this.setDownloadProgress({ ...this.downloadProgress, status: 'error', error: message })
+      return { ok: false, error: `下载引擎失败：${message}` }
     }
   }
 
