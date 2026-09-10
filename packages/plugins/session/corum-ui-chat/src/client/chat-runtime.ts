@@ -207,10 +207,27 @@ export function worktreeLedgerSubscribe(
 // 此在运行中即可跳转/订阅；历史回放仍走原有 summary 兜底匹配。
 let subagentChildDispose: (() => void) | null = null
 const subagentChildListeners = new Set<(frame: SubagentChildEvent) => void>()
-/** callId → 子会话身份（id + 前台/后台模式）进程内缓存（本 bundle 单例；页面刷新后由 summary/args 兜底）。 */
-const subagentChildByCall = new Map<string, { readonly childSessionId: string; readonly mode: 'foreground' | 'background' }>()
+/**
+ * callId → 子会话身份（id + 前台/后台模式）进程内缓存
+ * （本 bundle 单例；页面刷新后由 summary/args 兜底）。
+ *
+ * ⚠️ 必须支持**一个 callId 多个子会话**：`subagent` 是「一次调用一个子 Agent」，
+ * 但 `orchestrate` 的 N 个任务**共享父侧同一个 callId**（宿主对每个任务都
+ * `corumEmitChildStarted(..., exec.callId, ...)`），只是 label 不同。
+ * 旧实现是 `Map<callId, 单条>`，后到的任务**覆盖**先到的 → orchestrate 卡上
+ * 只有最后一个任务能拿到 childSessionId（goto 按钮因此只出现一个/不出现）。
+ * 现按 `callId + '\u0000' + label` 复合键存，单发 delegation 行为不变。
+ */
+const subagentChildByCall = new Map<string, { readonly childSessionId: string; readonly mode: 'foreground' | 'background'; readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string } }>()
+/** callId → 该调用观测到的全部子会话（保序，供 orchestrate 逐任务取值）。 */
+const subagentChildrenByCall = new Map<string, { readonly childSessionId: string; readonly label: string; readonly mode: 'foreground' | 'background'; readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string } }[]>()
 /** 缓存上限（超限按插入序淘汰最旧——长会话里 delegation 可能很多，防无界增长）。 */
 const SUBAGENT_CHILD_CACHE_MAX = 1000
+
+/** 复合键：同一 callId 下按 label 区分多个并发子会话。 */
+function childKey(callId: string, label: string): string {
+  return `${callId}\u0000${label}`
+}
 
 /**
  * 已观测到的精确子会话身份（'corum/subagent/child' 广播过即命中）。
@@ -218,11 +235,37 @@ const SUBAGENT_CHILD_CACHE_MAX = 1000
  * 供卡片与 conversation fold 在同一进程内复用精确映射——fold 过去只能按时间
  * 就近猜，多子 Agent 并行时会串；精确值优先、猜值兜底。`mode` 是宿主在 spawn
  * 那一刻定下的前台一次性 / 后台 agent（卡片据此显示徽标）。
+ *
+ * ⚠️ 不传 label 时返回**最后一个**观测到的子会话（单发 delegation 的兼容语义）；
+ * orchestrate 这类一个 callId 多任务的场景请用 {@link subagentChildrenOf} 或
+ * 传 label 精确取。
  * @param callId - 父侧 tool/call id。
+ * @param label - 任务标签（orchestrate 的 `tasks[i].label`）；省略则取该 callId 最新一条。
  * @returns 子会话 id 与模式，未广播过时 undefined。
  */
-export function subagentChildOf(callId: string): { readonly childSessionId: string; readonly mode: 'foreground' | 'background' } | undefined {
+export function subagentChildOf(
+  callId: string,
+  label?: string,
+): { readonly childSessionId: string; readonly mode: 'foreground' | 'background'; readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string } } | undefined {
+  if (label !== undefined) return subagentChildByCall.get(childKey(callId, label))
+  const all = subagentChildrenByCall.get(callId)
+  if (all !== undefined && all.length > 0) {
+    const last = all[all.length - 1]
+    return { childSessionId: last.childSessionId, mode: last.mode, ...last.worktree === undefined ? {} : { worktree: last.worktree } }
+  }
   return subagentChildByCall.get(callId)
+}
+
+/**
+ * 一个 callId 下观测到的全部子会话（orchestrate fan-out 逐任务取用）。
+ *
+ * 顺序 = 宿主 spawn 顺序（≈ `tasks[]` 顺序）；同 label 重复 spawn 时后者覆盖前者
+ * （保持「一个 label 一个子会话」的语义）。
+ * @param callId - 父侧 tool/call id。
+ * @returns 子会话列表（可能为空）。
+ */
+export function subagentChildrenOf(callId: string): readonly { readonly childSessionId: string; readonly label: string; readonly mode: 'foreground' | 'background'; readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string } }[] {
+  return subagentChildrenByCall.get(callId) ?? []
 }
 
 /** 注册一个 'corum/subagent/child' 帧监听（每卡一个；自行按 callId 过滤）。 */
@@ -234,10 +277,30 @@ export function subagentChildSubscribe(
     const remote = chatRuntimeRef.current?.remote
     if (remote !== undefined) {
       subagentChildDispose = remote.$on('corum/subagent/child', (frame) => {
-        subagentChildByCall.set(frame.callId, { childSessionId: frame.childSessionId, mode: frame.mode })
+        subagentChildByCall.set(childKey(frame.callId, frame.label), {
+          childSessionId: frame.childSessionId,
+          mode: frame.mode,
+          ...frame.worktree === undefined ? {} : { worktree: frame.worktree },
+        })
+        // 逐任务列表（orchestrate fan-out）：同 label 覆盖，新 label 追加。
+        const list = subagentChildrenByCall.get(frame.callId) ?? []
+        const index = list.findIndex(entry => entry.label === frame.label)
+        const entry = {
+          childSessionId: frame.childSessionId,
+          label: frame.label,
+          mode: frame.mode,
+          ...frame.worktree === undefined ? {} : { worktree: frame.worktree },
+        }
+        if (index >= 0) list[index] = entry
+        else list.push(entry)
+        subagentChildrenByCall.set(frame.callId, list)
         if (subagentChildByCall.size > SUBAGENT_CHILD_CACHE_MAX) {
           const oldest = subagentChildByCall.keys().next().value
           if (oldest !== undefined) subagentChildByCall.delete(oldest)
+        }
+        if (subagentChildrenByCall.size > SUBAGENT_CHILD_CACHE_MAX) {
+          const oldest = subagentChildrenByCall.keys().next().value
+          if (oldest !== undefined) subagentChildrenByCall.delete(oldest)
         }
         for (const fn of subagentChildListeners) fn(frame)
       })

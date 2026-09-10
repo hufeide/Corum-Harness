@@ -256,6 +256,23 @@
   text-overflow: ellipsis;
 }
 
+/* 模型行（任务级 model 声明 > 子会话 modelSelection 投影）。 */
+.branchModel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.branchModelText {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 分支状态 chip（设计稿 brX chip：r8 + 1px 描边 + 12/600）。 */
 .branchChip {
   flex: none;

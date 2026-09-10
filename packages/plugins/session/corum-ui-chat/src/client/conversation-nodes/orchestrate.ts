@@ -19,9 +19,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {
   ConversationMatch, ConversationNodeContext, ConversationNodeDefinition,
 } from '@corum/corum-ui-conversation/client'
+import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-tools/types'
 import {
-  parseCallArguments, parseIntegration, parseOutcomes,
+  parseCallArguments, parseIntegration, parseOutcomes, parseWorktreeSlugs,
   type OrchestrateChatData, type OrchestrateIntegration, type OrchestrateMode, type OrchestrateTask,
 } from '../contract/orchestrate.ts'
 import { chatNode } from './common.ts'
@@ -50,6 +51,8 @@ interface OrchestrateCallState {
   readonly settled: boolean
   readonly errored: boolean
   readonly integration?: OrchestrateIntegration
+  /** 逐任务的隔离 worktree slug（结果正文解析；刷新后的耐久兜底）。 */
+  readonly worktreeSlugs?: ReadonlyMap<number, string>
 }
 
 type ConversationEvent = Parameters<ConversationNodeDefinition['match']>[0]
@@ -89,15 +92,41 @@ function resultText(match: ConversationMatch): string {
 function applyResult(state: OrchestrateCallState, match: ConversationMatch): OrchestrateCallState {
   const text = resultText(match)
   const integration = parseIntegration(text)
+  const slugs = parseWorktreeSlugs(text)
   return {
     ...state,
     outcomes: parseOutcomes(text),
+    ...slugs.size > 0 ? { worktreeSlugs: slugs } : {},
     settled: true,
     errored: match.event.type === 'tool/result' && match.event.data.message.content.some(
       block => block.isError === true,
     ),
     ...integration === undefined ? {} : { integration },
   }
+}
+
+/**
+ * 逐任务子会话的**历史兜底**关联（页面刷新后无 spawn 广播帧时）。
+ *
+ * 口径与 `subagent.ts` 的 correlateChild 一致：`origin='subagent'` 且
+ * `updatedAt >= 调用时刻` 的会话，按时间升序取前 N 个（N = 任务数）。
+ * 不加 label 匹配——session/list 的 summary 不带任务 label，只能按顺序对齐
+ * （宿主按 `tasks[]` 顺序 spawn，故顺序可靠）。
+ * @param summaries - 当前会话列表快照的 byId。
+ * @param callTime - 父侧 tool/call 时间。
+ * @param count - 任务数。
+ * @returns 每个下标对应的子会话 id（不足处为 undefined）。
+ */
+function correlateChildren(
+  summaries: Readonly<Record<string, SessionSummary>>,
+  callTime: number,
+  count: number,
+): readonly (string | undefined)[] {
+  const later = Object.values(summaries)
+    .filter(summary => summary.origin === 'subagent' && summary.updatedAt >= callTime)
+    .sort((left, right) => left.updatedAt - right.updatedAt)
+    .map(summary => summary.id)
+  return Array.from({ length: count }, (_, index) => later[index])
 }
 
 /** Rebuild the state from the Context's own matches (cold feeds). */
@@ -113,9 +142,12 @@ function fallbackState(context: ConversationNodeContext<OrchestrateCallState>): 
 
 /**
  * Build the orchestrate card Definition.
+ * @param sessions - sessions service face（历史回放时按 session/list 关联子会话）。
  * @returns orchestrate-card Definition.
  */
-export function orchestrateCallDefinition(): ConversationNodeDefinition<OrchestrateCallState> {
+export function orchestrateCallDefinition(
+  sessions: ISessions,
+): ConversationNodeDefinition<OrchestrateCallState> {
   return {
     kind: 'orchestrate-card',
     target: 'chat',
@@ -137,7 +169,13 @@ export function orchestrateCallDefinition(): ConversationNodeDefinition<Orchestr
       if (location?.kind !== 'turn' && location?.kind !== 'step') return null
       const state = context.state ?? fallbackState(context)
       if (state === undefined) return null
+      // 逐任务子会话 id：运行期由卡内订阅 spawn 广播解析；这里先给历史兜底值
+      // （页面刷新后无广播帧 → session/list 时间就近），卡内拿到精确广播后会覆盖。
+      const summaries = sessions.list.getSnapshot().byId as unknown as Readonly<Record<string, SessionSummary>>
+      const correlated = correlateChildren(summaries, state.time, state.tasks.length)
       const data: OrchestrateChatData = {
+        ...correlated.some(id => id !== undefined) ? { childSessionIds: correlated } : {},
+        ...state.worktreeSlugs === undefined ? {} : { worktreeSlugs: state.worktreeSlugs },
         tasks: state.tasks,
         mode: state.mode,
         ...state.scriptName === undefined ? {} : { scriptName: state.scriptName },
@@ -161,5 +199,5 @@ export function orchestrateCallDefinition(): ConversationNodeDefinition<Orchestr
  * @param ctx - owning UI Conversation context.
  */
 export function registerOrchestrateConversationNode(ctx: Context): void {
-  ctx.uiConversation.events.register(orchestrateCallDefinition())
+  ctx.uiConversation.events.register(orchestrateCallDefinition(ctx.sessions))
 }

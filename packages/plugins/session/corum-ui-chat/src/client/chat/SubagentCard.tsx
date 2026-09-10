@@ -237,17 +237,29 @@ function useLiveChildIdentity(
   callId: string,
   fallbackId: string | undefined,
   fallbackMode: 'foreground' | 'background' | undefined,
-): { readonly childSessionId: string | undefined; readonly mode: 'foreground' | 'background' | undefined } {
+): {
+  readonly childSessionId: string | undefined
+  readonly mode: 'foreground' | 'background' | undefined
+  readonly worktree: { readonly slug: string; readonly branch: string } | undefined
+} {
   const [live, setLive] = useState(() => subagentChildOf(callId))
   useEffect(() => {
     setLive(subagentChildOf(callId))
     const sub = subagentChildSubscribe((frame) => {
       if (frame.callId !== callId) return
-      setLive({ childSessionId: frame.childSessionId, mode: frame.mode })
+      setLive({
+        childSessionId: frame.childSessionId,
+        mode: frame.mode,
+        ...frame.worktree === undefined ? {} : { worktree: frame.worktree },
+      })
     })
     return () => { sub.unsubscribe() }
   }, [callId])
-  return { childSessionId: live?.childSessionId ?? fallbackId, mode: live?.mode ?? fallbackMode }
+  return {
+    childSessionId: live?.childSessionId ?? fallbackId,
+    mode: live?.mode ?? fallbackMode,
+    worktree: live?.worktree,
+  }
 }
 
 /** 一个 delegation 召唤的卡片（进度由 'corum/subagent/progress' 推送注入，见 useChildProgress）。 */
@@ -263,7 +275,7 @@ function SubagentRow({
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
   // hooks 顺序恒定（React #310）：必须在任何 early return 之前。
-  const { childSessionId, mode } = useLiveChildIdentity(callId, foldedChildSessionId, foldedMode)
+  const { childSessionId, mode, worktree } = useLiveChildIdentity(callId, foldedChildSessionId, foldedMode)
   const progress = useChildProgress(childSessionId)
   const model = useChildModel(childSessionId)
   const [expanded, setExpanded] = useState(false)
@@ -287,6 +299,16 @@ function SubagentRow({
             <span className={css.modelRow}>
               <Cpu size={13} strokeWidth={2} className={css.modelIcon} />
               <span className={css.modelText}>{model}</span>
+            </span>
+          )}
+          {/* 隔离 worktree 行（设计稿 sub：`worktree · wt-1b3dcf`）。
+              数据源 = 本卡自己那次 spawn 的 'corum/subagent/child' 广播帧
+              （携带 worktree 三件套）——**每卡自己的子会话**，故不会像会话级
+              台账 chip 那样随节点数重复 N 份（那正是 c0e69443 移除它的原因）。 */}
+          {worktree !== undefined && (
+            <span className={css.modelRow} title={t('subagent.worktreeTitle')}>
+              <GitBranch size={13} strokeWidth={2} className={css.modelIcon} />
+              <span className={css.modelText}>{worktree.slug}</span>
             </span>
           )}
         </span>

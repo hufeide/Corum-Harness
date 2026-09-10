@@ -29,6 +29,11 @@ export interface OrchestrateTask {
   readonly research?: boolean
   /** 后台运行（continuable，可 send_message 续接）。 */
   readonly background?: boolean
+  /**
+   * 任务级**机制锁定**的模型（`tasks[i].model`）；缺省时子 Agent 跟随实例/全局
+   * 默认，卡片改为读子会话的 modelSelection 投影（见 OrchestrateCard 的模型行）。
+   */
+  readonly model?: string
 }
 
 /** 一个任务的终态（来自工具结果正文）。 */
@@ -71,6 +76,19 @@ export interface OrchestrateChatData {
   readonly errored: boolean
   /** 集成阶段状态（无 merge 声明时为 undefined）。 */
   readonly integration?: OrchestrateIntegration
+  /**
+   * 逐任务的子会话 id（下标 → childSessionId，undefined = 未关联）。
+   *
+   * 运行期由宿主 spawn 广播（'corum/subagent/child'）精确给出；历史回放
+   * （页面刷新后无广播帧）退化为 session/list 的 origin='subagent' 时间就近匹配
+   * ——与 `conversation-nodes/subagent.ts` 的 correlateChild 同口径。
+   */
+  readonly childSessionIds?: readonly (string | undefined)[]
+  /**
+   * 逐任务的隔离 worktree slug（下标 → slug）。
+   * 实时台账（'corum/worktree-ledger' 推送帧）优先，本字段是刷新后的耐久兜底。
+   */
+  readonly worktreeSlugs?: ReadonlyMap<number, string>
 }
 
 /** `[task N · label] done|failed: msg` 行（label 可缺省）。 */
@@ -91,6 +109,33 @@ export function parseOutcomes(text: string): ReadonlyMap<number, OrchestrateTask
     out.set(index, matched[3] === 'done'
       ? { kind: 'done' }
       : { kind: 'failed', error: matched[4]?.trim() ?? '' })
+  }
+  return out
+}
+
+/**
+ * 从工具结果正文里**按任务段**提取隔离 worktree 的 slug（`wt-xxxxxx`）。
+ *
+ * 为什么需要：`corum/worktree-ledger` 只在**运行期**广播（推送帧），页面刷新后
+ * 不重放 → 历史会话的分支副行拿不到 worktree 名。任务输出里常回显路径
+ * （`…/.corum-worktrees/wt-49f983/…`，实测宿主子 Agent 汇报会带），故作为
+ * **耐久兜底**：实时台账优先，取不到时用这里的值。
+ *
+ * ⚠️ 必须**按 `[task N]` 分段**再取 slug，不能全篇收集后按下标对齐：只有隔离任务
+ * 的输出才带路径（实测 3 任务里只有 task 2 是 always 隔离），全篇收集会把
+ * task 2 的 slug 错配到 task 0（本轮实测踩到）。
+ * @param text - `tool/result` 正文。
+ * @returns 下标 → 该任务段内出现过的 slug（无则不含该键）。
+ */
+export function parseWorktreeSlugs(text: string): ReadonlyMap<number, string> {
+  const out = new Map<number, string>()
+  // 按 `[task N …]` 分段：split 后奇数位是段头、偶数位是段体。
+  const parts = text.split(/\[task (\d+)(?: · [^\]]*)?\]/u)
+  for (let index = 1; index + 1 < parts.length; index += 2) {
+    const taskIndex = Number(parts[index])
+    if (!Number.isSafeInteger(taskIndex)) continue
+    const matched = /\.corum-worktrees\/(wt-[0-9a-z]+)/u.exec(parts[index + 1])
+    if (matched !== null) out.set(taskIndex, matched[1])
   }
   return out
 }
@@ -161,12 +206,19 @@ export function parseCallArguments(args: unknown): {
     if (typeof entry !== 'object' || entry === null) return
     const task = entry as Record<string, unknown>
     const isolation = str(task['isolation'])
+    const model = typeof task['model'] === 'object' && task['model'] !== null
+      ? task['model'] as Record<string, unknown>
+      : undefined
+    const modelLabel = model === undefined
+      ? undefined
+      : [str(model['model']), str(model['reasoningEffort'])].filter(part => part !== undefined).join(' · ')
     tasks.push({
       index,
       label: str(task['label']) ?? `task ${index}`,
       ...isolation === 'always' || isolation === 'write-tasks' || isolation === 'off' ? { isolation } : {},
       ...bool(task['research']) === true ? { research: true } : {},
       ...bool(task['background']) === true ? { background: true } : {},
+      ...modelLabel === undefined || modelLabel === '' ? {} : { model: modelLabel },
     })
   })
   const scripted = str(record['script']) !== undefined
