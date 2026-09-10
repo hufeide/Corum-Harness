@@ -125,13 +125,16 @@ function snapToEdge(x: number, y: number, width: number, height: number): BellPo
   }
 }
 
-function Toast({ notification, paused, onCollapse, onDismiss }: {
+function Toast({ notification, paused, onCollapse, onDismiss, onOpen }: {
   notification: CorumNotification
   paused: boolean
   onCollapse: (id: string) => void
   onDismiss: (id: string) => void
+  /** 点击整条 → 打开来源会话（无 onOpen 时不可点）。 */
+  onOpen: (id: string) => void
 }) {
   const Icon = TONE_ICON[notification.tone]
+  const clickable = notification.onOpen !== undefined
   // 5s 未处理 → 收起；悬停暂停（清除计时 + 冻结进度条），移开后按**剩余时间**续计。
   //
   // 剩余时间用 `remainingRef` 而非 state：进度条的宽度靠 CSS 动画表达（见 .countdown），
@@ -153,7 +156,13 @@ function Toast({ notification, paused, onCollapse, onDismiss }: {
     return () => { clearTimeout(timer) }
   }, [paused, notification.id, onCollapse])
   return (
-    <div className={css.toast} data-tone={notification.tone} role="status">
+    <div
+      className={css.toast}
+      data-tone={notification.tone}
+      data-action={clickable || undefined}
+      role="status"
+      onClick={clickable ? () => { onOpen(notification.id) } : undefined}
+    >
       <Icon size={16} strokeWidth={2} className={`${css.toneIcon} ${TONE_CLASS[notification.tone]}`} />
       <div className={css.col}>
         <span className={css.title}>{notification.title}</span>
@@ -186,11 +195,12 @@ function Toast({ notification, paused, onCollapse, onDismiss }: {
  * @param props - 通知列表与三个动作回调。
  * @returns 右侧抽屉式面板。
  */
-function NotificationPanel({ items, onMarkAllRead, onClose, onDismiss }: {
+function NotificationPanel({ items, onMarkAllRead, onClose, onDismiss, onOpen }: {
   items: readonly CorumNotification[]
   onMarkAllRead: () => void
   onClose: () => void
   onDismiss: (id: string) => void
+  onOpen: (id: string) => void
 }) {
   const unread = items.filter(n => !n.read).length
   return (
@@ -220,7 +230,14 @@ function NotificationPanel({ items, onMarkAllRead, onClose, onDismiss }: {
         {items.map(n => {
           const Icon = TONE_ICON[n.tone]
           return (
-            <div key={n.id} className={css.panelRow} data-read={n.read || undefined} data-tone={n.tone}>
+            <div
+              key={n.id}
+              className={css.panelRow}
+              data-read={n.read || undefined}
+              data-tone={n.tone}
+              data-action={n.onOpen !== undefined || undefined}
+              onClick={n.onOpen === undefined ? undefined : () => { onOpen(n.id) }}
+            >
               <Icon size={14} strokeWidth={2} className={`${css.toneIcon} ${TONE_CLASS[n.tone]}`} />
               <div className={css.col}>
                 <span className={css.title}>{n.title}</span>
@@ -260,6 +277,13 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
   const onDismiss = useRef((id: string) => { store.dismiss(id) }).current
   const onMarkAllRead = useRef(() => { store.markAllRead() }).current
   const onClosePanel = useRef(() => { store.setPanelOpen(false) }).current
+  const onOpenNotification = useRef((id: string) => {
+    // 点击 = 已确认：先标已读并收起通知中心，再执行跳转（顺序重要——跳转会切会话，
+    // 通知中心留在原地会挡视线）。
+    store.open(id)
+    store.setPanelOpen(false)
+    store.expandAll()
+  }).current
   const onOpenPanel = useRef(() => {
     store.expandAll()
     store.setPanelOpen(true)
@@ -332,8 +356,18 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
   if (items.length === 0) return null
   const unread = items.filter(n => !n.read).length
   const visible = items.filter(n => !n.collapsed)
-  // bell 只在「有未读」时渲染（TODO：无未读时不渲染 bell）。
-  const showBell = unread > 0 && !panelOpen
+  /**
+   * bell 的渲染条件（2026-09-10 调整）。
+   *
+   * 原实现（照抄 TODO 的「无未读时不渲染 bell」）只在**有未读**时出现——结果是
+   * 通知栏在日常使用中根本找不到：事件没触发时它不存在，全部已读后它又消失。
+   * 用户反馈「我怎么没看到通知栏呢」正是这个结构性问题的表现。
+   *
+   * 现改为：**只要有通知记录就渲染 bell**（读过的也留着），徽标只在有未读时显示。
+   * 这样通知中心恒可达（可回看历史），同时「未读」的视觉强调不变——比「隐藏」更
+   * 符合通知中心的心智模型（设计稿的 drawer-tab 本就是常驻图标，未读数是其附加态）。
+   */
+  const showBell = items.length > 0 && !panelOpen
   const dragStyle: React.CSSProperties | undefined = dragPos === null
     ? undefined
     : { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' }
@@ -347,7 +381,14 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
           onMouseLeave={() => { setPaused(false) }}
         >
           {visible.map(n => (
-            <Toast key={n.id} notification={n} paused={paused} onCollapse={onCollapse} onDismiss={onDismiss} />
+            <Toast
+              key={n.id}
+              notification={n}
+              paused={paused}
+              onCollapse={onCollapse}
+              onDismiss={onDismiss}
+              onOpen={onOpenNotification}
+            />
           ))}
         </div>
       )}
@@ -357,6 +398,7 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
           onMarkAllRead={onMarkAllRead}
           onClose={onClosePanel}
           onDismiss={onDismiss}
+          onOpen={onOpenNotification}
         />
       )}
       {showBell && (
@@ -366,8 +408,8 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
           className={css.tab}
           data-edge={bellPosition.edge}
           data-dragging={dragPos !== null || undefined}
-          aria-label={`通知（${unread} 条未读）；可拖动到屏幕边缘`}
-          title={`${unread} 条未读通知（可拖动）`}
+          aria-label={unread > 0 ? `通知（${unread} 条未读）；可拖动到屏幕边缘` : '通知中心；可拖动到屏幕边缘'}
+          title={unread > 0 ? `${unread} 条未读通知（可拖动）` : `${items.length} 条通知（可拖动）`}
           style={dragStyle ?? bellStyle(bellPosition)}
           onPointerDown={onPointerDown}
           onClick={() => {
@@ -377,7 +419,7 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
           }}
         >
           <Bell size={18} strokeWidth={2} className={css.tabIcon} />
-          <span className={css.tabBadge}>{unread > 99 ? '99+' : unread}</span>
+          {unread > 0 && <span className={css.tabBadge}>{unread > 99 ? '99+' : unread}</span>}
         </button>
       )}
     </>,

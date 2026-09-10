@@ -39,6 +39,14 @@ export interface CorumNotification {
    * 「全部已读」把它们一次置位 → 徽标消失（设计稿：无未读时不渲染 bell）。
    */
   read: boolean
+  /**
+   * 点击整条通知时的动作（如「打开来源会话」）。
+   *
+   * 存**函数**而非 `sessionId` 字符串：跳转需要 `ctx.sessions.open`，那是
+   * cordis 服务面、不能跨 bundle 放进 store 的可序列化数据里（红线 1）；
+   * 由生产方在 install 时闭包捕获，store 只负责持有与调用。
+   */
+  onOpen?: (() => void) | undefined
 }
 
 /** bell 吸附的屏幕边缘（决定圆角朝向与定位轴）。 */
@@ -63,6 +71,8 @@ export interface NotificationStore {
   subscribe(listener: () => void): () => void
   /** 发一条通知，返回其 id（供调用方后续 dismiss）。 */
   notify(input: Omit<CorumNotification, 'id' | 'createdAt' | 'collapsed' | 'read'> & { createdAt?: number }): string
+  /** 触发一条通知的点击动作（无动作时 no-op）。 */
+  open(id: string): void
   /** 关闭指定通知（从列表移除）。 */
   dismiss(id: string): void
   /** 收起一条通知（5s 未处理 → 右下角 tray）。 */
@@ -185,10 +195,20 @@ export function createNotificationStore(): NotificationStore {
         collapsed: false,
         read: false,
         ...(input.message !== undefined ? { message: input.message } : {}),
+        ...(input.onOpen === undefined ? {} : { onOpen: input.onOpen }),
       }
       items = [...items, next]
       emit()
       return id
+    },
+    open: (id) => {
+      const target = items.find(n => n.id === id)
+      if (target?.onOpen === undefined) return
+      try {
+        target.onOpen()
+      } catch (error) {
+        console.error('[corum-desktop] notification open action threw:', error)
+      }
     },
     dismiss: (id) => {
       if (!items.some(n => n.id === id)) return

@@ -35,6 +35,10 @@
   animation: toastEnter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* 可点击（带 onOpen）的 toast：给出指针与悬停反馈，否则用户不知道能点。 */
+.toast[data-action] { cursor: pointer; }
+.toast[data-action]:hover { background: var(--corum-glass-2); }
+
 /* 倒计时进度条（4px，贴底）：5s 内宽度 100% → 0；
    悬停暂停时 `animation-play-state: paused` 冻结（与 5s 计时同一套暂停语义）。 */
 .countdown {
@@ -305,6 +309,10 @@
   background: var(--corum-glass-2);
 }
 .panelRow:hover { background: var(--corum-glass-3, var(--corum-glass-2)); }
+
+/* 可点击的通知中心行。 */
+.panelRow[data-action] { cursor: pointer; }
+.panelRow[data-action]:hover { background: var(--corum-glass-3, var(--corum-glass-2)); }
 
 /* 已读条目降低对比（仍可单条关闭）。 */
 .panelRow[data-read] { opacity: 0.62; }
