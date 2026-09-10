@@ -1538,6 +1538,36 @@ export class CorumAgentService extends TypertRemoteService {
    * 从子会话事件窗算：turn（最新 turn/start）、step（当前 turn 已闭合 step 数）、
    * currentAction（最新工具调用名 / 生成中）、done（turn/end 闭合）。
    */
+  /**
+   * 读某会话的隔离 worktree 台账（「并行工作区」区的**冷启动基线**）。
+   *
+   * 为什么需要：台账推送（`corum/worktree-ledger`）只在**变更时** emit，
+   * 页面刷新/应用重启后不重放——纯推送订阅的历史会话永远看到空台账，而
+   * 「N 个隔离工作区 · 待集成」恰恰是刷新后最需要看的信息（未集成的分支可能
+   * 被后续 cleanup 清掉，用户要能发现）。故补一个读端点：前端挂载时拉一次做基线，
+   * 之后由推送帧增量更新（与 SubagentCard 的「推送为主 + RPC 冷启动基线」同范式）。
+   */
+  @Remote('getWorktreeLedger')
+  async getWorktreeLedgerRemote(sessionId: string): Promise<{
+    entries: Array<{ slug: string; branch: string; path: string; status: string }>
+    pending: number
+  }> {
+    const orchestration = this.ctx.get('corumOrchestration') as
+      | { entriesOf(id: string): Array<{ slug: string; branch: string; path: string; status: string }> }
+      | undefined
+    if (orchestration === undefined) return { entries: [], pending: 0 }
+    try {
+      const entries = orchestration.entriesOf(sessionId)
+      return {
+        entries: entries.map(entry => ({ ...entry })),
+        pending: entries.filter(entry => entry.status === 'active' || entry.status === 'settled').length,
+      }
+    } catch {
+      // 取不到按空台账处理（可见性增强，绝不影响会话本身）。
+      return { entries: [], pending: 0 }
+    }
+  }
+
   @Remote('getChildSessionProgress')
   async getChildSessionProgressRemote(sessionId: string): Promise<{
     progress?: {

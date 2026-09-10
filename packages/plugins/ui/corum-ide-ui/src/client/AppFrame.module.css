@@ -1283,3 +1283,21 @@
   font-size: 10px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* 台账状态徽标按状态着色（进行中=warn / 待集成=brand / 已集成=success / 已丢弃=dim）。 */
+.statusDetailAgentBadge[data-status='active'] { color: var(--dsw-alias-state-warn-primary, #FFB45C); }
+.statusDetailAgentBadge[data-status='settled'] { color: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); }
+.statusDetailAgentBadge[data-status='integrated'] { color: var(--dsw-alias-state-success-primary, #3EE6B0); }
+.statusDetailAgentBadge[data-status='discarded'] { color: var(--dsw-alias-label-dimmed, var(--dsw-alias-label-tertiary)); }
+
+/* 并行工作区行（P8 后 chip 的新家）：只读展示，不可点（与子 Agent 行的 goto 区分）。 */
+.statusDetailAgentRow[data-worktree] {
+  cursor: default;
+}
+
+.statusDetailWorktreeIcon {
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--dsw-alias-label-tertiary);
+}

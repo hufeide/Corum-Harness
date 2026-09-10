@@ -289,10 +289,17 @@ export function apply(ctx: ClientContext): void {
    */
   ctx.effect(() => {
     const remote = ctx.remote as unknown as RemoteEventFace
-    /** 状态胶囊注入面：子 Agent 花名册 + 子会话跳转（两处均会话作用域，槽自带 sessionId）。 */
+    /**
+     * 状态胶囊注入面：子 Agent 花名册 + 子会话跳转 + 台账冷启动基线。
+     *
+     * `connection` 用于拉**隔离台账的冷启动基线**：台账推送只在变更时 emit，
+     * 页面刷新后不重放，纯推送订阅的历史会话永远看不到「N 个隔离工作区 · 待集成」
+     * （而未集成分支可能被后续 cleanup 清掉，是最需要可见的信息）。
+     */
     const statusInjected = () => ({
       remote,
       openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
+      connection: ctx.get('connection') as ConnectionHandle | undefined,
     })
     /** 轨迹按钮注入面：切换壳的轨迹区域显隐（浮窗内 layout 无网格，静默 no-op）。 */
     const trajectoryInjected = () => ({

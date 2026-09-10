@@ -394,6 +394,92 @@ function useSubagentRoster(remote: RemoteEventFace | undefined, sessionId: strin
   return entries
 }
 
+/**
+ * `corum/worktree-ledger` 转发帧的窄化形（宿主 fork #10 发射，按父 sessionId 过滤）。
+ * 字段与 `@corum/corum-api-remotes/corum-events` 的 `CorumWorktreeLedgerFrameEvent`
+ * 结构同构——本包不 import 该包（红线 3：跨 bundle 用本地能力接口收窄）。
+ */
+interface WorktreeLedgerFrame {
+  sessionId?: string
+  entries?: ReadonlyArray<{
+    slug?: string
+    branch?: string
+    path?: string
+    status?: string
+  }>
+  pending?: number
+}
+
+/** 一条隔离工作区（渲染用，字段已归一）。 */
+interface WorktreeEntry {
+  readonly slug: string
+  readonly branch: string
+  readonly status: string
+}
+
+/** 台账状态文案（与 SubagentCard 的 WORKTREE_STATUS_LABEL 同口径）。 */
+const WORKTREE_STATUS_LABEL: Record<string, string> = {
+  active: '进行中',
+  settled: '待集成',
+  integrated: '已集成',
+  discarded: '已丢弃',
+}
+
+/**
+ * 当前会话的隔离 worktree 台账（「并行工作区」区的数据源）。
+ *
+ * 为什么搬到这里：`SubagentCard` 卡内的「并行工作区」chip 在 P8（逐次成节点）后
+ * 被移除——按次成节点会让它在每张卡上重复 N 份。用户定调的新家 = **会话条状态
+ * 胶囊的展开浮层**（与子 Agent 区并列），一个会话一处、不重复。
+ *
+ * @param remote - 统一事件中心 remote 面（缺省不订阅）。
+ * @param sessionId - 当前��话 id（按父会话过滤帧）。
+ * @returns 台账条目（无台账时为空数组）。
+ */
+function useWorktreeLedger(
+  remote: RemoteEventFace | undefined,
+  sessionId: string | undefined,
+  connection: RpcFace | undefined,
+): readonly WorktreeEntry[] {
+  const [entries, setEntries] = useState<readonly WorktreeEntry[]>([])
+  useEffect(() => {
+    if (sessionId === undefined) { setEntries([]); return undefined }
+    setEntries([])
+    /** 帧 → 渲染形（归一字段、跳过畸形条目）。 */
+    const apply = (frame: WorktreeLedgerFrame): void => {
+      const next: WorktreeEntry[] = []
+      for (const entry of frame.entries ?? []) {
+        if (entry.slug === undefined || entry.branch === undefined) continue
+        next.push({ slug: entry.slug, branch: entry.branch, status: entry.status ?? 'active' })
+      }
+      setEntries(next)
+    }
+    // 冷启动基线：台账推送只在**变更时** emit，页面刷新后不重放——不拉一次的话
+    // 历史会话永远看到空台账（而「待集成」正是刷新后最需要看的信息）。
+    let cancelled = false
+    const pullBaseline = async (): Promise<void> => {
+      if (connection === undefined) return
+      try {
+        const result = await connection.rpc.call('/api', 'corumAgent/getWorktreeLedger', { args: { sessionId } })
+        if (cancelled || !result.ok || result.value === undefined) return
+        apply(result.value as WorktreeLedgerFrame)
+      } catch {
+        // 拉取失败保持空台账（推送帧仍会补齐）。
+      }
+    }
+    void pullBaseline()
+    const dispose = remote?.$on('corum/worktree-ledger', (frame: WorktreeLedgerFrame) => {
+      if (frame.sessionId !== sessionId) return
+      apply(frame)
+    })
+    return () => {
+      cancelled = true
+      dispose?.()
+    }
+  }, [remote, sessionId, connection])
+  return entries
+}
+
 /** 运行中在前、最近活动倒序（胶囊取第一个当「当前子 Agent」）。 */
 function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentRosterEntry[] {
   return [...entries].sort((a, b) => (Number(a.done) - Number(b.done)) || (b.lastActive - a.lastActive))
@@ -419,7 +505,7 @@ function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentR
  * 「词元输入/输出」。`contextBreakdown` 是启发式构成近似（基座注释：never as a total），
  * 故这里用它只表达占比，且与 pressureTokens 的差额归入「未用」以保证合计闭合。
  */
-function AgentStatusDetail({ title, projections: p, anchor, roster, openSession, speedSeries }: {
+function AgentStatusDetail({ title, projections: p, anchor, roster, openSession, speedSeries, worktrees }: {
   title: string
   projections: AgentSessionProjections | undefined
   /** 会话顶栏行在**包含块坐标系**中的盒子（left/width），详情卡据此水平居中
@@ -431,6 +517,8 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
   openSession?: ((sessionId: string) => void) | undefined
   /** 生成速度采样序列（useSpeedSeries；空序列时曲线画基线占位）。 */
   speedSeries: readonly SpeedSample[]
+  /** 隔离工作区台账（用户 2026-09-10：P8 后 chip 的新家 = 本浮层）。 */
+  worktrees: readonly WorktreeEntry[]
 }) {
   const stats = p?.sessionStats
   const usage = p?.tokenUsage
@@ -602,6 +690,31 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
           ))}
         </div>
       )}
+      {/* 并行工作区（隔离 worktree 台账）。用户 2026-09-10：P8 逐次成节点后卡内
+          chip 会重复 N 份，故搬到本浮层——一个会话一处。数据源 = 宿主
+          'corum/worktree-ledger' 转发帧（按父会话过滤）。 */}
+      {worktrees.length > 0 && (
+        <div className={css.statusDetailAgents}>
+          <div className={css.statusDetailAgentsHead}>
+            <span className={css.statusDetailAgentsTitle}>并行工作区</span>
+            <span className={css.statusDetailAgentsCount}>
+              {worktrees.filter(entry => entry.status === 'active' || entry.status === 'settled').length} 待集成
+              {' · '}
+              {worktrees.length} 个隔离工作区
+            </span>
+          </div>
+          {worktrees.map(entry => (
+            <div key={entry.slug} className={css.statusDetailAgentRow} data-worktree>
+              <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
+              <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
+              <span className={css.statusDetailAgentStep}>{entry.slug}</span>
+              <span className={css.statusDetailAgentBadge} data-status={entry.status}>
+                {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -612,6 +725,21 @@ export interface SessionStatusInjected {
   readonly remote?: RemoteEventFace | undefined
   /** 打开会话（浮层子 Agent 行点击 → 进入子会话）。 */
   readonly openSession: (sessionId: string) => void
+  /**
+   * RPC 面（隔离台账的冷启动基线：推送帧不重放，刷新后需主动拉一次）。
+   * 结构窄化到「调用一个具名 RPC」——不 import connection 包的具体类型（红线 3）。
+   */
+  readonly connection?: RpcFace | undefined
+}
+
+/** `ctx.get('connection')` 的窄化面（只用到一元 RPC 调用）。 */
+export interface RpcFace {
+  rpc: {
+    call: (ns: string, method: string, payload: { args: unknown }) => Promise<{
+      ok: boolean
+      value?: unknown
+    }>
+  }
 }
 
 /**
@@ -643,7 +771,7 @@ export interface TrajectoryCapableProps {
  * @param props - 槽运行时 share（sessionId/useSessions/useTrajectory）+ 业务注入面。
  * @returns 状态胶囊与其展开的统计详情卡。
  */
-export function SessionStatusPill({ sessionId, useSessions, remote, openSession, useTrajectory }: SessionStatusPillProps) {
+export function SessionStatusPill({ sessionId, useSessions, remote, openSession, useTrajectory, connection }: SessionStatusPillProps) {
   const wrapRef = useRef<HTMLSpanElement | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [anchor, setAnchor] = useState({ left: 0, width: 0 })
@@ -658,6 +786,8 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
   const lead = running[0]
   // 生成速度序列（chart-speed 实时曲线）：来自轨迹快照的逐步真实速度。
   const speedSeries = useSpeedSeries(useTrajectory)
+  // 隔离工作区台账（浮层「并行工作区」区；P8 后 chip 的新家）。
+  const worktrees = useWorktreeLedger(remote, sessionId, connection)
 
   // 详情浮层锚点 = 会话顶栏行在视口中的水平中心（列宽变化/窗口缩放时重测）。
   // 上溯 <header>（会话插件 header 是行的宿主，两种窗口都在）；取不到则退回胶囊自身。
@@ -753,6 +883,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
               roster={roster}
               openSession={openSession}
               speedSeries={speedSeries}
+              worktrees={worktrees}
             />
           )}
         </span>

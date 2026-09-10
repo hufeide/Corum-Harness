@@ -20,7 +20,7 @@ import { memo, useEffect, useState } from 'react'
 import { ArrowRight, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, Loader } from 'lucide-react'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
-import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe, worktreeLedgerSubscribe } from '../chat-runtime.ts'
+import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe } from '../chat-runtime.ts'
 import css from './SubagentCard.module.css'
 
 /** 子会话进度 RPC 返回形（与 host getChildSessionProgress 对齐）。 */
@@ -380,60 +380,6 @@ function SubagentRow({
 }
 
 /** 子 Agent 进度卡（一个 Turn 的 delegation 召唤们，各自一张卡）。 */
-/** 「并行工作区」chip 的状态文案（zh/en 跟随会话 locale 以外——fork #10 机制术语，统一中文）。 */
-const WORKTREE_STATUS_LABEL: Record<string, string> = {
-  active: '进行中',
-  settled: '待集成',
-  integrated: '已集成',
-  discarded: '已丢弃',
-}
-
-/**
- * 「并行工作区」chip（P0-3：隔离台账用户可见性）。
- * 数据源 = 'corum/worktree-ledger' 推送帧（fork #10 发射；帧按父 sessionId 过滤）。
- * 仅当 chip 所属会话的台账非空时渲染；pending=0（全部已集成/丢弃）时显示历史态。
- */
-function WorktreeLedgerChip({ sessionId }: { sessionId: string | undefined }) {
-  const [frame, setFrame] = useState<{ pending: number; entries: readonly { slug: string; branch: string; status: string }[] } | undefined>(undefined)
-  // hooks 顺序恒定：expanded 必须在任何 early return 之前声明（React #310）。
-  const [expanded, setExpanded] = useState(false)
-  useEffect(() => {
-    if (sessionId === undefined) return undefined
-    const sub = worktreeLedgerSubscribe((f) => {
-      if (f.sessionId !== sessionId) return
-      setFrame({ pending: f.pending, entries: f.entries })
-    })
-    return () => { sub.unsubscribe() }
-  }, [sessionId])
-  if (frame === undefined || frame.entries.length === 0) return null
-  return (
-    <div className={css.ledgerChipWrap}>
-      <button
-        type="button"
-        className={frame.pending > 0 ? css.ledgerChipActive : css.ledgerChipDone}
-        title="并行工作区（隔离 worktree 台账）"
-        aria-expanded={expanded}
-        onClick={() => { setExpanded(open => !open) }}
-      >
-        <GitBranch size={12} strokeWidth={2.5} />
-        {frame.pending > 0
-          ? `${frame.pending} 个隔离工作区 · 待集成`
-          : `${frame.entries.length} 个隔离工作区 · 已集成`}
-      </button>
-      {expanded && (
-        <div className={css.ledgerPanel}>
-          {frame.entries.map(entry => (
-            <div key={entry.slug} className={css.ledgerRow}>
-              <span className={css.ledgerBranch}>{entry.branch}</span>
-              <span className={css.ledgerStatus} data-status={entry.status}>{WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export const SubagentCard = memo(function SubagentCard({ node, t }: ChatNodeViewProps<'subagent-call'>) {
   const invocations = node.data.invocations
   if (invocations.length === 0) return null
