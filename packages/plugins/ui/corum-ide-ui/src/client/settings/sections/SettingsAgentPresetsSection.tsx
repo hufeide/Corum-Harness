@@ -15,6 +15,52 @@ import type { SkillInfo, SkillVersion, SkillBinding, ProfileSummary, McpServerSu
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from '../SettingsSections.module.css'
 
+/**
+ * 「AI 润色」按钮的共享实现（设置页三处：人格 / 提示词 / 提示词放大态）。
+ *
+ * 为什么需要它：这三处此前是 `<button disabled title="即将上线">` 占位——违反已记录的
+ * 设计红线（`.dbg/agent-presets-final-design.md` §三：「AI 润色要么做真的、要么隐藏，
+ * 不留 disabled 占位」；`.dbg/agent-presets-pm-review.md` §四点名这是产品大忌：既暗示
+ * 存在又宣告不可用）。宿主端润色能力（`corumAgent.polishConversation`）早已实现并被
+ * composer 的 sparkle 按钮真实使用，故这里接真实现而不是删按钮。
+ *
+ * 与 composer 的差异：composer 带对话历史（润色提问）；设置页润色的是**Agent 定义文本**
+ * （人格/提示词），无对话上下文，故 `history` 传空数组——宿主按「无历史」分支处理。
+ * @param rpc - corum RPC 调用面（null 时按钮禁用）。
+ * @returns 润色动作、进行中标志与最后一次错误。
+ */
+function usePolishSetting(rpc: CorumRpcCall | null): {
+  polish: (text: string) => Promise<string | null>
+  polishing: boolean
+  error: string | null
+} {
+  const [polishing, setPolishing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const polish = async (text: string): Promise<string | null> => {
+    if (rpc === null || polishing || text.trim() === '') return null
+    setPolishing(true)
+    setError(null)
+    try {
+      const r = await rpc<{ polished?: string }>('corumAgent', 'polishConversation', {
+        text,
+        history: [],
+      })
+      const polished = r?.polished
+      if (typeof polished !== 'string' || polished.trim() === '') {
+        setError('润色未返回内容')
+        return null
+      }
+      return polished
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+      return null
+    } finally {
+      setPolishing(false)
+    }
+  }
+  return { polish, polishing, error }
+}
+
 /* ── Agent 预设（名片式 + 筛选 + 详情编辑）────────────────────────────── */
 
 /** ProfileSummary 投影（与 host agent-service.ts 对齐）。 */
@@ -467,6 +513,8 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
   const [mcpBindOpen, setMcpBindOpen] = useState(false)
   const [promptZoom, setPromptZoom] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  // 人格 / 提示词两处的 AI 润色（接宿主真实现，替代原 disabled 占位）。
+  const { polish, polishing } = usePolishSetting(rpc)
   const sectionNav = useSectionNav()
   const developerMode = useDeveloperMode()
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -636,7 +684,17 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
         <div className={css.promptZoomHd}>
           <span className={css.promptZoomTitle}>提示词</span>
           <div className={css.promptZoomActions}>
-            <button type="button" className={css.btnPolish} disabled title="即将上线"><Sparkles size={11} />AI 润色</button>
+            <button
+              type="button"
+              className={css.btnPolish}
+              disabled={polishing || draft.prompt.trim() === ''}
+              title={draft.prompt.trim() === '' ? '先填写提示词' : '用润色模型改写这段提示词'}
+              onClick={() => {
+                void polish(draft.prompt).then(next => { if (next !== null) set('prompt', next) })
+              }}
+            >
+              <Sparkles size={11} />{polishing ? '润色中…' : 'AI 润色'}
+            </button>
             <button type="button" className={css.btnGhost} onClick={() => setPromptZoom(false)}><Minimize2 size={12} />缩小</button>
           </div>
         </div>
@@ -783,8 +841,16 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
             />
             <div className={css.promptActionsRow}>
               <span className={css.promptCount}>{draft.persona.length} / 500</span>
-              <button type="button" className={css.btnPolish} disabled title="即将上线">
-                <Sparkles size={11} className={css.btnPolishIcon} />AI 润色
+              <button
+                type="button"
+                className={css.btnPolish}
+                disabled={polishing || draft.persona.trim() === ''}
+                title={draft.persona.trim() === '' ? '先填写人格描述' : '用润色模型改写这段人格描述'}
+                onClick={() => {
+                  void polish(draft.persona).then(next => { if (next !== null) set('persona', next.slice(0, 500)) })
+                }}
+              >
+                <Sparkles size={11} className={css.btnPolishIcon} />{polishing ? '润色中…' : 'AI 润色'}
               </button>
             </div>
           </div>
@@ -800,8 +866,16 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           <div className={css.promptArea}>
             <textarea className={css.promptTextarea} value={draft.prompt} onChange={e => set('prompt', e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
             <div className={css.promptActionsRow}>
-              <button type="button" className={css.btnPolish} disabled title="即将上线">
-                <Sparkles size={11} className={css.btnPolishIcon} />AI 润色
+              <button
+                type="button"
+                className={css.btnPolish}
+                disabled={polishing || draft.prompt.trim() === ''}
+                title={draft.prompt.trim() === '' ? '先填写提示词' : '用润色模型改写这段提示词'}
+                onClick={() => {
+                  void polish(draft.prompt).then(next => { if (next !== null) set('prompt', next) })
+                }}
+              >
+                <Sparkles size={11} className={css.btnPolishIcon} />{polishing ? '润色中…' : 'AI 润色'}
               </button>
             </div>
           </div>
