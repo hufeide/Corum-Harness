@@ -316,9 +316,18 @@ export function apply(ctx: Context, config: Config = Config({})): void {
          * fiber** 里取不到——dsh 的 Context 代理 getter 对未注入的命名空间抛错
          * （console: Uncaught (in promise) at get → apply.ts），点「选择」静默
          * 无反应。侧栏 corum-ide-sidebar-ui 能用的原因是它的 inject 声明了
-         * `connection`（`ctx.remote` 由 connection 服务随 fiber 装配）。本插件的
-         * inject 没有 connection（fork 时按官方形状保留了别的服务名），故
-         * `ctx.remote` 不存在。
+         * `connection`（`ctx.remote` 由 connection 服务随 fiber 装配）。
+         * 当时本插件 inject 没有 connection，故 `ctx.remote` 不存在。
+         *
+         * ⚠️ **2026-09-10 更正**：上面这条「inject 没有 connection」的**前提已不成立**——
+         * 2026-09-09 P2-3 复核已把 `'connection'` 补进本插件 inject（见文件顶部
+         * inject 声明，红线 4 违规修复）。`ctx.remote` 命名空间现在应当可用。
+         *
+         * 但**本处继续用 `connection.rpc.call` 直打**，这是有意保留的：走显式
+         * `{args}` 契约、不依赖命名空间代理的装配时序，行为与 `makeCorumRpcCall`
+         * 同通道。**不要**因为 inject 补齐就顺手改回 `ctx.remote.directoryPicker`
+         * ——那是无收益的重构，且会重新引入对 fiber 装配时序的隐式依赖。
+         * （新代码若需要 `ctx.remote`（如统一事件中心的 `$on` 订阅）可直接用。）
          *
          * 修法：不碰 `ctx.remote`，直接用官方 `connection.rpc.call` 打同一个
          * Remote 端点 `directoryPicker/pick`——与 `makeCorumRpcCall` 同通道、
