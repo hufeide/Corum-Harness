@@ -147,6 +147,84 @@ function publish(
   liveByKey.set(key, id)
 }
 
+/** `window.corumDesktop` 的窄化面（只用到系统通知两项；本地能力接口，红线 3）。 */
+interface NativeNotifyBridge {
+  notifyNative?: (request: {
+    title: string
+    body?: string
+    silent?: boolean
+    notificationId?: string
+  }) => Promise<{ ok: boolean; error?: string }>
+  onNativeNotificationClick?: (callback: (payload: { notificationId: string | null }) => void) => () => void
+}
+
+/** 取桌面桥（非桌面壳环境返回 undefined，调用方静默降级）。 */
+function nativeBridge(): NativeNotifyBridge | undefined {
+  return typeof window === 'undefined'
+    ? undefined
+    : (window as unknown as { corumDesktop?: NativeNotifyBridge }).corumDesktop
+}
+
+/**
+ * 把应用内通知**镜像到 macOS 系统通知中心**（2026-09-10 用户定调「先做 macOS」）。
+ *
+ * 三条设计规则（决定用户体验好坏，不是可选项）：
+ *   ① **只在窗口失焦/隐藏时发**——窗口在前台时应用内 toast 已经够，再弹系统通知
+ *      是重复打扰。判据 `document.hasFocus() && document.visibilityState === 'visible'`。
+ *   ② **点击走既有 `onOpen` 通路**——主进程负责唤醒窗口，renderer 收到点击回传后
+ *      调用 `store.open(id)`，于是「打开来源会话」等动作全部复用，无需第二套语义。
+ *   ③ **失败静默降级**——非 macOS / 权限被拒 / 平台不支持时 `notifyNative` 返回
+ *      `ok:false`，应用内 toast 仍在，用户不会失去信息（只是少了系统级提示）。
+ *
+ * @param store - 通知 store（作为「新通知出现」的事件源）。
+ * @returns 退订函数。
+ */
+export function installNativeNotificationMirror(store: NotificationStore): () => void {
+  const bridge = nativeBridge()
+  if (bridge?.notifyNative === undefined) return () => {}
+
+  // 已镜像过的通知 id（store 是快照订阅，同一条会在多次 emit 里重复出现）。
+  const mirrored = new Set<string>()
+
+  // 点击回传：主进程已唤醒窗口，这里执行通知自带的动作。
+  const disposeClick = bridge.onNativeNotificationClick?.((payload) => {
+    const id = payload.notificationId
+    if (id === null || id === '') return
+    store.open(id)
+    store.setPanelOpen(false)
+  }) ?? (() => {})
+
+  const unsubscribe = store.subscribe(() => {
+    const next = store.getSnapshot()
+    // 窗口在前台：不镜像（应用内 toast 已足够）。
+    const focused = typeof document !== 'undefined'
+      && document.hasFocus()
+      && document.visibilityState === 'visible'
+    if (!focused) {
+      for (const item of next) {
+        if (mirrored.has(item.id)) continue
+        mirrored.add(item.id)
+        void bridge.notifyNative?.({
+          title: item.title,
+          ...item.message === undefined ? {} : { body: item.message },
+          notificationId: item.id,
+        })
+      }
+    } else {
+      // 前台时也登记 id：切到后台后不该把「刚才前台已看到」的旧通知补弹一遍。
+      for (const item of next) mirrored.add(item.id)
+    }
+  })
+
+  // 首帧快照（挂载前已存在的通知不补发——它们多半已被看到）。
+  for (const item of store.getSnapshot()) mirrored.add(item.id)
+
+  return () => {
+    unsubscribe()
+    disposeClick()
+  }
+}
+
 /**
  * 把常用事件接进通知栏。
  *

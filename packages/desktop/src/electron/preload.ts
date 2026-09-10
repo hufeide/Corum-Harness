@@ -9,6 +9,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 const floatingListeners = new Set<(slotKey: string, detached: boolean) => void>()
 const floatingDragListeners = new Set<(payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void>()
+const nativeNotificationClickListeners = new Set<(payload: { notificationId: string | null }) => void>()
 
 ipcRenderer.on('corum:floating-change', (_event, payload: { slotKey: string; detached: boolean }) => {
   for (const listener of [...floatingListeners]) listener(payload.slotKey, payload.detached)
@@ -16,6 +17,11 @@ ipcRenderer.on('corum:floating-change', (_event, payload: { slotKey: string; det
 
 ipcRenderer.on('corum:floating-drag', (_event, payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => {
   for (const listener of [...floatingDragListeners]) listener(payload)
+})
+
+// 系统通知被点击：主进程已唤醒/聚焦窗口，这里把 id 交给 renderer 执行跳转。
+ipcRenderer.on('corum:native-notification-clicked', (_event, payload: { notificationId: string | null }) => {
+  for (const listener of [...nativeNotificationClickListeners]) listener(payload)
 })
 
 contextBridge.exposeInMainWorld('corumDesktop', {
@@ -26,6 +32,25 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** Open one slot's content in a detached floating window (?floating=<slotKey>). */
   openFloating: (slotKey: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('corum:open-floating', { slotKey }),
+
+  /**
+   * 发一条**系统通知**（macOS 通知中心）。返回 ok:false 表示平台不支持或失败，
+   * 调用方应静默降级（应用内 toast 仍然在）。
+   */
+  notifyNative: (request: {
+    title: string
+    body?: string
+    silent?: boolean
+    notificationId?: string
+  }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('corum:notify-native', request),
+  /** 订阅系统通知点击（主进程已唤醒窗口；这里执行跳转）。 */
+  onNativeNotificationClick: (callback: (payload: { notificationId: string | null }) => void): (() => void) => {
+    nativeNotificationClickListeners.add(callback)
+    return () => {
+      nativeNotificationClickListeners.delete(callback)
+    }
+  },
   /** Main window: subscribe to slot detach/restore (floating open/close). */
   onFloatingChange: (callback: (slotKey: string, detached: boolean) => void): (() => void) => {
     floatingListeners.add(callback)

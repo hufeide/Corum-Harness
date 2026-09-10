@@ -12,7 +12,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, dialog, ipcMain, BrowserWindow } from 'electron'
+import { app, dialog, ipcMain, BrowserWindow, Notification } from 'electron'
 import type { HostBridgeClient } from './bridge-client.ts'
 import { findCombo, loadAllCombos, touchCombo } from './combos.ts'
 import { createInputHal, type InputHal } from './input-hal.ts'
@@ -55,6 +55,83 @@ export function registerIpc(
   ipcMain.handle('corum:host-restart', async () => {
     await getBridge()?.restart()
     return { ok: true }
+  })
+
+  // ── 系统通知（macOS 优先；2026-09-10 用户定调「先做 macOS 系统通知」）──────
+  //
+  // 为什么放主进程而不是 renderer 的 Web Notification API：
+  //   ① 主进程 `new Notification()` **无需权限握手**（应用自身通知），
+  //      renderer 路线要先 setPermissionRequestHandler 且各平台行为不一；
+  //   ② 点击回调在主进程直接可拿（`notification.on('click')`），
+  //      能先唤醒/聚焦窗口再把点击转回 renderer 执行跳转；
+  //   ③ 图标、静音等选项可控。
+  //
+  // 去重与降噪是**调用方（renderer）的责任**：renderer 已知道窗口是否聚焦
+  // （`document.hasFocus()`），聚焦时不发系统通知（应用内 toast 已够）。
+  // 主进程只做「发」与「点击回传」，保持无状态——避免两处各自判断焦点而打架。
+  ipcMain.handle('corum:notify-native', async (_event, request: {
+    title: string
+    body?: string
+    /** 静音（默认 true：通知栏已有应用内提示音语义，系统音重复会吵）。 */
+    silent?: boolean
+    /** 点击时回传给 renderer 的通知 id（renderer 据此执行既有 onOpen 动作）。 */
+    notificationId?: string
+  }) => {
+    if (!Notification.isSupported()) return { ok: false, error: 'notifications unsupported' }
+    const notification = new Notification({
+      title: request.title,
+      ...request.body === undefined || request.body === '' ? {} : { body: request.body },
+      silent: request.silent !== false,
+    })
+    /**
+     * ⚠️ macOS（Electron 42+）用 UNNotification API，**未签名应用的通知会静默失败**：
+     * `isSupported()` 仍返回 true、`show()` 不抛错，只在 Notification 上 emit
+     * `failed`（UNErrorDomain error 1 = UNErrorCodeNotificationsNotAllowed）。
+     *
+     * 开发态跑的是 `node_modules` 里那个 `adhoc, linker-signed` 的 Electron.app，
+     * UNNotification **不接受** linker-signed 签名 → 通知不显示。
+     * 于是这里必须订阅 `failed` 并把结果如实回传，否则调用方会以为发送成功
+     * （实测踩到：`ok:true` 但屏幕上什么都没有）。
+     * 要让开发态也能看到：给 Electron.app 做**真签名**（见 docs/ASSESSMENT-*.md）。
+     */
+    const outcome = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      let settled = false
+      const settle = (result: { ok: boolean; error?: string }): void => {
+        if (settled) return
+        settled = true
+        resolve(result)
+      }
+      notification.on('show', () => { settle({ ok: true }) })
+      notification.on('failed', (_event, error: string) => {
+        settle({ ok: false, error: `notification failed: ${String(error)}` })
+      })
+      // 既没 show 也没 failed（极少数平台）→ 超时后按「已投递」处理，避免挂住调用方。
+      setTimeout(() => { settle({ ok: true }) }, 1500)
+      try {
+        notification.show()
+      } catch (error: unknown) {
+        settle({ ok: false, error: String(error) })
+      }
+    })
+    notification.on('click', () => {
+      // 唤醒优先：窗口可能被隐藏/最小化/在别的 Space。
+      const win = getWindow()
+      if (win !== null && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore()
+        if (!win.isVisible()) win.show()
+        win.focus()
+        // 先渲染进程可见，再把点击转回去（否则前端可能还没法处理跳转）。
+        if (win.webContents.isDestroyed() || win.webContents.isCrashed()) return
+        try {
+          win.webContents.send('corum:native-notification-clicked', {
+            notificationId: request.notificationId ?? null,
+          })
+        } catch {
+          // Render frame disposed mid-send — drop.
+        }
+      }
+    })
+    return outcome
   })
 
   // Floating window: open one slot's content detached in its own

@@ -10,7 +10,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createNotificationStore, type NotificationStore } from './notifications.ts'
-import { installNotificationBridge } from './notification-bridge.ts'
+import { installNativeNotificationMirror, installNotificationBridge } from './notification-bridge.ts'
 import { mountNotificationHost } from './mount-notifications.tsx'
 // Type-only: pulls the `ctx.slots` Context merge (declared by dsh-client-ui-renderer).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -85,6 +85,13 @@ export function apply(ctx: Context): void {
     const dispose = installNotificationBridge(notifyCtx, notifications)
     notifyCtx.effect(() => () => { dispose() }, 'corum-desktop: notification bridge')
   })
+
+  // 应用内通知 → macOS 系统通知中心镜像（2026-09-10 用户定调「先做 macOS」）。
+  // 只在窗口失焦时发（前台有应用内 toast）；点击经主进程唤醒窗口后走既有 onOpen。
+  ctx.effect(
+    () => installNativeNotificationMirror(notifications),
+    'corum-desktop: native notification mirror',
+  )
 
   // The resident Monaco editor (design.pen ③ 编辑器区合并卡，2026-09-03 改版：
   // 编辑器 + 资源管理器合一张卡): registered into the shell's `corum.editor`
