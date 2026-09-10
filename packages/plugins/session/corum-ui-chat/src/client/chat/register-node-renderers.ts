@@ -7,6 +7,7 @@ import {
   TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
 } from './MessageItem.tsx'
 import { SystemPromptNodeView } from './SystemPromptRow.tsx'
+import { OrchestrateCard } from './OrchestrateCard.tsx'
 import { SubagentCard } from './SubagentCard.tsx'
 import { TurnProcessNodeView } from './TurnProcessNodeView.tsx'
 import { TurnTailNodeView } from './TurnTailNodeView.tsx'
@@ -47,6 +48,9 @@ export function registerChatNodeRenderers(ctx: Context): void {
   // fork（corum）：子 Agent 进度卡（delegation 召唤在瀑布中流出的玻璃卡）。
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
     { name: 'conversation.chat.node', key: 'subagent-call', locale: NS }, SubagentCard))
+  // fork（corum）：orchestrate 编排卡（fan-out 流程图卡，对齐设计稿 fNng3）。
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
+    { name: 'conversation.chat.node', key: 'orchestrate-call', locale: NS }, OrchestrateCard))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'turn-tail',

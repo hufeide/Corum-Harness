@@ -1,0 +1,294 @@
+/* fork（corum）：orchestrate 编排卡（设计稿 orchestrate-flow-card，fNng3）。
+   玻璃卡 r14 + 光边；流程图 = 起始节点 + 虚线主干 + 逐分支横线/节点/卡 + 集成者卡。
+   状态色对齐设计稿两态实测：running #FFB45C · done #3EE6B0 · failed #FF5C7A。 */
+
+.card {
+  --orch-running: var(--dsw-alias-state-warn-primary, #FFB45C);
+  --orch-done: var(--dsw-alias-state-success-primary, #3EE6B0);
+  --orch-failed: var(--dsw-alias-state-error-primary, #FF5C7A);
+  --orch-idle: var(--dsw-alias-label-tertiary, #7E719E);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 14px;
+  backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* ── head ─────────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  /* 设计稿 avatar fill #01CDFE（品牌青），图标取深色。 */
+  background: var(--dsw-alias-brand-primary, #01CDFE);
+}
+
+.avatarIcon {
+  color: var(--corum-label-on-brand, #0A0612);
+}
+
+.meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.name {
+  font-size: 16px; /* 设计稿 name 16/600 */
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subtitle {
+  font-size: 13px; /* 设计稿 task 13 */
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 状态 chip（设计稿 chip：r9 + 1px 状态色描边 + 6px 状态点 + 14/600 文本）。 */
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chip[data-tone='running'] { border: 1px solid var(--orch-running); color: var(--orch-running); }
+.chip[data-tone='done'] { border: 1px solid var(--orch-done); color: var(--orch-done); }
+.chip[data-tone='failed'] { border: 1px solid var(--orch-failed); color: var(--orch-failed); }
+
+.chipText { white-space: nowrap; }
+
+.chipSpin { animation: orch-spin 1.1s linear infinite; }
+
+@keyframes orch-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chipSpin { animation: none; }
+}
+
+.actBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 7px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.actBtn:hover { color: var(--dsw-alias-label-primary); }
+
+/* ── flow 画布 ────────────────────────────────────────────────────────── */
+
+.flow {
+  display: flex;
+  gap: 0;
+  min-width: 0;
+}
+
+/* 左侧导轨：起始节点 + 虚线主干。 */
+.rail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 22px;
+  padding-top: 2px;
+}
+
+.startNode {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--dsw-alias-brand-primary, #01CDFE);
+  border-radius: 50%;
+}
+
+.startDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary, #01CDFE);
+}
+
+/* 虚线主干（设计稿 trunk：2px 宽，段间距 2px 的 dash 堆叠）。 */
+.trunk {
+  flex: 1;
+  width: 2px;
+  min-height: 24px;
+  margin-top: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--dsw-alias-brand-primary, #01CDFE) 0 4px,
+    transparent 4px 6px
+  );
+  opacity: 0.55;
+}
+
+.branches {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.branchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 分支横线（设计稿 brX-line：22px 宽 2px 高的 dash）。 */
+.branchLine {
+  flex: none;
+  width: 22px;
+  height: 2px;
+  background: repeating-linear-gradient(
+    to right,
+    var(--orch-running) 0 3px,
+    transparent 3px 5px
+  );
+}
+
+.branchLine[data-tone='running'] { background: repeating-linear-gradient(to right, var(--orch-running) 0 3px, transparent 3px 5px); }
+.branchLine[data-tone='done'] { background: repeating-linear-gradient(to right, var(--orch-done) 0 3px, transparent 3px 5px); }
+.branchLine[data-tone='failed'] { background: repeating-linear-gradient(to right, var(--orch-failed) 0 3px, transparent 3px 5px); }
+.branchLine[data-tone='idle'] { background: repeating-linear-gradient(to right, var(--orch-idle) 0 3px, transparent 3px 5px); }
+
+/* 分支节点（设计稿 brX-node：22px 光环 + 8px 实心点 + 勾/叉）。 */
+.branchNode {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  color: var(--orch-running);
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+}
+
+.branchNode[data-tone='running'] { color: var(--orch-running); }
+.branchNode[data-tone='done'] { color: var(--orch-done); }
+.branchNode[data-tone='failed'] { color: var(--orch-failed); }
+.branchNode[data-tone='idle'] { color: var(--orch-idle); }
+
+/* 分支卡（设计稿 brX-card：r8 + 半透明底 + label/sub + chip + goto）。 */
+.branchCard {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.4));
+}
+
+/* 集成者卡（设计稿 card-merge：更弱的底 + 描边，表示「汇合」语义）。 */
+.branchCard[data-integrator] {
+  background: rgba(42, 24, 64, 0.2);
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+}
+
+.branchTx {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.branchLabel {
+  font-size: 14px; /* 设计稿 label 14/500 */
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branchSub {
+  font-size: 12px; /* 设计稿 sub 12 */
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 分支状态 chip（设计稿 brX chip：r8 + 1px 描边 + 12/600）。 */
+.branchChip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+}
+
+.branchChip[data-tone='running'] { color: var(--orch-running); }
+.branchChip[data-tone='done'] { color: var(--orch-done); }
+.branchChip[data-tone='failed'] { color: var(--orch-failed); }
+.branchChip[data-tone='idle'] { color: var(--orch-idle); }
+
+/* goto 按钮（设计稿 brX goto：22×22 r6 + arrow-right）。 */
+.gotoBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 6px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  color: var(--dsw-alias-brand-primary, #4DE3FF);
+  cursor: pointer;
+}
+
+.gotoBtn:hover {
+  border-color: var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
+}

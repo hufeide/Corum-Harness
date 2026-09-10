@@ -398,15 +398,21 @@ function presentationPosition(
  * 产出 SubagentCard（`subagent-call` 节点）与通用 `tool-call` 节点，后者纯冗余。
  * 规则：delegation 调用隐藏通用工具行，**但失败（isError）时保留**——失败信息只
  * 在工具结果里，卡片此时只显示 Done/Running，藏掉就看不见报错了。
+ *
+ * fork（corum，2026-09-10）：同一规则扩到 `orchestrate`——它同样有自己的卡片
+ * （`orchestrate-call` → OrchestrateCard），通用工具行只是那串 JSON 参数。
+ * orchestrate 卡片自身会显示逐任务失败（分支 chip + 集成者状态），但整体抛错
+ * 时卡片仍需要通用行兜底，故 isError 一律保留。
  * @param node - one materialized Chat Node.
- * @returns whether the generic tool row duplicates a delegation card.
+ * @returns whether the generic tool row duplicates a delegation/orchestration card.
  */
 function isRedundantDelegationRow(node: ChatConversationViewNode): boolean {
   const candidate = node as ChatNode
   if (candidate.kind !== 'tool-call') return false
   const root = (candidate.data as { root: ToolCallBlock }).root
   const name = 'kind' in root ? root.call?.name : root.name
-  if (name === undefined || !isSubagentDelegationTool(name)) return false
+  if (name === undefined) return false
+  if (!isSubagentDelegationTool(name) && name !== 'orchestrate') return false
   return !('kind' in root && root.isError === true)
 }
 

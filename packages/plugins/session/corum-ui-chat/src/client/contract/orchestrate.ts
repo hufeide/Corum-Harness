@@ -1,0 +1,215 @@
+/**
+ * fork（corum）：orchestrate 编排卡的数据形与折叠逻辑。
+ *
+ * 数据源（全部来自父会话自身的事件窗口，无需新宿主通路）：
+ * - `tool/call` name='orchestrate' 的 `arguments`：`tasks[]`（label / isolation /
+ *   research / background）或 scripted 模式（`script` + `meta`）；`merge` 声明
+ *   决定是否有「集成者」节点。
+ * - `tool/result` 的正文：宿主 `render` 按固定格式拼串——
+ *   `[task N · label] done\n<输出>` 或 `[task N · label] failed: <错误>`，
+ *   结尾可选 `[corum integration] merged + committed into the main tree`
+ *   或 `[corum integration] N branch(es) pending: …`。
+ *   实测样本见 `packages/desktop/.corum-dev-home/sessions/**`（本文件按该格式解析，
+ *   解析失败时优雅降级为「运行中/未知」，绝不影响卡片可用性）。
+ *
+ * ⚠️ 为什么不用 `presentCall/presentResult` 的结构化 meta：实测 `tool/result`
+ * 的 `meta` 恒为 null（宿主 present* 只喂了通用卡），所以结构化状态只能由本
+ * 折叠器从 arguments + 正文重建。
+ */
+
+/** 一个编排任务的静态声明（来自 `tasks[i]`）。 */
+export interface OrchestrateTask {
+  /** 数组下标（宿主结果里 `[task N]` 用的就是它）。 */
+  readonly index: number
+  /** 展示标签（`tasks[i].label`，缺省回退 `task N`）。 */
+  readonly label: string
+  /** 隔离策略：always=强制 worktree；write-tasks=并发写才隔离；off=不隔离。 */
+  readonly isolation?: 'always' | 'write-tasks' | 'off'
+  /** 只读研究任务（无 worktree）。 */
+  readonly research?: boolean
+  /** 后台运行（continuable，可 send_message 续接）。 */
+  readonly background?: boolean
+}
+
+/** 一个任务的终态（来自工具结果正文）。 */
+export type OrchestrateTaskOutcome =
+  | { readonly kind: 'done' }
+  | { readonly kind: 'failed'; readonly error: string }
+
+/** 集成（fan-in）阶段状态。 */
+export type OrchestrateIntegration =
+  /** 声明了 merge.autoIntegrate，正在/已经跑集成者。 */
+  | { readonly kind: 'integrated' }
+  /** 集成者未启动（有任务失败，或未声明 autoIntegrate）。 */
+  | { readonly kind: 'pending'; readonly reason: string; readonly branches: readonly string[] }
+
+/** 编排调用的整体模式。 */
+export type OrchestrateMode = 'tasks' | 'script'
+
+/** 一张编排卡的完整折叠结果。 */
+export interface OrchestrateChatData {
+  /** 声明式任务清单（scripted 模式为空数组）。 */
+  readonly tasks: readonly OrchestrateTask[]
+  readonly mode: OrchestrateMode
+  /** scripted 模式的工作流名（`meta.name`）。 */
+  readonly scriptName?: string
+  /** 是否声明了 `merge`（决定要不要画「集成者」节点）。 */
+  readonly hasMerge: boolean
+  /** 是否声明了 `merge.autoIntegrate`。 */
+  readonly autoIntegrate: boolean
+  /** 父侧 `tool/call` id（子会话广播按它 + label 关联）。 */
+  readonly callId: string
+  /** 锚定卡片位置的父事件 seq。 */
+  readonly anchorSeq: number
+  /** 父侧调用时间。 */
+  readonly time: number
+  /** 任务终态（下标 → 结果）；工具未返回时为空 Map（= 全部运行中）。 */
+  readonly outcomes: ReadonlyMap<number, OrchestrateTaskOutcome>
+  /** 工具是否已返回（false = 进行中）。 */
+  readonly settled: boolean
+  /** 工具本身是否报错（isError，例如 orchestrate 整体抛错）。 */
+  readonly errored: boolean
+  /** 集成阶段状态（无 merge 声明时为 undefined）。 */
+  readonly integration?: OrchestrateIntegration
+}
+
+/** `[task N · label] done|failed: msg` 行（label 可缺省）。 */
+const TASK_LINE = /^\[task (\d+)(?: · ([^\]]*))?\] (done|failed)(?::\s*(.*))?$/u
+
+/**
+ * 解析工具结果正文里的任务终态。
+ * @param text - `tool/result` 的正文（宿主 render 的输出）。
+ * @returns 下标 → 终态。
+ */
+export function parseOutcomes(text: string): ReadonlyMap<number, OrchestrateTaskOutcome> {
+  const out = new Map<number, OrchestrateTaskOutcome>()
+  for (const rawLine of text.split('\n')) {
+    const matched = TASK_LINE.exec(rawLine.trim())
+    if (matched === null) continue
+    const index = Number(matched[1])
+    if (!Number.isSafeInteger(index)) continue
+    out.set(index, matched[3] === 'done'
+      ? { kind: 'done' }
+      : { kind: 'failed', error: matched[4]?.trim() ?? '' })
+  }
+  return out
+}
+
+/** `[corum integration] …` 行。 */
+const INTEGRATION_LINE = /^\[corum integration\] (.+)$/u
+
+/**
+ * 解析集成阶段状态。
+ * @param text - `tool/result` 的正文。
+ * @returns 集成状态，无该行时 undefined。
+ */
+export function parseIntegration(text: string): OrchestrateIntegration | undefined {
+  for (const rawLine of text.split('\n')) {
+    const matched = INTEGRATION_LINE.exec(rawLine.trim())
+    if (matched === null) continue
+    const body = matched[1]
+    if (body.startsWith('merged + committed')) return { kind: 'integrated' }
+    // `N branch(es) pending: a, b, c — call ...`
+    const pending = /^(\d+) branch\(es\) pending: ([^—]*)/u.exec(body)
+    const branches = pending === null
+      ? []
+      : pending[2].split(',').map(part => part.trim()).filter(part => part !== '')
+    return { kind: 'pending', reason: branches.length > 0 ? `${branches.length} 个分支待集成` : '待集成', branches }
+  }
+  return undefined
+}
+
+/** Read a string field off an untrusted value. */
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** Read a boolean field off an untrusted value. */
+function bool(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+/**
+ * 从 `tool/call` 的 `arguments`（JSON 字符串或已解析对象）折叠静态任务清单。
+ * @param args - `tool/call` 的 `arguments` 原值。
+ * @returns 任务清单与模式信息；解析不出来时任务清单为空。
+ */
+export function parseCallArguments(args: unknown): {
+  tasks: readonly OrchestrateTask[]
+  mode: OrchestrateMode
+  scriptName?: string
+  hasMerge: boolean
+  autoIntegrate: boolean
+} {
+  let parsed: unknown = args
+  if (typeof args === 'string') {
+    try { parsed = JSON.parse(args) } catch { return { tasks: [], mode: 'tasks', hasMerge: false, autoIntegrate: false } }
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return { tasks: [], mode: 'tasks', hasMerge: false, autoIntegrate: false }
+  }
+  const record = parsed as Record<string, unknown>
+  const merge = typeof record['merge'] === 'object' && record['merge'] !== null
+    ? record['merge'] as Record<string, unknown>
+    : undefined
+  const meta = typeof record['meta'] === 'object' && record['meta'] !== null
+    ? record['meta'] as Record<string, unknown>
+    : undefined
+  const rawTasks = Array.isArray(record['tasks']) ? record['tasks'] : []
+  const tasks: OrchestrateTask[] = []
+  rawTasks.forEach((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) return
+    const task = entry as Record<string, unknown>
+    const isolation = str(task['isolation'])
+    tasks.push({
+      index,
+      label: str(task['label']) ?? `task ${index}`,
+      ...isolation === 'always' || isolation === 'write-tasks' || isolation === 'off' ? { isolation } : {},
+      ...bool(task['research']) === true ? { research: true } : {},
+      ...bool(task['background']) === true ? { background: true } : {},
+    })
+  })
+  const scripted = str(record['script']) !== undefined
+  return {
+    tasks,
+    mode: scripted ? 'script' : 'tasks',
+    ...(scripted ? { scriptName: str(meta?.['name']) ?? '(unnamed)' } : {}),
+    hasMerge: merge !== undefined,
+    autoIntegrate: bool(merge?.['autoIntegrate']) === true,
+  }
+}
+
+/** 一张卡片的 head 摘要：标题 + 副标题 + 计数。 */
+export interface OrchestrateSummary {
+  readonly title: string
+  readonly subtitle: string
+  readonly done: number
+  readonly failed: number
+  readonly total: number
+}
+
+/**
+ * 折叠 head 摘要（设计稿 `编排工作流 · 3 任务并行` / `fan-out 并发 → fan-in 汇合`
+ * + 状态 chip `并行执行中 · 0/3` / `3/3 完成` / `1/3 · 1 失败`）。
+ * @param data - 折叠结果。
+ * @returns 摘要文案与计数。
+ */
+export function summarize(data: OrchestrateChatData): OrchestrateSummary {
+  const total = data.tasks.length
+  const done = [...data.outcomes.values()].filter(o => o.kind === 'done').length
+  const failed = [...data.outcomes.values()].filter(o => o.kind === 'failed').length
+  if (data.mode === 'script') {
+    return {
+      title: `编排工作流 · ${data.scriptName ?? '(unnamed)'}`,
+      subtitle: '脚本编排 · 逐阶段推进',
+      done, failed, total,
+    }
+  }
+  return {
+    title: `编排工作流 · ${total} 任务并行`,
+    subtitle: data.hasMerge && data.autoIntegrate
+      ? 'fan-out 并发 → fan-in 汇合 → 自动集成'
+      : 'fan-out 并发 → fan-in 汇合',
+    done, failed, total,
+  }
+}

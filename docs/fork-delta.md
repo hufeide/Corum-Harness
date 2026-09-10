@@ -127,7 +127,12 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 
 ### 4.2 corum-ui-chat（对照 ui-chat）
 
-相同 39 / 改名 25 / 实质 19 / 新增 13 / 删除 2。**rebase 风险：高**（含全仓两个 P0：foldable=false + corum-reskin 全局污染）。
+相同 39 / 改名 25 / 实质 19 / 新增 15 / 删除 2。**rebase 风险：高**（含全仓两个 P0：foldable=false + corum-reskin 全局污染）。
+
+> 2026-09-10 新增 2 个文件（orchestrate 编排卡）：`contract/orchestrate.ts`、
+> `conversation-nodes/orchestrate.ts`，另有 `chat/OrchestrateCard.tsx` + `.module.css`
+> 两个新文件（同属新增清单）；`conversation-nodes/subagent.ts` 与 `chat/SubagentCard.*`
+> 为更早的同类新增。
 
 **仅 import 改名（25 个，官方覆盖后 sed 包名）**：`conversation-nodes/` 全部 16 个（assistant/chat-snapshot-builder/command/common/compaction/event-projection/fallback/inbox/message/request-prompt/retry/tool/turn-error/turn-max-tokens/turn-process/turn-tail）、`contract/chat-nodes.ts`、`contract/snapshot.ts`、`model/conversation-context.ts`、`chat/ContextBody.tsx` 等。注意 `contract/snapshot.ts:70` 的 `declare module '@corum/corum-ui-conversation/client'` 也是改名产物——sed 时连 declare module 字符串一起换。
 
