@@ -238,12 +238,12 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
       <SettingGroup title="容量">
         <SettingRow
           label="上下文窗口"
-          desc="单次请求最大 token 数（留空用提供方默认）"
+          desc="单次请求最大词元数（留空用提供方默认）"
           control={<input className={styles['textField']} value={ctx} placeholder="256K" disabled={disabled} onChange={e => { setCtx(e.target.value); setSaved(false) }} />}
         />
         <SettingRow
-          label="最大输出 token 数"
-          desc="单次响应最大生成 token 数"
+          label="最大输出词元数"
+          desc="单次响应最大生成词元数"
           control={<input className={styles['textField']} value={maxOut} placeholder="32K" disabled={disabled} onChange={e => { setMaxOut(e.target.value); setSaved(false) }} />}
         />
         <SettingRow
@@ -297,9 +297,9 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
       </SettingGroup>
 
       <SettingGroup title="费用">
-        <PriceRow label="输入 · 缓存命中" desc="缓存命中时输入 token 单价" value={priceHit} disabled={disabled} onChange={(v) => { setPriceHit(v); setSaved(false) }} />
-        <PriceRow label="输入 · 缓存未命中" desc="缓存未命中时输入 token 单价" value={priceMiss} disabled={disabled} onChange={(v) => { setPriceMiss(v); setSaved(false) }} />
-        <PriceRow label="输出" desc="生成 token 单价" value={priceOut} disabled={disabled} divider={false} onChange={(v) => { setPriceOut(v); setSaved(false) }} />
+        <PriceRow label="输入 · 缓存命中" desc="缓存命中时输入词元单价" value={priceHit} disabled={disabled} onChange={(v) => { setPriceHit(v); setSaved(false) }} />
+        <PriceRow label="输入 · 缓存未命中" desc="缓存未命中时输入词元单价" value={priceMiss} disabled={disabled} onChange={(v) => { setPriceMiss(v); setSaved(false) }} />
+        <PriceRow label="输出" desc="生成词元单价" value={priceOut} disabled={disabled} divider={false} onChange={(v) => { setPriceOut(v); setSaved(false) }} />
       </SettingGroup>
 
       {/* 新模型模式：隐藏连接组（API 地址/连通测试是供应商级，沿用供应商的） */}

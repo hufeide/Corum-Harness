@@ -271,10 +271,9 @@
   z-index: 60;
   display: flex;
   flex-direction: column;
-  gap: 10px; /* GpfJh gap 10 */
-  width: max-content;
-  min-width: 480px; /* 长方形下限（三列 chart 撑宽，设计稿远大于高） */
-  padding: 16px; /* GpfJh pad 16 */
+  gap: 12px; /* 设计稿 ④ gap 12 */
+  width: 560px; /* 设计稿 ④ 真实浮层宽度 560（非撑宽的长方形：旧版 min-width 480 + 三列 chart） */
+  padding: 16px; /* ④ pad 16 */
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
   border: 1px solid var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
   border-radius: 18px; /* GpfJh cornerRadius 18 */
@@ -299,7 +298,7 @@
 .statusDetailTitle {
   flex: 1;
   min-width: 0;
-  font-size: 16px; /* 提取表：标题 16（原 13 ×1.25） */
+  font-size: 14px; /* 设计稿 ④：标题 14/700（旧版 16 过于抢眼） */
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -307,64 +306,45 @@
   text-overflow: ellipsis;
 }
 
-.statusDetailHint {
-  flex: none;
-  font-size: 12px; /* 提取表：hint 12（原 9 ×1.25） */
+/* ── 3 列指标格（设计稿 ④ mrow：3 列 ×2 行，key 上 / value 下） ──
+   原实现是 7 条纵向 key-value 行，占高且信息密度低；改网格后整体高度降约 25%。 */
+.statusDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.statusDetailStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.statusDetailStatKey {
+  font-size: 10.5px; /* 设计稿 k 10.5 */
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.statusDetailRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.statusDetailKey {
-  font-size: 14px; /* 提取表：行 k 14（原 11 ×1.25） */
-  color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-}
-
-.statusDetailValue {
+.statusDetailStatValue {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 14px; /* 提取表：行 v 14（原 11 ×1.25） */
+  font-size: 14px; /* 设计稿 v 14/600 */
+  font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
 }
 
-.statusDetailBarWrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px; /* r-cache gap 8 */
-}
 
-.statusDetailBar {
-  width: 64px; /* r-cache bar 64×5 */
-  height: 5px;
-  border-radius: 999px;
-  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  overflow: hidden;
-}
 
-.statusDetailBarFill {
-  display: block;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--dsw-alias-state-success, #22c55e);
-}
 
 .statusDetailDivider {
   height: 1px; /* div h 1 */
   background: var(--corum-glass-border, rgba(185, 140, 255, 0.18));
 }
 
-.statusDetailChartHead {
-  display: flex;
-  align-items: center;
-  gap: 6px; /* sh gap 6 */
-}
 
 .statusDetailPulse {
   flex: none;
@@ -374,13 +354,6 @@
   background: var(--dsw-alias-brand-primary);
 }
 
-.statusDetailChartTitle {
-  flex: 1;
-  font-size: 13px; /* 提取表：实时统计区头 13（原 10 ×1.25） */
-  font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-}
 
 .statusDetailChartLive {
   flex: none;
@@ -390,35 +363,82 @@
 
 .statusDetailChartsRow {
   display: flex;
-  align-items: flex-end; /* charts-row alignItems end */
-  gap: 18px; /* charts-row gap 18 */
+  /* 设计稿 ④：两列等高（左 = 生成速度曲线，右 = 上下文 donut）。旧版是 3 列
+     align-items:end（donut / 命中率曲线 / 累计费用曲线），后两者已按用户要求删除。 */
+  align-items: stretch;
+  gap: 16px;
 }
 
+/* 曲线列限宽：donut 列内容窄（200），把剩余宽度给曲线（设计稿 chart-speed
+   fill_container 吃掉剩余空间）。min-width:0 让曲线在窄窗口下可收缩而不撑破卡片。 */
 .statusDetailChartCol {
   display: flex;
   flex-direction: column;
-  gap: 4px; /* chart-context/cache/cost gap 4 */
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 图表列头（左列含实时速度读数）：标题 + 弹性空隙 + 状态点 + 当前值。 */
+.statusDetailChartColHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusDetailChartColSpacer {
+  flex: 1;
+  min-width: 0;
 }
 
 .statusDetailChartColLabel {
-  font-size: 12px; /* 提取表：chart 列标 12（原 9 ×1.25） */
+  font-size: 10.5px; /* 设计稿 chart 列标 10.5/600 */
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.statusDetailChartColBody {
+/* 速度曲线下方读数行：平均 / 首词元平均 / 峰值。 */
+.statusDetailSpeedFoot {
   display: flex;
   align-items: center;
-  gap: 10px; /* chart-context body gap 10 */
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.statusDetailSpeedItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.statusDetailSpeedKey {
+  font-size: 10px; /* 设计稿 k 10 */
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.statusDetailSpeedValue {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; /* 设计稿 v 12/600 */
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 上下文占用未上报时的占位（不让布局塌陷）。 */
+.statusDetailChartEmpty {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .statusDetailDonut {
   position: relative;
   flex: none;
-  width: 72px; /* donut 72×72 */
-  height: 72px;
+  width: 96px; /* 设计稿 donut 96×96（旧版 72，用户要求图表区加高对齐） */
+  height: 96px;
   border-radius: 50%;
+  align-self: center;
 }
 
 .statusDetailDonutCenter {
@@ -447,8 +467,10 @@
 .statusDetailLegend {
   display: flex;
   flex-direction: column;
-  gap: 3px; /* legend gap 3 */
-  width: 150px; /* legend w 150 */
+  gap: 4px;
+  /* 图例在 donut 下方、占满该列宽度（设计稿 ④ 的纵向环+图例）；
+     旧版是横向并排 legend w150，窄列下数值会被裁切。 */
+  width: 100%;
 }
 
 .statusDetailLegendRow {
@@ -481,25 +503,7 @@
 /* 趋势曲线（chart-cache/chart-cost 的 plot 170×40 折线）。 */
 .statusDetailTrend {
   display: block;
-}
-
-.statusDetailTrendLegend {
-  display: flex;
-  align-items: center;
-  gap: 6px; /* lg gap 6 */
-}
-
-.statusDetailTrendDot {
-  flex: none;
-  width: 4px; /* lg dot 4×4 */
-  height: 4px;
-  border-radius: 50%;
-}
-
-.statusDetailTrendLabel {
-  font-size: 12px; /* 提取表：趋势均值 12（原 9 ×1.25） */
-  color: var(--dsw-alias-label-tertiary);
-  white-space: nowrap;
+  width: 100%;
 }
 
 .agentTrajBtn {

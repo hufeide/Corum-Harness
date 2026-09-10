@@ -79,56 +79,38 @@ export function ConversationSessionHeader({
              2026-08-29 曾整块删除（理由：壳的 Agent 标题栏已显示会话标题，避免重复）；
              2026-09-10「顶栏归会话」把壳的 Agent 标题栏拆掉、会话段迁回会话级槽后，
              该理由不再成立——本行重新成为会话顶栏的宿主：
-               crumbs（当前会话标题/子会话面包屑） + actions（壳贡献的状态 pill +
-               常驻 Agent 胶囊） + utilities（壳贡献的轨迹按钮，右对齐）。
-             两个 list 子槽由 apply.ts 的注册声明，此前无人 renderSlot（死槽），
-             现由本行渲染——壳经它们贡献 corum 专属 chrome，无需改本组件逻辑。 */}
+               crumbs（当前会话标题/子会话面包屑） + actions（壳贡献的合并胶囊）
+               + utilities（壳贡献的轨迹按钮，右对齐）。
+             .actions/.utilities 两个 list 子槽由 apply.ts 注册、此前无人 renderSlot
+             （死槽），现由本行渲染——壳经它们贡献 corum 专属 chrome，无需改本组件逻辑。
+
+             fork（corum，2026-09-10）：**刻意不 renderSlot `.lineage`**。
+             官方 ui-subagent 往该槽注册 `SubagentHeaderLineage`（「N 个子代理 ⌄」），
+             那是顶栏的**第二个下拉**——用户定调「顶部下拉按钮只有一个」，子 Agent
+             信息一律走壳那个合并胶囊的浮层（见 corum-ide-ui/session-bar.tsx 的
+             AgentStatusDetail）。注意这与「删除 titleRow」不同：本行仍在（提供
+             crumbs + 两个 corum 子槽），只屏蔽 lineage 一个槽；`.lineage` 的注册
+             声明保留在 apply.ts（回滚时重新 renderSlot 即可恢复，无需改契约）。 */}
           <div className={css.titleRow}>
             <div className={css.titleCluster}>
               <nav className={css.crumbs} aria-label={t('session.hierarchy')}>
                 {ancestry.map((summary, index) => {
                   const last = index === ancestry.length - 1
-                  const title = (
-                    <button
-                      type="button"
-                      className={clsx(
-                        css.crumb,
-                        summary.subagent && css.crumbSubagent,
-                        last && css.crumbCurrent,
-                      )}
-                      disabled={last}
-                      onClick={() => { open(summary.id) }}
-                    >
-                      {summary.displayTitle}
-                    </button>
-                  )
-                  const lineage = last || summary.subagent
-                  const lineageOwner = {
-                    lineageSessionId: summary.id,
-                    displayTitle: summary.displayTitle,
-                    ...last ? {} : { openTitle: () => { open(summary.id) } },
-                  }
                   return (
                     <span key={summary.id} className={css.crumbSeg}>
                       {index > 0 && <span className={css.crumbSep}>/</span>}
-                      {lineage
-                        ? summary.subagent
-                          ? renderSlot(
-                            'conversation.session.header.lineage',
-                            lineageOwner,
-                            { fallback: title },
-                          )
-                          : (
-                            <>
-                              {title}
-                              {renderSlot(
-                                'conversation.session.header.lineage',
-                                lineageOwner,
-                                { fallback: null },
-                              )}
-                            </>
-                          )
-                        : title}
+                      <button
+                        type="button"
+                        className={clsx(
+                          css.crumb,
+                          summary.subagent && css.crumbSubagent,
+                          last && css.crumbCurrent,
+                        )}
+                        disabled={last}
+                        onClick={() => { open(summary.id) }}
+                      >
+                        {summary.displayTitle}
+                      </button>
                     </span>
                   )
                 })}

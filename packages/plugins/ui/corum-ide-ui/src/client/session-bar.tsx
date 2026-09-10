@@ -25,7 +25,7 @@
  *
  * @module corum-ide-ui/client/session-bar
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only：拉入 corum-ui-conversation 的 SlotMap 声明（header.actions /
 // header.utilities 两个槽由它声明），让本文件的槽注册通过类型检查
@@ -34,13 +34,20 @@ import type {} from '@corum/corum-ui-conversation/client'
 import { useDeveloperMode } from './settings/developer-mode.ts'
 import css from './AppFrame.module.css'
 
-/** session/list 行 projectionValues 的窄化形（顶栏统计的数据源）。 */
+/** session/list 行 projectionValues 的窄化形（顶栏统计的数据源）。
+ *  字段名与官方 `dsh-session-stats/types` 的 `SessionStatsProjection` 同构。 */
 interface SessionStatsProjection {
   turns?: number
   steps?: number
   llmMs?: number
   toolMs?: number
+  /** 首词元延迟合计（`step/start` → 首个非空 delta），配合 ttftSteps 求平均。 */
+  ttftMs?: number
+  /** 带首词元记录（= 可用于求 TTFT 平均）的 step 数。 */
+  ttftSteps?: number
+  /** 解码墙钟合计（首词元 → assistant/message），配合 decodeTokens 求平均速度。 */
   decodeMs?: number
+  /** 与 decodeMs 同口径的服务方输出词元数。 */
   decodeTokens?: number
 }
 interface TokenUsageProjection {
@@ -89,32 +96,193 @@ function compactDuration(ms: number): string {
   return `${m}m ${s % 60}s`
 }
 
-/** 紧凑 token：12.4k / 3.1k / 178.3k（千分位紧凑，详情行用全量 toLocaleString）。 */
+/** 紧凑词元：12.4k / 3.1k / 178.3k（千分位紧凑，详情行用全量 toLocaleString）。 */
 function compactTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
-/** 顶栏统计（真实数据，session/list 投影折叠）。 */
+/** 解码速度文案：42 词元/s（中文口径——用户定：中文用「词元」，英文界面才用 tok/s）。 */
+function compactTps(tps: number): string {
+  if (!Number.isFinite(tps) || tps <= 0) return '—'
+  return `${tps >= 100 ? Math.round(tps) : tps.toFixed(1)} 词元/s`
+}
+
+/**
+ * 顶栏合并胶囊的统计段（设计稿 ①②④ 的 status-pill stats 文案）。
+ *
+ * 口径（用户 2026-09-10 定调）：轮次与步骤合并成 `X 轮 / X 步`（原为两个独立
+ * 事实，占宽且信息密度低）；词元量用「词元」而非 tok/Token；命中率只留数值
+ * （缓存命中曲线已按用户要求删除）。
+ */
 function agentStatsSummary(p: AgentSessionProjections | undefined): string {
   if (p === undefined) return '—'
   const turns = p.sessionStats?.turns ?? 0
+  const steps = p.sessionStats?.steps ?? 0
   const active = (p.sessionStats?.llmMs ?? 0) + (p.sessionStats?.toolMs ?? 0)
   const input = (p.tokenUsage?.uncachedInputTokens ?? 0) + (p.tokenUsage?.cacheReadTokens ?? 0) + (p.tokenUsage?.cacheWriteTokens ?? 0)
   const output = p.tokenUsage?.outputTokens ?? 0
   const cacheRead = p.tokenUsage?.cacheReadTokens ?? 0
   const hit = input > 0 ? Math.round((cacheRead / input) * 100) : 0
-  return `${turns} 轮 · ${compactDuration(active)} · In ${compactTokens(input)} / Out ${compactTokens(output)} · 命中 ${hit}%`
+  return `${turns} 轮 / ${steps} 步 · ${compactDuration(active)} · 词元 ${compactTokens(input)} / ${compactTokens(output)} · 命中 ${hit}%`
 }
 
-/** 迷你趋势曲线（设计稿 chart-cache/chart-cost 的 plot 170×40 折线）。
- *  数据源是当前会话聚合值（无逐 turn 历史序列投影），以「起步微升 → 收敛当前值」
- *  的单调折线近似趋势（语义对齐设计稿的上升曲线）。 */
-function TrendLine({ color, width = 170, height = 40 }: { color: string; width?: number; height?: number }) {
-  // 折线：左低右高收敛（0,32 → 40,24 → 90,18 → 130,12 → 170,8），圆角平滑。
-  const d = `M0 ${height * 0.8} C ${width * 0.24} ${height * 0.6}, ${width * 0.5} ${height * 0.45}, ${width * 0.76} ${height * 0.3} S ${width * 0.94} ${height * 0.2}, ${width} ${height * 0.2}`
+/**
+ * 每个 step 的解码速度采样点（设计稿 chart-speed 实时曲线的数据单元）。
+ * `tps = 该步输出词元 / 该步解码秒数`。
+ */
+interface SpeedSample {
+  /** step 序号（用于 React key 与「第 N 步」提示）。 */
+  readonly step: number
+  /** 该步解码速度（词元/s）。 */
+  readonly tps: number
+}
+
+/** 曲线最多保留的采样点数（超出丢最旧；浮层宽度约 300px，40 点已足够密）。 */
+const SPEED_SERIES_CAP = 40
+
+/**
+ * `useTrajectory` 快照的窄化面（只取 eventNodes；见下方 useSpeedSeries 的取数注释）。
+ * 该 hook 由 corum-ui-trajectory 经 `SessionStandardProps` 模块合并声明，
+ * 会话作用域 occupant 都能拿到——结构窄化避免本包新增运行时依赖（红线 3）。
+ */
+interface TrajectorySnapshotLike {
+  readonly eventNodes?: readonly TrajectoryNodeLike[]
+}
+/** 轨迹事件节点里与吞吐曲线相关的字段（AssistantMessageNode 的子集）。 */
+interface TrajectoryNodeLike {
+  kind?: string
+  turn?: number
+  step?: number
+  usage?: { outputTokens?: number } | undefined
+  timing?: {
+    stepStartTime?: number | null
+    firstTokenTime?: number | null
+    completedTime?: number
+  } | undefined
+}
+export type UseTrajectoryHook = <T>(selector: (snapshot: TrajectorySnapshotLike) => T) => T
+
+/** 空轨迹快照（缺省 hook 的返回值；模块级常量保证引用稳定，避免每次渲染换新数组）。 */
+const EMPTY_TRAJECTORY_NODES: readonly TrajectoryNodeLike[] = []
+
+/**
+ * 缺省轨迹 hook（`useTrajectory` 未注入时的替身）。
+ *
+ * ⚠️ Rules of Hooks：不能按「prop 有没有」改变 hook 调用数量，故本函数**不调用任何
+ * hook**（真实 `useTrajectory` 内部会调 useStore 之类）。两支的 hook 数因此不同，
+ * 但该分支只随插件装配变化——本项目里 corum-ui-trajectory 是常驻插件
+ * （见 `__DSH_BOOT__` 的 application 批），运行期不会翻转；真换成没装该插件的
+ * 精简装配时需要重新挂载，属可接受边界（已在 docs/TODO.md 登记）。
+ */
+function useEmptyTrajectory<T>(_selector: (snapshot: TrajectorySnapshotLike) => T): T {
+  return EMPTY_TRAJECTORY_NODES as unknown as T
+}
+
+/** 从一步 assistant 节点算解码速度（词元/s）；不可算返回 null。 */
+function stepTps(node: TrajectoryNodeLike): number | null {
+  const first = node.timing?.firstTokenTime
+  const done = node.timing?.completedTime
+  const tokens = node.usage?.outputTokens
+  if (typeof first !== 'number' || typeof done !== 'number' || typeof tokens !== 'number') return null
+  const decodeMs = Math.max(0, done - first)
+  // 解码时长过短（<50ms）说明该步几乎瞬时结束，速度会是噪声级大数，跳过。
+  if (decodeMs < 50 || tokens <= 0) return null
+  const tps = tokens / (decodeMs / 1000)
+  return Number.isFinite(tps) && tps > 0 ? tps : null
+}
+
+/**
+ * 逐步解码速度序列（设计稿 chart-speed「生成速度」实时曲线）。
+ *
+ * **取数与可行性（用户 2026-09-10 点名要评估）**：
+ * - 逐词元的 `assistant/live-chunk` 事件带 seq/time，但被 conversation 装配器内部
+ *   消费，官方 `ISession` 面只暴露生命周期 + 行为动词 —— 槽位占用者拿不到事件窗口，
+ *   故**不做**逐词元订阅（那需要新增宿主事件通路 + 重启，即 docs/TODO.md 的 B 档）。
+ * - 这里走**真实历史**：`useTrajectory().eventNodes` 是本会话装配好的 assistant
+ *   节点序列，每个节点自带 `timing`（stepStartTime/firstTokenTime/completedTime）
+ *   与 `usage.outputTokens` —— 与官方 TrajectoryTable 算 TTFT/吞吐同源。
+ *   于是 `tps = outputTokens / ((completedTime - firstTokenTime)/1000)` 得到每一步的
+ *   真实速度，**已结束的会话也有完整曲线**（投影增量方案只能从挂载点开始累积，
+ *   对历史会话恒为空——这正是第一版曲线画不出东西的原因，实测已证）。
+ *
+ * 仅取可算的步；按到达顺序（= step 升序）保留，超上限丢最旧。
+ *
+ * @param useTrajectory - 会话作用域标准 props 的轨迹快照 hook（缺失时用空实现）。
+ * @returns 按时间升序的速度采样点。
+ */
+function useSpeedSeries(useTrajectory: UseTrajectoryHook | undefined): readonly SpeedSample[] {
+  const hook = useTrajectory ?? useEmptyTrajectory
+  const nodes = hook(s => s.eventNodes ?? EMPTY_TRAJECTORY_NODES)
+  return useMemo(() => {
+    const out: SpeedSample[] = []
+    for (const node of nodes) {
+      if (node.kind !== 'assistant') continue
+      const tps = stepTps(node)
+      if (tps === null) continue
+      out.push({ step: node.step ?? out.length + 1, tps })
+    }
+    return out.slice(-SPEED_SERIES_CAP)
+  }, [nodes])
+}
+
+/**
+ * 生成速度曲线（设计稿 chart-speed）：折线 + 面积，横轴 = 步，纵轴 = 词元/s。
+ *
+ * 采样不足（<2 点）时**不画假曲线**，改为一条虚线基线。原因：本组件装在会话顶栏，
+ * 页面刷新后历史帧不重放，`useSpeedSeries` 从当次挂载才开始累积，已结束的会话
+ * 永远只有 0~1 个点——画成实心块会被误读为「速度恒为 0」。
+ *
+ * @param samples - 速度采样点（按时间升序）。
+ * @param width - 画布宽（px）。
+ * @param height - 画布高（px）。
+ * @returns 折线 + 面积（或空态基线）的 SVG。
+ */
+function SpeedChart({ samples, width = 300, height = 138 }: {
+  samples: readonly SpeedSample[]
+  width?: number
+  height?: number
+}) {
+  const pad = 10
+  const inner = height - pad * 2
+  // 纵轴上限：取样本最大值再上浮 15%（避免顶点贴底/贴顶），下限 10 防止除零。
+  const peak = samples.length > 0 ? Math.max(...samples.map(s => s.tps)) : 0
+  const maxV = Math.max(10, peak * 1.15)
+  const n = samples.length
+  if (n < 2) {
+    // 空态：虚线基线（不填充），避免被读成「速度 0」的实心块。
+    return (
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        className={css.statusDetailTrend}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <line
+          x1="0" y1={height / 2} x2={width} y2={height / 2}
+          stroke="var(--corum-glass-border, rgba(185,140,255,.3))"
+          strokeWidth="1" strokeDasharray="4 4"
+        />
+      </svg>
+    )
+  }
+  const pts = samples.map((s, i) => [
+    (i / (n - 1)) * width,
+    pad + (1 - s.tps / maxV) * inner,
+  ] as const)
+  const line = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ')
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={css.statusDetailTrend} aria-hidden="true">
-      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className={css.statusDetailTrend}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <path d={`${line} L${width} ${height} L0 ${height} Z`} fill="var(--dsw-alias-brand-primary)" opacity="0.18" stroke="none" />
+      <path d={line} fill="none" stroke="var(--dsw-alias-brand-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -211,10 +379,27 @@ function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentR
   return [...entries].sort((a, b) => (Number(a.done) - Number(b.done)) || (b.lastActive - a.lastActive))
 }
 
-/** 状态栏详情卡（设计稿 GpfJh，×1.25 放大 + 长方形三列 chart）：hover/点击
- *  status-pill 展开的会话统计浮层。长方形 = 左（上下文 donut+图例）右（命中率/
- *  累计费用两个趋势曲线）三列撑宽。 */
-function AgentStatusDetail({ title, projections: p, anchor, roster, openSession }: {
+/**
+ * 状态栏详情卡（设计稿 ④ J3tMzR「合并态下拉浮层」）：点击 status-pill 展开的
+ * 会话统计浮层。结构自上而下（与设计稿逐段对应）：
+ *   1. 标题行（状态点 + `会话统计 · <会话名>`）
+ *   2. 3 列指标格 ×2 行：轮次/步骤（合并）· 工作时长 · LLM 思考
+ *                       词元输入 · 词元输出 · 工具调用
+ *   3. 两列图表：左 = 生成速度实时曲线（+ 平均 / 首词元平均）；右 = 上下文 donut + 图例
+ *   4. 分隔线 + 子 Agent 列表（运行中在前，可点击进入子会话）
+ *
+ * 用户 2026-09-10 定调：轮次与步骤合并成 `X 轮 / X 步`；「LLM 思考」用
+ * `sessionStats.llmMs`（= step/start → assistant/message，与工具调用相加 = 工作时长）；
+ * 缓存命中与累计费用**不画曲线**（命中率数值仍在顶栏胶囊；基座无会话级费用投影）。
+ *
+ * 上下文 donut 的口径（修 2026-09-10 发现的 129% bug）：只画**当前占用**的构成
+ * （对话消息 / 系统提示词 / 工具 / 未用，合计恒为 100%）。旧实现把累计账单量
+ * `tokenUsage`（整段日志累加）和当前占用 `contextPressure.pressureTokens` 混在
+ * 同一个饼里，四段相加 129.3%——几何上不成立。累计账单留在上方指标格的
+ * 「词元输入/输出」。`contextBreakdown` 是启发式构成近似（基座注释：never as a total），
+ * 故这里用它只表达占比，且与 pressureTokens 的差额归入「未用」以保证合计闭合。
+ */
+function AgentStatusDetail({ title, projections: p, anchor, roster, openSession, speedSeries }: {
   title: string
   projections: AgentSessionProjections | undefined
   /** 会话顶栏行在**包含块坐标系**中的盒子（left/width），详情卡据此水平居中
@@ -224,6 +409,8 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession 
   roster: readonly SubagentRosterEntry[]
   /** 打开会话（子 Agent 行点击 → 进入该子会话）。 */
   openSession?: ((sessionId: string) => void) | undefined
+  /** 生成速度采样序列（useSpeedSeries；空序列时曲线画基线占位）。 */
+  speedSeries: readonly SpeedSample[]
 }) {
   const stats = p?.sessionStats
   const usage = p?.tokenUsage
@@ -231,7 +418,9 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession 
   const breakdown = p?.contextBreakdown
   const turns = stats?.turns ?? 0
   const steps = stats?.steps ?? 0
-  const active = (stats?.llmMs ?? 0) + (stats?.toolMs ?? 0)
+  const llmMs = stats?.llmMs ?? 0
+  const toolMs = stats?.toolMs ?? 0
+  const active = llmMs + toolMs
   const input = (usage?.uncachedInputTokens ?? 0) + (usage?.cacheReadTokens ?? 0) + (usage?.cacheWriteTokens ?? 0)
   const output = usage?.outputTokens ?? 0
   const cacheRead = usage?.cacheReadTokens ?? 0
@@ -242,19 +431,36 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession 
   const system = breakdown?.systemTokens ?? 0
   const tools = breakdown?.toolsTokens ?? 0
   const messages = breakdown?.messageTokens ?? 0
-  const ctxFree = Math.max(0, ctxWindow - ctxUsed)
-  const segOf = (n: number): number => (ctxWindow > 0 ? (n / ctxWindow) * 360 : 0)
-  const inputDeg = segOf(input)
-  const outputDeg = segOf(output)
-  const systemDeg = segOf(system + tools)
-  void messages
-  const rows: ReadonlyArray<readonly [string, string]> = [
-    ['轮次 Turns', String(turns)],
+  // 平均解码速度（整段累计口径：decodeTokens / decodeMs）与首词元平均延迟。
+  const decodeMs = stats?.decodeMs ?? 0
+  const decodeTokens = stats?.decodeTokens ?? 0
+  const avgTps = decodeMs > 0 ? decodeTokens / (decodeMs / 1000) : 0
+  const ttftSteps = stats?.ttftSteps ?? 0
+  const avgTtftMs = ttftSteps > 0 ? (stats?.ttftMs ?? 0) / ttftSteps : 0
+  // 当前占用构成（设计稿 chart-context 的 donut）：三段启发式 + 未用补数。
+  //
+  // ⚠️ 「未用」必须由**三段之和**反推，不能用 `ctxWindow - ctxUsed`：`ctxUsed`
+  // （provider 锚定的 pressureTokens）与 `contextBreakdown` 的启发式三段是两个
+  // 不同估计器，基座注释明确说二者**不会相等**。若拿 ctxUsed 求补数，图例四项
+  // 之和会超过窗口上限（实测 1002.8k / 1000k），饼图几何上不成立——这正是旧实现
+  // 四段相加 129% 的同类错误。这里以三段之和为分母保证**合计恒等于窗口**，
+  // 环心仍显示权威占用率 ctxPct（两者微小差异属估计器固有，见基座注释）。
+  const ctxParts = messages + system + tools
+  const ctxFree = Math.max(0, ctxWindow - ctxParts)
+  const ctxSum = ctxParts + ctxFree || 1
+  const pctOf = (n: number): number => Math.round((n / ctxSum) * 1000) / 10
+  // 曲线读数：latest = 最近一步速度（无序列时退回整段平均，避免空态显示「—」）；峰值 = 样本最大。
+  const nowTps = speedSeries.length > 0 ? (speedSeries[speedSeries.length - 1]?.tps ?? avgTps) : avgTps
+  const peakTps = speedSeries.length > 0 ? Math.max(...speedSeries.map(s => s.tps)) : 0
+  // 曲线：本条会话的真实逐步速度；空序列时弧长/顶点都退化，交给 SpeedChart 画基线。
+  // 3 列指标格（设计稿 ④）：key 上 / value 下，两行共 6 项。
+  const metrics: ReadonlyArray<readonly [string, string]> = [
+    ['轮次 / 步骤', `${turns} 轮 / ${steps} 步`],
     ['工作时长 Active', compactDuration(active)],
-    ['Token 输入 Input', input.toLocaleString('en-US')],
-    ['Token 输出 Output', output.toLocaleString('en-US')],
-    ['执行步骤 Steps', String(steps)],
-    ['工具调用 Tool', compactDuration(stats?.toolMs ?? 0)],
+    ['LLM 思考', compactDuration(llmMs)],
+    ['词元输入 Input', compactTokens(input)],
+    ['词元输出 Output', compactTokens(output)],
+    ['工具调用 Tool', `${toolMs > 0 ? compactDuration(toolMs) : '—'}${hit > 0 ? ` · 命中 ${hit}%` : ''}`],
   ]
   return (
     <div
@@ -266,84 +472,86 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession 
       <div className={css.statusDetailHead}>
         <span className={css.statusDetailDot} />
         <span className={css.statusDetailTitle}>会话统计 · {title}</span>
-        <span className={css.statusDetailHint}>hover 状态栏弹出</span>
       </div>
-      {rows.map(([k, v]) => (
-        <div key={k} className={css.statusDetailRow}>
-          <span className={css.statusDetailKey}>{k}</span>
-          <span className={css.statusDetailValue}>{v}</span>
+      {/* 3 列指标格 ×2 行（设计稿 ④ mrow/stat/k/v）。 */}
+      <div className={css.statusDetailGrid}>
+        {metrics.map(([k, v]) => (
+          <div key={k} className={css.statusDetailStat}>
+            <span className={css.statusDetailStatKey}>{k}</span>
+            <span className={css.statusDetailStatValue}>{v}</span>
+          </div>
+        ))}
+      </div>
+      {/* 图表两列（设计稿 ④ charts）：左 = 生成速度实时曲线，右 = 上下文 donut+图例。 */}
+      <div className={css.statusDetailChartsRow}>
+        {/* 生成速度（chart-speed）：实时曲线 + 平均 / 首词元平均。 */}
+        <div className={css.statusDetailChartCol}>
+          <span className={css.statusDetailChartColHead}>
+            <span className={css.statusDetailChartColLabel}>生成速度</span>
+            <span className={css.statusDetailChartColSpacer} />
+            <span className={css.statusDetailPulse} />
+            <span className={css.statusDetailChartLive}>{compactTps(nowTps)}</span>
+          </span>
+          <SpeedChart samples={speedSeries} width={300} height={138} />
+          <span className={css.statusDetailSpeedFoot}>
+            <span className={css.statusDetailSpeedItem}>
+              <span className={css.statusDetailSpeedKey}>平均</span>
+              <span className={css.statusDetailSpeedValue}>{compactTps(avgTps)}</span>
+            </span>
+            <span className={css.statusDetailSpeedItem}>
+              <span className={css.statusDetailSpeedKey}>首词元平均</span>
+              <span className={css.statusDetailSpeedValue}>{avgTtftMs > 0 ? compactDuration(avgTtftMs) : '—'}</span>
+            </span>
+            {peakTps > 0 && (
+              <span className={css.statusDetailSpeedItem}>
+                <span className={css.statusDetailSpeedKey}>峰值</span>
+                <span className={css.statusDetailSpeedValue}>{compactTps(peakTps)}</span>
+              </span>
+            )}
+          </span>
         </div>
-      ))}
-      <div className={css.statusDetailRow}>
-        <span className={css.statusDetailKey}>命中率 Cache Hit</span>
-        <span className={css.statusDetailBarWrap}>
-          <span className={css.statusDetailBar}><span className={css.statusDetailBarFill} style={{ width: `${hit}%` }} /></span>
-          <span className={css.statusDetailValue}>{hit}%</span>
-        </span>
+        {/* 上下文占用（chart-context）：donut（构成占比，合计 100%）+ 图例。 */}
+        <div className={css.statusDetailChartCol}>
+          <span className={css.statusDetailChartColLabel}>
+            上下文 Context{ctxWindow > 0 ? ` · 上限 ${compactTokens(ctxWindow)}` : ''}
+          </span>
+          {ctxWindow > 0 ? (
+            <>
+              <span className={css.statusDetailDonut} style={{
+                background: `conic-gradient(var(--dsw-alias-brand-primary) 0deg ${pctOf(messages) * 3.6}deg, `
+                  + `var(--dsw-alias-state-warn-primary, #FFB45C) ${pctOf(messages) * 3.6}deg ${(pctOf(messages) + pctOf(system)) * 3.6}deg, `
+                  + `var(--corum-brand-accent, #FF71CE) ${(pctOf(messages) + pctOf(system)) * 3.6}deg ${(pctOf(messages) + pctOf(system) + pctOf(tools)) * 3.6}deg, `
+                  + `var(--corum-glass-2, rgba(42,24,64,.85)) ${(pctOf(messages) + pctOf(system) + pctOf(tools)) * 3.6}deg 360deg)`,
+              }}>
+                <span className={css.statusDetailDonutCenter}>
+                  <span className={css.statusDetailDonutPct}>{ctxPct}%</span>
+                  <span className={css.statusDetailDonutCap}>已用 {compactTokens(ctxUsed)}</span>
+                </span>
+              </span>
+              <span className={css.statusDetailLegend}>
+                {([
+                  ['var(--dsw-alias-brand-primary)', '对话消息', messages],
+                  ['var(--dsw-alias-state-warn-primary, #FFB45C)', '系统提示词', system],
+                  ['var(--corum-brand-accent, #FF71CE)', '工具', tools],
+                  ['var(--corum-glass-2, rgba(42,24,64,.85))', '未用', ctxFree],
+                ] as const).map(([color, label, n]) => (
+                  <span key={label} className={css.statusDetailLegendRow}>
+                    <span className={css.statusDetailLegendDot} style={{ background: color }} />
+                    <span className={css.statusDetailLegendLabel}>{label}</span>
+                    <span className={css.statusDetailLegendValue}>{compactTokens(n)}</span>
+                  </span>
+                ))}
+              </span>
+            </>
+          ) : (
+            <span className={css.statusDetailChartEmpty}>暂未上报上下文占用</span>
+          )}
+        </div>
       </div>
       <div className={css.statusDetailDivider} />
-      {/* 实时统计区头（设计稿 sec-charts sh：pulse + 标题 + 实时更新）。 */}
-      <div className={css.statusDetailChartHead}>
-        <span className={css.statusDetailPulse} />
-        <span className={css.statusDetailChartTitle}>实时统计 · {turns} 轮</span>
-        <span className={css.statusDetailChartLive}>实时更新</span>
-      </div>
-      {/* 三列 chart 行（设计稿 charts-row，长方形撑宽关键）：上下文 donut+图例 /
-          命中率趋势 / 累计费用趋势。 */}
-      <div className={css.statusDetailChartsRow}>
-        {/* 上下文 donut + 图例（chart-context）。 */}
-        <div className={css.statusDetailChartCol}>
-          <span className={css.statusDetailChartColLabel}>上下文 Context{ctxWindow > 0 ? ` · 上限 ${compactTokens(ctxWindow)}` : ''}</span>
-          <div className={css.statusDetailChartColBody}>
-            {ctxWindow > 0 && (
-              <>
-                <span className={css.statusDetailDonut} style={{
-                  background: `conic-gradient(var(--dsw-alias-brand-primary) 0deg ${inputDeg}deg, var(--corum-brand-accent, #FF71CE) ${inputDeg}deg ${inputDeg + outputDeg}deg, var(--dsw-alias-state-warn-primary, #FFB45C) ${inputDeg + outputDeg}deg ${inputDeg + outputDeg + systemDeg}deg, var(--corum-glass-2, rgba(42,24,64,.85)) ${inputDeg + outputDeg + systemDeg}deg 360deg)`,
-                }}>
-                  <span className={css.statusDetailDonutCenter}>
-                    <span className={css.statusDetailDonutPct}>{ctxPct}%</span>
-                    <span className={css.statusDetailDonutCap}>已用</span>
-                  </span>
-                </span>
-                <span className={css.statusDetailLegend}>
-                  {([
-                    ['var(--dsw-alias-brand-primary)', '输入', input],
-                    ['var(--corum-brand-accent, #FF71CE)', '输出', output],
-                    ['var(--dsw-alias-state-warn-primary, #FFB45C)', '系统提示词', system + tools],
-                    ['var(--corum-glass-2, rgba(42,24,64,.85))', '未用', ctxFree],
-                  ] as const).map(([color, label, n]) => (
-                    <span key={label} className={css.statusDetailLegendRow}>
-                      <span className={css.statusDetailLegendDot} style={{ background: color }} />
-                      <span className={css.statusDetailLegendLabel}>{label}</span>
-                      <span className={css.statusDetailLegendValue}>{compactTokens(n)} · {ctxWindow > 0 ? Math.round((n / ctxWindow) * 1000) / 10 : 0}%</span>
-                    </span>
-                  ))}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        {/* 命中率趋势（chart-cache，state-success 折线）。 */}
-        <div className={css.statusDetailChartCol}>
-          <span className={css.statusDetailChartColLabel}>命中率</span>
-          <TrendLine color="var(--dsw-alias-state-success, #22c55e)" />
-          <span className={css.statusDetailTrendLegend}>
-            <span className={css.statusDetailTrendDot} style={{ background: 'var(--dsw-alias-state-success, #22c55e)' }} />
-            <span className={css.statusDetailTrendLabel}>平均 {hit}%</span>
-          </span>
-        </div>
-        {/* 累计费用趋势（chart-cost，label-secondary 折线）。 */}
-        <div className={css.statusDetailChartCol}>
-          <span className={css.statusDetailChartColLabel}>累计费用</span>
-          <TrendLine color="var(--dsw-alias-label-secondary)" />
-          <span className={css.statusDetailTrendLegend}>
-            <span className={css.statusDetailTrendDot} style={{ background: 'var(--dsw-alias-label-secondary)' }} />
-            <span className={css.statusDetailTrendLabel}>—</span>
-          </span>
-        </div>
-      </div>
-      {/* 子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。
-          运行中在前、已完成在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标。 */}
+      {/* 子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息，与统计同卡统一）。
+          运行中在前、已完成在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标，
+          点击进入该子会话（官方 lineage 下拉已按「顶栏只保留一个下拉」屏蔽）。 */}
       {roster.length > 0 && (
         <div className={css.statusDetailAgents}>
           <div className={css.statusDetailAgentsHead}>
@@ -386,19 +594,36 @@ export interface SessionStatusInjected {
   readonly openSession: (sessionId: string) => void
 }
 
-/** 状态胶囊 occupant 的完整 props（运行时 share 已含 sessionId + useSessions）。 */
+/**
+ * 状态胶囊 occupant 的完整 props（运行时 share 已含 sessionId + useSessions）。
+ *
+ * `useTrajectory` 由 corum-ui-trajectory 经
+ * `declare module '@deepseek-ai/dsh-client-ui-slots'` 的 `SessionStandardProps`
+ * 模块合并注入——本包不 import 该实现包（红线 3：跨 bundle 类型面用本地能力接口
+ * 收窄），故这里用 `TrajectoryCapableProps` 显式并上钩子面；运行时由槽的
+ * PropsRuntime 实际提供（已实机确认 ConversationSessionHeader 收到的 props 含
+ * useTrajectory）。若精简装配里没装轨迹插件，该 prop 为 undefined，曲线退化为
+ * 空态基线（不报错）。
+ */
 export type SessionStatusPillProps =
-  PropsRuntime<'conversation.session.header.actions'> & SessionStatusInjected
+  PropsRuntime<'conversation.session.header.actions'>
+  & SessionStatusInjected
+  & TrajectoryCapableProps
+
+/** 会话标准 props 里本组件消费的轨迹能力（本地能力接口，见上注释）。 */
+export interface TrajectoryCapableProps {
+  readonly useTrajectory?: UseTrajectoryHook | undefined
+}
 
 /**
  * 会话顶栏的 corum 状态段：状态胶囊（真实统计）+ 常驻子 Agent 胶囊 + 详情浮层。
  *
  * 锚点：详情浮层按**会话顶栏行的水平中心**居中——行在 `header` 元素内，主窗口
  * 与独立窗口都存在（独立窗口没有网格，故不能再用壳的会话列几何）。
- * @param props - 槽运行时 share（sessionId/useSessions）+ 业务注入面。
+ * @param props - 槽运行时 share（sessionId/useSessions/useTrajectory）+ 业务注入面。
  * @returns 状态胶囊与其展开的统计详情卡。
  */
-export function SessionStatusPill({ sessionId, useSessions, remote, openSession }: SessionStatusPillProps) {
+export function SessionStatusPill({ sessionId, useSessions, remote, openSession, useTrajectory }: SessionStatusPillProps) {
   const wrapRef = useRef<HTMLSpanElement | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [anchor, setAnchor] = useState({ left: 0, width: 0 })
@@ -411,6 +636,8 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession 
   const roster = rankRoster(useSubagentRoster(remote, sessionId))
   const running = roster.filter(entry => !entry.done)
   const lead = running[0]
+  // 生成速度序列（chart-speed 实时曲线）：来自轨迹快照的逐步真实速度。
+  const speedSeries = useSpeedSeries(useTrajectory)
 
   // 详情浮层锚点 = 会话顶栏行在视口中的水平中心（列宽变化/窗口缩放时重测）。
   // 上溯 <header>（会话插件 header 是行的宿主，两种窗口都在）；取不到则退回胶囊自身。
@@ -505,6 +732,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession 
               anchor={anchor}
               roster={roster}
               openSession={openSession}
+              speedSeries={speedSeries}
             />
           )}
         </span>
