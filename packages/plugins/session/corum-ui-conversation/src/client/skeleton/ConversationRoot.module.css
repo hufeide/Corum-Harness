@@ -41,21 +41,33 @@
      header buttons stay clickable. */
   z-index: 9;
   flex: none;
-  padding: 12px 28px 0 20px;
-  border-bottom: 1px solid transparent;
+  /* 会话顶栏卡片（design.pen a2otEO 主窗口 / i5ie6 独立窗口，两帧规格一致）：
+     height 44 / gap 8 / padding [0,12] / fill $glass-1 / cornerRadius 12。
+     flex column + justify-content:center 让 titleRow 垂直居中；多视图时 tabs
+     在其下自然排布（不挤同一行）。
+     外边距与拖窗行为由宿主外壳经两个自定义属性注入：
+       --corum-session-topbar-margin    主窗口给四边 gutter；浮窗左侧让给红绿灯。
+       --corum-session-topbar-app-region 浮窗整条承担拖窗（主窗口 none，不抢壳的
+                                          窗口控制条）。 */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin: var(--corum-session-topbar-margin, 12px 12px 0);
+  padding: 0 12px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 12px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  -webkit-app-region: var(--corum-session-topbar-app-region, none);
 }
 
-.header::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 1px;
-  left: 0;
-  z-index: 0;
-  height: 1px;
-  /* fork（corum 液态玻璃）：header 底部分隔用玻璃光边。 */
-  background: var(--corum-glass-border);
-  pointer-events: none;
+/* 卡内可点/可选控件不拖窗（标题面包屑、状态胶囊、轨迹按钮）。 */
+.header button,
+.header a,
+.header [role='button'] {
+  -webkit-app-region: no-drag;
 }
 
 /* Blank hero/settling: keep the strict Session header mounted without taking
@@ -65,10 +77,12 @@
 }
 
 .titleRow {
+  /* design.pen session-topbar：gap 8、align center、单行高 44（由 .header 的
+     min-height + 居中承担，这里只保证行内元素居中不换行）。 */
   display: flex;
   align-items: center;
-  gap: 0;
-  min-height: 32px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .titleCluster {

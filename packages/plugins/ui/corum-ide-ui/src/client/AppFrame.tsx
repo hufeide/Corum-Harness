@@ -217,6 +217,16 @@ function floatingSlotKey(): string | null {
 const FLOATABLE_SLOTS: ReadonlySet<string> = new Set<string>(IDE_GRID_SLOTS)
 
 /**
+ * 自带顶栏（= 会话顶栏卡片充当窗口顶栏）的浮动槽：这些槽挂载的是会话视图，
+ * 其 header 已渲染 state 行，故不再叠加壳的 Window Chrome（design.pen i5ie6）。
+ * 目前只有 `conversation`（会话拖出为独立窗口 = 设计稿画的那一帧）。
+ *
+ * ⚠️ 注意：判断依据是「该槽的内容会不会渲染 `conversation.session.header`」。
+ * 未来若新增其他会话级槽（如 trajectory 也带 header），需评估是否一并加入。
+ */
+const SELF_CHROME_FLOATING_SLOTS: ReadonlySet<string> = new Set<string>(['conversation'])
+
+/**
  * 运行时动态网格槽 → 官方 SlotMap renderSlot 的边界 helper（B2）。
  *
  * 网格 leaf 的 slot 是运行时宽 string（用户可拖入任意已注册槽、含本壳内建槽
@@ -817,9 +827,18 @@ export function IdeAppFrame({
   }
   if (floatKey !== null) {
     const mountable = FLOATABLE_SLOTS.has(floatKey)
+    // design.pen i5ie6（会话拖出为独立窗口）：承载会话的浮动窗**不画独立 chrome
+    // 行**——会话顶栏卡片本身就是窗口顶栏，左侧让出红绿灯、整条承担拖窗，即设计稿
+    // 的 `titlebar-row = [traffic-light-inset 66][session-topbar fill]` 单行结构。
+    // 其余槽位（编辑器/终端/轨迹…）没有会话顶栏，保留 FloatingChrome 提供拖拽区与标题。
+    const selfChrome = SELF_CHROME_FLOATING_SLOTS.has(floatKey)
     return (
-      <div className={css.floatingRoot} data-floating={floatKey}>
-        <FloatingChrome slotKey={floatKey} />
+      <div className={css.floatingRoot} data-floating={floatKey} data-self-chrome={selfChrome || undefined}>
+        {selfChrome
+          /* 红绿灯让位段：系统红黄绿由 titleBarStyle:'hiddenInset' 画在左上角，
+             本元素只提供让位几何 + 拖拽命中（与右侧会话顶栏同一行）。 */
+          ? <div className={css.floatingTrafficInset} aria-hidden="true" />
+          : <FloatingChrome slotKey={floatKey} />}
         <div className={css.floatingBody}>
           {mountable
             ? renderDynamicSlot(renderSlot, floatKey)

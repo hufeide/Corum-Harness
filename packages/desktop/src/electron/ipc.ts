@@ -82,13 +82,24 @@ export function registerIpc(
       return { ok: true }
     }
     const win = new BrowserWindow({
-      width: 560,
-      height: 640,
+      // design.pen i5ie6 的帧宽 900：会话顶栏卡片要容纳
+      // 标题 + divider + 状态胶囊（`4 轮 · 31m · In x / Out y · 命中 z%`）
+      // + 常驻 Agent 胶囊 + 轨迹按钮，560 宽会把标题压成几个字（实测 `并./`）。
+      width: 900,
+      height: 700,
       title: `corum · ${key}`,
-      // 无边框：完全去掉 macOS 原生标题栏，由 Window Chrome（圆点+槽位名+
-      // dock-back）充当唯一顶栏，避免「系统标题栏 + 自绘 Chrome」双层。
-      // Window Chrome 已带 -webkit-app-region:drag，窗口可拖。
-      titleBarStyle: 'hidden',
+      // design.pen i5ie6（会话拖出为独立窗口）：顶栏 = 系统红绿灯 + 会话顶栏卡片
+      // 同一行。故这里用 'hiddenInset'（与主窗口一致：隐藏原生标题栏但保留左上角
+      // 红绿灯，灯位内联进内容区），渲染层在这行左侧留 traffic-light-inset 让位、
+      // 并让会话顶栏卡片承担整条拖窗。
+      // 非会话槽（编辑器/终端/轨迹…）没有会话顶栏，渲染层仍画自绘 Window Chrome
+      // 作为唯一顶栏——该情况下 titleBarStyle 仍是 hiddenInset，自绘 chrome 的
+      // 左 padding(84px) 已为红绿灯让位，行为与改动前一致。
+      titleBarStyle: 'hiddenInset',
+      // 红绿灯定位：与会话顶栏卡片中线对齐——卡片 min-height 44、上边距 12，
+      // 中线 y = 12 + 22 = 34，灯高 13 → 定标 y = 34 - 6.5 ≈ 27。x=16 与卡片
+      // 左缘（floatingBody padding 12 + 卡片 margin 12）留出视觉间距。
+      trafficLightPosition: { x: 16, y: 27 },
       webPreferences: {
         preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
         contextIsolation: true,

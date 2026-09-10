@@ -816,7 +816,38 @@
   overflow: hidden;
 }
 
-/* design.pen Window Chrome: traffic dots + slot title + dock-back hint. */
+/* design.pen i5ie6（会话拖出为独立窗口）：自顶栏槽位的浮动窗不再有独立 chrome 行——
+   会话顶栏卡片本身就是窗口顶栏，且与红绿灯让位段**同处一行**：
+     titlebar-row = [ traffic-light-inset 66 ][ session-topbar fill ]   gap 8
+   卡片深藏在 body 内的会话视图里（ConversationRoot → header），无法与 inset 组成
+   直接的 flex 兄弟，故 inset 走绝对定位、卡片用左边距预留这一段——视觉结果与
+   设计稿的单行结构一致。 */
+.floatingRoot[data-self-chrome] {
+  position: relative;
+  /* 卡片承担整条拖窗；左边距 = inset 66 + 设计稿 gap 8 = 74。 */
+  --corum-session-topbar-app-region: drag;
+  --corum-session-topbar-margin: 12px 12px 0 74px;
+}
+
+.floatingRoot[data-self-chrome] .floatingBody {
+  padding-top: 0;
+}
+
+/* 红绿灯让位段（design.pen traffic-light-inset：66×40）：系统红黄绿由
+   titleBarStyle:'hiddenInset' 画在左上角，本段只提供让位几何 + 拖拽命中，
+   不自绘（自绘会与系统灯重叠）。 */
+.floatingTrafficInset {
+  position: absolute;
+  top: 12px; /* 与卡片上缘对齐（卡片 margin-top 12） */
+  left: 0;
+  width: 66px;
+  height: 40px;
+  -webkit-app-region: drag;
+}
+
+/* design.pen Window Chrome: traffic dots + slot title + dock-back hint.
+   仅用于**不带**会话顶栏的浮动槽（编辑器/终端/轨迹…）——那些槽没有自己的顶栏，
+   需要这条 chrome 提供拖拽区与标题。带会话顶栏的槽见 .floatingRoot[data-self-chrome]。 */
 .windowChrome {
   flex: none;
   display: flex;
