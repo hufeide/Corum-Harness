@@ -10,6 +10,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 const floatingListeners = new Set<(slotKey: string, detached: boolean) => void>()
 const floatingDragListeners = new Set<(payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void>()
 const nativeNotificationClickListeners = new Set<(payload: { notificationId: string | null }) => void>()
+const notificationCenterListeners = new Set<() => void>()
 
 ipcRenderer.on('corum:floating-change', (_event, payload: { slotKey: string; detached: boolean }) => {
   for (const listener of [...floatingListeners]) listener(payload.slotKey, payload.detached)
@@ -22,6 +23,11 @@ ipcRenderer.on('corum:floating-drag', (_event, payload: { slotKey: string; dragg
 // 系统通知被点击：主进程已唤醒/聚焦窗口，这里把 id 交给 renderer 执行跳转。
 ipcRenderer.on('corum:native-notification-clicked', (_event, payload: { notificationId: string | null }) => {
   for (const listener of [...nativeNotificationClickListeners]) listener(payload)
+})
+
+// 托盘菜单点了「通知中心」：主进程已显示窗口，这里让 renderer 展开自己的通知面板。
+ipcRenderer.on('corum:open-notification-center', () => {
+  for (const listener of [...notificationCenterListeners]) listener()
 })
 
 contextBridge.exposeInMainWorld('corumDesktop', {
@@ -49,6 +55,32 @@ contextBridge.exposeInMainWorld('corumDesktop', {
     nativeNotificationClickListeners.add(callback)
     return () => {
       nativeNotificationClickListeners.delete(callback)
+    }
+  },
+
+  // ── 托盘常驻（macOS 菜单栏）──────────────────────────────────────────
+
+  /**
+   * 把未读数推给主进程（菜单栏标题上的数字）。
+   *
+   * 单向 `send`（无返回值）：这是**显示**同步，renderer 不需要等待；主进程侧对
+   * 形状做钳制（`ipc.ts`）。
+   */
+  setNotificationCount: (count: { unread: number; total: number }): void => {
+    ipcRenderer.send('corum:notifications-count', count)
+  },
+
+  /**
+   * 取「常驻模式」一次性提示的展示资格（renderer 的托盘桥装好后主动拉一次）。
+   * @returns resident=当前是否托盘常驻；firstTime=这次该不该提示（拉取即落盘去重）。
+   */
+  getTrayHint: (): Promise<{ resident: boolean; firstTime: boolean }> =>
+    ipcRenderer.invoke('corum:tray-hint'),
+  /** 主进程托盘菜单点了「通知中心」→ 展开渲染层的通知面板。 */
+  onOpenNotificationCenter: (callback: () => void): (() => void) => {
+    notificationCenterListeners.add(callback)
+    return () => {
+      notificationCenterListeners.delete(callback)
     }
   },
   /** Main window: subscribe to slot detach/restore (floating open/close). */

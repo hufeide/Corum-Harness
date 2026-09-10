@@ -60,8 +60,11 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/HANDOFF-2026-09-10-session-bar-and-notifications.md` — **最新交接入口**（会话条
-  Agent 胶囊 + 通知 5s 收起 + P8 卡片按次锚点 + P1/P2/P4/P10 修复）；下个 session 从这里开始。
+- `docs/HANDOFF-2026-09-10-tray-and-notification-ownership.md` — **最新交接入口**（通知归属
+  分档：全局只进主窗 / 浮窗留直接反馈 toast + macOS 托盘常驻：菜单栏未读数字、关窗隐藏、
+  单实例锁）；下个 session 从这里开始。
+- `docs/HANDOFF-2026-09-10-session-bar-and-notifications.md` — 上一份交接（会话条
+  Agent 胶囊 + 通知 5s 收起 + P8 卡片按次锚点 + P1/P2/P4/P10 修复）。
 - `docs/plugin-template.md` — new-plugin package template and setup steps.
 - `.dbg/cordis-singleton-probe.md`, `.dbg/c3a-sidebar-mode-service.md` — the
   cordis cross-bundle singleton proof + the sidebarMode service implementation

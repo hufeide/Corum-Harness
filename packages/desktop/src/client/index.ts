@@ -11,6 +11,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createNotificationStore, type NotificationStore } from './notifications.ts'
 import { installNativeNotificationMirror, installNotificationBridge } from './notification-bridge.ts'
+import { installTrayBridge } from './tray-bridge.ts'
 import { mountNotificationHost } from './mount-notifications.tsx'
 // Type-only: pulls the `ctx.slots` Context merge (declared by dsh-client-ui-renderer).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -86,11 +87,29 @@ export function apply(ctx: Context): void {
     notifyCtx.effect(() => () => { dispose() }, 'corum-desktop: notification bridge')
   })
 
-  // 应用内通知 → macOS 系统通知中心镜像（2026-09-10 用户定调「先做 macOS」）。
-  // 只在窗口失焦时发（前台有应用内 toast）；点击经主进程唤醒窗口后走既有 onOpen。
+  // 系统通知镜像：**当前默认关闭**（2026-09-10 用户定调「先降级不开发」）。
+  //
+  // 代码已就绪（`installNativeNotificationMirror` + 主进程 `corum:notify-native`），
+  // 但 macOS（Electron 42+）的 UNNotification **要求代码签名**：本仓开发态与打包版
+  // 都是 `linker-signed`，UNNotification 不接受 → 通知必然静默失败
+  // （实测 `{ok:false, error:'UNErrorDomain错误1'}`）。
+  // 在签名与分发配置就位前打开它只会白跑 IPC，故先关；签名解决后把下面的开关
+  // 置 true 即可启用（无需改其他代码）。详见
+  // `docs/ASSESSMENT-tray-floating-system-notification.md` §0.5。
+  const NATIVE_NOTIFICATIONS_ENABLED = false
+  if (NATIVE_NOTIFICATIONS_ENABLED) {
+    ctx.effect(
+      () => installNativeNotificationMirror(notifications),
+      'corum-desktop: native notification mirror',
+    )
+  }
+
+  // macOS 菜单栏托盘的渲染层半边（2026-09-10 用户「托盘常驻要做」+「托盘提示消息
+  // 数量」）：把未读数推给主进程显示在菜单栏标题上，并接托盘菜单的「通知中心」动作。
+  // 不走 ctx.inject —— 它只依赖 preload 桥与 notifications store，无 cordis 服务依赖。
   ctx.effect(
-    () => installNativeNotificationMirror(notifications),
-    'corum-desktop: native notification mirror',
+    () => installTrayBridge(notifications),
+    'corum-desktop: tray bridge',
   )
 
   // The resident Monaco editor (design.pen ③ 编辑器区合并卡，2026-09-03 改版：

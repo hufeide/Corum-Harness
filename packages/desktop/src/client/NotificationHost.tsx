@@ -260,8 +260,27 @@ function NotificationPanel({ items, onMarkAllRead, onClose, onDismiss, onOpen }:
   )
 }
 
-/** 通知栈宿主：portal 到 body 右下角纵向堆叠（设计稿 alignItems=end）+ 可拖动 bell + 通知中心。 */
-export function NotificationHost({ store }: { store: NotificationStore }) {
+/**
+ * 通知宿主的渲染档位。
+ *
+ * - `full`（主窗默认）：toast 栈 + 可拖动 bell + 通知中心。承载**全局**通知
+ *   （编排进度、子 Agent 完成、工作区回收…），未读数是其核心状态。
+ * - `direct`（浮窗）：**只有 toast 栈**，不渲染 bell、不渲染通知中心。
+ *
+ * 为什么分档（用户 2026-09-10 定调）：「通知只归属主窗口」+「保留浮窗的直接反馈」。
+ * 全局事件桥在浮窗根本不安装（见 notification-bridge.ts），浮窗里能出现的只有
+ * **本窗口用户动作的直接反馈**（`__corumNotify`：切换 Agent 失败、编辑器打开失败…）。
+ * 这类反馈是「我刚才那一下的结果」，必须当场看见 → 保留 toast；而「通知中心 /
+ * 未读数」是应用级的信箱心智，浮窗是个可能很小、随时会被关掉的单槽位视图，
+ * 在那里再立一个信箱只会和主窗的未读数打架 → 不渲染 bell。
+ */
+export type NotificationHostMode = 'full' | 'direct'
+
+/**
+ * 通知栈宿主：portal 到 body 右下角纵向堆叠（设计稿 alignItems=end）+ 可拖动 bell + 通知中心。
+ * @param props - 通知 store 与渲染档位（默认 `full`）。
+ */
+export function NotificationHost({ store, mode = 'full' }: { store: NotificationStore; mode?: NotificationHostMode }) {
   const items = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [paused, setPaused] = useState(false)
   // 非 items 的 UI 状态（通知中心开合 / bell 位置）：单独订阅，避免拖动时重建 items 数组。
@@ -273,7 +292,15 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
   const draggedRef = useRef(false)
   const tabRef = useRef<HTMLButtonElement | null>(null)
   // 回调引用稳定：Toast 的计时 effect 依赖它们，内联箭头函数会让每次渲染都重置 5s 计时。
-  const onCollapse = useRef((id: string) => { store.collapse(id) }).current
+  //
+  // direct 档的「5s 到点」= **直接销毁**（而不是收起到 bell）：浮窗没有 bell 可收，
+  // 若照旧走 collapse，条目会永远留在 store 的 collapsed 状态里——既占内存，又让
+  // `items.length > 0` 恒真。而直接反馈的语义本就是「当场看见」：看过即走，
+  // 不沉淀成待办队列（真要留痕的失败在浮窗里另有原地错误态，如 Agent 切换失败）。
+  const onCollapse = useRef((id: string) => {
+    if (mode === 'direct') store.dismiss(id)
+    else store.collapse(id)
+  }).current
   const onDismiss = useRef((id: string) => { store.dismiss(id) }).current
   const onMarkAllRead = useRef(() => { store.markAllRead() }).current
   const onClosePanel = useRef(() => { store.setPanelOpen(false) }).current
@@ -367,7 +394,7 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
    * 这样通知中心恒可达（可回看历史），同时「未读」的视觉强调不变——比「隐藏」更
    * 符合通知中心的心智模型（设计稿的 drawer-tab 本就是常驻图标，未读数是其附加态）。
    */
-  const showBell = items.length > 0 && !panelOpen
+  const showBell = mode === 'full' && items.length > 0 && !panelOpen
   const dragStyle: React.CSSProperties | undefined = dragPos === null
     ? undefined
     : { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' }
@@ -392,7 +419,7 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
           ))}
         </div>
       )}
-      {panelOpen && (
+      {panelOpen && mode === 'full' && (
         <NotificationPanel
           items={items}
           onMarkAllRead={onMarkAllRead}

@@ -9,17 +9,27 @@
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { NotificationStore } from './notifications.ts'
-import { NotificationHost } from './NotificationHost.tsx'
+import { NotificationHost, type NotificationHostMode } from './NotificationHost.tsx'
+import { isFloatingWindow } from './window-role.ts'
 
 /** 通知容器在 body 下的标记类名（防重复挂载）。 */
 const CONTAINER_CLASS = 'corum-notification-root'
 
 /**
  * 挂载通知宿主。幂等：已挂载时直接返回现有 root。
+ *
+ * 两个窗口都挂，但**档位不同**（用户 2026-09-10 定调）：
+ *   ① 「悬浮窗只在主窗口，拖出会话后，通知也只通知到主窗口」→ **全局**通知
+ *      （事件桥）只装主窗（见 notification-bridge.ts）。
+ *   ② 「保留浮窗的直接反馈，仅全局通知走主窗」→ 浮窗仍要渲染 toast，否则用户在
+ *      浮窗里点了「切换 Agent」失败就彻底没有反馈（`__corumNotify` 会写进浮窗
+ *      自己的 store，而没有 UI 去读它 = 静默吞错）。
+ * 故浮窗以 `direct` 档挂载：**只留 toast 栈**，不挂 bell / 通知中心。
  * @param store - 通知 store。
  * @returns 卸载句柄（HMR/壳重建时清理 root + 容器）。
  */
 export function mountNotificationHost(store: NotificationStore): { dispose(): void } {
+  const mode: NotificationHostMode = isFloatingWindow() ? 'direct' : 'full'
   let container = document.body.querySelector<HTMLDivElement>(`.${CONTAINER_CLASS}`)
   let root: Root | null = null
   if (container === null) {
@@ -27,7 +37,7 @@ export function mountNotificationHost(store: NotificationStore): { dispose(): vo
     container.className = CONTAINER_CLASS
     document.body.appendChild(container)
     root = createRoot(container)
-    root.render(createElement(NotificationHost, { store }))
+    root.render(createElement(NotificationHost, { store, mode }))
   }
   return {
     dispose() {

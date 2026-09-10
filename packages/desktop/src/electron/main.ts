@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, nativeImage, session } from 'electron'
 import { registerSchemes, registerProtocols } from './protocol.ts'
 import { registerIpc } from './ipc.ts'
+import { createCorumTray, type CorumTray } from './tray.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
 import { findCombo, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
 import { resolveMasterKeyB64, MASTER_KEY_ENV } from './credentials-key.ts'
@@ -96,6 +97,8 @@ const DEV = process.env.CORUM_DEV_HMR !== undefined && process.env.CORUM_DEV_HMR
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false
+/** macOS 菜单栏托盘（常驻入口）；非 macOS 或创建失败时为 null。 */
+let tray: CorumTray | null = null
 /** 当前 host bridge（combo 切换时整体替换）。 */
 let bridge: HostBridgeClient | null = null
 /** 当前协议集（只服务 combo 壳页 + shell 静态资源；dsh 页走官方 webserver）。 */
@@ -139,11 +142,39 @@ function createWindow(): void {
     const [mw, mh] = mainWindow.getMinimumSize()
     console.log(`[corum-shell] window min size effective: ${mw}x${mh}`)
   }
+  /**
+   * 关窗语义（2026-09-10 用户定调「托盘常驻要做」）。
+   *
+   * 有托盘时：点红点 / ⌘W **不再退出**，而是把窗口藏起来 —— 后台的会话轮次、
+   * 子 Agent、编排批次继续跑，用户经菜单栏图标随时回来（这正是「常驻」的意义；
+   * 否则托盘图标会随关窗一起消失，等于没有）。
+   *
+   * 真正的退出只有两条路：托盘菜单「退出 矩道 Corum」与 ⌘Q —— 二者都走
+   * `app.quit()`，`before-quit` 会把 `quitting` 置位并先 flush 会话日志。
+   * 所以这里必须检查 `quitting`，否则退出流程会被自己的 preventDefault 卡住。
+   *
+   * 没有托盘（非 macOS / 托盘创建失败）时保持原语义（关窗即退出）：宁可少一个
+   * 功能，也不能让用户关掉窗口后再也找不回应用。
+   */
+  mainWindow.on('close', (event) => {
+    if (DEV) {
+      process.stderr.write(`[corum-shell] main window close requested (tray=${tray === null ? 'null' : 'ready'}, quitting=${String(quitting)})\n`)
+    }
+    if (quitting || tray === null) return
+    event.preventDefault()
+    // 常驻模式下这条日志是「窗口为什么没关掉」的唯一线索，不随 DEV 关掉。
+    process.stderr.write('[corum-shell] close intercepted → hide (tray resident)\n')
+    mainWindow?.hide()
+  })
   mainWindow.on('closed', () => {
+    if (DEV) process.stderr.write('[corum-shell] main window closed → app.quit()\n')
     mainWindow = null
     // 主窗关闭 = 退出整个 app（连带所有脱出的浮动窗）。浮动窗没有独立存活
     // 意义——它渲染的是主窗会话的内容，主窗没了它就成了孤儿。走 app.quit()
     // 触发 before-quit 的会话 flush，再退出。
+    //
+    // 注意：常驻模式下这条路只在**真正退出**时才走到（关窗已被上面的 close
+    // 处理器拦成 hide）。
     app.quit()
   })
   if (SMOKE || DEV) {
@@ -162,6 +193,32 @@ function createWindow(): void {
       process.stderr.write(`[smoke] renderer failed to load: ${code} ${description}\n`)
       app.exit(1)
     })
+  }
+}
+
+/**
+ * 显示并聚焦主窗口（托盘菜单「显示主窗口」与 macOS dock 点击共用一条路径）。
+ *
+ * 隐藏（`hide()`）与最小化（`minimize()`）都算「不在眼前」，必须都处理：
+ * 只 show 不 restore 会让窗口以图标形态停在 Dock 里，看起来像没反应。
+ */
+function showMainWindow(): void {
+  if (DEV) process.stderr.write('[corum-shell] show main window\n')
+  if (mainWindow === null || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/** 显示主窗口并让渲染层展开通知中心（托盘菜单第二项）。 */
+function openNotificationCenter(): void {
+  showMainWindow()
+  const contents = mainWindow?.webContents
+  if (contents === undefined || contents.isDestroyed()) return
+  try {
+    contents.send('corum:open-notification-center')
+  } catch {
+    // render frame 已 dispose（重载/崩溃竞态）：丢一条打开指令无害。
   }
 }
 
@@ -238,6 +295,25 @@ async function main(): Promise<void> {
   const userDataDir = process.env.CORUM_USER_DATA_DIR
     ?? join(os.tmpdir(), `corum-desktop-ud-${process.env.CORUM_DESKTOP_MODE ?? 'minimal'}-${process.env.CORUM_DEBUG_PORT ?? 'noport'}`)
   app.setPath('userData', userDataDir)
+
+  /**
+   * 单实例锁（2026-09-10 加，随托盘常驻一起来的必需项）。
+   *
+   * 为什么在托盘这一轮必须加：托盘图标是**每个进程一个 status item**，而「开机自启 +
+   * 手动再点一次」是极容易发生的事 —— 两个进程就是菜单栏上两个一模一样的图标，
+   * 用户点哪个都只说对一半（各自有自己的未读数与窗口）。锁在 `userData` 上（见上
+   * 一段：按 mode + 调试端口隔离），所以不同 combo / 不同调试端口的实例仍可并存，
+   * 只有「同一个实例再启动一次」会被合并到已有实例。
+   *
+   * 第二个实例不自己建窗口/托盘，而是把已有实例的主窗口请到前台后退出 —— 这也正好
+   * 是用户点 Dock 图标或再次双击应用时的预期行为。
+   */
+  if (!app.requestSingleInstanceLock()) {
+    process.stderr.write('[corum-desktop] another instance already owns the lock; handing over and exiting\n')
+    app.quit()
+    return
+  }
+  app.on('second-instance', () => { showMainWindow() })
 
   // 收敛 no-sandbox：仅「未签名 dev 构建」才禁用 Chromium 沙盒。dev（未打包）
   // 态 macOS 对未签名二进制拒绝沙盒初始化，窗口会空白，故追加 no-sandbox；
@@ -316,9 +392,23 @@ async function main(): Promise<void> {
   // 就能加载。dsh 页面走官方 webserver（dist + bundle + boot graph 注入全由
   // 官方 web-runtime/modules 行负责），壳协议只保留 combo 页与 shell 静态资源。
   protocols = registerProtocols(monacoWorkersPath(), shellAssetsPath())
-  // 壳层 IPC 一次性注册：bridge 通过 getter 解析（combo 切换换实例）。
-  registerIpc(() => bridge, () => mainWindow, { launchCombo })
+  // 壳层 IPC 一次性注册：bridge 通过 getter 解析（combo 切换换实例）；托盘同理
+  // 走 getter（托盘在 createWindow 之后才建，但 IPC 可能更早被调用）。
+  registerIpc(() => bridge, () => mainWindow, { launchCombo, getTray: () => tray })
   createWindow()
+  // macOS 菜单栏常驻托盘（2026-09-10 用户定调「托盘常驻要做」）。
+  // 建在 createWindow 之后：托盘菜单的第一项要能显示主窗口；同时 `tray !== null`
+  // 是关窗语义从「退出」降级为「藏起来」的开关（见 createWindow 的 close 处理器）。
+  // smoke 不建：那条路径要的是可预期的「起→握手→退」，多一个常驻图标会吊住进程。
+  if (!SMOKE) {
+    tray = createCorumTray({
+      assetsDir: shellAssetsPath(),
+      showMainWindow,
+      openNotificationCenter,
+      quit: () => { app.quit() },
+    })
+    process.stderr.write(`[corum-desktop] tray: ${tray === null ? 'unavailable (non-darwin or failed)' : 'ready'}\n`)
+  }
   process.stderr.write('[corum-desktop] window created (combo launcher)\n')
 
   if (SMOKE) {
@@ -370,7 +460,16 @@ async function main(): Promise<void> {
   }
 }
 
+// macOS：点 Dock 图标（或在无窗口时被激活）= 把常驻隐藏的主窗口请回来。
+// 没有这一段，用户关窗后用 Dock 唤起会「什么都没发生」。
+app.on('activate', (_event, hasVisibleWindows) => {
+  if (DEV) process.stderr.write(`[corum-shell] activate (hasVisibleWindows=${String(hasVisibleWindows)})\n`)
+  if (mainWindow === null || mainWindow.isDestroyed()) return
+  showMainWindow()
+})
+
 app.on('window-all-closed', () => {
+  if (DEV) process.stderr.write('[corum-shell] window-all-closed → app.quit()\n')
   app.quit()
 })
 

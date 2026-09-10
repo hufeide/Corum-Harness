@@ -32,6 +32,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { NotificationStore, NotificationTone } from './notifications.ts'
+import { isFloatingWindow } from './window-role.ts'
 
 /** `ctx.remote` 的窄化面（只用到转发事件订阅）。 */
 interface RemoteFace {
@@ -180,6 +181,8 @@ function nativeBridge(): NativeNotifyBridge | undefined {
  * @returns 退订函数。
  */
 export function installNativeNotificationMirror(store: NotificationStore): () => void {
+  // 同样只装主窗（浮窗没有通知 UI，也无从判断全局焦点语义）。
+  if (isFloatingWindow()) return () => {}
   const bridge = nativeBridge()
   if (bridge?.notifyNative === undefined) return () => {}
 
@@ -235,6 +238,15 @@ export function installNativeNotificationMirror(store: NotificationStore): () =>
  * @returns 退订函数。
  */
 export function installNotificationBridge(ctx: Context, store: NotificationStore): () => void {
+  // 通知是**应用级能力，只归属主窗口**（用户 2026-09-10 定调：「悬浮窗只在主窗口，
+  // 拖出会话后，通知也只通知到主窗口」）。
+  //
+  // ⚠️ 为什么必须在这里拦：浮窗与主窗**同源同 bundle**，两边的 `ctx.remote`
+  // 都订阅同一批宿主事件；而每个窗口各有**独立的 store 实例**（renderer 进程隔离）。
+  // 浮窗虽然以 `direct` 档挂了 toast（保留本窗直接反馈），但**全局事件不该进浮窗**：
+  // 同一事件会在两处各弹一份，而浮窗没有 bell / 通知中心，条目 5s 后即销毁 →
+  // 用户回头去主窗找时反而没有（真正的信箱只该在主窗）。故事件桥只装主窗。
+  if (isFloatingWindow()) return () => {}
   const remote = ctx.get('remote') as RemoteFace | undefined
   const sessions = ctx.get('sessions') as SessionsFace | undefined
   if (remote === undefined) return () => {}

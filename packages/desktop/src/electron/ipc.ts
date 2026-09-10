@@ -16,6 +16,7 @@ import { app, dialog, ipcMain, BrowserWindow, Notification } from 'electron'
 import type { HostBridgeClient } from './bridge-client.ts'
 import { findCombo, loadAllCombos, touchCombo } from './combos.ts'
 import { createInputHal, type InputHal } from './input-hal.ts'
+import { takeTrayResidentHint, type CorumTray } from './tray.ts'
 
 /**
  * Register the transport IPC handlers. Run once after app ready; the bridge
@@ -23,13 +24,15 @@ import { createInputHal, type InputHal } from './input-hal.ts'
  * @param getBridge - returns the live host bridge child handle.
  * @param getWindow - returns the current main window (or null while closed).
  * @param options - optional hooks: unary observation (smoke handshake), combo
- * launch (main-process spawn orchestration).
+ * launch (main-process spawn orchestration), tray accessor (menu-bar count).
  */
 export function registerIpc(
   getBridge: () => HostBridgeClient | null,
   getWindow: () => BrowserWindow | null,
   options?: {
     launchCombo?: (id: string) => Promise<{ ok: boolean; error?: string }>
+    /** 当前托盘（未建/非 macOS 为 null）；未读数与常驻提示都经它落地。 */
+    getTray?: () => CorumTray | null
   },
 ): void {
   // Push a message to the MAIN window's webContents. A closed floating
@@ -55,6 +58,29 @@ export function registerIpc(
   ipcMain.handle('corum:host-restart', async () => {
     await getBridge()?.restart()
     return { ok: true }
+  })
+
+  // ── 托盘常驻（macOS 菜单栏）────────────────────────────────────────────
+  //
+  // 未读数由**主窗 renderer**推送（通知账本在 renderer 的 store 里，主进程不复制
+  // 一份状态）：renderer 侧 store 一变就 send 一次，主进程只做「显示」。
+  // 用 `ipcMain.on` 而非 `handle`：这是纯通知、没有返回值，高频（每次通知增删）
+  // 也不该让 renderer 等一个 round trip。
+  ipcMain.on('corum:notifications-count', (_event, payload: { unread?: unknown; total?: unknown }) => {
+    const tray = options?.getTray?.() ?? null
+    if (tray === null) return
+    // 不可信输入的形状校验在这里做：托盘文案不能出现 NaN / 负数。
+    tray.setCount({
+      unread: typeof payload?.unread === 'number' ? payload.unread : 0,
+      total: typeof payload?.total === 'number' ? payload.total : 0,
+    })
+  })
+
+  // 常驻模式的**一次性**提示（详见 tray.ts 的 takeTrayResidentHint）：renderer 的
+  // 托盘桥装好后拉一次，拿到 firstTime 就发一条应用内通知。用 invoke 而不是主进程
+  // 主动推：renderer 的桥装好的时刻只有它自己知道，主动推会撞上「还没装好」。
+  ipcMain.handle('corum:tray-hint', () => {
+    return takeTrayResidentHint((options?.getTray?.() ?? null) !== null)
   })
 
   // ── 系统通知（macOS 优先；2026-09-10 用户定调「先做 macOS 系统通知」）──────
