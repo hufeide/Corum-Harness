@@ -110,9 +110,15 @@ function compactTps(tps: number): string {
 /**
  * 顶栏合并胶囊的统计段（设计稿 ①②④ 的 status-pill stats 文案）。
  *
- * 口径（用户 2026-09-10 定调）：轮次与步骤合并成 `X 轮 / X 步`（原为两个独立
- * 事实，占宽且信息密度低）；词元量用「词元」而非 tok/Token；命中率只留数值
- * （缓存命中曲线已按用户要求删除）。
+ * 口径（用户定调）：
+ * - 轮次与步骤合并成 `X 轮 / X 步`（原为两个独立事实，占宽且信息密度低）；
+ * - **词元输入/输出改为 context 占用百分比**（用户 2026-09-10：收起态不需要累计
+ *   账单量，占用率才是「还能聊多久」的可执行信息；累计词元量保留在展开浮层的
+ *   指标格里，一个事实一个家）。
+ * - 命中率只留数值（缓存命中曲线已按用户要求删除）。
+ *
+ * @param p - 会话投影（可为 undefined，未上报时整段显示 —）。
+ * @returns 形如 `4 轮 / 20 步 · 31m 26s · 上下文 2.1% · 命中 90%`。
  */
 function agentStatsSummary(p: AgentSessionProjections | undefined): string {
   if (p === undefined) return '—'
@@ -120,10 +126,24 @@ function agentStatsSummary(p: AgentSessionProjections | undefined): string {
   const steps = p.sessionStats?.steps ?? 0
   const active = (p.sessionStats?.llmMs ?? 0) + (p.sessionStats?.toolMs ?? 0)
   const input = (p.tokenUsage?.uncachedInputTokens ?? 0) + (p.tokenUsage?.cacheReadTokens ?? 0) + (p.tokenUsage?.cacheWriteTokens ?? 0)
-  const output = p.tokenUsage?.outputTokens ?? 0
   const cacheRead = p.tokenUsage?.cacheReadTokens ?? 0
   const hit = input > 0 ? Math.round((cacheRead / input) * 100) : 0
-  return `${turns} 轮 / ${steps} 步 · ${compactDuration(active)} · 词元 ${compactTokens(input)} / ${compactTokens(output)} · 命中 ${hit}%`
+  return `${turns} 轮 / ${steps} 步 · ${compactDuration(active)} · 上下文 ${contextPercent(p)} · 命中 ${hit}%`
+}
+
+/**
+ * context 占用百分比文案（`2.1%`；窗口未上报时 `—`）。
+ *
+ * 保留一位小数：窗口常是 1000k 量级，整数会把 0.4% 与 1.4% 都显示成「1%」，
+ * 在低占用阶段丢掉全部分辨率（实测本会话 20.6k/1000k = 2.1%）。
+ * @param p - 会话投影。
+ * @returns 百分比文案（含 % 号）。
+ */
+function contextPercent(p: AgentSessionProjections | undefined): string {
+  const used = p?.contextPressure?.pressureTokens ?? 0
+  const window = p?.contextPressure?.contextWindow ?? 0
+  if (window <= 0) return '—'
+  return `${Math.round((used / window) * 1000) / 10}%`
 }
 
 /**
