@@ -51,13 +51,23 @@ const MIN_DOCK_CHANGE_GAP_MS = 1100
 /** Dock 弹跳的节流间隔（ms）：同一波通知只跳一次，避免连环跳变成骚扰。 */
 const BOUNCE_THROTTLE_MS = 15_000
 
-/** Dock 要的额外输入：菜单动作（`ShellMenuHost`）+ 「该不该喊人」的判定。 */
+/** Dock 要的额外输入：菜单动作（`ShellMenuHost`）+ 「该不该喊人」的判定 + 图标重放。 */
 export interface CorumDockHost extends ShellMenuHost {
   /**
    * 此刻是否值得用 Dock 弹跳提示用户（主窗隐藏 / 最小化 / 未聚焦）。
    * 由 `main.ts` 依窗口状态回答 —— 本模块不持有窗口引用。
    */
   shouldAttractAttention(): boolean
+  /**
+   * 重新把应用图标设到 Dock。
+   *
+   * **为什么必须有**：`dock.hide()/show()` 会切换激活策略，Dock 会重新取图标，
+   * 之前用 `app.dock.setIcon()` 设进去的自定义图标**会被丢掉**，回退成 bundle 图标
+   * （dev 态 = Electron 默认图标）。2026-09-10 实测：本模块早期版本在启动时无条件
+   * `dock.show()`，于是应用一启动图标就被重置成 Electron 默认图标（用户报「图标怎么
+   * 变回去了」）。所以每次显隐变更后都要重放一次。
+   */
+  reapplyDockIcon(): void
 }
 
 /** Dock 的对外句柄。 */
@@ -98,18 +108,34 @@ export function createCorumDock(host: CorumDockHost): CorumDock | null {
   let lastBounceAt = 0
 
   /**
-   * 应用 Dock 图标显隐（串行化）。
+   * 应用 Dock 图标显隐（幂等 + 串行化 + 图标重放）。
    *
-   * `app.dock.hide()` 会把应用切成 accessory（不再出现在 Dock 与 ⌘Tab 里）——
-   * 这正是「只留菜单栏」想要的；恢复路径是菜单栏托盘的同一个勾选项（托盘在
-   * 菜单栏上始终可见，所以不存在「关掉后找不回」的死角）。
+   * `dock.hide()` 会把应用切成 accessory（不再出现在 Dock 与 ⌘Tab 里）—— 这正是
+   * 「只留菜单栏」想要的；恢复路径是菜单栏托盘的同一个勾选项（托盘在菜单栏上始终
+   * 可见，所以不存在「关掉后找不回」的死角）。
    */
   const applyVisibility = (): void => {
     const run = (): void => {
+      // ① 幂等：目标状态与当前一致时**什么都不做**。`dock.show()` 即使图标本来就
+      //    可见也会切一次激活策略，而切策略会让 Dock 丢掉自定义图标 —— 启动时无条件
+      //    `show()` 正是「应用一启动图标就变回 Electron 默认」的根因（实测踩到）。
+      try {
+        if (dock.isVisible() === !hidden) return
+      } catch {
+        // isVisible 不可用（极少数会话环境）时退化为「照常执行」。
+      }
       lastVisibilityChangeAt = Date.now()
       try {
-        if (hidden) dock.hide()
-        else void dock.show()
+        if (hidden) {
+          dock.hide()
+          // ③ 真的切了策略 → 让 main 侧把 `assets/icon.png` 重放回去。
+          host.reapplyDockIcon()
+        } else {
+          // `show()` 是异步的：图标重置可能发生在 promise 落定之后，故前后各重放一次
+          // （重放幂等且极廉价，宁可多设一次，也不要留一个「图标变默认」的时间窗）。
+          void dock.show().then(() => { host.reapplyDockIcon() })
+          host.reapplyDockIcon()
+        }
       } catch (error) {
         // 极少数会话环境（无 Dock）会抛；吞掉不影响启动。
         process.stderr.write(`[corum-desktop] dock visibility change failed: ${String(error)}\n`)
@@ -117,7 +143,7 @@ export function createCorumDock(host: CorumDockHost): CorumDock | null {
     }
     const waited = Date.now() - lastVisibilityChangeAt
     if (waited < MIN_DOCK_CHANGE_GAP_MS) {
-      // 官方已知问题：1 秒内的第二次 hide/show 会被忽略 → 延迟到窗口外再执行。
+      // ② 官方已知问题：1 秒内的第二次 hide/show 会被忽略 → 延迟到窗口外再执行。
       if (pendingVisibility !== null) clearTimeout(pendingVisibility)
       pendingVisibility = setTimeout(() => {
         pendingVisibility = null

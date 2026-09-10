@@ -201,6 +201,25 @@ function createWindow(): void {
 }
 
 /**
+ * 把应用图标设到 Dock（dev 态默认是 electron.icns；打包态由 electron-builder 的
+ * `mac.icon` 写进 Info.plist）。
+ *
+ * **幂等，且必须在每次 Dock 显隐变更后重放**：`dock.hide()/show()` 会切换激活策略，
+ * Dock 会重新取图标，自定义图标随之丢失（回退成 bundle 图标 = dev 态的 Electron 默认
+ * 图标）。这类「设置过又被系统重置」的状态必须有一个可重放的入口，否则就是
+ * 「用户看到图标莫名其妙变回默认」这类只有肉眼能发现的 bug。
+ */
+function applyDockIcon(): void {
+  if (process.platform !== 'darwin') return
+  const icon = nativeImage.createFromPath(join(dirname(fileURLToPath(import.meta.url)), '../assets/icon.png'))
+  if (icon.isEmpty()) {
+    process.stderr.write('[corum-desktop] dock icon asset missing (assets/icon.png)\n')
+    return
+  }
+  app.dock?.setIcon(icon)
+}
+
+/**
  * 显示并聚焦主窗口（托盘菜单「显示主窗口」与 macOS dock 点击共用一条路径）。
  *
  * 隐藏（`hide()`）与最小化（`minimize()`）都算「不在眼前」，必须都处理：
@@ -388,10 +407,12 @@ async function main(): Promise<void> {
   }
   // macOS dock 图标（dev 态默认 electron.icns，这里显式换成 corum logo；打包态由
   // electron-builder 的 mac.icon 写进 Info.plist）。assets/icon.png = 新鲸鱼图标。
-  if (process.platform === 'darwin') {
-    const icon = nativeImage.createFromPath(join(dirname(fileURLToPath(import.meta.url)), '../assets/icon.png'))
-    if (!icon.isEmpty()) app.dock?.setIcon(icon)
-  }
+  //
+  // ⚠️ 必须能被**重复调用**：`app.dock.setIcon()` 设的是 `NSApp.applicationIconImage`，
+  // 而任何**切激活策略**的动作（`dock.hide()` / `dock.show()`）都会让 Dock 重新取图标，
+  // 自定义图标随之丢失、回退到 bundle 图标（dev 态 = Electron 默认图标）——用户看到的
+  // 就是「图标变回默认了」（2026-09-10 实测踩到，见 dock.ts 的 reapplyDockIcon）。
+  applyDockIcon()
   // 协议提前注册（无需 host）：combo 管理页（corumapp://combo/…）在纯壳阶段
   // 就能加载。dsh 页面走官方 webserver（dist + bundle + boot graph 注入全由
   // 官方 web-runtime/modules 行负责），壳协议只保留 combo 页与 shell 静态资源。
@@ -423,6 +444,9 @@ async function main(): Promise<void> {
     }
     dock = createCorumDock({
       ...menuHost,
+      // 显隐切换会重置 Dock 图标（见 applyDockIcon 的注释）：让 dock 模块在每次
+      // 变更后把它重放回去。
+      reapplyDockIcon: applyDockIcon,
       // 遮挡判定：窗口不存在 / 已隐藏 / 未聚焦 —— 三者的共同语义是「用户看不到主窗」，
       // 此时新通知才值得让 Dock 图标跳一下（窗口在前台时系统也会让 bounce 返回 -1）。
       shouldAttractAttention: () => {
