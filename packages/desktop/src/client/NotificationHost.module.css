@@ -17,9 +17,11 @@
   pointer-events: none; /* 容器不挡点击，toast 自身恢复 pointer-events */
 }
 
-/* 单行 toast：图标 + col(title/msg) + 时间 + 关闭 ×。 */
+/* 单行 toast：图标 + col(title/msg) + 时间 + 关闭 ×（+ 底部倒计时条）。 */
 .toast {
   pointer-events: auto;
+  position: relative; /* 倒计时进度条的定位父级 */
+  overflow: hidden; /* 进度条贴底圆角裁切 */
   width: 340px;
   max-width: calc(100vw - 32px);
   display: flex;
@@ -32,6 +34,32 @@
   backdrop-filter: blur(12px);
   animation: toastEnter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/* 倒计时进度条（4px，贴底）：5s 内宽度 100% → 0；
+   悬停暂停时 `animation-play-state: paused` 冻结（与 5s 计时同一套暂停语义）。 */
+.countdown {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  width: 100%;
+  transform-origin: left center;
+  animation: countdownShrink linear forwards;
+  /* 时长由 JS 内联传（与 AUTO_COLLAPSE_MS 单一来源）；缺省 5s 兜底。 */
+  animation-duration: var(--corum-countdown, 5000ms);
+}
+
+@keyframes countdownShrink {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+.countdown[data-paused] { animation-play-state: paused; }
+
+.barSuccess { background: var(--dsw-alias-state-success-primary, #3EE6B0); }
+.barWarn { background: var(--dsw-alias-state-warn-primary, #FFB45C); }
+.barError { background: var(--dsw-alias-state-error-primary, #FF5C8A); }
+.barInfo { background: var(--dsw-alias-brand-primary); }
 
 @keyframes toastEnter {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
@@ -97,14 +125,18 @@
 }
 .btnX:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
 
-/* 收起态：右下角常驻 bell（design.pen `drawer-tab` cZ9D4 —— 28×52、左侧圆角 14、
-   贴右边缘、bell 18 + $state-error 未读数）。点击全部展开。 */
+/* 收起态：常驻 bell（design.pen `drawer-tab` cZ9D4 —— 外框 **56×52**、内 content
+   28×56、bell 18 + $state-error 未读数 badge 16（12/700）；圆角 **14 0 0 14** =
+   贴右边缘（只圆左侧两角）。
+   2026-09-10 第二轮：可拖动到任意位置，松手吸附最近边缘；吸附后 `data-edge` 决定
+   圆角朝向（贴右=左圆角 / 贴左=右圆角 / 贴上=下圆角 / 贴下=上圆角）。 */
 .tab {
   position: fixed;
   right: 0;
-  bottom: 120px;
+  top: 120px;
   z-index: 9999;
-  width: 28px;
+  box-sizing: border-box;
+  width: 56px; /* 设计稿 drawer-tab 外框 56×52（内含 28 宽 content，水平居中） */
   height: 52px;
   display: flex;
   flex-direction: column;
@@ -113,13 +145,28 @@
   gap: 4px;
   padding: 0;
   border: 1px solid var(--corum-glass-border);
-  border-right: none;
-  border-radius: 14px 0 0 14px;
   background: var(--corum-glass-1);
   box-shadow: 0 6px 16px #0000004D;
   backdrop-filter: blur(12px);
   color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none; /* 指针拖动期间不触发滚动/缩放手势 */
+  user-select: none;
+}
+
+/* 圆角朝向跟随吸附边缘。 */
+.tab[data-edge='right'] { border-radius: 14px 0 0 14px; border-right: none; }
+.tab[data-edge='left'] { border-radius: 0 14px 14px 0; border-left: none; }
+.tab[data-edge='top'] { border-radius: 0 0 14px 14px; border-top: none; }
+.tab[data-edge='bottom'] { border-radius: 14px 14px 0 0; border-bottom: none; }
+
+/* 拖动中：改用视口绝对定位（内联 left/top 覆盖贴边），并给出抓取光标与抬升感。 */
+.tab[data-dragging] {
+  cursor: grabbing;
+  border-radius: 14px;
+  border: 1px solid var(--corum-glass-border-active);
+  box-shadow: 0 12px 28px #00000066;
+  transition: none;
 }
 .tab:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
 .tabIcon { flex: none; }
@@ -135,12 +182,137 @@
   background: var(--dsw-alias-state-error-primary, #FF5C8A);
   color: #FFFFFF;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 12px; /* 设计稿 count 文本 12/700（原实现 10/600） */
+  font-weight: 700;
   line-height: 1;
 }
+
+/* ── 通知中心（展开列表，2026-09-10 第二轮）──────────────────────────────
+   点 bell 打开：右侧抽屉式面板，头部「全部已读」+「收起」，逐条渲染。
+   与 5s 自动收起共用 collapsed 状态机；收起后 bell 未读数 = 未读条数。 */
+.panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  top: 16px;
+  z-index: 9999;
+  width: 340px; /* 与 toast 同宽，视觉成一组 */
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: 14px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  box-shadow: 0 10px 28px #0000003D;
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  animation: panelEnter 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes panelEnter {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.panelHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--corum-glass-border);
+}
+
+.panelHeadIcon { flex: none; color: var(--dsw-alias-label-secondary); }
+
+.panelTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.panelUnread {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-error-primary, #FF5C8A);
+  color: #FFFFFF;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.panelSpacer { flex: 1; min-width: 0; }
+
+.panelAction {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.panelAction:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+
+.panelIconBtn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.panelIconBtn:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  gap: 4px;
+}
+
+.panelEmpty {
+  padding: 16px 8px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 通知中心里的一条（与 toast 同结构，去掉倒计时条）。 */
+.panelRow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+.panelRow:hover { background: var(--corum-glass-3, var(--corum-glass-2)); }
+
+/* 已读条目降低对比（仍可单条关闭）。 */
+.panelRow[data-read] { opacity: 0.62; }
+.panelRow[data-read] .title { color: var(--dsw-alias-label-secondary); }
 
 /* 降级：减少动画偏好 */
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
+  .panel { animation: none; }
+  .countdown { animation: none; width: 100%; }
 }

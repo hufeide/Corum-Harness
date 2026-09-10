@@ -14,22 +14,42 @@
  * 对齐时删掉了旧的 icon-box 与 r2 操作行（无消费方，见 notifications.ts）。
  *
  * 2026-09-10 用户定调「有通知弹出后，5s 未处理自动收起到右下角」：未处理的 toast
- * 计时 5s 后收起为右下角常驻 bell（`drawer-tab`：28×52、左侧圆角 14、bell 18 +
- * $state-error 未读数），点 bell 全部展开；鼠标悬停 toast 期间暂停计时。
+ * 计时 5s 后收起为右下角常驻 bell（`drawer-tab`），点 bell 展开通知中心；
+ * 鼠标悬停 toast 期间暂停计时（进度条同步冻结，二者共用同一剩余时间）。
+ *
+ * 2026-09-10 第二轮（用户「继续完成剩余内容」，TODO 两条待办）：
+ *   ① **bell 可拖动 + 边缘吸附**：松手吸附最近边缘（左右为主，必要时上下），
+ *      位置持久化（store → localStorage），吸附后圆角朝向跟随边缘；拖动中不触发展开
+ *      （用 6px 移动阈值区分 click 与 drag）。
+ *   ② **通知交互**：通知中心头部「全部已读」（未读清零 → bell 隐藏）+ 手动收起浮窗
+ *      （与 5s 自动收起共用 `collapsed` 状态机）+ toast 底部 4px **倒计时进度条**
+ *      （随 5s 线性收缩，悬停冻结）。
  *
  * 通知栈经 createPortal 挂到 document.body 右下角（摆脱网格 .leaf 的
  * will-change:transform + overflow:hidden 合成层裁剪，同 SettingsShell 模式）。
  * @module corum-desktop/client/NotificationHost
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { Bell, CircleAlert, CircleCheck, Hourglass, Info, X } from 'lucide-react'
-import type { CorumNotification, NotificationStore, NotificationTone } from './notifications.ts'
+import type { BellEdge, BellPosition, CorumNotification, NotificationStore, NotificationTone } from './notifications.ts'
 import css from './NotificationHost.module.css'
 
 /** 未处理自动收起的等待时长（用户定调 5s）。 */
 export const AUTO_COLLAPSE_MS = 5000
+
+/** 拖动判定阈值（px）：位移超过它才算拖动，否则视为点击展开。 */
+const DRAG_THRESHOLD = 6
+
+/** 吸附判定：边缘留白（px）。 */
+const SNAP_MARGIN = 16
+
+/** 拖到边缘附近多少 px 内就吸附该边（左右优先）。 */
+const SNAP_ATTRACT = 96
+
+/** 吸附后沿轴的最小偏移，避免贴到视口角落被裁。 */
+const AXIS_MIN = 72
 
 /** tone → lucide 图标（设计稿：success=circle-check / warn=hourglass / error=circle-alert）。 */
 const TONE_ICON: Record<NotificationTone, typeof Info> = {
@@ -56,6 +76,55 @@ function relTime(createdAt: number): string {
   return `${Math.floor(diff / 86_400_000)} 天前`
 }
 
+/** tone → 进度条配色类（与状态图标同色系）。 */
+const BAR_CLASS: Record<NotificationTone, string> = {
+  success: css.barSuccess,
+  warn: css.barWarn,
+  error: css.barError,
+  info: css.barInfo,
+}
+
+/**
+ * bell 的定位样式：贴边 + 沿轴偏移；圆角朝向跟随边缘（贴右=左侧圆角）。
+ * @param position - 当前吸附位置。
+ * @returns 内联样式（含 `data-edge` 由调用方设置）。
+ */
+function bellStyle(position: BellPosition): React.CSSProperties {
+  switch (position.edge) {
+    case 'right': return { right: 0, top: position.offset }
+    case 'left': return { left: 0, top: position.offset }
+    case 'top': return { top: 0, left: position.offset }
+    case 'bottom': return { bottom: 0, left: position.offset }
+  }
+}
+
+/**
+ * 把拖动落点吸附到最近边缘（左右优先，因为通知栈在右侧）。
+ * @param x - 落点中心 x（视口坐标）。
+ * @param y - 落点中心 y。
+ * @param width - 视口宽。
+ * @param height - 视口高。
+ * @returns 吸附后的位置。
+ */
+function snapToEdge(x: number, y: number, width: number, height: number): BellPosition {
+  const distLeft = x
+  const distRight = width - x
+  const distTop = y
+  const distBottom = height - y
+  const min = Math.min(distLeft, distRight, distTop, distBottom)
+  // 左右优先：上下的距离必须明显更近才吸附上下（否则拖到角落时会翻成上下）。
+  if (min === distLeft || min === distRight) {
+    return {
+      edge: distLeft < distRight ? 'left' : 'right',
+      offset: Math.max(AXIS_MIN, Math.min(height - AXIS_MIN, y)),
+    }
+  }
+  return {
+    edge: distTop < distBottom ? 'top' : 'bottom',
+    offset: Math.max(AXIS_MIN, Math.min(width - AXIS_MIN, x)),
+  }
+}
+
 function Toast({ notification, paused, onCollapse, onDismiss }: {
   notification: CorumNotification
   paused: boolean
@@ -63,10 +132,24 @@ function Toast({ notification, paused, onCollapse, onDismiss }: {
   onDismiss: (id: string) => void
 }) {
   const Icon = TONE_ICON[notification.tone]
-  // 5s 未处理 → 收起；悬停暂停（清除计时），移开后重新计时。
+  // 5s 未处理 → 收起；悬停暂停（清除计时 + 冻结进度条），移开后按**剩余时间**续计。
+  //
+  // 剩余时间用 `remainingRef` 而非 state：进度条的宽度靠 CSS 动画表达（见 .countdown），
+  // 不必每帧重渲染；这里只需要在「暂停/恢复」边界读到准确的剩余毫秒。
+  const remainingRef = useRef(AUTO_COLLAPSE_MS)
+  const deadlineRef = useRef(0)
+  const [progressPaused, setProgressPaused] = useState(paused)
   useEffect(() => {
-    if (paused) return undefined
-    const timer = setTimeout(() => { onCollapse(notification.id) }, AUTO_COLLAPSE_MS)
+    if (paused) {
+      // 暂停：结算剩余时间并冻结进度条宽度。
+      remainingRef.current = Math.max(0, deadlineRef.current - Date.now())
+      setProgressPaused(true)
+      return undefined
+    }
+    // 恢复：从剩余时间续计（首次进入时 remaining 即满额 5s）。
+    deadlineRef.current = Date.now() + remainingRef.current
+    setProgressPaused(false)
+    const timer = setTimeout(() => { onCollapse(notification.id) }, remainingRef.current)
     return () => { clearTimeout(timer) }
   }, [paused, notification.id, onCollapse])
   return (
@@ -87,21 +170,173 @@ function Toast({ notification, paused, onCollapse, onDismiss }: {
       >
         <X size={9} strokeWidth={2} />
       </button>
+      {/* 倒计时进度条（4px）：5s 线性收缩；悬停冻结（animation-play-state: paused）。 */}
+      <span
+        className={`${css.countdown} ${BAR_CLASS[notification.tone]}`}
+        data-paused={progressPaused || undefined}
+        style={{ '--corum-countdown': `${AUTO_COLLAPSE_MS}ms` } as React.CSSProperties}
+        aria-hidden="true"
+      />
     </div>
   )
 }
 
-/** 通知栈宿主：portal 到 body 右下角纵向堆叠（设计稿 alignItems=end）+ 收起 bell。 */
+/**
+ * 通知中心（展开列表）：头部「全部已读」+「收起」+ 逐条渲染（可单条关闭）。
+ * @param props - 通知列表与三个动作回调。
+ * @returns 右侧抽屉式面板。
+ */
+function NotificationPanel({ items, onMarkAllRead, onClose, onDismiss }: {
+  items: readonly CorumNotification[]
+  onMarkAllRead: () => void
+  onClose: () => void
+  onDismiss: (id: string) => void
+}) {
+  const unread = items.filter(n => !n.read).length
+  return (
+    <div className={css.panel} role="dialog" aria-label="通知中心">
+      <div className={css.panelHead}>
+        <Bell size={14} strokeWidth={2} className={css.panelHeadIcon} />
+        <span className={css.panelTitle}>通知</span>
+        {unread > 0 && <span className={css.panelUnread}>{unread}</span>}
+        <span className={css.panelSpacer} />
+        {unread > 0 && (
+          <button type="button" className={css.panelAction} onClick={onMarkAllRead}>
+            全部已读
+          </button>
+        )}
+        <button
+          type="button"
+          className={css.panelIconBtn}
+          aria-label="收起通知中心"
+          title="收起"
+          onClick={onClose}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      </div>
+      <div className={css.panelBody}>
+        {items.length === 0 && <span className={css.panelEmpty}>暂无通知</span>}
+        {items.map(n => {
+          const Icon = TONE_ICON[n.tone]
+          return (
+            <div key={n.id} className={css.panelRow} data-read={n.read || undefined} data-tone={n.tone}>
+              <Icon size={14} strokeWidth={2} className={`${css.toneIcon} ${TONE_CLASS[n.tone]}`} />
+              <div className={css.col}>
+                <span className={css.title}>{n.title}</span>
+                {n.message !== undefined && n.message !== '' && <span className={css.msg}>{n.message}</span>}
+              </div>
+              <span className={css.time}>{relTime(n.createdAt)}</span>
+              <button
+                type="button"
+                className={css.btnX}
+                aria-label="关闭通知"
+                onClick={() => onDismiss(n.id)}
+              >
+                <X size={9} strokeWidth={2} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** 通知栈宿主：portal 到 body 右下角纵向堆叠（设计稿 alignItems=end）+ 可拖动 bell + 通知中心。 */
 export function NotificationHost({ store }: { store: NotificationStore }) {
   const items = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [paused, setPaused] = useState(false)
+  // 非 items 的 UI 状态（通知中心开合 / bell 位置）：单独订阅，避免拖动时重建 items 数组。
+  const ui = useSyncExternalStore(store.subscribeUi, store.getUiSnapshot)
+  const panelOpen = ui.panelOpen
+  const bellPosition = ui.bell
+  // 拖动中的临时位置（视口坐标；松手吸附后清空）。
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
+  const draggedRef = useRef(false)
+  const tabRef = useRef<HTMLButtonElement | null>(null)
   // 回调引用稳定：Toast 的计时 effect 依赖它们，内联箭头函数会让每次渲染都重置 5s 计时。
   const onCollapse = useRef((id: string) => { store.collapse(id) }).current
   const onDismiss = useRef((id: string) => { store.dismiss(id) }).current
-  const onExpandAll = useRef(() => { store.expandAll() }).current
+  const onMarkAllRead = useRef(() => { store.markAllRead() }).current
+  const onClosePanel = useRef(() => { store.setPanelOpen(false) }).current
+  const onOpenPanel = useRef(() => {
+    store.expandAll()
+    store.setPanelOpen(true)
+  }).current
+
+  /**
+   * 拖动 bell：pointer 捕获 + 6px 阈值（阈值内视为点击 → 展开通知中心）。
+   * 松手吸附最近边缘并持久化；拖动中不打开通知中心。
+   */
+  const onPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    // 只响应主键（右键/中键不拖）。
+    if (event.button !== 0) return
+    const el = event.currentTarget
+    const rect = el.getBoundingClientRect()
+    const grab = { dx: event.clientX - rect.left, dy: event.clientY - rect.top }
+    draggedRef.current = false
+    const start = { x: event.clientX, y: event.clientY }
+    let moved: { x: number; y: number } | null = null
+    const onMove = (e: PointerEvent): void => {
+      const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+      if (!draggedRef.current && dist < DRAG_THRESHOLD) return
+      draggedRef.current = true
+      moved = {
+        x: Math.max(0, Math.min(window.innerWidth - rect.width, e.clientX - grab.dx)),
+        y: Math.max(0, Math.min(window.innerHeight - rect.height, e.clientY - grab.dy)),
+      }
+      setDragPos(moved)
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (!draggedRef.current) {
+        setDragPos(null)
+        return
+      }
+      // 吸附：用 bell 中心点算最近边缘。
+      const base = moved ?? { x: rect.left, y: rect.top }
+      const centerX = base.x + rect.width / 2
+      const centerY = base.y + rect.height / 2
+      store.setBellPosition(snapToEdge(centerX, centerY, window.innerWidth, window.innerHeight))
+      setDragPos(null)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }, [store])
+
+  // 窗口缩放后把 offset 夹回可见范围（否则可能被推出屏幕）。
+  useLayoutEffect(() => {
+    const clamp = (): void => {
+      const current = store.getBellPosition()
+      const max = current.edge === 'left' || current.edge === 'right' ? window.innerHeight : window.innerWidth
+      const offset = Math.max(AXIS_MIN, Math.min(max - AXIS_MIN, current.offset))
+      if (offset !== current.offset) store.setBellPosition({ edge: current.edge, offset })
+    }
+    clamp()
+    window.addEventListener('resize', clamp)
+    return () => { window.removeEventListener('resize', clamp) }
+  }, [store])
+
+  // Esc 收起通知中心（与手动收起同路径）。
+  useEffect(() => {
+    if (!panelOpen) return undefined
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') store.setPanelOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('keydown', onKey) }
+  }, [panelOpen, store])
+
   if (items.length === 0) return null
-  const collapsed = items.filter(n => n.collapsed)
+  const unread = items.filter(n => !n.read).length
   const visible = items.filter(n => !n.collapsed)
+  // bell 只在「有未读」时渲染（TODO：无未读时不渲染 bell）。
+  const showBell = unread > 0 && !panelOpen
+  const dragStyle: React.CSSProperties | undefined = dragPos === null
+    ? undefined
+    : { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' }
   return createPortal(
     <>
       {visible.length > 0 && (
@@ -116,16 +351,33 @@ export function NotificationHost({ store }: { store: NotificationStore }) {
           ))}
         </div>
       )}
-      {collapsed.length > 0 && (
+      {panelOpen && (
+        <NotificationPanel
+          items={items}
+          onMarkAllRead={onMarkAllRead}
+          onClose={onClosePanel}
+          onDismiss={onDismiss}
+        />
+      )}
+      {showBell && (
         <button
+          ref={tabRef}
           type="button"
           className={css.tab}
-          aria-label={`展开 ${collapsed.length} 条通知`}
-          title={`${collapsed.length} 条未处理通知`}
-          onClick={onExpandAll}
+          data-edge={bellPosition.edge}
+          data-dragging={dragPos !== null || undefined}
+          aria-label={`通知（${unread} 条未读）；可拖动到屏幕边缘`}
+          title={`${unread} 条未读通知（可拖动）`}
+          style={dragStyle ?? bellStyle(bellPosition)}
+          onPointerDown={onPointerDown}
+          onClick={() => {
+            // 拖动过就不要再触发展开（指针抬起后浏览器仍会补一次 click）。
+            if (draggedRef.current) { draggedRef.current = false; return }
+            onOpenPanel()
+          }}
         >
           <Bell size={18} strokeWidth={2} className={css.tabIcon} />
-          <span className={css.tabBadge}>{collapsed.length > 99 ? '99+' : collapsed.length}</span>
+          <span className={css.tabBadge}>{unread > 99 ? '99+' : unread}</span>
         </button>
       )}
     </>,
