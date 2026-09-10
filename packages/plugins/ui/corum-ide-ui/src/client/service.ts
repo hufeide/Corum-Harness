@@ -50,6 +50,16 @@ export interface GridActions {
    * 「corum:open-in-editor 点亮编辑器」等可编程入口用本方法，不再模拟点按钮。
    */
   showRegion(slot: string): void
+  /**
+   * 切换区域的显隐（等价于各快捷按钮的 toggleRegionVisibility 单槽包装）：
+   * 显示 → 隐藏（移出 userShown + 树 hidden=true 持久化）；隐藏 → 显示（showRegion）。
+   *
+   * 2026-09-10「顶栏归会话」新增：轨迹按钮从壳的窗口标题栏迁进**会话级槽**
+   * （session-bar.tsx），槽 occupant 拿不到 AppFrame 内部的 `userShown` 状态，
+   * 故经本服务面回调。与 showRegion 的差别是「可关」——轨迹区域是 fixed 槽、
+   * 不进插件中心视图管理，该按钮是唯一开关（用户 2026-09-09 定调）。
+   */
+  toggleRegion(slot: string): void
   /** 重置布局（按当前 frame 尺寸重算默认布局并持久化）。 */
   resetLayout(): void
   /** 切换侧栏 leaf 的 hidden（折叠 ⟷ 展开）。 */
@@ -98,6 +108,11 @@ export interface ILayout {
    * 经本方法显示区域（取代「读 localStorage 字符串匹配 + 模拟点按钮」hack）。
    */
   showRegion(slot: string): void
+  /**
+   * 切换区域显隐（会话顶栏的轨迹按钮经 session-bar 槽调用；浮窗内为 no-op）。
+   * 语义同 GridActions.toggleRegion。
+   */
+  toggleRegion(slot: string): void
   /** 重置布局（视图菜单「重置布局」；回退默认布局的几何）。 */
   resetLayout(): void
   /**
@@ -207,6 +222,10 @@ export class LayoutController implements ILayout {
 
   showRegion(slot: string): void {
     this.#requireGrid().showRegion(slot)
+  }
+
+  toggleRegion(slot: string): void {
+    this.#requireGrid().toggleRegion(slot)
   }
 
   resetLayout(): void {

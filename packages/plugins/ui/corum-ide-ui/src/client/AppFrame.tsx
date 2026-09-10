@@ -12,7 +12,7 @@
  * 纯组件：一切经框架三份 share（runtime / render-slot / store）到达，不 import
  * cordis 或框架。几何求解已迁到 GridView 的分割树（grid.ts）。
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
@@ -40,14 +40,18 @@ import css from './AppFrame.module.css'
 
 /**
  * 标题栏让位（design.pen L1：主窗口边距=0、titlebar-row 与 col-nav 间距=0）：
- * root row 的 sidebar/conversation 格内容顶部下移让位标题栏浮层；right-col 格
- * offset=0 顶到窗口顶（编辑器/资源管理器/终端上方无标题栏、贴窗口顶）。
- * 取值 = 标题栏底(40) + 卡片间距(0) − frame padding-top(0) = 40px：卡片顶落在
- * 40（= frame padding 0 + clearance 40），标题栏底到卡片间距恰为 0（设计稿
- * left-col 无 gap、left-body 无 padding；2026-08-27 用户指出间距过大 + 主窗口边距改 0）。
+ * root row 各格内容顶部下移让位窗口标题栏浮层。
+ *
+ * 2026-09-10「顶栏归会话」后的取值 = `[40, 0, 0]`：
+ *   - sidebar 格 offset=40——窗口控制（红绿灯让位 + 图标按钮）仍是窗口级浮层，
+ *     只压在侧栏正上方，侧栏内容必须让位（标题栏底 40 + 卡片间距 0）。
+ *   - conversation 格 offset=**0**——会话段已迁进会话级槽，该列上方不再有浮层，
+ *     卡片顶到窗口顶；标题栏行本身也已收窄到侧栏右缘（不再覆盖对话区），
+ *     故这里必须同步去让位，否则对话区顶部会白白空出 40px。
+ *   - right-col 格 offset=0——编辑器/资源管理器/终端上方本来就无标题栏。
  * 沿 root row 的格序（sidebar, conversation, right-col）。
  */
-const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
+const TITLEBAR_CLEARANCE: readonly number[] = [40, 0, 0]
 
 // ── FloatingLayer 单例桥 ──
 // AppFrame 组件树里 <FloatingLayer /> 是标题栏触发器的 sibling（Provider 在
@@ -132,540 +136,6 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
         </button>
       </div>
       )}
-    </div>
-  )
-}
-
-/**
- * Agent 标题栏（design.pen b4p03B，36px）：顶部贯通标题栏的右段——当前会话的
- * 标题 + 分隔线 + 状态胶囊（轮次/耗时/token/命中率 + chevron）+ spacer + 轨迹
- * 按钮（activity）。结构对齐设计稿，数据暂用假数据（同对话区 Convo Header），
- * 真实会话标题/统计待后续接。整段在 titlebar-row 的 .titlebarDrag 段内——
- * 根容器整段 app-region:drag（空白处拖窗口），内部文字/状态胶囊/轨迹按钮各自
- * no-drag（文字可选、按钮可点）；spacer 无声明、落入根 drag 命中区（可拖）。
- */
-/** session/list 行 projectionValues 的窄化形（Agent 标题栏统计的数据源）。 */
-interface SessionStatsProjection {
-  turns?: number
-  steps?: number
-  llmMs?: number
-  toolMs?: number
-  decodeMs?: number
-  decodeTokens?: number
-}
-interface TokenUsageProjection {
-  uncachedInputTokens?: number
-  outputTokens?: number
-  cacheReadTokens?: number
-  cacheWriteTokens?: number
-}
-interface ContextPressureProjection {
-  pressureTokens?: number
-  projectedTokens?: number
-  contextWindow?: number
-}
-interface ContextBreakdownProjection {
-  systemTokens?: number
-  toolsTokens?: number
-  messageTokens?: number
-}
-interface AgentSessionProjections {
-  sessionStats?: SessionStatsProjection
-  tokenUsage?: TokenUsageProjection
-  contextPressure?: ContextPressureProjection
-  contextBreakdown?: ContextBreakdownProjection
-}
-
-/** 紧凑时长：12m 34s / 3.8秒（标题栏摘要 + 详情 Active 共用）。 */
-function compactDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  return `${m}m ${s % 60}s`
-}
-
-/** 紧凑 token：12.4k / 3.1k / 178.3k（千分位紧凑，详情行用全量 toLocaleString）。 */
-function compactTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
-}
-
-/** Agent 标题栏统计（真实数据，session/list 投影折叠）。 */
-function agentStatsSummary(p: AgentSessionProjections | undefined): string {
-  if (p === undefined) return '—'
-  const turns = p.sessionStats?.turns ?? 0
-  const active = (p.sessionStats?.llmMs ?? 0) + (p.sessionStats?.toolMs ?? 0)
-  const input = (p.tokenUsage?.uncachedInputTokens ?? 0) + (p.tokenUsage?.cacheReadTokens ?? 0) + (p.tokenUsage?.cacheWriteTokens ?? 0)
-  const output = p.tokenUsage?.outputTokens ?? 0
-  const cacheRead = p.tokenUsage?.cacheReadTokens ?? 0
-  const hit = input > 0 ? Math.round((cacheRead / input) * 100) : 0
-  return `${turns} 轮 · ${compactDuration(active)} · In ${compactTokens(input)} / Out ${compactTokens(output)} · 命中 ${hit}%`
-}
-
-/** 迷你趋势曲线（设计稿 chart-cache/chart-cost 的 plot 170×40 折线）。
- *  数据源是当前会话聚合值（无逐 turn 历史序列投影），以「起步微升 → 收敛当前值」
- *  的单调折线近似趋势（语义对齐设计稿的上升曲线）。 */
-function TrendLine({ color, width = 170, height = 40 }: { color: string; width?: number; height?: number }) {
-  // 折线：左低右高收敛（0,32 → 40,24 → 90,18 → 130,12 → 170,8），圆角平滑。
-  const d = `M0 ${height * 0.8} C ${width * 0.24} ${height * 0.6}, ${width * 0.5} ${height * 0.45}, ${width * 0.76} ${height * 0.3} S ${width * 0.94} ${height * 0.2}, ${width} ${height * 0.2}`
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={css.statusDetailTrend} aria-hidden="true">
-      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-/** 状态栏详情卡（设计稿 GpfJh，×1.25 放大 + 长方形三列 chart）：hover/点击
- *  status-pill 展开的会话统计浮层。长方形 = 左（上下文 donut+图例）右（命中率/
- *  累计费用两个趋势曲线）三列撑宽。 */
-function AgentStatusDetail({ title, projections: p, anchor, roster, openSession }: {
-  title: string
-  projections: AgentSessionProjections | undefined
-  /** 会话区在视口中的水平锚点（left/width），详情卡据此在会话区水平居中（用户定调）。 */
-  anchor: { left: number; width: number }
-  /** 子 Agent 花名册（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。 */
-  roster: readonly SubagentRosterEntry[]
-  /** 打开会话（子 Agent 行点击 → 进入该子会话）。 */
-  openSession?: ((sessionId: string) => void) | undefined
-}) {
-  const stats = p?.sessionStats
-  const usage = p?.tokenUsage
-  const pressure = p?.contextPressure
-  const breakdown = p?.contextBreakdown
-  const turns = stats?.turns ?? 0
-  const steps = stats?.steps ?? 0
-  const active = (stats?.llmMs ?? 0) + (stats?.toolMs ?? 0)
-  const input = (usage?.uncachedInputTokens ?? 0) + (usage?.cacheReadTokens ?? 0) + (usage?.cacheWriteTokens ?? 0)
-  const output = usage?.outputTokens ?? 0
-  const cacheRead = usage?.cacheReadTokens ?? 0
-  const hit = input > 0 ? Math.round((cacheRead / input) * 100) : 0
-  const ctxUsed = pressure?.pressureTokens ?? 0
-  const ctxWindow = pressure?.contextWindow ?? 0
-  const ctxPct = ctxWindow > 0 ? Math.round((ctxUsed / ctxWindow) * 1000) / 10 : 0
-  const system = breakdown?.systemTokens ?? 0
-  const tools = breakdown?.toolsTokens ?? 0
-  const messages = breakdown?.messageTokens ?? 0
-  const ctxFree = Math.max(0, ctxWindow - ctxUsed)
-  const segOf = (n: number): number => (ctxWindow > 0 ? (n / ctxWindow) * 360 : 0)
-  const inputDeg = segOf(input)
-  const outputDeg = segOf(output)
-  const systemDeg = segOf(system + tools)
-  const rows: ReadonlyArray<readonly [string, string]> = [
-    ['轮次 Turns', String(turns)],
-    ['工作时长 Active', compactDuration(active)],
-    ['Token 输入 Input', input.toLocaleString('en-US')],
-    ['Token 输出 Output', output.toLocaleString('en-US')],
-    ['执行步骤 Steps', String(steps)],
-    ['工具调用 Tool', compactDuration(stats?.toolMs ?? 0)],
-  ]
-  return (
-    <div
-      className={css.statusDetail}
-      role="dialog"
-      aria-label="会话统计详情"
-      style={{ left: anchor.left + anchor.width / 2 }}
-    >
-      <div className={css.statusDetailHead}>
-        <span className={css.statusDetailDot} />
-        <span className={css.statusDetailTitle}>会话统计 · {title}</span>
-        <span className={css.statusDetailHint}>hover 状态栏弹出</span>
-      </div>
-      {rows.map(([k, v]) => (
-        <div key={k} className={css.statusDetailRow}>
-          <span className={css.statusDetailKey}>{k}</span>
-          <span className={css.statusDetailValue}>{v}</span>
-        </div>
-      ))}
-      <div className={css.statusDetailRow}>
-        <span className={css.statusDetailKey}>命中率 Cache Hit</span>
-        <span className={css.statusDetailBarWrap}>
-          <span className={css.statusDetailBar}><span className={css.statusDetailBarFill} style={{ width: `${hit}%` }} /></span>
-          <span className={css.statusDetailValue}>{hit}%</span>
-        </span>
-      </div>
-      <div className={css.statusDetailDivider} />
-      {/* 实时统计区头（设计稿 sec-charts sh：pulse + 标题 + 实时更新）。 */}
-      <div className={css.statusDetailChartHead}>
-        <span className={css.statusDetailPulse} />
-        <span className={css.statusDetailChartTitle}>实时统计 · {turns} 轮</span>
-        <span className={css.statusDetailChartLive}>实时更新</span>
-      </div>
-      {/* 三列 chart 行（设计稿 charts-row，长方形撑宽关键）：上下文 donut+图例 /
-          命中率趋势 / 累计费用趋势。 */}
-      <div className={css.statusDetailChartsRow}>
-        {/* 上下文 donut + 图例（chart-context）。 */}
-        <div className={css.statusDetailChartCol}>
-          <span className={css.statusDetailChartColLabel}>上下文 Context{ctxWindow > 0 ? ` · 上限 ${compactTokens(ctxWindow)}` : ''}</span>
-          <div className={css.statusDetailChartColBody}>
-            {ctxWindow > 0 && (
-              <>
-                <span className={css.statusDetailDonut} style={{
-                  background: `conic-gradient(var(--dsw-alias-brand-primary) 0deg ${inputDeg}deg, var(--corum-brand-accent, #FF71CE) ${inputDeg}deg ${inputDeg + outputDeg}deg, var(--dsw-alias-state-warn-primary, #FFB45C) ${inputDeg + outputDeg}deg ${inputDeg + outputDeg + systemDeg}deg, var(--corum-glass-2, rgba(42,24,64,.85)) ${inputDeg + outputDeg + systemDeg}deg 360deg)`,
-                }}>
-                  <span className={css.statusDetailDonutCenter}>
-                    <span className={css.statusDetailDonutPct}>{ctxPct}%</span>
-                    <span className={css.statusDetailDonutCap}>已用</span>
-                  </span>
-                </span>
-                <span className={css.statusDetailLegend}>
-                  {([
-                    ['var(--dsw-alias-brand-primary)', '输入', input],
-                    ['var(--corum-brand-accent, #FF71CE)', '输出', output],
-                    ['var(--dsw-alias-state-warn-primary, #FFB45C)', '系统提示词', system + tools],
-                    ['var(--corum-glass-2, rgba(42,24,64,.85))', '未用', ctxFree],
-                  ] as const).map(([color, label, n]) => (
-                    <span key={label} className={css.statusDetailLegendRow}>
-                      <span className={css.statusDetailLegendDot} style={{ background: color }} />
-                      <span className={css.statusDetailLegendLabel}>{label}</span>
-                      <span className={css.statusDetailLegendValue}>{compactTokens(n)} · {ctxWindow > 0 ? Math.round((n / ctxWindow) * 1000) / 10 : 0}%</span>
-                    </span>
-                  ))}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        {/* 命中率趋势（chart-cache，state-success 折线）。 */}
-        <div className={css.statusDetailChartCol}>
-          <span className={css.statusDetailChartColLabel}>命中率</span>
-          <TrendLine color="var(--dsw-alias-state-success, #22c55e)" />
-          <span className={css.statusDetailTrendLegend}>
-            <span className={css.statusDetailTrendDot} style={{ background: 'var(--dsw-alias-state-success, #22c55e)' }} />
-            <span className={css.statusDetailTrendLabel}>平均 {hit}%</span>
-          </span>
-        </div>
-        {/* 累计费用趋势（chart-cost，label-secondary 折线）。 */}
-        <div className={css.statusDetailChartCol}>
-          <span className={css.statusDetailChartColLabel}>累计费用</span>
-          <TrendLine color="var(--dsw-alias-label-secondary)" />
-          <span className={css.statusDetailTrendLegend}>
-            <span className={css.statusDetailTrendDot} style={{ background: 'var(--dsw-alias-label-secondary)' }} />
-            <span className={css.statusDetailTrendLabel}>—</span>
-          </span>
-        </div>
-      </div>
-      {/* 子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。
-          运行中在前、已完成在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标。 */}
-      {roster.length > 0 && (
-        <div className={css.statusDetailAgents}>
-          <div className={css.statusDetailAgentsHead}>
-            <span className={css.statusDetailAgentsTitle}>子 Agent</span>
-            <span className={css.statusDetailAgentsCount}>
-              {roster.filter(entry => !entry.done).length} 运行中 · {roster.filter(entry => entry.done).length} 已完成
-            </span>
-          </div>
-          {rankRoster(roster).map((entry) => (
-            <button
-              key={entry.childSessionId}
-              type="button"
-              className={css.statusDetailAgentRow}
-              data-done={entry.done || undefined}
-              title={`进入子会话 ${entry.childSessionId}`}
-              aria-label={`进入子会话 ${entry.label}`}
-              onClick={() => { openSession?.(entry.childSessionId) }}
-            >
-              <span className={css.statusDetailAgentDot} data-done={entry.done || undefined} />
-              <span className={css.statusDetailAgentLabel}>{entry.label}</span>
-              <span className={css.statusDetailAgentStep}>
-                {entry.done ? '已完成' : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
-              </span>
-              {entry.isolated && <span className={css.statusDetailAgentBadge}>隔离</span>}
-              {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
-              <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** 子 Agent 花名册条目（会话顶栏常驻胶囊 + 详情浮层的子 Agent 区数据源）。 */
-interface SubagentRosterEntry {
-  readonly childSessionId: string
-  readonly label: string
-  readonly mode: 'foreground' | 'background'
-  readonly isolated: boolean
-  readonly step: number
-  readonly currentAction?: string
-  readonly done: boolean
-  readonly lastActive: number
-}
-
-/** `ctx.remote` 的窄化面（只用到转发事件订阅）。 */
-export interface RemoteEventFace {
-  $on: (event: string, listener: (frame: never) => void) => () => void
-}
-
-/** 花名册内帧形（corum/subagent/child 与 corum/subagent/progress 的并集窄化）。 */
-interface ChildFrame {
-  parentSessionId?: string
-  callId?: string
-  childSessionId?: string
-  label?: string
-  mode?: 'foreground' | 'background'
-  isolated?: boolean
-  sessionId?: string
-  turn?: number
-  step?: number
-  currentAction?: string
-  done?: boolean
-  lastActive?: number
-}
-
-/**
- * 当前会话的子 Agent 花名册（2026-09-10 用户定调：常驻胶囊与状态展示合并）。
- *
- * 数据源 = 统一事件中心转发帧（`corum/subagent/child` 精确父子映射 +
- * `corum/subagent/progress` 进度推送），按父会话过滤后折叠成条目；运行中在前、
- * 最近活动排序。页面刷新后无回放帧，花名册从空开始，下一次派遣即恢复
- * （与 SubagentCard 的「广播优先、时间就近兜底」同源，这里只取精确通道）。
- */
-function useSubagentRoster(remote: RemoteEventFace | undefined, sessionId: string | undefined): readonly SubagentRosterEntry[] {
-  const [entries, setEntries] = useState<readonly SubagentRosterEntry[]>([])
-  useEffect(() => {
-    if (remote === undefined || sessionId === undefined) { setEntries([]); return undefined }
-    setEntries([])
-    const upsert = (patch: Partial<SubagentRosterEntry> & { childSessionId: string }): void => {
-      setEntries((prev) => {
-        const index = prev.findIndex(e => e.childSessionId === patch.childSessionId)
-        if (index < 0) {
-          if (patch.label === undefined) return prev
-          return [...prev, {
-            childSessionId: patch.childSessionId,
-            label: patch.label,
-            mode: patch.mode ?? 'foreground',
-            isolated: patch.isolated ?? false,
-            step: patch.step ?? 0,
-            ...(patch.currentAction === undefined ? {} : { currentAction: patch.currentAction }),
-            done: patch.done ?? false,
-            lastActive: patch.lastActive ?? Date.now(),
-          }]
-        }
-        const next = [...prev]
-        next[index] = { ...next[index], ...patch } as SubagentRosterEntry
-        return next
-      })
-    }
-    const disposeChild = remote.$on('corum/subagent/child', (frame: ChildFrame) => {
-      if (frame.parentSessionId !== sessionId || frame.childSessionId === undefined) return
-      upsert({
-        childSessionId: frame.childSessionId,
-        ...(frame.label === undefined ? {} : { label: frame.label }),
-        ...(frame.mode === undefined ? {} : { mode: frame.mode }),
-        ...(frame.isolated === undefined ? {} : { isolated: frame.isolated }),
-        lastActive: Date.now(),
-      })
-    })
-    const disposeProgress = remote.$on('corum/subagent/progress', (frame: ChildFrame) => {
-      if (frame.sessionId === undefined) return
-      upsert({
-        childSessionId: frame.sessionId,
-        ...(frame.step === undefined ? {} : { step: frame.step }),
-        ...(frame.currentAction === undefined ? {} : { currentAction: frame.currentAction }),
-        ...(frame.done === undefined ? {} : { done: frame.done }),
-        ...(frame.lastActive === undefined ? {} : { lastActive: frame.lastActive }),
-      })
-    })
-    return () => { disposeChild(); disposeProgress() }
-  }, [remote, sessionId])
-  return entries
-}
-
-/** 运行中在前、最近活动倒序（胶囊取第一个当「当前子 Agent」）。 */
-function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentRosterEntry[] {
-  return [...entries].sort((a, b) => (Number(a.done) - Number(b.done)) || (b.lastActive - a.lastActive))
-}
-
-function AgentTitleBar({ sessionTitle, currentSessionId, useSessions, sessionAnchor, onOpenTrajectory, remote, openSession }: {
-  sessionTitle?: string | undefined
-  /** 当前会话 id（AppFrame 从 useSessions 取 current 下发；空态/blank 为 undefined）。 */
-  currentSessionId?: string | undefined
-  /** 官方 useSessions 选择器 hook（读当前会话 projectionValues 投影）。 */
-  useSessions: AppFrameProps['useSessions']
-  /** 会话区在视口中的水平锚点（left/width），详情卡据此在会话区水平居中。 */
-  sessionAnchor: { left: number; width: number }
-  /** fork（corum）：轨迹按钮 → details 抽屉轨迹视图（fork #12）。 */
-  onOpenTrajectory: () => void
-  /** 统一事件中心 remote 面（子 Agent 花名册订阅源；缺省不渲染胶囊）。 */
-  remote?: RemoteEventFace | undefined
-  /** 打开会话（浮层子 Agent 行点击 → 进入子会话）。 */
-  openSession?: ((sessionId: string) => void) | undefined
-}) {
-  const titleRef = useRef<HTMLSpanElement | null>(null)
-  const [overflowing, setOverflowing] = useState(false)
-  const [detailOpen, setDetailOpen] = useState(false)
-  // 开发者模式（同 bundle 设置域；关闭时轨迹按钮不渲染）。
-  const developerMode = useDeveloperMode()
-  const title = sessionTitle || '新会话'
-  // 当前会话的统计投影（session/list 行 projectionValues）——真实数据，替代硬编码。
-  const projections = useSessions((s: SessionListState) => {
-    if (currentSessionId === undefined) return undefined
-    return (s.byId as unknown as Readonly<Record<string, { projectionValues?: AgentSessionProjections }>>)[currentSessionId]?.projectionValues
-  })
-  // 子 Agent 花名册（2026-09-10 用户定调：胶囊与状态展示合并到同一 pill）。
-  const roster = rankRoster(useSubagentRoster(remote, currentSessionId))
-  const running = roster.filter(entry => !entry.done)
-  const lead = running[0]
-
-  // 标题溢出检测（字号/内容/宽度变化时重测）。用 useLayoutEffect 在 paint 前
-  // 同步测量——避免「旧 overflowing=true + 新标题」先渲染一帧跑马灯双份文本。
-  useLayoutEffect(() => {
-    const el = titleRef.current
-    if (el === null) return
-    const measure = (): void => { setOverflowing(el.scrollWidth > el.clientWidth + 1) }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => { ro.disconnect() }
-  }, [title])
-
-  // 详情卡外点击关闭（Escape 同步关）。
-  const detailRef = useRef<HTMLSpanElement | null>(null)
-  useLayoutEffect(() => {
-    if (!detailOpen) return undefined
-    const onPointerDown = (e: PointerEvent): void => {
-      if (detailRef.current !== null && !detailRef.current.contains(e.target as Node)) setDetailOpen(false)
-    }
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setDetailOpen(false) }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [detailOpen])
-
-  return (
-    <div className={css.agentTitleBar}>
-      <span
-        ref={titleRef}
-        className={`${css.agentTitle}${overflowing ? ` ${css.agentTitleMarquee}` : ''}`}
-        title={title}
-      >
-        {overflowing ? (
-          /* 跑马灯：滚动轨双份文本无缝循环（平移 -50% = 一份+间隔宽）。 */
-          <span className={css.marqueeTrack}>
-            <span className={css.marqueeChunk}>{title}</span>
-            <span className={css.marqueeChunk} aria-hidden="true">{title}</span>
-          </span>
-        ) : (
-          title
-        )}
-      </span>
-      <span className={css.agentDivider} />
-      {/* 状态胶囊（design.pen status-pill + GpfJh 详情卡）：真实统计 + 点击展开详情。 */}
-      <span ref={detailRef} className={css.agentStatusWrap}>
-        <button
-          type="button"
-          className={css.agentStatusPill}
-          aria-expanded={detailOpen}
-          aria-label="会话统计，点击展开详情"
-          onClick={() => { setDetailOpen(open => !open) }}
-        >
-          <span className={css.agentStatusDot} />
-          <span className={css.agentStats}>{agentStatsSummary(projections)}</span>
-          {/* 常驻子 Agent 胶囊（用户 2026-09-10 定调：放 Title 右边、与状态展示合并）：
-              仅在当前会话有运行中子 Agent 时出现，空闲时整段不渲染。 */}
-          {lead !== undefined && (
-            <>
-              <span className={css.agentCapsuleDivider} />
-              <span className={css.agentCapsuleDot} />
-              <span className={css.agentCapsuleCount}>运行中 {running.length}</span>
-              <span className={css.agentCapsuleLabel}>{lead.label}</span>
-              <span className={css.agentCapsuleStep}>Step {lead.step}</span>
-              {running.length > 1 && <span className={css.agentCapsuleMore}>+{running.length - 1}</span>}
-            </>
-          )}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${css.agentChev}${detailOpen ? ` ${css.agentChevOpen}` : ''}`}><path d="m6 9 6 6 6-6" /></svg>
-        </button>
-        {detailOpen && (
-          <AgentStatusDetail
-            title={title}
-            projections={projections}
-            anchor={sessionAnchor}
-            roster={roster}
-            {...(openSession === undefined ? {} : { openSession })}
-          />
-        )}
-      </span>
-      <span className={css.agentSpacer} />
-      {/* fork（corum）：轨迹按钮是开发者功能——仅在「设置 → 高级 → 开发者模式」
-          开启时可见（用户 2026-09-09 定调）。 */}
-      {developerMode && (
-        <button
-          type="button" className={css.agentTrajBtn} title="轨迹" aria-label="打开轨迹视图"
-          onClick={() => { onOpenTrajectory() }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
-        </button>
-      )}
-    </div>
-  )
-}
-
-/** sessions 服务面的窄化（只用到 list 的 uSES 读写）。 */
-export interface SessionsListFace {
-  list: {
-    getSnapshot: () => SessionListState
-    subscribe: (listener: () => void) => () => void
-  }
-}
-
-/** 会话列表选择器 hook（uSES 源 = sessions.list）。 */
-function useSessionListSelector<T>(sessions: SessionsListFace, selector: (state: SessionListState) => T): T {
-  return useSyncExternalStore(sessions.list.subscribe, () => selector(sessions.list.getSnapshot()))
-}
-
-/**
- * 会话顶栏槽内容（`conversation.session.header`，2026-09-10 用户定调）。
- *
- * 背景：titlebar-row 原先是**窗口级**浮层（覆盖左列、整行 app-region:drag），
- * 会话拖出为独立窗口后这一段仍留在主窗口——会话标题/状态/Agent 胶囊在独立窗口
- * 里看不到。改为把会话段注册进**会话级槽**：它随会话视图渲染，独立窗口自然带上
- * 自己的顶栏；窗口控制（红绿灯 + 全局图标按钮）仍留在主窗口的侧栏上方。
- * @param props.sessionId - 槽的会话作用域 id。
- * @param props.sessions - `ctx.sessions`（读标题/统计投影）。
- * @param props.remote - `ctx.remote`（子 Agent 花名册订阅源）。
- * @param props.onOpenTrajectory - 轨迹按钮动作（壳的 grid 区域点亮）。
- */
-export function SessionHeaderSlot({ sessionId, sessions, remote, onOpenTrajectory }: {
-  sessionId: string
-  sessions: SessionsListFace
-  remote?: RemoteEventFace | undefined
-  onOpenTrajectory: () => void
-}) {
-  const barRef = useRef<HTMLDivElement | null>(null)
-  const [anchor, setAnchor] = useState({ left: 0, width: 0 })
-  const title = useSessionListSelector(sessions, s => (s.byId[sessionId] as { displayTitle?: string } | undefined)?.displayTitle)
-  const useSessionsCompat = useCallback(
-    <T,>(selector: (state: SessionListState) => T): T => useSessionListSelector(sessions, selector),
-    [sessions],
-  )
-  // 详情浮层锚点 = 顶栏在视口中的水平中心（会话列宽变化/窗口缩放时重测）。
-  useLayoutEffect(() => {
-    const el = barRef.current
-    if (el === null) return undefined
-    const measure = (): void => {
-      const rect = el.getBoundingClientRect()
-      setAnchor(prev => (prev.left === rect.left && prev.width === rect.width ? prev : { left: rect.left, width: rect.width }))
-    }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    window.addEventListener('resize', measure)
-    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
-  }, [])
-  return (
-    <div ref={barRef} className={css.sessionHeaderSlot}>
-      <AgentTitleBar
-        sessionTitle={title}
-        currentSessionId={sessionId}
-        useSessions={useSessionsCompat as AppFrameProps['useSessions']}
-        sessionAnchor={anchor}
-        onOpenTrajectory={onOpenTrajectory}
-        {...(remote === undefined ? {} : { remote })}
-      />
     </div>
   )
 }
@@ -797,11 +267,14 @@ export type AppFrameProps =
   & {
     /** 主题偏好选择器 hook（inject hooks.theme 绑定而来，selector 形式）。 */
     useTheme: <S>(sel: (p: ThemePreference) => S, eq?: (a: S, b: S) => boolean) => S
-    /** 统一事件中心 remote 面（子 Agent 花名册订阅源；由 index.tsx 注入）。 */
-    remote?: RemoteEventFace | undefined
-    /** 打开一个会话（浮层子 Agent 行点击 → 进入子会话；由 index.tsx 注入）。 */
-    openSession?: ((sessionId: string) => void) | undefined
-    /** 主题偏好写入（直通 theme 服务）。 */
+    /**
+     * 主题偏好写入（直通 theme 服务）。
+     *
+     * 注：`remote` / `openSession` 两个注入面**已不再由本组件消费**——它们随会话段
+     * 迁往 session-bar.tsx（会话顶栏槽 occupant 的注入面），改由 index.tsx 的
+     * `ctx.slots.register` inject 工厂提供。本组件保留的是纯壳层（网格/侧栏/
+     * 窗口控制）所需的面。
+     */
     setTheme: (p: ThemePreference) => void
     /**
      * 插件中心触发（壳不持面板——业务 chrome 已拆出为
@@ -828,33 +301,16 @@ export function IdeAppFrame({
   setTheme,
   openPluginManager: onOpenPluginManager,
   attachGridActions,
-  remote,
-  openSession,
 }: AppFrameProps) {
   const panels = useStore(s => s)
+  // 当前会话 id（非 blank）——details 抽屉的会话切换复位用。
   const detailsSession = useSessions((s: SessionListState) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
-  // 获取当前会话标题（用于 Agent 标题栏）
-  // blank 先判——官方 displayTitle 此刻回落到**工作区目录名**（displayTitleOf
-  // 的 workspaceTitleOf(cwd) 兜底），不是空串，故必须按 blank 判断，不能写成
-  // `displayTitle || (blank ? '新会话' : …)`——那样永远走不到「新会话」。
-  const currentSessionTitle = useSessions((s: SessionListState) => {
-    const current = s.current
-    if (current === undefined) return undefined
-    const session = s.byId[current]
-    if (session === undefined) return undefined
-    if (session.blank === true) return '新会话'
-    return session.displayTitle || undefined
-  })
   const themePreference = useTheme((p: ThemePreference) => p)
-  // 空态判定（2026-08-30 用户走查：空态时 Agent 标题栏——会话标题/状态胶囊/
-  // 轨迹按钮——不该显示，那是会话态信息）。hero = 无当前会话 OR 当前会话 blank。
-  const isHero = useSessions((s: SessionListState) => {
-    const current = s.current
-    return current === undefined || s.byId[current]?.blank === true
-  })
+  // 会话标题/空态判定（isHero）已随会话段迁往 session-bar.tsx：那里由槽 occupant
+  // 直接读 `useSessions` 投影（槽是会话作用域，自带 sessionId），本组件不再需要。
   const frameRef = useRef<HTMLDivElement | null>(null)
   // 网格变更订阅：插件中心面板的区域显隐列经 useSyncExternalStore 读
   // gridRef 投影；任何隐藏相关变更后调 notifyGridListeners() 刷新。
@@ -1052,11 +508,9 @@ export function IdeAppFrame({
     if (!developerMode) onCloseSlot('corum.trajectory' as GridSlot)
   }, [developerMode, onCloseSlot])
   const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor']) }, [toggleRegionVisibility])
-  // fork（corum）：右上角轨迹按钮 → 右侧「轨迹」区域显隐开关（fork #12；2026-09-09
-  // 用户定调：抽屉形态不好用，改为与编辑器/终端同构的独立区域）。用 toggle 而非
-  // 纯 show：fixed 槽不进插件中心的视图管理，按钮是唯一的收起入口（与 rail 的
-  // 面板/终端按钮同款语义）。
-  const onOpenTrajectory = useCallback(() => { toggleRegionVisibility(['corum.trajectory' as GridSlot]) }, [toggleRegionVisibility])
+  // 注：轨迹按钮的显隐开关（原 onOpenTrajectory）已随会话段迁往会话级槽——
+  // 现经 GridActions.toggleRegion 暴露给 session-bar 的 occupant（见下方
+  // gridActions 的 toggleRegion 与 service.ts 的 ILayout.toggleRegion）。
   const onToggleTerminal = useCallback(() => { toggleRegionVisibility(['corum.panel']) }, [toggleRegionVisibility])
   // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
   const onToggleTheme = useCallback(() => {
@@ -1114,6 +568,8 @@ export function IdeAppFrame({
     // 点亮区域的单槽包装（LayoutController.showRegion → 本面）：清 userShown
     // 运行时隐藏 + 树 hidden 持久化，供「corum:open-in-editor」等可编程入口。
     showRegion: (slot) => { showRegion([slot as GridSlot]) },
+    // 切换区域显隐的单槽包装（会话顶栏的轨迹按钮经本面回调；见 service.ts 注释）。
+    toggleRegion: (slot) => { toggleRegionVisibility([slot as GridSlot]) },
     resetLayout,
     toggleSidebar: toggleSidebarLeaf,
     openNewTaskForm,
@@ -1140,7 +596,7 @@ export function IdeAppFrame({
     isInGrid: (slot) => findLeafBySlot(gridRef.current, slot) !== null,
     hiddenSlotsSnapshot: getHiddenSnapshot,
     onGridChange: gridSubscribe,
-  }), [setRegionHidden, onCloseSlot, showRegion, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, getHiddenSnapshot, gridSubscribe])
+  }), [setRegionHidden, onCloseSlot, showRegion, toggleRegionVisibility, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, getHiddenSnapshot, gridSubscribe])
   // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
   // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
   // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
@@ -1148,29 +604,21 @@ export function IdeAppFrame({
     attachGridActions(gridActions)
   }, [attachGridActions, gridActions])
 
-  // 标题栏行只覆盖左列（design.pen：titlebar-row 是 left-col 的第一个子节点，
-  // 压在 sidebar+conversation 上方；right-col 编辑器/资源管理器/终端顶到窗口顶，
-  // 其上方无标题栏）。标题栏行 = absolute 浮层：窗口标题栏跟随侧栏右缘、Agent
-  // 标题栏覆盖对话区正上方。侧栏/对话区列宽随 GridView 动态变化（sash 拖拽/
-  // 折叠/窗口 resize），这里测量两者的实际几何驱动对齐。
+  // 标题栏行（窗口控制）只覆盖侧栏正上方：宽度须跟随侧栏右缘（侧栏列宽随
+  // GridView 动态变化——sash 拖拽/折叠/窗口 resize），这里测量实际几何驱动对齐。
+  // 2026-09-10「顶栏归会话」后本行不再覆盖对话区，故只需侧栏右缘一个锚点
+  // （会话段的锚点测量已随 session-bar 迁走，改为量自身宿主 <header>）。
   const [sidebarRight, setSidebarRight] = useState(296)
-  const [convoBox, setConvoBox] = useState({ x: 310, width: 0 })
   useEffect(() => {
     let raf: number | null = null
     const measure = () => {
       raf = null
-      // 量 GridView 的格（branchCell，宽度=列宽），不量 leaf（leaf 现已被
+      // 量 GridView 的格（branchCell，宽度=列宽），不量 leaf（leaf 已被
       // leafTopOffset 下移让位标题栏，其 getBoundingClientRect 的 top 不是列顶）。
       // branchCell 是 .leaf 的父格——用 leaf 上溯一层命中。
       const sidebarLeaf = document.querySelector('[data-slot="corum.sidebar"]')
-      const convoLeaf = document.querySelector('[data-slot="conversation"]')
       const sidebar = sidebarLeaf?.parentElement ?? null
-      const convo = convoLeaf?.parentElement ?? null
       if (sidebar !== null) setSidebarRight(Math.round(sidebar.getBoundingClientRect().right))
-      if (convo !== null) {
-        const b = convo.getBoundingClientRect()
-        setConvoBox({ x: Math.round(b.x), width: Math.round(b.width) })
-      }
     }
     const schedule = () => { raf ??= requestAnimationFrame(measure) }
     // leaf 可能尚未挂载/布局变化——监听窗口 resize + 定期兜底测量。
@@ -1349,7 +797,9 @@ export function IdeAppFrame({
     setRegionHidden: (_slot: string, _hidden: boolean) => {},
     closeRegion: (_slot: string) => { window.close() },
     // 浮窗无 userShown/树 hidden 语义——点亮区域在浮窗无意义，no-op 兜底。
+    // （会话顶栏的轨迹按钮在浮窗里也走这里：浮窗没有网格，点击静默无效。）
     showRegion: (_slot: string) => {},
+    toggleRegion: (_slot: string) => {},
     resetLayout: () => {},
     toggleSidebar: () => {},
     openNewTaskForm: () => {},
@@ -1412,30 +862,12 @@ export function IdeAppFrame({
             settingsSlot={renderSlot('sidebar.settings', { wide: false })}
           />
         </div>
-        {/* 会话段（会话名 + 状态胶囊 + 常驻 Agent 胶囊 + 轨迹）。
-            ⚠️ 2026-09-10 结构迁移进行中：目标是把这一段搬进
-           `conversation.session.header`（会话级槽，随会话拖出为独立窗口），但该槽
-           已被 corum-ui-conversation 的 ConversationSessionHeader 占用（重复注册
-           会让会话插件 apply 失败——实测）。正确做法是**扩展会话插件自己的头部
-           组件**，而不是在壳里抢注册；本轮先保留窗口层渲染（胶囊/浮层已按用户
-           定调合并）。 */}
-        <div
-          className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
-          data-hero={isHero || undefined}
-          style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
-        >
-          {!isHero && (
-            <AgentTitleBar
-              sessionTitle={currentSessionTitle}
-              currentSessionId={detailsSession}
-              useSessions={useSessions}
-              sessionAnchor={{ left: convoBox.x, width: convoBox.width }}
-              onOpenTrajectory={onOpenTrajectory}
-              {...(remote === undefined ? {} : { remote })}
-              {...(openSession === undefined ? {} : { openSession })}
-            />
-          )}
-        </div>
+        {/* 会话段（会话标题 + 状态胶囊 + 常驻 Agent 胶囊 + 轨迹）已迁出本行
+            （2026-09-10「顶栏归会话」）：现由 corum-ide-ui 的 session-bar 注册进
+            会话级槽 `conversation.session.header.actions|utilities`，宿主是会话插件
+            ConversationSessionHeader 的 titleRow——该行随会话视图渲染，会话拖出为
+            独立窗口时自带顶栏（实测浮窗会恢复当前会话）。
+            本行从此只剩**窗口控制**（红绿灯让位 + 全局图标按钮），宽度收到侧栏右缘。 */}
       </div>
 
       {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。

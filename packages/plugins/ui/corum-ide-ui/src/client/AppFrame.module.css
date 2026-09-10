@@ -84,20 +84,6 @@
   box-sizing: border-box;
 }
 
-/* Agent 标题栏座位：absolute 定位（left/width 由 inline style = 对话区几何），
-   覆盖对话区正上方，左/右缘始终对齐对话区。 */
-.agentTitleBarSeat {
-  position: absolute;
-  top: 2px;
-  height: 36px;
-  display: flex;
-}
-/* 分隔线只在空态（hero）画（2026-08-30 用户走查：空态标题栏与内容区分界需
-   装饰线；非空会话不该有这条横线——会话态标题栏与内容本是一体）。 */
-.agentTitleBarSeat[data-hero] {
-  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-}
-
 /* 红绿灯让位区（84px）：系统红黄绿由 titleBarStyle:hiddenInset 保留，不自绘。 */
 .navTitleBarInset {
   flex: none;
@@ -200,71 +186,12 @@
   font-weight: 400;
 }
 
-/* ── Agent 标题栏（design.pen b4p03B，36px，顶部贯通标题栏右段）──
-   会话标题 + 分隔线 + 状态胶囊 + spacer + 轨迹按钮。根容器整段 drag（空白处
-   可拖窗口）；内部文字/状态胶囊/按钮各自 no-drag（文字可选、按钮可点）。 */
-.agentTitleBar {
-  -webkit-app-region: drag;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  /* design.pen b4p03B：fill 透明、stroke 透明（实例覆盖 $bg-base）——无外边框
-     无圆角，内容直接铺在标题栏行上。 */
-  background: transparent;
-  border: none;
-}
-
-.agentTitle {
-  -webkit-app-region: no-drag; /* 文字可选/可点，不拖窗 */
-  /* 标题可压缩（让位状态胶囊）：flex 0 1 auto + min-width 0，空间不足时 ellipsis
-     /跑马灯（窄列下标题缩、stats 完整显示——对齐设计稿 b4p03B：stats 是核心
-     信息不可截断，标题可跑马灯）。原 flex:none 不缩会把状态胶囊压到 ellipsis。 */
-  flex: 0 1 auto;
-  min-width: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 300px; /* 限制标题最大宽度，超出触发跑马灯 */
-}
-
-/* 跑马灯（2026-08-29）：标题溢出时 agentTitle 作裁剪窗（去 ellipsis，由滚动轨
-   承载显示），滚动轨双份文本无缝循环——hover 触发，移出即停回卷首。 */
-.agentTitleMarquee {
-  text-overflow: clip;
-  display: block;
-}
-.marqueeTrack {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  will-change: transform;
-}
-.marqueeChunk {
-  flex: none;
-  padding-right: 32px; /* 两份文本间的循环间隔 */
-}
-/* hover 触发滚动：平移 -50%（一份文本+间隔宽）无缝循环；速度按溢出长度
-   近似恒定（10s 基础，长标题自然更慢——CSS 无法按内容宽调速，可接受）。 */
-.agentTitleBar:hover .agentTitleMarquee .marqueeTrack {
-  animation: agent-marquee 10s linear infinite;
-}
-@keyframes agent-marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .agentTitleBar:hover .agentTitleMarquee .marqueeTrack {
-    animation: none;
-  }
-}
+/* ── 会话顶栏的 corum 段（design.pen b4p03B / a2otEO，会话级槽 occupant）──
+   状态胶囊 + 常驻 Agent 胶囊 + 轨迹按钮。2026-09-10「顶栏归会话」后这些段渲染在
+   会话插件 ConversationSessionHeader 的 titleRow 内（不再由壳的窗口标题栏渲染），
+   故下面不再有 .agentTitleBar/.agentTitle/.marquee* 根容器与标题样式——会话标题
+   由该行的官方 crumbs 渲染（.crumb/.crumbCurrent，见 ConversationRoot.module.css），
+   运行/独立窗口两处共用同一实现。 */
 
 .agentDivider {
   flex: none;
@@ -573,11 +500,6 @@
   font-size: 12px; /* 提取表：趋势均值 12（原 9 ×1.25） */
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
-}
-
-.agentSpacer {
-  flex: 1;
-  min-width: 0;
 }
 
 .agentTrajBtn {
@@ -1206,18 +1128,6 @@
 .emptySlotHint {
   font-size: 12px;
   color: var(--dsw-alias-label-dimmed);
-}
-
-/* ── 会话顶栏槽（conversation.session.header，2026-09-10 用户定调）──
-   titlebar-row 的会话段从窗口级浮层搬进会话级槽：随会话视图渲染，会话拖出为
-   独立窗口时自带顶栏。容器只负责让出间距，条本身沿用 .agentTitleBar。 */
-.sessionHeaderSlot {
-  flex: none;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  padding: 6px 10px 0;
-  box-sizing: border-box;
 }
 
 /* 常驻子 Agent 胶囊（用户 2026-09-10：放 Title 右边、与状态展示合并）。

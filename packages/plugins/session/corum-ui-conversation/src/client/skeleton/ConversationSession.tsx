@@ -67,9 +67,6 @@ export function ConversationSessionHeader({
   const session = useSession(s => s)
   const conversation = useConversation(s => s)
   const hideChrome = session.blank && conversationPhase(session, conversation) === 'blank'
-  // corum：ancestry/open 仅为 titleRow 面包屑服务；titleRow 已删（见下），保留推导避免破坏注入面。
-  void ancestry
-  void open
 
   return (
     <header
@@ -78,9 +75,73 @@ export function ConversationSessionHeader({
     >
       {!hideChrome && (
         <>
-          {/* 标题行已移除（2026-08-29）：Agent 标题栏已显示会话标题，避免重复。
-              保留 tabs（对话/轨迹选项卡）和 header 结构。官方 0.1.3 的 titleRow
-              （crumbs 面包屑 + lineage/actions/utilities 槽）整块不渲染。 */}
+          {/* 标题行（2026-09-10 恢复，官方 0.1.3 结构）。
+             2026-08-29 曾整块删除（理由：壳的 Agent 标题栏已显示会话标题，避免重复）；
+             2026-09-10「顶栏归会话」把壳的 Agent 标题栏拆掉、会话段迁回会话级槽后，
+             该理由不再成立——本行重新成为会话顶栏的宿主：
+               crumbs（当前会话标题/子会话面包屑） + actions（壳贡献的状态 pill +
+               常驻 Agent 胶囊） + utilities（壳贡献的轨迹按钮，右对齐）。
+             两个 list 子槽由 apply.ts 的注册声明，此前无人 renderSlot（死槽），
+             现由本行渲染——壳经它们贡献 corum 专属 chrome，无需改本组件逻辑。 */}
+          <div className={css.titleRow}>
+            <div className={css.titleCluster}>
+              <nav className={css.crumbs} aria-label={t('session.hierarchy')}>
+                {ancestry.map((summary, index) => {
+                  const last = index === ancestry.length - 1
+                  const title = (
+                    <button
+                      type="button"
+                      className={clsx(
+                        css.crumb,
+                        summary.subagent && css.crumbSubagent,
+                        last && css.crumbCurrent,
+                      )}
+                      disabled={last}
+                      onClick={() => { open(summary.id) }}
+                    >
+                      {summary.displayTitle}
+                    </button>
+                  )
+                  const lineage = last || summary.subagent
+                  const lineageOwner = {
+                    lineageSessionId: summary.id,
+                    displayTitle: summary.displayTitle,
+                    ...last ? {} : { openTitle: () => { open(summary.id) } },
+                  }
+                  return (
+                    <span key={summary.id} className={css.crumbSeg}>
+                      {index > 0 && <span className={css.crumbSep}>/</span>}
+                      {lineage
+                        ? summary.subagent
+                          ? renderSlot(
+                            'conversation.session.header.lineage',
+                            lineageOwner,
+                            { fallback: title },
+                          )
+                          : (
+                            <>
+                              {title}
+                              {renderSlot(
+                                'conversation.session.header.lineage',
+                                lineageOwner,
+                                { fallback: null },
+                              )}
+                            </>
+                          )
+                        : title}
+                    </span>
+                  )
+                })}
+                {ancestry.length === 0 && <span className={css.crumbCurrent}>{sessionId}</span>}
+              </nav>
+              <div className={css.headerActions}>
+                {renderSlot('conversation.session.header.actions', {})}
+              </div>
+            </div>
+            <div className={css.headerUtilities}>
+              {renderSlot('conversation.session.header.utilities', {})}
+            </div>
+          </div>
           {tabs.length > 1 && (
             <div className={css.tabs} role="tablist">
               {tabs.map(viewTab => (

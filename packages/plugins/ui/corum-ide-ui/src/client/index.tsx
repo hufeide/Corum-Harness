@@ -36,7 +36,10 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GridActions, PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
-import type { RemoteEventFace } from './AppFrame.tsx'
+import {
+  SessionStatusPill, SessionTrajectoryButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
+} from './session-bar.tsx'
+import type { RemoteEventFace } from './session-bar.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { ThemePresenter } from '@corum/corum-ui-base/client'
@@ -246,10 +249,6 @@ export function apply(ctx: ClientContext): void {
         // 操作面（attachGrid）挂进 LayoutController，ctx.layout 服务方法即可
         // 直连网格（替代原 window CustomEvent 事件桥）。
         return {
-          // 子 Agent 花名册订阅源（会话条胶囊 + 统计浮层的子 Agent 区）。
-          remote: ctx.remote as unknown as RemoteEventFace,
-          // 浮层子 Agent 行点击 → 直接进入该子会话（用户 2026-09-10 定调）。
-          openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
           setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
           attachGridActions: (a: GridActions) => { layout.attachGrid(a) },
           // 插件中心触发：壳不持面板（业务 chrome 已拆出），经 LayoutController
@@ -272,6 +271,50 @@ export function apply(ctx: ClientContext): void {
       void disposeRegistry()
     }
   }, 'ide-shell: service + token layer + root registration')
+
+  /**
+   * 会话顶栏的 corum 段（2026-09-10「顶栏归会话」）：注册进**会话级**槽
+   * `conversation.session.header.actions`（状态胶囊 + 常驻 Agent 胶囊）与
+   * `.utilities`（轨迹按钮，右对齐），宿主是会话插件 ConversationSessionHeader
+   * 的 titleRow——该行随会话视图渲染，会话拖出为独立窗口时自带顶栏。
+   *
+   * 为什么是这两个槽：二者由 `@corum/corum-ui-conversation` 在 apply.ts 声明为
+   * **list** 子槽，此前无人 renderSlot（2026-08-29 删 titleRow 后成为死槽），
+   * 故壳往这里注册不会与官方/会话插件自己的注册冲突（对比：直接在壳里注册
+   * `conversation.session.header` 这个 **single** 槽会重复注册，实测让会话插件
+   * apply 失败、对话区整体不渲染——本轮已避开该路径）。
+   *
+   * 用 `ctx.slots.inject(槽名, …)` 包裹注册：槽由别的插件声明，inject 面保证
+   * 「声明先于注册」的时序（与会话插件自己的 queueDockEntry 同法）。
+   */
+  ctx.effect(() => {
+    const remote = ctx.remote as unknown as RemoteEventFace
+    /** 状态胶囊注入面：子 Agent 花名册 + 子会话跳转（两处均会话作用域，槽自带 sessionId）。 */
+    const statusInjected = () => ({
+      remote,
+      openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
+    })
+    /** 轨迹按钮注入面：切换壳的轨迹区域显隐（浮窗内 layout 无网格，静默 no-op）。 */
+    const trajectoryInjected = () => ({
+      toggleTrajectory: () => { layout.toggleRegion(TRAJECTORY_REGION) },
+    })
+    const disposeStatus = ctx.slots.inject(SESSION_BAR_SLOTS.status, () => ctx.slots.register({
+      name: SESSION_BAR_SLOTS.status,
+      id: SESSION_BAR_IDS.status,
+      order: 10,
+      inject: statusInjected,
+    }, SessionStatusPill))
+    const disposeTrajectory = ctx.slots.inject(SESSION_BAR_SLOTS.trajectory, () => ctx.slots.register({
+      name: SESSION_BAR_SLOTS.trajectory,
+      id: SESSION_BAR_IDS.trajectory,
+      order: 10,
+      inject: trajectoryInjected,
+    }, SessionTrajectoryButton))
+    return () => {
+      disposeStatus()
+      disposeTrajectory()
+    }
+  }, 'ide-shell: session bar slots (status pill + trajectory)')
 
   // Theme presentation: pure DOM writes from resolved snapshots.
   ctx.effect(() => {
