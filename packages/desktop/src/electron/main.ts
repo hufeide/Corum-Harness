@@ -23,6 +23,8 @@ import { app, BrowserWindow, nativeImage, session } from 'electron'
 import { registerSchemes, registerProtocols } from './protocol.ts'
 import { registerIpc } from './ipc.ts'
 import { createCorumTray, type CorumTray } from './tray.ts'
+import { createCorumDock, type CorumDock } from './dock.ts'
+import type { ShellMenuHost } from './shell-menu.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
 import { findCombo, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
 import { resolveMasterKeyB64, MASTER_KEY_ENV } from './credentials-key.ts'
@@ -99,6 +101,8 @@ let mainWindow: BrowserWindow | null = null
 let quitting = false
 /** macOS 菜单栏托盘（常驻入口）；非 macOS 或创建失败时为 null。 */
 let tray: CorumTray | null = null
+/** macOS Dock 侧常驻能力（未读徽标 / 右键菜单 / 图标显隐）；同上。 */
+let dock: CorumDock | null = null
 /** 当前 host bridge（combo 切换时整体替换）。 */
 let bridge: HostBridgeClient | null = null
 /** 当前协议集（只服务 combo 壳页 + shell 静态资源；dsh 页走官方 webserver）。 */
@@ -394,20 +398,42 @@ async function main(): Promise<void> {
   protocols = registerProtocols(monacoWorkersPath(), shellAssetsPath())
   // 壳层 IPC 一次性注册：bridge 通过 getter 解析（combo 切换换实例）；托盘同理
   // 走 getter（托盘在 createWindow 之后才建，但 IPC 可能更早被调用）。
-  registerIpc(() => bridge, () => mainWindow, { launchCombo, getTray: () => tray })
+  registerIpc(() => bridge, () => mainWindow, { launchCombo, getTray: () => tray, getDock: () => dock })
   createWindow()
-  // macOS 菜单栏常驻托盘（2026-09-10 用户定调「托盘常驻要做」）。
-  // 建在 createWindow 之后：托盘菜单的第一项要能显示主窗口；同时 `tray !== null`
-  // 是关窗语义从「退出」降级为「藏起来」的开关（见 createWindow 的 close 处理器）。
-  // smoke 不建：那条路径要的是可预期的「起→握手→退」，多一个常驻图标会吊住进程。
+  // macOS 的两个常驻入口（2026-09-10 用户定调「托盘常驻要做」+「下面的 dock 栏也做一下」）：
+  //   - 菜单栏托盘（status item）：未读数字是**被遮挡时**仍可见的主载体；
+  //   - Dock（下方 Dock 栏）：未读徽标 + 右键菜单。
+  // 两者共用同一份菜单模板（`shell-menu.ts`）与同一份未读推送（`ipc.ts` 扇出），
+  // 避免「同一功能两个入口给了两套功能树 / 两个不一样的数字」。
+  // 建在 createWindow 之后：菜单第一项要能显示主窗口；且 `tray !== null` 是关窗语义
+  // 从「退出」降级为「藏起来」的开关（见 createWindow 的 close 处理器）。
+  // smoke 不建：那条路径要的是可预期的「起→握手→退」，多一个常驻入口会吊住进程。
   if (!SMOKE) {
-    tray = createCorumTray({
-      assetsDir: shellAssetsPath(),
+    const menuHost: ShellMenuHost = {
       showMainWindow,
       openNotificationCenter,
       quit: () => { app.quit() },
+      isDockHidden: () => dock?.isHidden() ?? false,
+      setDockHidden: (hidden) => {
+        dock?.setHidden(hidden)
+        // 两份菜单实例各自持有勾选态：改完必须都重建，否则另一个入口显示的是旧状态。
+        tray?.refresh()
+        dock?.refresh()
+      },
+    }
+    dock = createCorumDock({
+      ...menuHost,
+      // 遮挡判定：窗口不存在 / 已隐藏 / 未聚焦 —— 三者的共同语义是「用户看不到主窗」，
+      // 此时新通知才值得让 Dock 图标跳一下（窗口在前台时系统也会让 bounce 返回 -1）。
+      shouldAttractAttention: () => {
+        const win = mainWindow
+        if (win === null || win.isDestroyed()) return true
+        return !win.isVisible() || win.isMinimized() || !win.isFocused()
+      },
     })
+    tray = createCorumTray({ ...menuHost, assetsDir: shellAssetsPath() })
     process.stderr.write(`[corum-desktop] tray: ${tray === null ? 'unavailable (non-darwin or failed)' : 'ready'}\n`)
+    process.stderr.write(`[corum-desktop] dock: ${dock === null ? 'unavailable (non-darwin or failed)' : 'ready'}\n`)
   }
   process.stderr.write('[corum-desktop] window created (combo launcher)\n')
 

@@ -27,10 +27,10 @@
  * @module corum-desktop/electron/tray
  */
 
-import { Menu, Tray, app, nativeImage } from 'electron'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import os from 'node:os'
-import { dirname, join } from 'node:path'
+import { Tray, app, nativeImage } from 'electron'
+import { join } from 'node:path'
+import { buildShellMenu, countLabel, type ShellCount, type ShellMenuHost } from './shell-menu.ts'
+import { patchShellState, readShellState } from './shell-state.ts'
 
 /**
  * 托盘图标的逻辑尺寸（pt）。
@@ -40,30 +40,22 @@ import { dirname, join } from 'node:path'
  */
 const ICON_PT = 18
 
-/** 托盘要拉起的窗口动作（由 main.ts 注入，托盘不自己持有窗口引用）。 */
-export interface CorumTrayHost {
+/** 托盘要的额外输入：shell 静态资源目录（菜单动作见 `ShellMenuHost`）。 */
+export interface CorumTrayHost extends ShellMenuHost {
   /** shell 静态资源目录（dev 与打包态不同，由 main 侧解析）。 */
   assetsDir: string
-  /** 显示并聚焦主窗口（已隐藏则 show，已最小化则 restore）。 */
-  showMainWindow: () => void
-  /** 显示主窗口并展开其中的通知中心。 */
-  openNotificationCenter: () => void
-  /** 真正退出（走 `app.quit()` → `before-quit` 的会话 flush）。 */
-  quit: () => void
 }
 
 /** 托盘的对外句柄。 */
 export interface CorumTray {
   /** 更新未读数（主窗 renderer 推送；驱动标题文字 + tooltip + 菜单状态行）。 */
-  setCount(count: { unread: number; total: number }): void
+  setCount(count: ShellCount): void
+  /**
+   * 重建菜单栏菜单（勾选态变化后需要；未读数没变时不会走 `setCount` 的重建路径）。
+   */
+  refresh(): void
   /** 销毁托盘（退出前调用；否则 macOS 上会残留一个点不动的图标）。 */
   destroy(): void
-}
-
-/** 当前未读状态（托盘自持，菜单状态行用）。 */
-interface CountState {
-  unread: number
-  total: number
 }
 
 /**
@@ -106,7 +98,7 @@ function trayImage(assetsDir: string): Electron.NativeImage {
 export function createCorumTray(host: CorumTrayHost): CorumTray | null {
   if (process.platform !== 'darwin') return null
 
-  let count: CountState = { unread: 0, total: 0 }
+  let count: ShellCount = { unread: 0, total: 0 }
   let tray: Tray
   try {
     tray = new Tray(trayImage(host.assetsDir))
@@ -116,80 +108,9 @@ export function createCorumTray(host: CorumTrayHost): CorumTray | null {
     return null
   }
 
-  /** 状态行文案：「3 条未读 · 共 7 条」/「无未读通知」。 */
-  const statusLabel = (): string => {
-    if (count.total === 0) return '暂无通知'
-    if (count.unread === 0) return `${count.total} 条通知 · 全部已读`
-    return `${count.unread} 条未读 · 共 ${count.total} 条`
-  }
-
-  /**
-   * 菜单栏标题数字：超过 99 封顶为 `99+`。
-   *
-   * 为什么不直接写原值：三位数会把状态项撑宽、挤压右侧系统图标（菜单栏空间稀缺，
-   * Raycast 官方也警告过），而且到那个量级时精确值已经没有决策价值。与应用内 bell
-   * 徽标的上限（`NotificationHost` 的 `99+`）保持一致，两处不同步会显得像 bug。
-   */
-  const titleLabel = (): string => (count.unread > 99 ? '99+' : String(count.unread))
-
-  /**
-   * 开机自启开关的状态（OS 是唯一事实源：用户在「系统设置 → 登录项」里改过之后，
-   * 我们这边的缓存就会撒谎，所以每次都现读）。
-   */
-  const loginItemOn = (): boolean => {
-    try {
-      return app.getLoginItemSettings().openAtLogin
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * 切换开机自启。
-   *
-   * dev 态必须显式给 `path` + `args`：打包态的 execPath 就是 app 本身，而 dev 态
-   * 它是 `node_modules` 里的 Electron 二进制，不传参登录后只会打开一个空 Electron。
-   * （未签名 + Windows 的 `guid` 反模式见调研报告 §5.3-8：这里不传 guid。）
-   * @param next - 目标状态。
-   */
-  const setLoginItem = (next: boolean): void => {
-    try {
-      app.setLoginItemSettings({
-        openAtLogin: next,
-        ...app.isPackaged ? {} : { path: process.execPath, args: [process.argv[1] ?? ''] },
-      })
-    } catch (error) {
-      process.stderr.write(`[corum-desktop] login item toggle failed: ${String(error)}\n`)
-    }
-  }
-
-  /** 重建菜单（未读数变化后必须重建：状态行与「通知中心」后缀都在菜单里）。 */
+  /** 重建菜单（未读数或勾选态变化后必须重建：状态行与「通知中心」后缀都在菜单里）。 */
   const rebuildMenu = (): void => {
-    const menu = Menu.buildFromTemplate([
-      { label: '显示主窗口', click: () => { host.showMainWindow() } },
-      {
-        label: count.unread > 0 ? `通知中心（${count.unread} 条未读）` : '通知中心',
-        click: () => { host.openNotificationCenter() },
-      },
-      { type: 'separator' },
-      { label: statusLabel(), enabled: false },
-      { type: 'separator' },
-      {
-        label: '开机自动启动',
-        type: 'checkbox',
-        checked: loginItemOn(),
-        click: (item) => {
-          setLoginItem(item.checked)
-          // 回读一次：setLoginItemSettings 在 macOS 上可能被系统策略拒绝，
-          // 不回读就会出现「勾了但其实没生效」的假象（按钮状态是唯一反馈面）。
-          item.checked = loginItemOn()
-          rebuildMenu()
-        },
-      },
-      { type: 'separator' },
-      { label: '退出 矩道 Corum', click: () => { host.quit() } },
-    ])
-    tray.setContextMenu(menu)
+    tray.setContextMenu(buildShellMenu(count, host))
   }
 
   /**
@@ -199,7 +120,7 @@ export function createCorumTray(host: CorumTrayHost): CorumTray | null {
    * `fontType: 'monospacedDigit'` 让 9→10 位宽变化时标题不左右跳动。
    */
   const apply = (): void => {
-    tray.setTitle(count.unread > 0 ? titleLabel() : '', { fontType: 'monospacedDigit' })
+    tray.setTitle(count.unread > 0 ? countLabel(count.unread) : '', { fontType: 'monospacedDigit' })
     tray.setToolTip(count.unread > 0
       ? `矩道 Corum · ${count.unread} 条未读通知`
       : '矩道 Corum · 常驻运行中')
@@ -245,46 +166,12 @@ export function createCorumTray(host: CorumTrayHost): CorumTray | null {
       }
       apply()
     },
+    refresh: rebuildMenu,
     destroy,
   }
 }
 
 // ── 首次常驻提示（一次性）─────────────────────────────────────────────────
-
-/**
- * 壳层状态文件（与 `combos.json` 同目录同风格：`~/.corum-desktop/`）。
- *
- * 为什么放壳层文件而不是设置中心：这是**主进程语义**（关窗是否退出）的一次性
- * 告知，随壳启动就要决定，不能等 host / 设置服务起来。
- */
-const SHELL_STATE_PATH = join(os.homedir(), '.corum-desktop', 'shell.json')
-
-/** 壳层状态（当前只有「常驻提示已展示」一项，留成对象便于扩展）。 */
-interface ShellState {
-  trayResidentHintShown?: boolean
-}
-
-/** 读壳层状态（文件缺失/损坏一律当空状态，不能因为一个提示位挡住启动）。 */
-function readShellState(): ShellState {
-  try {
-    if (!existsSync(SHELL_STATE_PATH)) return {}
-    const parsed: unknown = JSON.parse(readFileSync(SHELL_STATE_PATH, 'utf8'))
-    if (typeof parsed !== 'object' || parsed === null) return {}
-    return parsed as ShellState
-  } catch {
-    return {}
-  }
-}
-
-/** 写壳层状态（失败只 warn：提示位写不进去顶多再提示一次）。 */
-function writeShellState(state: ShellState): void {
-  try {
-    mkdirSync(dirname(SHELL_STATE_PATH), { recursive: true })
-    writeFileSync(SHELL_STATE_PATH, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
-  } catch (error) {
-    process.stderr.write(`[corum-desktop] shell state write failed: ${String(error)}\n`)
-  }
-}
 
 /**
  * 取「常驻模式」一次性提示的展示资格。
@@ -301,6 +188,6 @@ export function takeTrayResidentHint(resident: boolean): { resident: boolean; fi
   if (!resident) return { resident: false, firstTime: false }
   const state = readShellState()
   if (state.trayResidentHintShown === true) return { resident: true, firstTime: false }
-  writeShellState({ ...state, trayResidentHintShown: true })
+  patchShellState({ trayResidentHintShown: true })
   return { resident: true, firstTime: true }
 }
