@@ -1233,7 +1233,16 @@ export class CorumAgentService extends TypertRemoteService {
         conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
       )
     }
-    const agentOptions = { provider: effectiveModel.provider, model: effectiveModel.model }
+    // BUG-25（2026-09-11）：`agentOptions` 必须带上 reasoningEffort——此前只传
+    // provider/model，Agent 自身的模型配置就丢了档位（表单填 High、会话里却是默认档）。
+    // 与会话选择（installTaskModelSelection）口径一致：所选即所得。
+    const agentOptions = {
+      provider: effectiveModel.provider,
+      model: effectiveModel.model,
+      ...(effectiveModel.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: ReasoningEffortId(effectiveModel.reasoningEffort) }),
+    }
 
     // 官方 preset 无 corum profile 实体——跳过编译落盘与 skill checkout（preset
     // 目录已在 agentPresets 服务管理的根里，mount 直接按 id 解析）。

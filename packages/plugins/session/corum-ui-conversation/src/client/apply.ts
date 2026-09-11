@@ -348,6 +348,45 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           }
           return ctx.workspaces.list.getSnapshot().items[0]?.path
         }
+        /**
+         * 兑现「新建任务」表单选的模型/推理等级（BUG-25）。
+         *
+         * 为什么必须补这一步：**blank 泳道没有会话级模型选择**，composer 的
+         * `ModelDirectory` 取值口径是 `projected.next ?? catalog.default`
+         * （见 corum-ui-model-selection/directory.ts），其中 `catalog.default`
+         * 是**部署默认**（`agentDefaultModel.currentSelection()`）。于是表单里选的
+         * 模型/档位只被 host 记进了 request 覆盖（见 corum-agent 的
+         * `installTaskModelSelection`），**没进会话的 modelSelection 投影**——用户
+         * 实测：表单填 `Kimi-k3 · High`，进会话却显示部署默认（`… · Default`），
+         * 「所选非所得」。这里用官方 `session/selectModel` 通道补一次显式选择：
+         * 落 `model/selection` 事件 → 投影 next 成立 → composer 显示的就是表单选的那项，
+         * 且与真实请求一致（不再依赖 request 覆盖兜底）。
+         *
+         * 副作用与 composer 里手动换模型**完全一致**（官方 selectModel 会把该选择存为
+         * 部署默认）——同一交互的同一语义，不自造第二套。
+         *
+         * 失败不阻断建任务：泳道已可用，请求侧仍有 `installTaskModelSelection` 兜底。
+         */
+        const applyFormModel = async (sessionId: string, model: NewTaskOptions['model']): Promise<void> => {
+          if (model === undefined) return
+          try {
+            const result = await connection.rpc.call('/api', 'session/selectModel', {
+              args: {
+                request: {
+                  sessionId,
+                  provider: model.provider,
+                  model: model.model,
+                  ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }),
+                },
+              },
+            })
+            if (!result.ok) {
+              console.warn('[new-task] selectModel rejected', result.error)
+            }
+          } catch (error) {
+            console.warn('[new-task] selectModel failed', error)
+          }
+        }
         const startTaskLane = async (cwd: string, profileId?: string, permission?: string, model?: NewTaskOptions['model']): Promise<void> => {
           const args: CreateTaskAgentArgs = {
             cwd,
@@ -357,6 +396,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           }
           const { sessionId } = await call<CreateTaskAgentResult>('corumAgent', CORUM_AGENT_METHODS.createTaskAgent, args)
           sessions.open(sessionId as SessionId)
+          await applyFormModel(sessionId, model)
         }
         return {
           listProjects: async () => {
