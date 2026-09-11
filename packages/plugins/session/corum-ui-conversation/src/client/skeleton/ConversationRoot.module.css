@@ -45,21 +45,30 @@
      height 44 / gap 8 / padding [0,12] / fill $glass-1 / cornerRadius 12。
      flex column + justify-content:center 让 titleRow 垂直居中；多视图时 tabs
      在其下自然排布（不挤同一行）。
-     外边距与拖窗行为由宿主外壳经两个自定义属性注入：
-       --corum-session-topbar-margin    主窗口给四边 gutter；浮窗左侧让给红绿灯。
-       --corum-session-topbar-app-region 浮窗整条承担拖窗（主窗口 none，不抢壳的
-                                          窗口控制条）。 */
+     外边距/高度/拖窗行为由宿主外壳经自定义属性注入：
+       --corum-session-topbar-margin    主窗口 0（贴窗口顶，与侧栏标题栏同带 0..40）；
+                                        浮窗给四边 gutter，左侧让给红绿灯。
+       --corum-session-topbar-height    主窗口 40（与壳 titlebarRow 同高，底部与
+                                        左侧红绿灯/图标按钮底对齐）；浮窗 44。
+       --corum-session-topbar-app-region 主窗口 drag（非交互区可拖窗，BUG-1）；
+                                        浮窗整条承担拖窗。 */
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 8px;
   box-sizing: border-box;
-  min-height: 44px;
+  min-height: var(--corum-session-topbar-height, 44px);
   margin: var(--corum-session-topbar-margin, 12px 12px 0);
   padding: 0 12px;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 12px;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  /* 无卡片外观（2026-09-11 用户定调）：去掉 glass-1 底、glass-border 描边与圆角，
+     让会话标题与状态胶囊**直接坐在环境背景上**，与左侧 nav 上方的 titlebarRow
+     (AppFrame.module.css .navTitleBar —— 本来就无底无边) 视觉一致。
+     布局/拖窗不变：min-height/margin/padding/app-region 全部保留。
+     注意：不要用 `background: transparent` 之外的手段（如删 padding）去「顺眼」，
+     那会破坏 BUG-1 里与红绿灯底部对齐的 40px 同带关系。 */
+  border: none;
+  border-radius: 0;
+  background: transparent;
   -webkit-app-region: var(--corum-session-topbar-app-region, none);
 }
 

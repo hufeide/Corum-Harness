@@ -77,8 +77,12 @@ interface EditorTab {
   /** 预览 tab（VS Code 语义：单击文件打开的临时 tab，斜体显示；双击/编辑/双击 tab 后固定）。
    *  新打开预览 tab 会替换掉已有预览 tab（VS Code 单预览位）。 */
   preview: boolean
-  /** diff tab（VS Code「选择以进行比较」+「与已选项目比较」）：只读双侧 diff 视图。 */
-  diff?: { original: string; modified: string }
+  /** diff tab（VS Code「选择以进行比较」+「与已选项目比较」）：只读双侧 diff 视图。
+   *  `originalContent` 存在时左侧取内存内容（Review 卡「点击文件看改动」——
+   *  重建出的原文不落盘）；否则两侧都按路径读盘。 */
+  diff?: { original: string; modified: string; originalContent?: string | undefined }
+  /** diff tab 的一行说明（如重建不完整的提示），显示在 tab 顶部横幅。 */
+  diffNote?: string | undefined
   /** 预览类型（md/svg/图片/视频）；null = 普通代码 tab。 */
   kind?: PreviewKind
   /** 源码 ⟷ 预览切换（md/svg 有效；图片/视频恒预览）。 */
@@ -90,6 +94,13 @@ const DIFF_PATH_PREFIX = 'diff://'
 function diffTabPath(a: string, b: string): string {
   return `${DIFF_PATH_PREFIX}${a}::${b}`
 }
+
+/** Review 卡「改动前后」diff tab 的合成 path 前缀（同样不持久化；与 compare
+ *  diff tab 分开，避免同文件重叠时误复用内容不同的 tab）。 */
+const REVIEW_DIFF_PREFIX = 'reviewdiff://'
+
+/** diff 布局偏好（并排/内联）的 localStorage key。 */
+const DIFF_SIDE_BY_SIDE_KEY = 'corum.diff.sideBySide'
 
 /** 保存反馈（状态栏右侧短暂显示；失败常驻直到下次保存/编辑）。 */
 type SaveFeedback =
@@ -104,6 +115,8 @@ type SaveFeedback =
  *  openFile 写入（写入即触发服务 pending 认领）。 */
 export interface EditorApiRef {
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
+  /** 打开「改动前后」diff tab（Review 卡）：左侧为内存重建的原文，右侧读盘当前文件。 */
+  openContentDiff: ((input: { path: string; originalContent: string; note?: string | undefined }) => Promise<void>) | null
 }
 
 /** 本插件的注入面（见 client/index.ts apply）。 */
@@ -276,7 +289,12 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   useEffect(() => {
     if (restoredRef.current) return
     restoredRef.current = true
-    const paths = (persisted.tabs ?? []).filter(p => !p.startsWith(DIFF_PATH_PREFIX))
+    // 合成 tab（对比 diff `diff://…` 与 Review 卡的改动 diff `reviewdiff://…`）都
+    // **不能**持久化：它们的 `diff` 字段（两侧路径/内存原文）没有落盘，重启后按普通
+    // 文件 tab 恢复会去 readFile 一个假路径，得到一个报错的坏 tab。
+    // （早期只排除了 `diff://`，`reviewdiff://` 不以它开头，于是漏了 —— 用户已复现。）
+    const paths = (persisted.tabs ?? [])
+      .filter(p => !p.startsWith(DIFF_PATH_PREFIX) && !p.startsWith(REVIEW_DIFF_PREFIX))
     if (paths.length === 0) return
     // 并发恢复所有 tab（内容 readFile 重载）；恢复的 tab 都是固定（非预览）。
     for (const path of paths) {
@@ -368,12 +386,59 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
     }
   }, [tabs, readFile, showEditor])
 
-  // 把 openFile 暴露给 index.ts（corumEditor 服务的调用入口；写入触发 pending 认领）。
-  // 同 bundle 内 ref 直通，非跨 bundle 共享可变状态，不违反 cordis 红线。
+  const openContentDiff = useCallback(async (
+    input: { path: string; originalContent: string; note?: string | undefined },
+  ) => {
+    showEditor()
+    const { path, originalContent, note } = input
+    // 合成键带上内容长度：同一文件再次点击且重建结果变化时应开新 tab 而不是
+    // 复用旧内容（monaco 模型在 mount 时一次性建立，不随 props 更新）。
+    const key = `${REVIEW_DIFF_PREFIX}${path}::${originalContent.length}`
+    const existing = tabs.find(t => t.path === key)
+    if (existing !== undefined) {
+      setActivePath(key)
+      return
+    }
+    const name = path.split('/').pop() ?? path
+    const newTab: EditorTab = {
+      path: key,
+      title: `${name} ↔`,
+      content: '',
+      savedContent: '',
+      language: languageFromPath(path, 'plaintext'),
+      error: null,
+      externalChanged: false,
+      preview: false,
+      diff: { original: `${path}（本轮改动前）`, modified: path, originalContent },
+      ...note !== undefined ? { diffNote: note } : {},
+    }
+    setTabs(prev => [...prev, newTab])
+    setActivePath(key)
+  }, [tabs, showEditor])
+
+  // 把 openFile / openContentDiff 暴露给 index.ts（corumEditor 服务的调用入口；
+  // 写入触发 pending 认领）。同 bundle 内 ref 直通，非跨 bundle 共享可变状态，
+  // 不违反 cordis 红线。
   useEffect(() => {
     editorApi.openFile = openFile
-    return () => { editorApi.openFile = null }
-  }, [editorApi, openFile])
+    editorApi.openContentDiff = openContentDiff
+    return () => { editorApi.openFile = null; editorApi.openContentDiff = null }
+  }, [editorApi, openFile, openContentDiff])
+
+  /**
+   * diff 布局偏好：左右并排（true）还是内联单栏（false）。
+   * 持久化在 localStorage —— 与 tab 无关的编辑器级偏好，刷新/重启后保持。
+   * 默认**并排**（2026-09-11 用户定调：切到左右视图对比）。
+   */
+  const [diffSideBySide, setDiffSideBySide] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem(DIFF_SIDE_BY_SIDE_KEY)
+      return raw === null ? true : raw === '1'
+    } catch { return true }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(DIFF_SIDE_BY_SIDE_KEY, diffSideBySide ? '1' : '0') } catch { /* 容量满等：退回会话内记忆 */ }
+  }, [diffSideBySide])
 
   /** 固定预览 tab（双击 tab / 编辑后 / 双击树文件）。 */
   const pinTab = useCallback((path: string) => {
@@ -424,6 +489,16 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
     }
   }, [tabs, readFile, showEditor])
 
+  /**
+   * 打开「改动前后」diff tab（Review 卡点击文件行）。
+   *
+   * 与 openDiffTab 的区别：左侧不是磁盘文件，而是 host 侧逆序反推重建出的原文
+   * （来自 host 影子 git 仓库 corumReview/fileBefore —— 轮次起始状态都提交过，故精确）。
+   * 右侧仍是磁盘当前文件，所以只需要 `path` 一个路径。
+   *
+   * `note` 非空表示重建不完整（该文件被整文件覆盖写过等），作为横幅提示如实
+   * 告知用户「左侧是尽力重建、可能不等于会话开始时的内容」。
+   */
   /** Close a tab. If dirty, confirm first (save / discard / cancel). */
   const closeTab = useCallback((path: string) => {
     const doClose = (): void => {
@@ -1028,14 +1103,35 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
         <div className={css.code}>
           {activeTab?.diff !== undefined
             ? (
-              <DiffViewer
-                key={activeTab.path}
-                original={activeTab.diff.original}
-                modified={activeTab.diff.modified}
-                language={activeTab.language}
-                readFile={readFile}
-                dark={dark}
-              />
+              <>
+                {/* diff 工具条：布局切换（并排 / 内联）。偏好持久化，跨 tab 与重启保持。 */}
+                <div className={css.diffBar}>
+                  <button
+                    type="button"
+                    className={css.diffToggle}
+                    aria-pressed={diffSideBySide}
+                    title={diffSideBySide ? '切换为内联单栏' : '切换为左右并排对比'}
+                    onClick={() => { setDiffSideBySide(v => !v) }}
+                  >
+                    {diffSideBySide ? '左右并排' : '内联单栏'}
+                  </button>
+                </div>
+                {/* 重建不完整时的如实提示（该文件被整文件覆盖写过等）：
+                    避免用户把「尽力重建的左侧」误当成会话开始时的原文。 */}
+                {activeTab.diffNote !== undefined && (
+                  <div className={css.diffNote} role="status">{activeTab.diffNote}</div>
+                )}
+                <DiffViewer
+                  key={activeTab.path}
+                  original={activeTab.diff.original}
+                  modified={activeTab.diff.modified}
+                  originalContent={activeTab.diff.originalContent}
+                  language={activeTab.language}
+                  readFile={readFile}
+                  dark={dark}
+                  sideBySide={diffSideBySide}
+                />
+              </>
             )
             : activeTab !== null && activeTab.kind === 'image'
             ? <ImagePreview key={activeTab.path} path={activeTab.path} title={activeTab.title} readBinary={readBinary} />

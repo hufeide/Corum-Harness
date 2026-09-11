@@ -15,6 +15,13 @@ export interface ReviewCardActions {
   onRevertAll: () => Promise<{ ok: boolean; reverted: number; failed: number; message?: string }>
   /** 「全部保留」：确认本轮写操作，dismiss 卡片。 */
   onKeepAll: () => void
+  /** 展开态点击文件行：在编辑器打开「本轮改动前 ↔ 当前」的 diff 视图。
+   *  （原文由 host 逆序反推重建 —— 会话事件流不含文件旧内容。） */
+  onOpenDiff?: ((path: string) => void) | undefined
+  /** 「保留此文件」：只确认这一个文件，它随即从卡片消失，其它文件不受影响。 */
+  onKeepFile?: ((path: string) => void) | undefined
+  /** 「撤销此文件」：只反向 apply 这一个文件的写操作。 */
+  onRevertFile?: ((path: string) => void) | undefined
 }
 
 /** 文案 t 函数的最小面（chat 命名空间）。 */
@@ -32,7 +39,7 @@ function displayPath(path: string, cwd: string | undefined): string {
 }
 
 export function ReviewCard({
-  changes, cwd, busy, onRevertAll, onKeepAll, t,
+  changes, cwd, busy, onRevertAll, onKeepAll, onOpenDiff, onKeepFile, onRevertFile, t,
 }: {
   changes: ReviewChanges
   cwd: string | undefined
@@ -94,13 +101,56 @@ export function ReviewCard({
         <ul className={css.fileList}>
           {changes.files.map(file => (
             <li key={file.path} className={css.fileRow}>
-              <span className={css.filePath} title={file.path}>
-                {displayPath(file.path, cwd)}
-              </span>
+              {onOpenDiff !== undefined
+                ? (
+                  <button
+                    type="button"
+                    className={css.filePathButton}
+                    title={`${file.path} — 查看本轮改动`}
+                    onClick={() => { onOpenDiff(file.path) }}
+                  >
+                    {displayPath(file.path, cwd)}
+                  </button>
+                )
+                : (
+                  <span className={css.filePath} title={file.path}>
+                    {displayPath(file.path, cwd)}
+                  </span>
+                )}
               <span className={css.fileDiff}>
                 <span className={css.added}>+{file.added}</span>
                 <span className={css.removed}>−{file.removed}</span>
               </span>
+              {/* 单文件粒度动作：只作用于这一行对应的文件（水位/撤销都按文件隔离，
+                  见 review-source.ts 的 publishFileSeq）。hover 才显形，避免列表噪声。 */}
+              {(onKeepFile !== undefined || onRevertFile !== undefined) && (
+                <span className={css.fileActions}>
+                  {onRevertFile !== undefined && (
+                    <button
+                      type="button"
+                      className={css.fileActionButton}
+                      disabled={busy}
+                      title={`撤销 ${displayPath(file.path, cwd)} 的改动`}
+                      aria-label={`撤销 ${displayPath(file.path, cwd)} 的改动`}
+                      onClick={() => { onRevertFile(file.path) }}
+                    >
+                      {t('review.revert')}
+                    </button>
+                  )}
+                  {onKeepFile !== undefined && (
+                    <button
+                      type="button"
+                      className={clsx(css.fileActionButton, css.fileKeepButton)}
+                      disabled={busy}
+                      title={`保留 ${displayPath(file.path, cwd)} 的改动`}
+                      aria-label={`保留 ${displayPath(file.path, cwd)} 的改动`}
+                      onClick={() => { onKeepFile(file.path) }}
+                    >
+                      {t('review.keep')}
+                    </button>
+                  )}
+                </span>
+              )}
             </li>
           ))}
         </ul>

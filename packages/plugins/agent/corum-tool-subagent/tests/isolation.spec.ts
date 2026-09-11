@@ -332,27 +332,32 @@ describe('corumEntryDead / entriesOf 死条目剔除（2026-09-09）', () => {
   })
 })
 
-describe('git 判据是运行时探测，不是产品开关（2026-09-10 用户更正）', () => {
-  it('机制代码不读 `autoInitGit`（开关只管新建工作区，与「当前工作区是否有 .git」是两个维度）', async () => {
+describe('git 判据是运行时探测，不是产品开关', () => {
+  it('产品代码里已不存在 `autoInitGit` 开关（2026-09-11 用户定调：打开工作区固定「探测，没有就初始化」）', async () => {
     const fs = await import('node:fs')
     const path = await import('node:path')
-    const root = new URL('../../../..', import.meta.url).pathname // packages/
+    const reposRoot = new URL('../../../../..', import.meta.url).pathname // 仓库根（tests → 包 → agent → plugins → packages → 根）
     const walk = (dir: string): string[] => fs.existsSync(dir)
       ? fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
         const full = path.join(dir, entry.name)
-        if (entry.isDirectory()) return entry.name === 'node_modules' || entry.name === 'lib' || entry.name === 'client' ? [] : walk(full)
-        return entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') ? [full] : []
+        if (entry.isDirectory()) {
+          return ['node_modules', 'lib', 'dist', 'build', '.git'].includes(entry.name) ? [] : walk(full)
+        }
+        // 排除测试自身（它的搜索词就是 `autoInitGit` 字面量）。
+        return /\.[cm]?tsx?$/.test(entry.name) && !/\.spec\.[cm]?tsx?$/.test(entry.name) ? [full] : []
       })
       : []
-    const mechanismFiles = [
-      ...walk(path.join(root, 'plugins/agent')),
-      ...walk(path.join(root, 'desktop/src/host')),
+    const sources = [
+      ...walk(path.join(reposRoot, 'packages/plugins')),
+      ...walk(path.join(reposRoot, 'packages/desktop/src')),
     ]
-    expect(mechanismFiles.length).toBeGreaterThan(20)
-    const offenders = mechanismFiles.filter(file => fs.readFileSync(file, 'utf8').includes('autoInitGit'))
-    // 唯一允许出现的地方：host 的 corum-git.ts —— 它只**注册**该设置（namespace + schema），
-    // 不参与任何机制判定；读取方只有客户端的新建工作区流程。
-    expect(offenders.map(file => path.basename(file))).toEqual(['corum-git.ts'])
+    expect(sources.length).toBeGreaterThan(50)
+    // 只看**代码**：注释里保留「为什么移除该开关」的历史说明是有价值的，
+    // 不能因为注释提到这个词就让断言失败，所以先剥注释再扫。
+    const stripComments = (src: string): string =>
+      src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    const offenders = sources.filter(file => stripComments(fs.readFileSync(file, 'utf8')).includes('autoInitGit'))
+    expect(offenders.map(file => path.relative(reposRoot, file))).toEqual([])
   })
 
   it('机制侧判据是 corumIsGitRepo(cwd)（git rev-parse 探测当前工作区）', async () => {

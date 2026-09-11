@@ -1,5 +1,46 @@
-/* fork（corum）：Review 卡——glass-1 玻璃卡 r14 + 光边，固定在消息流底部、
-   composer 上方（挂在 ChatView 流尾、Sticky composerSeat 之上）。 */
+/* fork（corum）：Review 卡——glass-1 玻璃卡 r14 + 光边，挂在
+   `conversation.input.dock` 槽上（与 TodoPanel 同槽、由 composerSeat 吸附）。 */
+
+/*
+ * dock 槽条目的宽度约束容器。
+ *
+ * 宽度：与 TodoPanel / 输入卡用**同一个算式**（`--dsh-composer-card-max-width`
+ * 减 4 个 dock inset），保证三张卡左右边缘严格对齐。早先写
+ * `padding: 0 32px` 是想复刻 `.scroll` 的左右内边距，但卡片已不在 `.scroll`
+ * 内层，那 64px 成了纯损失 —— 实测比 TodoPanel 窄 64px（616 vs 680）。
+ *
+ * 吸附：由 ConversationRoot 的 sticky `composerSeat` 统一提供，这里不写
+ * position。上下顺序由槽注册的 `order` 决定（review = -10 < todo = 0 <
+ * queue = 20），所以也不需要 CSS `order`。
+ */
+.reviewCardWrapper {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  margin: 0 auto;
+  width: calc(
+    100% -
+    var(--dsh-composer-side-clearance) -
+    var(--dsh-composer-side-clearance) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset)
+  );
+  max-width: calc(
+    var(--dsh-composer-card-max-width) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset)
+  );
+}
+
+.reviewCardWrapper > * {
+  max-width: 100%;
+  min-width: 0;
+}
 
 .root {
   box-sizing: border-box;
@@ -23,9 +64,13 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* 展开时向上移动，避免被输入框遮盖 */
+/* BUG-4（2026-09-11）：展开态原先 `transform: translateY` 上移来「避免被输入框遮盖」——
+   但 transform 只挪视觉层、不挪文档流：sticky composer 的定位计算仍按未 transform 的
+   布局高度，导致展开的卡片浮上去后盖住 TurnStatus（「深度求索」）且随滚动漂移。
+   修正：去掉 transform，让卡片在文档流中占真实高度——sticky composer 自然把它顶在
+   输入框上方，文件列表向上撑开消息区（max-height 已限制 240px 防无限撑高）。 */
 .root[data-open] {
-  transform: translateY(calc(-1 * (100% - 46px)));
+  /* 文档流占真实高度（见上注释），无位移变换。 */
 }
 
 .summary {
@@ -75,12 +120,15 @@
   line-height: 20px;
 }
 
+/* BUG-2（2026-09-11）：+ 行绿色（新增）/ − 行红色（删减），原来误用了未定义的
+   --dsw-alias-state-success/--dsw-alias-state-error（不带 -primary 后缀）——
+   该 token 不存在，fallback 到默认白色。改用真实定义的 -primary token。 */
 .added {
-  color: var(--dsw-alias-state-success);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .removed {
-  color: var(--dsw-alias-state-error);
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .spacer {
@@ -142,6 +190,13 @@
   overflow-y: auto;
   border-top: 1px solid var(--corum-glass-border);
   list-style: none;
+  /* 文件多到超过 max-height 时要**看得见**滚动条（用户反馈：超出后没有滚动条，
+     看不出还能滚）。滚动条拇指取本卡片所在的 l2 抬升 token —— 与设置面板/插件中心
+     同一套约定（ui-theme 的 scrollbar 契约：表面自己声明拇指色，向后代继承）。 */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  /* 预留滚动条槽位：出现/消失时不左右跳。 */
+  scrollbar-gutter: stable;
 }
 
 .fileRow {
@@ -162,6 +217,30 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* BUG-2（2026-09-11）：展开态文件行可点击进编辑器看变更（button 版，与
+   .filePath 同排版，加 hover 反馈表明可交互）。 */
+.filePathButton {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.filePathButton:hover {
+  color: var(--dsw-alias-label-primary);
+  text-decoration: underline;
+}
+
 .fileDiff {
   display: inline-flex;
   flex: none;
@@ -173,12 +252,66 @@
   line-height: 20px;
 }
 
+/* 单文件动作（撤销/保留）：默认收起、行 hover 或键盘聚焦时才显形 —— 文件多时
+   一列常显按钮会淹没路径本身。用 width 过渡而非 display，避免 hover 时行高跳动。 */
+.fileActions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  padding-left: 8px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.fileRow:hover .fileActions,
+.fileRow:focus-within .fileActions {
+  opacity: 1;
+}
+
+.fileActionButton {
+  padding: 1px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 6px;
+  background: var(--corum-glass-2);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.fileActionButton:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+  background: var(--corum-glass-3);
+}
+
+.fileActionButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 「保留」用品牌色示好（正向、主推动作）。 */
+.fileKeepButton {
+  border-color: transparent;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+}
+
+.fileKeepButton:hover:not(:disabled) {
+  color: var(--corum-label-on-brand);
+  filter: brightness(1.08);
+}
+
+/* 触屏/无 hover 设备：动作按钮常显，否则永远点不到。 */
+@media (hover: none) {
+  .fileActions { opacity: 1; }
+}
+
 .notice {
   flex: 1 1 100%;
   margin-top: 6px;
   font-size: 12px;
   line-height: 18px;
-  color: var(--dsw-alias-state-error);
+  color: var(--dsw-alias-state-error-primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

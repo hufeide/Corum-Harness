@@ -2,19 +2,17 @@
  * corum-desktop/corum-git — 工作区 git 侦测与初始化 Host 半（Typert Remote，
  * service 名 `corumGit`）。
  *
- * 背景（用户需求 2026-09-09）：新建工作区时自动侦测 git 仓库，没有则询问用户
- * 是否初始化——corum 的子 Agent 编排隔离（worktree）/ 声明式 verify / integrate
- * 全部依赖 git 仓库；非 git 工作区这些能力不可用（实测 `isolation: always` 在
- * 非 git 目录 `git worktree add` 直接报 `fatal: not a git repository`）。本服务
- * 提供 renderer 流程所需的两个原子能力：`status`（侦测）与 `init`（初始化）。
+ * 背景：corum 的子 Agent 编排隔离（worktree）/ 声明式 verify / integrate 全部依赖
+ * git 仓库；非 git 工作区这些能力不可用（实测 `isolation: always` 在非 git 目录
+ * `git worktree add` 直接报 `fatal: not a git repository`）。
+ *
+ * **产品策略（2026-09-11 用户定调）**：corum 不再提供「是否初始化 git」开关。
+ * 打开工作区的行为固定为「探测是否已是 git 仓库，没有就初始化」——因此
+ * `corum-workspace.autoInitGit` 设置项及其 UI 已移除，调用方统一走 `ensureRepo`。
  *
  * 与 corumFs 的差异：corumFs 以「host 进程 cwd 为项目根」防穿越（文件树数据源）；
  * 本服务接受**任意绝对路径**——用户添加的工作区可在文件系统任意位置，不存在
  * 「项目根」概念，故不做根校验，仅 realpath 归一后在目标目录跑 git。
- *
- * 同时承载 `corum-workspace` settings namespace 的注册（「新工作区始终初始化 git」
- * 通用开关的持久化面）——与 ui-onboarding 在 boot.ts 的补注册同款原因：该 namespace
- * 无其它插件负责注册，host 半在此注册使 settings.describe / mutate 可用。
  *
  * @Remote 方法直接 return value（Typert Remote 信封自动包 `{ ok: true, value }`），
  * 失败 throw（包成 `{ ok: false, error }`）。
@@ -25,23 +23,6 @@ import { realpath } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import z from '@deepseek-ai/schemastery'
-
-// ── corum-workspace settings namespace（通用开关持久化面）─────────────────────
-
-/** settings.yaml 的 corum-workspace 段。 */
-export const CORUM_WORKSPACE_SETTINGS_NAMESPACE = 'corum-workspace'
-
-/** 通用设置形（全键可选——omission 语义，未改的键不落 yaml）。 */
-export interface CorumWorkspaceSettings {
-  /** 新建工作区时是否自动初始化 git 仓库（默认 true）。 */
-  readonly autoInitGit?: boolean
-}
-
-/** schemastery schema（omission 语义：default(undefined) 不物化未改的键）。 */
-export const CORUM_WORKSPACE_SETTINGS_SCHEMA: z<CorumWorkspaceSettings> = z.object({
-  autoInitGit: z.boolean().default(undefined as unknown as boolean),
-})
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -51,7 +32,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /** 在目录下跑一个 git 子命令；exit 0 resolve stdout，否则 reject 带 stderr。 */
-function runGit(cwd: string, args: string[]): Promise<{ stdout: string; code: number }> {
+function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
@@ -60,8 +41,7 @@ function runGit(cwd: string, args: string[]): Promise<{ stdout: string; code: nu
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     child.on('error', rejectPromise)
     child.on('exit', (code) => {
-      resolvePromise({ stdout: stdout.trim(), code: code ?? -1 })
-      void stderr
+      resolvePromise({ stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? -1 })
     })
   })
 }
@@ -69,26 +49,6 @@ function runGit(cwd: string, args: string[]): Promise<{ stdout: string; code: nu
 export class CorumGitService extends TypertRemoteService {
   constructor(ctx: Context) {
     super(ctx, 'corumGit')
-    // corum-workspace namespace 注册（「新工作区始终初始化 git」开关的持久化面）。
-    // settings 服务此时尚未挂载（host boot 早期），短轮询直到可用——与 boot.ts 的
-    // ui-onboarding 补注册同款模式（根 ctx 上 inject 异步回调实测不触发）。
-    const register = (): void => {
-      const settings = ctx.get('settings') as {
-        register: (ns: unknown, schema: unknown) => void
-      } | undefined
-      if (settings === undefined) return
-      settings.register(CORUM_WORKSPACE_SETTINGS_NAMESPACE, CORUM_WORKSPACE_SETTINGS_SCHEMA)
-      this.ctx.logger.info('corum-workspace namespace registered')
-    }
-    const poll = setInterval(() => {
-      if (ctx.get('settings') !== undefined) {
-        clearInterval(poll)
-        try { register() } catch (error) {
-          this.ctx.logger.warn(`corum-workspace register failed: ${String(error)}`)
-        }
-      }
-    }, 100)
-    setTimeout(() => clearInterval(poll), 15000)
   }
 
   /** realpath 归一目标目录（symlink/.. 解析），不存在则抛错。 */
@@ -134,7 +94,9 @@ export class CorumGitService extends TypertRemoteService {
 
     const initResult = await runGit(dir, ['init'])
     if (initResult.code !== 0) {
-      throw new Error(`git init failed (exit ${initResult.code})`)
+      // 带上 stderr：早期实现把它吞了，导致失败只剩「git init failed (exit 1)」这句
+      // 无从下手的报错（实测 ai-lab / dsh_test 就卡在这里）。
+      throw new Error(`git init failed (exit ${initResult.code}): ${initResult.stderr || 'no stderr'}`)
     }
     // 空初始 commit：worktree/分支的前置。git 可能因缺 user.name/user.email 失败——
     // 用 -c 传入一次性身份（不写用户的 global/local config，最小侵入）。
@@ -144,9 +106,24 @@ export class CorumGitService extends TypertRemoteService {
       'commit', '--allow-empty', '-m', 'chore: initial commit',
     ])
     if (commitResult.code !== 0) {
-      throw new Error(`git initial commit failed (exit ${commitResult.code})`)
+      throw new Error(`git initial commit failed (exit ${commitResult.code}): ${commitResult.stderr || 'no stderr'}`)
     }
     this.ctx.logger.info(`git initialized: ${dir}`)
     return { initialized: true, alreadyRepo: false }
+  }
+
+  /**
+   * 保证目录是一个 git 仓库：已是仓库则原样返回，否则 `git init` + 初始 commit。
+   *
+   * 这是**产品策略的唯一落点**（2026-09-11 用户定调）：corum 不再提供「是否初始化
+   * git」开关 —— 打开工作区的行为固定为「探测，没有就初始化」。调用方一律用本方法，
+   * 不要再各自拼 status + init 两跳。
+   *
+   * @param path - 任意绝对目录路径。
+   * @returns `initialized` 表示本次是否真的创建了仓库。
+   */
+  @Remote('ensureRepo')
+  async ensureRepo(path: string): Promise<{ initialized: boolean; alreadyRepo: boolean }> {
+    return await this.init(path)
   }
 }

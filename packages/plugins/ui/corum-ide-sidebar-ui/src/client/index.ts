@@ -109,6 +109,44 @@ export function apply(ctx: ClientContext): void {
     'ide-sidebar: corum.sidebar skeleton',
   )
 
+  /**
+   * fork（corum）：**启动时**保证每个已注册工作区都是 git 仓库
+   * （2026-09-11 用户定调：打开工作区的行为固定为「探测，没有就初始化」，
+   * 不再有 autoInitGit 开关、也不询问）。
+   *
+   * 只跑一次：等列表首次非空（boot 早期快照可能是空的）→ 串行 ensureRepo →
+   * 退订。串行是刻意的：并发会对每个工作区各起一个 git 进程。单个工作区失败只
+   * warn 不阻断 —— 不影响其余工作区，且隔离等能力自带非 git 降级。
+   */
+  ctx.effect(() => {
+    let done = false
+    let cancelled = false
+    let unsubscribe: (() => void) | null = null
+    const run = (): void => {
+      if (done || cancelled) return
+      const items = ctx.workspaces.list.getSnapshot().items
+      if (items.length === 0) return
+      done = true
+      unsubscribe?.()
+      void (async () => {
+        for (const ws of items) {
+          if (cancelled) return
+          const path = (ws as { path?: string }).path
+          if (typeof path !== 'string' || path === '') continue
+          try {
+            // eslint-disable-next-line no-await-in-loop -- 串行：避免一次起多个 git 进程
+            await connection.rpc.call('/api', 'corumGit/ensureRepo', { args: { path } })
+          } catch (error) {
+            console.warn('[ui-sidebar] ensureRepo failed', { path, error })
+          }
+        }
+      })()
+    }
+    unsubscribe = ctx.workspaces.list.subscribe(run)
+    run() // 订阅前可能已经加载好了
+    return () => { cancelled = true; unsubscribe?.() }
+  }, 'ui-sidebar: ensure git repos at boot')
+
   // 任务模式内容（开源版核心功能面）：工作区分组会话列表 + 搜索 + 工作区管理。
   ctx.effect(
     () => ctx.slots.inject('corum.sidebar.sessions', () => ctx.slots.register(
@@ -202,13 +240,6 @@ export function apply(ctx: ClientContext): void {
             const result = await connection.rpc.call('/api', 'corumGit/init', { args: { path } })
             if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
             return result.value as { initialized: boolean; alreadyRepo: boolean }
-          },
-          // fork（corum）：读「新工作区始终初始化 git」开关（corum-workspace.autoInitGit）。
-          // 默认 true（开关开=始终初始化免打扰）；用户显式关后才在添加工作区时逐次询问。
-          autoInitGitEnabled: () => {
-            const scope = (ctx as unknown as { settingsScope: { bind: (spec: { namespace: string }) => { getSnapshot: () => { value: { autoInitGit?: boolean } | undefined } } } }).settingsScope
-            const value = scope.bind({ namespace: 'corum-workspace' }).getSnapshot().value
-            return value?.autoInitGit ?? true
           },
           // 0.1.2：IWorkspaces.pickDirectory 移除，目录选择走 directoryPicker Remote。
           pickDirectory: pickDir,

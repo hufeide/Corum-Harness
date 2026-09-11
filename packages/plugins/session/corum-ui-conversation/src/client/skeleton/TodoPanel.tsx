@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // The domain's client-namespace pure-type outlet: one import edge delivers
@@ -17,105 +17,152 @@ export interface TodoPanelProps {
   t: TodoDockProps['t']
 }
 
-/** Local exhaustiveness helper — client packages do not depend on `dsh-llm`. */
-/* v8 ignore next 3 -- closed-union backstop; only reached if status is forged */
-function assertNever(value: never): never {
-  throw new Error(`unreachable todo status: ${String(value)}`)
-}
+/**
+ * 进度线的一个节点（design.pen `ZWe4x` dot-N + `sKrdG` 上下文稿）。
+ *
+ * 设计稿的圆点语义：一个圆点 = 一个任务项（用户确认）。三种状态对应设计 token：
+ * - `completed`  → `state-success`（绿）9px 实心
+ * - `in_progress`→ `state-warn`（黄）8px 实心 + 双层 halo 涟漪
+ * - `pending`    → `#D9D3EE` 60% 9px 实心
+ *
+ * 设计稿把「已完成 → 进行中」之间的连接线画成绿色 55% 虚线（已走过的路径），
+ * 「进行中 → 之后」画成 glass-border 70% 虚线（未走过的路径）。这个分界由
+ * `dotIndex` 与 `activeIndex` 比较得出，见 `connectorTone`。
+ */
+type TodoDotTone = 'done' | 'active' | 'pending'
 
-/** Status glyphs share the figma 14×14 artboard; the 16×16 `.glyph` cell centers them. */
-function CompletedGlyph() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true" className={css.glyphCompleted}>
-      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" />
-      <path
-        d="M10.9631 5.71411L7.70154 8.97571C7.48011 9.19714 7.27736 9.40099 7.09229 9.54993C6.89742 9.70669 6.66314 9.85279 6.3634 9.90027C6.2049 9.92534 6.04339 9.92534 5.88489 9.90027C5.58515 9.85279 5.35087 9.70669 5.15601 9.54993C4.97093 9.40099 4.76818 9.19714 4.54675 8.97571L3.03516 7.46411L3.96313 6.53613L5.47473 8.04773C5.7169 8.28989 5.86196 8.43389 5.97888 8.52795C6.08597 8.61409 6.10875 8.60701 6.08997 8.604C6.11259 8.60758 6.13571 8.60758 6.15833 8.604C6.13954 8.60701 6.16232 8.61409 6.26941 8.52795C6.38633 8.43389 6.53139 8.28989 6.77356 8.04773L10.0352 4.78613L10.9631 5.71411Z"
-        fill="currentColor"
-      />
-    </svg>
-  )
-}
-
-/** In-progress: business-blue ring fading out; CSS spins the svg. */
-function ProgressGlyph() {
-  const gradientId = useId()
-  return (
-    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true" className={css.glyphProgress}>
-      <defs>
-        <linearGradient id={gradientId} x1="2.5" y1="12" x2="10.5" y2="3.5" gradientUnits="userSpaceOnUse">
-          <stop stopColor="currentColor" />
-          <stop offset="1" stopColor="currentColor" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <circle cx="7" cy="7" r="6.4" stroke={`url(#${gradientId})`} strokeWidth="1.2" />
-    </svg>
-  )
-}
-
-/** Pending: dashed unstarted ring (figma dash 2.4 2.4). */
-function PendingGlyph() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" aria-hidden="true" className={css.glyphPending}>
-      <circle cx="7" cy="7" r="6.4" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2.4 2.4" />
-    </svg>
-  )
-}
-
-function StatusGlyph({ status }: { status: TodoItem['status'] }) {
+/** 单个任务的圆点色调（status → tone，闭合联合穷尽）。 */
+function dotTone(status: TodoItem['status']): TodoDotTone {
   switch (status) {
-    case 'completed': return <CompletedGlyph />
-    case 'in_progress': return <ProgressGlyph />
-    case 'pending': return <PendingGlyph />
+    case 'completed': return 'done'
+    case 'in_progress': return 'active'
+    case 'pending': return 'pending'
     /* v8 ignore next -- closed TodoItem status union */
-    default: return assertNever(status)
+    default: return 'pending'
   }
 }
 
-/** Header summary: "·"-joined per-status counts; zero-count segments are omitted as noise (a non-empty list keeps at least one). */
-function progressLabel(todos: readonly TodoItem[], t: TodoPanelProps['t']): string {
+/**
+ * 连接虚线（节点 i 与 i+1 之间）的色调。
+ *
+ * 设计稿：绿虚线只画到当前进行中的节点为止（已完成的路径），其后一律用
+ * glass-border 虚线段。首个进行中节点之前的连接线为绿，之后为中性。
+ */
+function connectorTone(index: number, activeIndex: number): 'done' | 'idle' {
+  // 没有进行中节点时，全部已完成则整条走绿，否则按最后一个已完成节点收口。
+  if (activeIndex < 0) return 'idle'
+  return index < activeIndex ? 'done' : 'idle'
+}
+
+/**
+ * 进度线的时间轴标记：默认折叠时只渲染这条线（无文字），与设计稿 `sKrdG`
+ * 的 40px 玻璃胶囊一致。
+ *
+ * 排布：**扁平序列** `dot, conn, dot, conn, …`（不是「node 包着 dot+conn」）。
+ * 早先的实现把 connector 放进每个 node 内、再让 node `flex:1`，会得到
+ * `101,106,106,106,106,106` 这种不等宽的格子 —— 首节点没有 connector，
+ * 少了一份 `min-width`，且 8px 的进行中点比 9px 的待办点窄 1px，flex 分配
+ * 时每个节点的剩余空间都不一样，视觉上圆点就「没对齐」。改成扁平序列后，
+ * 每个圆点两侧的间距都是同一个 connector 宽度，天然等距。
+ *
+ * 虚线流动动画（设计稿交互⑤）与黄点涟漪（交互⑥）都在 CSS 里
+ * （见 TodoPanel.module.css）。
+ */
+function ProgressLine({ todos }: { todos: readonly TodoItem[] }) {
+  const activeIndex = todos.findIndex(item => item.status === 'in_progress')
+  return (
+    <div className={css.line} aria-hidden="true">
+      {todos.map((item, index) => {
+        const tone = dotTone(item.status)
+        return (
+          <Fragment key={item.content}>
+            {index > 0 && (
+              <span
+                className={css.connector}
+                data-tone={connectorTone(index - 1, activeIndex)}
+              />
+            )}
+            <span className={css.dot} data-tone={tone}>
+              {/* 进行中：黄点自身呼吸 + 双层涟漪 halo
+                  （设计稿 halo1 14px@50% / halo2 20px@25%）。 */}
+              {tone === 'active' && (
+                <>
+                  <span className={css.haloOuter} />
+                  <span className={css.haloInner} />
+                </>
+              )}
+            </span>
+          </Fragment>
+        )
+      })}
+    </div>
+  )
+}
+
+export function TodoPanel({ todos, t }: TodoPanelProps) {
+  const [expanded, setExpanded] = useState(false)
+  if (todos.length === 0) return null
+
+  // hover 浮层（交互②）要展示「当下最该看的那个任务」：优先进行中，
+  // 其次最后一条，兜底第一条。
+  const focus = todos.find(item => item.status === 'in_progress')
+    ?? todos[todos.length - 1]
+    ?? todos[0]
+
   const done = todos.filter(item => item.status === 'completed').length
   const active = todos.filter(item => item.status === 'in_progress').length
   const pending = todos.length - done - active
-  // En spaces (U+2002): HTML collapses runs of ASCII spaces, so widening the
-  // separator breathing room needs a literal wide space.
-  return [
+
+  // 折叠态进度文案（用户反馈：只有圆点太单调、认不出是什么组件）。
+  // 复用既有 locale key，零计数段省略 —— 与官方「1 进行中 · 5 待处理」同款读法。
+  // 分隔用 en-space（U+2002）：HTML 会折叠连续 ASCII 空格，要让「·」两侧
+  // 有呼吸感必须用宽空格。
+  const progressText = [
     ...done > 0 ? [t('todo.progress.done', { done })] : [],
     ...active > 0 ? [t('todo.progress.active', { active })] : [],
     ...pending > 0 ? [t('todo.progress.pending', { pending })] : [],
   ].join('\u2002·\u2002')
-}
-
-export function TodoPanel({ todos, t }: TodoPanelProps) {
-  const [collapsed, setCollapsed] = useState(true)
-  if (todos.length === 0) return null
 
   return (
-    <section className={css.root} data-testid="todo-panel" aria-label={t('todo.title')}>
-      <div className={css.body}>
-        <button
-          type="button"
-          className={css.header}
-          aria-expanded={!collapsed}
-          onClick={() => { setCollapsed(v => !v) }}
-        >
-          <span className={css.lead} aria-hidden><IconChecklistOutline14 /></span>
-          <span className={css.title}>{t('todo.title')}</span>
-          <span className={css.progress}>{progressLabel(todos, t)}</span>
-          <span className={css.chevron} aria-hidden>
-            {collapsed ? <IconChevronUpOutline14 /> : <IconChevronDownOutline14 />}
-          </span>
-        </button>
-        {!collapsed && (
-          <ul className={css.list}>
-            {todos.map(item => (
-              <li key={item.content} className={css.item} data-status={item.status}>
-                <span className={css.glyph} aria-hidden><StatusGlyph status={item.status} /></span>
-                <span className={css.content}>{item.content}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+    <section className={css.root} data-testid="todo-panel" data-expanded={expanded}>
+      <button
+        type="button"
+        className={css.trigger}
+        aria-expanded={expanded}
+        aria-label={`${t('todo.summary', { total: todos.length, done, active })}；${expanded ? t('todo.collapse') : t('todo.expand')}`}
+        onClick={() => { setExpanded(v => !v) }}
+      >
+        {/* 身份标识（图标 + 名称）：让用户一眼知道这是「任务」控件，而不是
+            一串无来由的圆点。 */}
+        <span className={css.lead} aria-hidden><IconChecklistOutline14 /></span>
+        <span className={css.title}>{t('todo.title')}</span>
+        <span className={css.progress}>{progressText}</span>
+        <ProgressLine todos={todos} />
+        <span className={css.chevron} data-expanded={expanded}>
+          {expanded ? <IconChevronUpOutline14 size={10} /> : <IconChevronDownOutline14 size={10} />}
+        </span>
+      </button>
+      {/* 设计稿交互②：hover 圆点浮现当前任务名称。自绘浮层（跟随 corum 玻璃主题）
+          而非 title 属性 —— title 会出系统级黄框、不可主题化。显隐由 CSS 的
+          .trigger:hover/.focus-visible 兄弟选择器驱动，无需 React 状态。 */}
+      <div className={css.tooltip} role="tooltip">
+        {focus !== undefined ? focus.content : ''}
       </div>
+      {/* 展开态（交互③「点击进度线：展开为任务栏」）：列出**全部**任务项。
+          早先只渲染 focus 一条，是因为把设计稿 `mugD6` 的 head 误读成了「整个
+          展开态」—— 那只是展开态的标题行；进度线本身代表全部任务，展开后必须
+          与进度线的圆点一一对应，否则点数和条目数对不上（用户报「有多个任务却
+          只显示一个」）。 */}
+      {expanded && (
+        <ul className={css.list}>
+          {todos.map(item => (
+            <li key={item.content} className={css.item} data-tone={dotTone(item.status)}>
+              <span className={css.itemGlyph} data-tone={dotTone(item.status)} aria-hidden />
+              <span className={css.itemText}>{item.content}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

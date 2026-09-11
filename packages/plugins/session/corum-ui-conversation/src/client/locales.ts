@@ -90,6 +90,11 @@ export const zh = {
   'todo.progress.pending': '{pending} 待处理',
   'todo.rowTitle': '更新任务清单',
   'todo.completed': '{done}/{total} 已完成',
+  /* 任务控件（design.pen 圆点进度线）无障碍文案：进度线本身纯图形，
+     aria-label 需要把「N 个任务、几个完成/进行中」读出来。 */
+  'todo.summary': '任务进度：共 {total} 项，{done} 项已完成，{active} 项进行中',
+  'todo.expand': '展开任务详情',
+  'todo.collapse': '收起任务详情',
   'command.imagesUnsupported': '/{command} 不接受图片附件，请先移除图片',
   'command.attachmentsUnsupported': '/{command} 不接受附件，请先移除附件',
   'ask.rowTitle': '提问',
@@ -260,6 +265,9 @@ export const en = {
   'todo.progress.pending': '{pending} pending',
   'todo.rowTitle': 'Update to-do list',
   'todo.completed': '{done}/{total} completed',
+  'todo.summary': 'Task progress: {total} total, {done} completed, {active} in progress',
+  'todo.expand': 'Expand task details',
+  'todo.collapse': 'Collapse task details',
   'command.imagesUnsupported': '/{command} does not accept image attachments; remove them first',
   'command.attachmentsUnsupported': '/{command} does not accept attachments; remove them first',
   'ask.rowTitle': 'Ask question',

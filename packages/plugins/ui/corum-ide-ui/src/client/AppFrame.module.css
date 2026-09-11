@@ -21,6 +21,14 @@
   height: 100%;
   overflow: hidden;
   background: transparent; /* ambient 蒸汽波背景由 body 提供（theme.css） */
+
+  /* BUG-1（2026-09-11）：主窗口会话顶栏卡片与左侧 titlebarRow（0..40）同带对齐——
+     顶 margin 0、高 40，底部与左侧红绿灯/图标按钮底对齐；非交互区承担拖窗
+     （卡内按钮经 ConversationRoot.module.css 的 .header button 规则 no-drag）。
+     浮窗不走 .frame（floatingRoot 独立 root），不受影响。 */
+  --corum-session-topbar-margin: 0 12px 0;
+  --corum-session-topbar-height: 40px;
+  --corum-session-topbar-app-region: drag;
 }
 
 /* ── 顶部标题栏行（design.pen titlebar-row，40px）──
@@ -1205,6 +1213,16 @@
 .agentCapsuleMore {
   flex: none;
   font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* 全已结束时状态点降为中性色（不再用品牌的「活」色）。 */
+.agentCapsuleDot[data-done='true'] {
+  background: var(--dsw-alias-label-tertiary);
+}
+/* 「M 已完成」尾注（运行中段之后的补充信息）。 */
+.agentCapsuleDone {
+  flex: none;
+  font-size: 10.5px;
   color: var(--dsw-alias-label-tertiary);
 }
 

@@ -1,7 +1,18 @@
+/*
+ * 任务控件（design.pen `ZWe4x` 展开态 + `sKrdG` 上下文/折叠态 + `KXddj` 交互说明）。
+ *
+ * 形态：输入框上方一条 glass-1 玻璃胶囊。
+ *   折叠（默认）：40px 高，内部只有一条「圆点 + 虚线」进度线 + 右侧 chevron。
+ *   展开：额外在下方排一行任务名（12px / 600 / label-primary）。
+ *
+ * 三种状态色沿用设计 token（corum 主题里 --corum-glass-* 与 --dsw-alias-* 都已存在）：
+ *   已完成 = state-success(绿) / 进行中 = state-warn(黄) / 待办 = #D9D3EE(白紫)
+ */
+
 .root {
   box-sizing: border-box;
+  position: relative;
   flex: none;
-  overflow: hidden;
   margin: 0 auto;
   width: calc(
     100% -
@@ -19,39 +30,30 @@
     var(--dsh-composer-dock-inset) -
     var(--dsh-composer-dock-inset)
   );
-  /* fork（corum 液态玻璃）：dock 卡 glass-2 + 玻璃光边 + blur + r12。 */
+  /* 设计稿 task-widget：glass-1 底 + glass-border 1px + r14。 */
   border: 1px solid var(--corum-glass-border);
-  border-radius: 12px;
-  background: var(--corum-glass-2);
+  border-radius: 14px;
+  background: var(--corum-glass-1);
   backdrop-filter: blur(20px) saturate(140%);
-  /* Elevated surface: `--dsw-specific-tip` is the same dark rung as the menu
-     surface, and `.list` scrolls inside this card, so the thumb takes the l2
-     elevation tokens. Declared here because the elevation belongs to the
-     surface, and the custom properties inherit down to `.list` (see ui-theme
-     styles/scrollbar.css for the rebinding contract). */
-  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
-  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
-.body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 6px 12px;
-}
-
-.header {
+/* 折叠态（设计稿 sKrdG）：整条 40px 高的可点区域，水平内缩 16px。 */
+.trigger {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 0;
+  height: 40px;
+  padding: 0 16px;
   border: none;
   background: transparent;
-  text-align: left;
   cursor: pointer;
 }
 
+/* ── 身份标识（图标 + 名称）───────────────────────────────────────── */
+
+/* 用户反馈：折叠态只有圆点时太单调、认不出是什么组件，所以补回「图标 + 任务」
+   这一层身份文案（其余内容仍是设计稿的圆点进度线）。 */
 .lead {
   display: grid;
   flex: none;
@@ -62,22 +64,152 @@
 .title {
   flex: none;
   font-size: 13px;
-  line-height: 24px;
   font-weight: 500;
+  line-height: 20px;
   color: var(--dsw-alias-label-primary);
 }
 
+/* 进度计数（「1 进行中 · 5 待处理」）：与官方同款读法，零计数段在 JS 侧省略。 */
 .progress {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: none;
   overflow: hidden;
   font-size: 13px;
-  line-height: 20px;
   font-weight: 400;
+  line-height: 20px;
   color: var(--dsw-alias-label-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── 进度线 ─────────────────────────────────────────────────────────── */
+
+/*
+ * 进度线（扁平序列：dot / connector / dot / connector …）。
+ *
+ * 每个圆点左右两侧都是等宽的 connector（首尾靠 line 的 padding 收口），
+ * 所以圆点天然等距 —— 不要再把 connector 包进「flex:1 的 node」里，
+ * 那会因首节点无 connector、进行中点 8px 比待办点 9px 窄而算出不等宽格子。
+ *
+ * `margin-left: auto` + `max-width`：让进度线贴在右侧（chevron 之前），
+ * 左侧留给身份与计数文案。不设 max-width 的话宽屏上连线会被拉得过长、
+ * 点位稀疏得像装饰。
+ */
+.line {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  max-width: 360px;
+  height: 24px;
+  margin-left: auto;
+}
+
+/* 连接虚线：设计稿是 6 段 3×2、r1 的 dash 以 space_between 排布。
+   这里改用一个 repeating-linear-gradient 画同一几何，好处是可以直接位移
+   background-position 做「虚线从左向右流动」（交互⑤），且周期无跳变。 */
+.connector {
+  flex: 1 1 0;
+  min-width: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background-image: repeating-linear-gradient(
+    to right,
+    currentColor 0 3px,
+    transparent 3px 9px
+  );
+  animation: todo-dash-flow 1.2s linear infinite;
+}
+
+.connector[data-tone='done'] {
+  color: var(--dsw-alias-state-success-primary);
+  opacity: 0.55;
+}
+
+.connector[data-tone='idle'] {
+  color: var(--corum-glass-border);
+  opacity: 0.7;
+}
+
+/* 位移一个 dash 周期（3 + 6 = 9px）实现无缝循环流动。 */
+@keyframes todo-dash-flow {
+  to {
+    background-position: 9px 0;
+  }
+}
+
+/* ── 圆点 ───────────────────────────────────────────────────────────── */
+
+/*
+ * 所有圆点都占同一个 9px 外框（`box-sizing` + 固定 width/height），进行中的
+ * 黄点靠 `transform: scale` 视觉略小 —— 这样三种状态的**布局宽度完全一致**，
+ * 圆点间距不受状态影响。早先直接给 active 写 8px，布局宽度就比待办少 1px，
+ * 叠加 flex 分配后首节点差到 5px。
+ */
+.dot {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.dot[data-tone='done'] {
+  background: var(--dsw-alias-state-success-primary);
+  opacity: 0.9;
+}
+
+.dot[data-tone='pending'] {
+  /* 设计稿写死的 #D9D3EE，非 token（60% 不透明度）。 */
+  background: #D9D3EE;
+  opacity: 0.6;
+}
+
+/* 进行中：设计稿 dot-3 是 24×24 的 cell，内含 8px 实心黄点 + 两层 halo
+   （14px@50% / 20px@25%）。交互⑥要求黄点自身也有波动动画，这里让 .dot 用
+   scale 呼吸（视觉 8px↔9px），halo 在内层错相位荡开形成涟漪。 */
+.dot[data-tone='active'] {
+  background: var(--dsw-alias-state-warn-primary);
+  animation: todo-dot-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes todo-dot-breathe {
+  0%, 100% { transform: scale(0.889); }
+  50% { transform: scale(1); }
+}
+
+.haloInner,
+.haloOuter {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* halo1 = 14px @ 50% */
+.haloInner {
+  width: 14px;
+  height: 14px;
+  opacity: 0.5;
+}
+
+/* halo2 = 20px @ 25%，与内层错相位呼吸，形成涟漪脉冲（交互⑥）。 */
+.haloOuter {
+  width: 20px;
+  height: 20px;
+  opacity: 0.25;
+  animation: todo-halo-pulse 2s ease-in-out infinite;
+}
+
+@keyframes todo-halo-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.06; }
+}
+
+/* ── chevron ────────────────────────────────────────────────────────── */
 
 .chevron {
   display: grid;
@@ -86,12 +218,49 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* ── hover 任务名浮层（交互②）─────────────────────────────────────── */
+
+/*
+ * 设计稿要求 hover 圆点浮现当前任务名称。浮层挂在 .root 上、由 .trigger 的
+ * :hover/:focus-visible 唤起（纯 CSS，无额外状态）。默认 opacity 0 +
+ * visibility hidden，保证不参与命中测试也不被读屏误读。
+ */
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 16px;
+  max-width: calc(100% - 32px);
+  padding: 6px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  backdrop-filter: blur(20px) saturate(140%);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.trigger:hover + .tooltip,
+.trigger:focus-visible + .tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ── 展开态任务列表（交互③）──────────────────────────────────────── */
+
 .list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin: 0;
-  padding: 0;
+  padding: 2px 16px 8px;
   list-style: none;
   max-height: 180px;
   overflow-y: auto;
@@ -100,44 +269,51 @@
 .item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 18px;
   color: var(--dsw-alias-label-secondary);
 }
 
-.glyph {
-  display: grid;
+/* 展开态的每一条左侧配一个小圆点，颜色与进度线上的同状态圆点一致 ——
+   让「线上第 N 个点」和「列表第 N 条」能对上。 */
+.itemGlyph {
   flex: none;
-  place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
 }
 
-.glyphCompleted {
-  color: var(--dsw-alias-state-success-primary);
+.itemGlyph[data-tone='done'] {
+  background: var(--dsw-alias-state-success-primary);
+  opacity: 0.9;
 }
 
-.glyphPending {
-  color: var(--dsw-alias-label-caption);
+.itemGlyph[data-tone='active'] {
+  background: var(--dsw-alias-state-warn-primary);
+  animation: todo-dot-breathe 1.6s ease-in-out infinite;
 }
 
-.glyphProgress {
-  color: var(--dsw-alias-state-business-primary);
-  animation: todo-progress-spin 1s linear infinite;
+.itemGlyph[data-tone='pending'] {
+  background: #D9D3EE;
+  opacity: 0.6;
 }
 
-@keyframes todo-progress-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Figma strip is single-line; long items ellipsize with no inline expand. */
-.content {
+.itemText {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 动效降级由 corum-ide-ui/theme.css 的 prefers-reduced-motion 全局块兜底；
+   这里额外停掉流动与脉冲，避免「动效被压成 0.001ms 但仍每帧重绘」。 */
+@media (prefers-reduced-motion: reduce) {
+  .connector,
+  .haloOuter,
+  .dot[data-tone='active'],
+  .itemGlyph[data-tone='active'] {
+    animation: none;
+  }
 }

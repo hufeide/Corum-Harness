@@ -27,9 +27,6 @@ import {
 // 物理相对路径而非 @corum/corum-ui-base 子路径：原因同 ProjectPane.tsx（tsdown
 // 跨包 css 子路径 import 错乱，相对路径才能正确抽取内联进 bundle）。
 import css from '../../../corum-ui-base/src/client/sidebar.module.css'
-// fork（corum）：新建工作区的 git 初始化确认框（组件走包名子路径，与 ModelSelect/
-// EditorColumn 一致；仅 css 才用上方物理相对路径——tsdown css 子路径错乱规避）。
-import { ConfirmDialog } from '@corum/corum-ui-base/client'
 
 /** Injected actions + the live feed（由 corum.sidebar.sessions 槽的 occupant 插件注入）。 */
 export interface SessionsPaneInjected {
@@ -55,8 +52,6 @@ export interface SessionsPaneInjected {
   gitWorkspaceStatus: (path: string) => Promise<boolean>
   /** fork（corum）：在目录初始化 git 仓库（git init + 空初始 commit）。 */
   gitWorkspaceInit: (path: string) => Promise<{ initialized: boolean; alreadyRepo: boolean }>
-  /** fork（corum）：「新工作区始终初始化 git」通用开关当前值（corum-workspace.autoInitGit，默认 true）。 */
-  autoInitGitEnabled: () => boolean
   /** Host 原生目录选择器；用户取消返回 null。 */
   pickDirectory: () => Promise<string | null>
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
@@ -291,26 +286,17 @@ export function SessionsPane(props: SessionsPaneInjected) {
   const [addingWorkspace, setAddingWorkspace] = useState(false)
   const [addWorkspaceError, setAddWorkspaceError] = useState<string | null>(null)
   // fork（corum）：待确认的 git 初始化（非 git 工作区 + 「始终初始化」开关关闭时弹出）。
-  const [pendingGitInit, setPendingGitInit] = useState<string | null>(null)
-  const [gitInitBusy, setGitInitBusy] = useState(false)
   const addWorkspace = useCallback(async (): Promise<void> => {
     setAddWorkspaceError(null)
     setAddingWorkspace(true)
     try {
       const path = await props.pickDirectory()
       if (path === null) return // 用户取消
-      // fork（corum）：新建工作区的 git 侦测（2026-09-09 用户需求）。非 git 仓库时——
-      // 「始终初始化 git」开关开 → 直接初始化（免打扰）；开关关 → 弹确认框询问。
-      // 已是 git 仓库（含 worktree/子目录）则直接注册。
-      const isRepo = await props.gitWorkspaceStatus(path)
-      if (!isRepo) {
-        if (props.autoInitGitEnabled()) {
-          await props.gitWorkspaceInit(path)
-        } else {
-          setPendingGitInit(path)
-          return // 等 ConfirmDialog 决策（确认=初始化 / 取消=直接注册并隔离降级）
-        }
-      }
+      // fork（corum）：工作区的 git 保证（2026-09-11 用户定调）。行为固定为
+      // 「探测，没有就初始化」——不再询问、也没有开关（原 autoInitGit 设置已移除）。
+      // 子 Agent 并行隔离、声明式验证、集成合并都依赖 git。
+      // `ensureRepo` 幂等：已是仓库（含 worktree/子目录）直接返回。
+      await props.gitWorkspaceInit(path)
       await props.addWorkspace(path)
     } catch (error) {
       setAddWorkspaceError(error instanceof Error ? error.message : String(error))
@@ -318,40 +304,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
       setAddingWorkspace(false)
     }
   }, [props])
-  // fork（corum）：确认初始化 git——init 后注册工作区。
-  const confirmGitInit = useCallback(async (): Promise<void> => {
-    if (pendingGitInit === null) return
-    setGitInitBusy(true)
-    setAddWorkspaceError(null)
-    try {
-      await props.gitWorkspaceInit(pendingGitInit)
-      await props.addWorkspace(pendingGitInit)
-      setPendingGitInit(null)
-    } catch (error) {
-      setAddWorkspaceError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setGitInitBusy(false)
-    }
-  }, [pendingGitInit, props])
-  // fork（corum）：拒绝初始化——直接注册工作区（隔离等 git 依赖能力由 spawnOne 的
-  // 非 git 降级自动关闭，见 corum-tool-subagent 的 corumIsGitRepo 判定）。
-  const declineGitInit = useCallback((): void => {
-    if (pendingGitInit === null) return
-    const path = pendingGitInit
-    setPendingGitInit(null)
-    void (async () => {
-      setAddingWorkspace(true)
-      setAddWorkspaceError(null)
-      try {
-        await props.addWorkspace(path)
-      } catch (error) {
-        setAddWorkspaceError(error instanceof Error ? error.message : String(error))
-      } finally {
-        setAddingWorkspace(false)
-      }
-    })()
-  }, [pendingGitInit, props])
-
   // 区头标签：分组视图 = 工作区；单列 = 会话（官方 locale 语义）。
   const headLabel = groupBy === 'workspace' ? '工作区' : '会话'
 
@@ -466,22 +418,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
         )}
         {renameError !== null && (
           <div className={css.projectError} role="alert">重命名失败：{renameError}</div>
-        )}
-
-        {/* fork（corum）：非 git 工作区的初始化确认（「始终初始化」开关关闭时）。
-            确认=git init+注册；取消=直接注册（隔离等 git 依赖能力自动降级关闭）。 */}
-        {pendingGitInit !== null && (
-          <ConfirmDialog
-            title="初始化 git 仓库"
-            message={`工作区「${pendingGitInit}」不是 git 仓库。子 Agent 并行隔离、声明式验证、集成合并等能力依赖 git，初始化后这些能力才可用。`}
-            warning="将在该目录执行 git init 并创建一个空的初始 commit（不改动你的任何文件）。"
-            tone="primary"
-            confirmLabel="初始化并添加"
-            cancelLabel="不初始化，直接添加"
-            busy={gitInitBusy}
-            onConfirm={() => { void confirmGitInit() }}
-            onCancel={declineGitInit}
-          />
         )}
 
         <div className={css.sessionList}>

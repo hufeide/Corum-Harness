@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-ide-test-conversation-ui",
   "version": "0.1.0",
-  "description": "S0 可行性测试插件：往壳的 conversation 槽注册占位（测试模块 + openDetails 按钮），验证中心列组合与 details 抽屉动作面。S2 由 @corum/corum-ide-conversation-ui 接管。",
+  "description": "S0 可行性测试插件：往壳的 conversation 槽注册占位（测试模块 + openDetails 按钮），验证中心列组合与 details 抽屉动作面。S2 曾由 @corum/corum-ide-conversation-ui 接管，该包已于 2026-09-11 删除（由 fork 的 corum-ui-conversation 取代）。",
   "private": true,
   "type": "module",
   "dsh": {

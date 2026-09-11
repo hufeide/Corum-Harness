@@ -516,6 +516,30 @@ export class CorumFsService extends TypertRemoteService {
   }
 
   /**
+   * 只读预览：把某文件本轮写操作在**内存里**逆序反推，重建出「改动前」的文本，
+   * 供 Review 卡的「点击文件 → 看 diff」使用（与 revertWrites 同一套 matching
+   * 语义，但不落盘）。
+   *
+   * 为什么需要它：会话事件流只含工具入参（oldString/newString），不含文件旧内容
+   * （见 revertWrites 注释与 review-revert.ts 的三档说明）。要展示整文件
+   * before/after diff，就必须拿当前文件 + 逆序反推算出原文。
+   *
+   * 重建边界（`complete` 标志如实反映）：
+   *   - `edit` / `str_replace` → 精确反向（newString 唯一匹配换回 oldString）。
+   *   - `str_replace_editor create` → 文件原本不存在，反向即「空文件」。
+   *   - `write`（整文件覆盖）→ 旧内容不可知，**重建到此为止**：
+   *     返回的是「最后一次整写之后」的状态，`complete: false`。
+   *   - `str_replace_editor insert` → 行号已漂移，按 lineCount 尽力移除；
+   *     移除失败同样停止并标 `complete: false`。
+   *
+   * 安全：与 revertWrites 完全同一套 realpath 防穿越 + root 钳制（root 必须在
+   * host cwd 之内），只读、不写任何文件。
+   *
+   * @param ops - 该文件的写操作，**按 seq 逆序**（最新在前，与 revertOrder 同序）。
+   * @param root - 路径根（泳道工作区绝对路径）。
+   * @returns 重建文本 + 是否完整重建到会话起点 + 当前文件相对路径。
+   */
+  /**
    * 单条撤销的落盘实现；目标必须 realpath 后仍在有效根内。
    *
    * 有效根钳制：rootOverride 经 realpath 后必须等于 host 进程 cwd 或位于 cwd

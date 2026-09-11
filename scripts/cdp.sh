@@ -160,6 +160,9 @@ case "$CMD" in
     ;;
   start|restart)
     cleanup
+    # 启动环境守卫（同 dev-ide.sh）：沙箱内启动的应用会功能残缺但不报错。
+    # 注意 nohup/disown 甩不掉 seatbelt —— 沙箱是进程级属性，会被整棵进程树继承。
+    bash "$SCRIPT_DIR/app-launch-guard.sh" "$ROOT"
     log "启动 combo=${COMBO_ID}（CDP :${CORUM_DEBUG_PORT}）…"
     # 后台启动并立即返回（不在脚本内等 CDP）——关键：本脚本常被 Agent 工具以
     # 「带超时的 bash 调用」执行，若脚本内长时间等待，外层超时会 SIGTERM 整个

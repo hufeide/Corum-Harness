@@ -74,13 +74,16 @@
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* 下拉列表 — fixed 定位，经 portal 挂到 body，z-index 高于设置面板 */
+/* 下拉列表 — fixed 定位，经 portal 挂到 body，z-index 高于设置面板。
+ * max-height 由 JS 按视口可用空间写入（空间不足时向上翻转展开），此处仅兜底；
+ * overscroll-behavior 防止列表滚到底后带动外层页面滚动。 */
 .dropdown {
   position: fixed;
   z-index: 10000;
   min-width: 180px;
-  max-height: 240px;
+  max-height: 320px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
@@ -98,8 +101,7 @@
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 14px;
+  font-family: 'Inter', -apple-system, sans-serif;  font-size: 14px;
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
   text-align: left;
@@ -135,4 +137,29 @@
   background: var(--dsw-alias-brand-primary);
   color: var(--corum-label-on-brand);
   border-color: transparent;
+}
+
+/* 细滚动条 — 深色玻璃面板下原生粗滚动条突兀；Firefox 走 scrollbar-width/color */
+.dropdown {
+  scrollbar-width: thin;
+  scrollbar-color: var(--corum-glass-border) transparent;
+}
+
+.dropdown::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dropdown::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-clip: padding-box;
+  background-color: var(--corum-glass-border);
+}
+
+.dropdown::-webkit-scrollbar-thumb:hover {
+  background-color: var(--corum-glass-border-active);
 }

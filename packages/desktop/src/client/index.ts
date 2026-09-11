@@ -189,13 +189,24 @@ export function apply(ctx: Context): void {
     // chat 经 inject 'corumEditor' + 局部能力接口收窄调 openFile(absolute)，拿到
     // { ok, error } 结构化反馈；EditorColumn 未挂载时请求挂起，挂载经
     // readySource 通知认领（pending 模式，替代轮询）。
-    const rawEditorApiRef: EditorApiRef = { openFile: null }
+    const rawEditorApiRef: EditorApiRef = { openFile: null, openContentDiff: null }
     const editorReady = createEditorReadySource()
-    // openFile 写入/清空时通知就绪源（EditorColumn 挂载/卸载）→ 认领 pending。
+    // 任一 api 写入/清空都通知就绪源（EditorColumn 挂载/卸载）→ 认领 pending。
+    //
+    // 两个 setter 都必须 notify：EditorColumn 的 mount effect 是
+    // `openFile = …; openContentDiff = …` 顺序赋值，而 setter 里的 notify 是
+    // **同步**的 —— 若只有 openFile 触发认领，挂起中的 diff 请求会在
+    // openContentDiff 赋上前就被认领一次、看到 null 而放弃，之后再无通知，
+    // 最终 3s 超时（实测过的坑）。
     const editorApiRef: EditorApiRef = {
       get openFile() { return rawEditorApiRef.openFile },
       set openFile(fn) {
         rawEditorApiRef.openFile = fn
+        editorReady.notify()
+      },
+      get openContentDiff() { return rawEditorApiRef.openContentDiff },
+      set openContentDiff(fn) {
+        rawEditorApiRef.openContentDiff = fn
         editorReady.notify()
       },
     }

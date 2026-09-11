@@ -29,6 +29,11 @@ mkdir -p "$RUN_DIR"
 
 log() { printf '[dev-ide] %s\n' "$*"; }
 
+# 启动环境守卫：应用绝不能在 Agent 工具的文件沙箱内启动（那样会功能残缺但不报错：
+# bash 开不了 PTY、隔离 worktree 建不起来、跨工作区写 EPERM）。详见脚本头部注释。
+# 只告警、不阻止：确知后果时用 CORUM_ALLOW_SANDBOXED_LAUNCH=1 跳过。
+bash "$SCRIPT_DIR/app-launch-guard.sh" "$ROOT"
+
 # 递归杀进程树（macOS pgrep -P；先子后父）。
 kill_tree() {
   local pid="$1"
@@ -91,7 +96,6 @@ build_all() {
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-sidebar-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-explorer-ui"
-  build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-conversation-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-panel-bottom-ui"
 
   run_step "$DESKTOP" ./node_modules/.bin/tsc -b tsconfig.host.json --pretty false

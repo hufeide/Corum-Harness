@@ -101,6 +101,21 @@ function selectionOf(state: ModelDirectoryState, id: string): ModelSelection | u
 /** Dictionary namespace owned by this plugin. */
 const NS = 'model'
 
+/**
+ * 官方 connection 服务的最小能力面（局部收窄，不引 official 包类型 ——
+ * 本包 deps 未含 dsh-client-connection，且红线 3 要求用局部 capability interface
+ * 而不是耦合实现包）。
+ */
+interface CorumRpcConnection {
+  rpc: {
+    call: (
+      channel: string,
+      endpoint: string,
+      payload: { args: Record<string, unknown> },
+    ) => Promise<{ ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }>
+  }
+}
+
 /** Required services: the contribution registry, the seat's slot registry, locale, and the service's own faces. */
 export const inject = ['commandUi', 'locale', 'sessions', 'slots', 'remote', 'remote.session']
 
@@ -159,6 +174,31 @@ export function apply(ctx: ClientContext): void {
   ctx.inject(['slots', 'modelDirectories'], (scope: ClientContext) => {
     const models = scope.modelDirectories
     const sessions = scope.sessions
+    /**
+     * 会话图片态 × 目标模型视觉能力（corum 追加的切换前预警数据源）。
+     *
+     * 走官方 `connection.rpc.call` 直打 corum Remote 端点（与 makeCorumRpcCall
+     * 同通道、同 `{args}` 契约），**不依赖本插件 fiber 的 `ctx.remote` 命名空间
+     * 装配时序**（同 corum-ui-conversation/apply.ts 的长注理由）。
+     * 任何失败一律返回 null —— 预警是锦上添花，绝不能因查询失败影响换模型主链路。
+     * @param sessionId - 目标会话。
+     * @param selection - 目标模型。
+     */
+    const imageCompatibility = async (
+      sessionId: string,
+      selection: Pick<ModelSelection, 'provider' | 'model'>,
+    ): Promise<{ hasImage: boolean; supportsImage: boolean | null } | null> => {
+      try {
+        const connection = scope.get('connection') as CorumRpcConnection | undefined
+        if (connection === undefined) return null
+        const result = await connection.rpc.call('/api', 'corumAgent/getImageCompatibility', {
+          args: { sessionId, provider: selection.provider, model: selection.model },
+        })
+        return result.ok ? result.value as { hasImage: boolean; supportsImage: boolean | null } : null
+      } catch {
+        return null
+      }
+    }
     scope.slots.inject('conversation.input.model', () => scope.slots.register({
       name: 'conversation.input.model',
       locale: NS,
@@ -184,6 +224,9 @@ export function apply(ctx: ClientContext): void {
           select: (selection: ModelSelection) => available
             ? directory.select(selection).then(() => true, () => false)
             : Promise.resolve(false),
+          imageCompatibility: (selection: Pick<ModelSelection, 'provider' | 'model'>) => available
+            ? imageCompatibility(sessionId, selection)
+            : Promise.resolve(null),
         }
       },
     }, ModelSelect))

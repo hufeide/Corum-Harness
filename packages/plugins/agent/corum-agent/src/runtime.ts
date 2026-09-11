@@ -41,7 +41,7 @@ import type { TaskStatus as ProjectTaskStatus } from './project-entities.ts'
 import { listProjects } from './project-store.ts'
 import { laneLabel, makeTaskSource, normalizeTask, taskRef, renderTaskMessage } from './runtime-task.ts'
 import type { EnqueueOptions, Task, TaskStatus } from './runtime-task.ts'
-import { STALL_THRESHOLD_MS, STALL_SCAN_INTERVAL_MS } from './runtime-state.ts'
+import { STALL_THRESHOLD_MS, STALL_SCAN_INTERVAL_MS, stallAutoRecoverMsValue } from './runtime-state.ts'
 import type { LaneState, ProfileRuntime } from './runtime-state.ts'
 
 // 再导出：保持 index.ts 的 import 面不变（包内拆分对外的稳定锚）。
@@ -181,7 +181,15 @@ export class AgentRuntime extends TypertRemoteService {
     return last ?? rt.currentStartedAt ?? Date.now()
   }
 
-  /** 卡住扫描：执行中任务超阈值无活动 → 发 stalled（每任务报一次，活动恢复后可再报）。 */
+  /**
+   * 卡住扫描：执行中任务超阈值无活动 → stalled 报告 + 超 STALL_AUTO_RECOVER_MS 主动恢复。
+   *
+   * 两级阈值：
+   *   - STALL_THRESHOLD_MS（3min）：发 stalled 信息事件（只报告，不处理）。
+   *   - STALL_AUTO_RECOVER_MS（10min）：主动 cancel turn + requeue + 唤醒循环。
+   *     这处理的是「bash 工具 300s 超时但 model turn 未收到 tool_result」等状态不同步
+   *     场景——stalled 报告只发信息事件不闭环，本动作才真正打断死锁。
+   */
   private scanStalledTasks(): void {
     const now = Date.now()
     for (const rt of this.profiles.values()) {
@@ -189,6 +197,20 @@ export class AgentRuntime extends TypertRemoteService {
       const idleMs = now - this.lastActivityAt(rt)
       if (idleMs < STALL_THRESHOLD_MS) {
         rt.stallReported = false // 活动健康，复位可再报
+        continue
+      }
+      // 超过自动恢复阈值：主动 cancel + requeue，打断死锁。
+      // 阈值可配置（C4）：每次扫描现读，改设置即时生效，无需重启。
+      const recoverMs = stallAutoRecoverMsValue()
+      if (idleMs >= recoverMs) {
+        const task = rt.current
+        const idleSec = Math.round(idleMs / 1000)
+        this.ctx.logger.warn(
+          `corumRuntime: [${rt.projectId}/${rt.profileId}] task "${task.id}" stalled ${idleSec}s ≥ ${Math.round(recoverMs / 1000)}s — auto-recovering (cancel + requeue)`,
+        )
+        // cancelTask 会 agent.cancel + requeue + 唤醒循环；fate=requeue 让任务回队首重派。
+        this.cancelTask(rt.projectId, rt.profileId, `任务卡住 ${idleSec}s 无活动，自动恢复（tool 超时或状态不同步）`, '@corum/corum-agent/stall-recovery', 'requeue')
+        // cancelTask 已置 current=undefined + stallReported 复位，下次 scan 自然跳过。
         continue
       }
       if (rt.stallReported) continue
@@ -245,6 +267,7 @@ export class AgentRuntime extends TypertRemoteService {
     rt.current = undefined
     rt.currentFromSeq = undefined
     rt.currentStartedAt = undefined
+    rt.stallReported = false // 复位：requeue 后新派发是新的活动周期，可再报 stalled。
     const lane = rt.lanes.get(task.label)
     if (lane !== undefined) {
       lane.status = 'idle'

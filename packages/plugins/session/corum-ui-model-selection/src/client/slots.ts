@@ -27,4 +27,15 @@ export interface ModelSelectInjected {
    * @returns whether the host accepted the selection.
    */
   select: (selection: ModelSelection) => Promise<boolean>
+  /**
+   * 会话图片态 × 目标模型视觉能力（切换前预警用）。
+   *
+   * 官方只在**发消息**时校验图片-模型匹配（`session/attachment-invalid` +
+   * `MODEL_DOES_NOT_SUPPORT_IMAGES`），`selectModel` 本身不读会话历史——corum
+   * 在切换那一刻主动查询，以便提前告知用户代价。查询失败返回 null
+   * （调用方视为「未知」：不提示、不阻断）。
+   */
+  imageCompatibility: (
+    selection: Pick<ModelSelection, 'provider' | 'model'>,
+  ) => Promise<{ hasImage: boolean; supportsImage: boolean | null } | null>
 }

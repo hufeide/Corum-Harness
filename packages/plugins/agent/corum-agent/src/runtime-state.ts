@@ -70,3 +70,28 @@ export interface ProfileRuntime {
 export const STALL_THRESHOLD_MS = 3 * 60 * 1000
 /** 卡住扫描周期。 */
 export const STALL_SCAN_INTERVAL_MS = 60 * 1000
+/**
+ * 卡住自动恢复阈值**默认值**：执行中任务超过此时长无活动 → 主动 cancel turn +
+ * requeue + 注入提示让模型重试。stalled 只是报告（信息事件），本阈值才触发恢复动作
+ * （兜底闭环）。10 分钟经验起点：bash 工具 5min 超时 + 5min 余量让模型自行恢复。
+ *
+ * C4（2026-09-11 用户要求配置化）：实际生效值走下面的 holder —— 由
+ * `corum-agent` settings namespace 的 `stallRecoverMinutes` 覆盖（默认即本值）。
+ * 项目制扫描（runtime.ts）与 task 泳道（agent-service.ts 的 whenIdleWithTimeout）
+ * **共用**这一个值，避免两处各写一份硬编码后再次漂移。
+ */
+export const STALL_AUTO_RECOVER_MS_DEFAULT = 10 * 60 * 1000
+
+/** 生效中的自动恢复阈值（可由设置覆盖）。 */
+let stallAutoRecoverMs = STALL_AUTO_RECOVER_MS_DEFAULT
+
+/** 读生效中的自动恢复阈值（毫秒）。 */
+export function stallAutoRecoverMsValue(): number {
+  return stallAutoRecoverMs
+}
+
+/** 设置自动恢复阈值（分钟）。非法值忽略；下限 1 分钟，避免配成 0 把正常长工具打断。 */
+export function setStallAutoRecoverMinutes(minutes: number): void {
+  if (!Number.isFinite(minutes) || minutes <= 0) return
+  stallAutoRecoverMs = Math.max(60_000, Math.round(minutes * 60_000))
+}

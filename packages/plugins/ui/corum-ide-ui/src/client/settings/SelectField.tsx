@@ -16,6 +16,15 @@ interface SelectOption {
   label: string
 }
 
+/** 下拉与触发按钮/视口边缘的间距（px）。 */
+const GAP = 4
+/** 下拉与视口上下边缘的最小留白（px）。 */
+const EDGE = 8
+/** 下拉高度上限（px）；超出滚动。 */
+const MAX_DROPDOWN_H = 320
+/** 下拉高度下限（px）；空间再小也保证能滚动（不塌成 0）。 */
+const MIN_DROPDOWN_H = 120
+
 interface SelectFieldProps {
   /** 当前选中值。 */
   value: string
@@ -49,7 +58,21 @@ export function SelectField({ value, options, onChange, disabled, variant = 'def
     const rect = btn.getBoundingClientRect()
     const el = document.getElementById('__select-dropdown')
     if (el) {
-      el.style.top = `${rect.bottom + 4}px`
+      // 视口空间自适应：优先向下展开；下方空间不足且上方更宽裕时向上翻转。
+      // 高度按可用空间收敛（≤ 320px），超出交给 overflow-y 滚动 ——
+      // 否则长列表（模型/供应商）会被视口底边裁掉，后段选项既看不到也滚不到。
+      const spaceBelow = window.innerHeight - rect.bottom - GAP - EDGE
+      const spaceAbove = rect.top - GAP - EDGE
+      const openUp = spaceBelow < MIN_DROPDOWN_H && spaceAbove > spaceBelow
+      const avail = Math.max(MIN_DROPDOWN_H, Math.min(MAX_DROPDOWN_H, openUp ? spaceAbove : spaceBelow))
+      if (openUp) {
+        el.style.top = 'auto'
+        el.style.bottom = `${window.innerHeight - rect.top + GAP}px`
+      } else {
+        el.style.bottom = 'auto'
+        el.style.top = `${rect.bottom + GAP}px`
+      }
+      el.style.maxHeight = `${avail}px`
       el.style.right = `${window.innerWidth - rect.right}px`
       el.style.minWidth = `${rect.width}px`
     }

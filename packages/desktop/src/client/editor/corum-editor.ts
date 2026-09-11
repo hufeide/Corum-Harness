@@ -35,6 +35,18 @@ export interface CorumEditorService {
    * EditorColumn 未挂载时请求挂起，挂载认领；3s 仍未挂载报超时。
    */
   openFile(absolutePath: string): Promise<OpenFileResult>
+  /**
+   * 打开「改动前后」diff tab（Review 卡点击文件行）。
+   *
+   * 左侧是调用方传进来的**原文**（来自 host 影子 git 仓库 `corumReview/fileBefore` —
+   * 每个轮次的起始状态都提交过，所以这是**精确**的改动前内容），右侧是磁盘当前文件。
+   * `note` 非空表示重建不完整（该文件被整文件覆盖写过等），编辑器以横幅如实告知。
+   */
+  openContentDiff(input: {
+    absolutePath: string
+    originalContent: string
+    note?: string | undefined
+  }): Promise<OpenFileResult>
 }
 
 /**
@@ -59,10 +71,21 @@ export interface EditorOpenBackend {
  *  用结构化类型避免反向 import 组件文件）。 */
 interface OpenFileRef {
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
+  openContentDiff: ((input: { path: string; originalContent: string; note?: string | undefined }) => Promise<void>) | null
 }
 
 /** pending 挂载超时（与原 3s 轮询窗口一致，但纯事件驱动、零轮询）。 */
 const MOUNT_TIMEOUT_MS = 3000
+
+/**
+ * 一个待编辑器挂载的请求。两种形态共用单 pending 槽（见 createCorumEditor）：
+ *   - `file`：普通打开文件（EditorColumn.openFile）。
+ *   - `diff`：Review 卡「改动前后」diff（EditorColumn.openContentDiff），
+ *     多带一份内存重建的原文。
+ */
+type PendingRequest =
+  | { kind: 'file'; rel: string }
+  | { kind: 'diff'; rel: string; originalContent: string; note?: string | undefined }
 
 /**
  * 创建 corumEditor 服务实例（index.ts 的 ctx.inject 回调里 new 出并 provide）。
@@ -76,7 +99,13 @@ export function createCorumEditor(
   backend: EditorOpenBackend,
 ): CorumEditorService {
   // pending 槽：EditorColumn 未挂载时的挂起请求（挂载认领；超时拒绝）。
-  let pending: { rel: string; resolve: (r: OpenFileResult) => void; timer: ReturnType<typeof setTimeout> } | null = null
+  // 两种请求共用同一个槽（单槽语义：新的请求覆盖旧的，避免快速连点时排队打开
+  // 多个 tab）；`kind` 决定认领时调哪个 api。
+  let pending: {
+    req: PendingRequest
+    resolve: (r: OpenFileResult) => void
+    timer: ReturnType<typeof setTimeout>
+  } | null = null
 
   const clearPending = (): void => {
     if (pending === null) return
@@ -84,48 +113,100 @@ export function createCorumEditor(
     pending = null
   }
 
+  /**
+   * 尝试立刻执行请求；编辑器未挂载（对应 api 为 null）时返回 null 表示需挂起。
+   *
+   * 两条路径都必须走这里：`showEditorRegion()` 只是把编辑器区域点亮，真正的
+   * EditorColumn 在**下一次渲染**才挂载，所以「点亮后立刻调 api」必然是 null。
+   * 早先 openContentDiff 绕过了挂起队列、直接判断 null 就报错，实测必然失败
+   * （点文件只得到「编辑器挂载超时」）。
+   */
+  const runRequest = (req: PendingRequest): Promise<void> | null => {
+    if (req.kind === 'file') {
+      const api = editorApiRef.openFile
+      if (api === null) return null
+      return api(req.rel, { pin: true })
+    }
+    const api = editorApiRef.openContentDiff
+    if (api === null) return null
+    return api({
+      path: req.rel,
+      originalContent: req.originalContent,
+      ...req.note !== undefined ? { note: req.note } : {},
+    })
+  }
+
   const claimPending = (): void => {
-    if (pending === null || editorApiRef.openFile === null) return
-    const { rel, resolve } = pending
+    if (pending === null) return
+    const run = runRequest(pending.req)
+    if (run === null) return
+    const { resolve } = pending
     clearPending()
-    void editorApiRef.openFile(rel, { pin: true })
+    void run
       .then(() => resolve({ ok: true }))
       .catch((err: unknown) => resolve({ ok: false, error: err instanceof Error ? err.message : String(err) }))
   }
 
-  // EditorColumn 挂载/卸载时通知：挂载则认领 pending（卸载时 openFile=null，
-  // claimPending 内部守卫自然 no-op）。
+  // EditorColumn 挂载/卸载时通知：挂载则认领 pending（卸载时 api 为 null，
+  // runRequest 返回 null，claimPending 自然 no-op）。
   readySource.subscribe(claimPending)
 
-  return {
-    openFile: (absolutePath: string): Promise<OpenFileResult> => {
-      if (absolutePath === '') return Promise.resolve({ ok: false, error: '路径为空' })
-      const rel = backend.toRelativePath(absolutePath)
-      if (rel === null) {
-        const root = backend.currentRoot()
-        return Promise.resolve({
+  /** 解析绝对路径 → 相对路径；失败时返回可直接回给调用方的错误。 */
+  const resolveRel = (absolutePath: string): { rel: string } | { error: OpenFileResult } => {
+    if (absolutePath === '') return { error: { ok: false, error: '路径为空' } }
+    const rel = backend.toRelativePath(absolutePath)
+    if (rel === null) {
+      const root = backend.currentRoot()
+      return {
+        error: {
           ok: false,
           error: root === null || root === ''
             ? '未打开项目（编辑器没有当前工作区根）'
             : `路径不在当前工作区根下（root: ${root}）`,
-        })
+        },
       }
-      backend.showEditorRegion()
-      if (editorApiRef.openFile !== null) {
-        return editorApiRef.openFile(rel, { pin: true })
-          .then((): OpenFileResult => ({ ok: true }))
-          .catch((err: unknown): OpenFileResult => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
-      }
-      // 未挂载：挂起等认领（单 pending 槽——新的 openFile 覆盖旧的，避免
-      // 快速连点时排队打开多个文件；超时拒绝给 chat 可见反馈）。
-      clearPending()
-      return new Promise<OpenFileResult>((resolve) => {
-        const timer = setTimeout(() => {
-          pending = null
-          console.warn('[corum-desktop] corumEditor.openFile: editor mount timeout', { path: rel })
-          resolve({ ok: false, error: '编辑器挂载超时（3s 未就绪）' })
-        }, MOUNT_TIMEOUT_MS)
-        pending = { rel, resolve, timer }
+    }
+    return { rel }
+  }
+
+  /**
+   * 统一入口：点亮编辑器区 → 立刻试跑；未挂载则挂起等 mount 认领（超时拒绝）。
+   * openFile / openContentDiff 只在「构造哪种请求」上不同。
+   */
+  const dispatch = (req: PendingRequest): Promise<OpenFileResult> => {
+    backend.showEditorRegion()
+    const run = runRequest(req)
+    if (run !== null) {
+      return run
+        .then((): OpenFileResult => ({ ok: true }))
+        .catch((err: unknown): OpenFileResult => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
+    }
+    clearPending()
+    return new Promise<OpenFileResult>((resolve) => {
+      const timer = setTimeout(() => {
+        pending = null
+        console.warn('[corum-desktop] corumEditor: editor mount timeout', { path: req.rel })
+        resolve({ ok: false, error: '编辑器挂载超时（3s 未就绪）' })
+      }, MOUNT_TIMEOUT_MS)
+      pending = { req, resolve, timer }
+    })
+  }
+
+  return {
+    openFile: (absolutePath: string): Promise<OpenFileResult> => {
+      const resolved = resolveRel(absolutePath)
+      if ('error' in resolved) return Promise.resolve(resolved.error)
+      return dispatch({ kind: 'file', rel: resolved.rel })
+    },
+
+    openContentDiff: (input): Promise<OpenFileResult> => {
+      const resolved = resolveRel(input.absolutePath)
+      if ('error' in resolved) return Promise.resolve(resolved.error)
+      return dispatch({
+        kind: 'diff',
+        rel: resolved.rel,
+        originalContent: input.originalContent,
+        ...input.note !== undefined ? { note: input.note } : {},
       })
     },
   }

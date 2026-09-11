@@ -27,6 +27,7 @@ import './corum-reskin.css'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
 import { createReviewSource, type ReviewSource } from './chat/review-source.ts'
+import { registerReviewDock } from './chat/ReviewDock.tsx'
 import { DetailsPanel } from './details/DetailsPanel.tsx'
 import { en, NS, zh } from './locale.ts'
 import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'
@@ -78,6 +79,26 @@ declare module '@deepseek-ai/cordis' {
  */
 interface EditorOpenCapable {
   openFile?: (absolutePath: string) => Promise<{ ok: boolean; error?: string }>
+}
+
+/** corumEditor 的「打开改动前后 diff」能力面（Review 卡点击文件行用）。 */
+interface ContentDiffCapable {
+  openContentDiff?: (input: {
+    absolutePath: string
+    originalContent: string
+    note?: string | undefined
+  }) => Promise<{ ok: boolean; error?: string }>
+}
+
+/** `__corumNotify` 一次写只读桥（规范 §1 例外：CorumNotification 面）。 */
+interface CorumNotifyBridge {
+  __corumNotify?: (n: { tone: 'error'; title: string; message?: string | undefined }) => void
+}
+
+/** 用户可见失败反馈（失败路径统一走这里，避免各处重复拼 window 断言）。 */
+function notifyUser(title: string, message?: string | undefined): void {
+  const notify = (window as unknown as CorumNotifyBridge).__corumNotify
+  notify?.({ tone: 'error', title, ...message === undefined ? {} : { message } })
 }
 
 /** Services required by the Chat target and its presentation registrations. */
@@ -137,24 +158,120 @@ export function apply(ctx: Context): void {
   const chatStore = createChatStore()
 
   // fork（corum）：Review 卡的 per-session 数据源缓存（binding → ReviewSource）。
+  // 2026-09-11 起数据源是 host 的影子 git 仓库（corumReview）：客户端不再从事件流
+  // 反推改动、也不再自算行数/水位，只把 sessionId 交给 host。
   const reviewSources = new WeakMap<SessionBinding, ReviewSource>()
   const reviewSource = (binding: SessionBinding): ReviewSource => {
     let source = reviewSources.get(binding)
     if (source === undefined) {
       source = createReviewSource(
-        binding.eventSource,
+        String(binding.sessionId),
         ctx.get('connection') as ConnectionHandle,
-        // 泳道工作区绝对路径（撤销的路径根）：从会话 list 行取 cwd。
-        ctx.sessions.list.getSnapshot().byId[binding.sessionId]?.cwd,
+        binding.eventSource,
       )
       reviewSources.set(binding, source)
     }
     return source
   }
+
+  /**
+   * 在内置编辑器打开一个（可能相对 cwd 的）文件路径。
+   *
+   * 抽成公共闭包是因为 Review 卡的**两个**渲染面都要用它：ChatView 的文件提及
+   * 链接（`openFile` prop）与 ReviewDock 的展开态文件行（`onOpenFile`）。早先
+   * 这段逻辑内联在 view 的 inject 里，Review 卡搬去 dock 后就够不着了。
+   *
+   * 统一事件中心三-2：原 corum:open-in-editor 跨 bundle CustomEvent（fire-and-
+   * forget 无失败反馈）→ corumEditor cordis 服务直调（desktop client provide，
+   * 内部转相对路径 + 点亮编辑器 + pending 挂载认领）。{ ok, error } 结构化反馈：
+   * error 时 console.warn + 框架通知（用户可见）。
+   */
+  const openFileAt = async (sessionId: SessionId, path: string): Promise<void> => {
+    const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+    const absolute = resolveWorkspacePath(cwd, path)
+    const editor = ctx.corumEditor as unknown as EditorOpenCapable
+    if (typeof editor.openFile !== 'function') {
+      console.warn('[ui-chat] openFile: corumEditor service missing openFile face')
+      return
+    }
+    try {
+      const result = await editor.openFile(absolute)
+      if (!result.ok) {
+        console.warn('[ui-chat] openFile failed:', result.error, { path: absolute })
+        notifyUser('无法在编辑器打开文件', result.error)
+      }
+    } catch (err) {
+      console.warn('[ui-chat] openFile threw:', err, { path: absolute })
+    }
+  }
   const chatScrollPositions = new Map<SessionId, ChatScrollPosition>()
   const transcriptView = new TranscriptViewPolicy(
     ctx.settingsScope.bind<ChatSettings>({ namespace: CHAT_SETTINGS_NAMESPACE }),
   )
+
+  /**
+   * fork（corum）：把「改动审查保留天数」推给 host 的影子 git 仓库服务。
+   *
+   * 设置值存在 settings.yaml（namespace `corum-review`），而**读取方在 host**——
+   * host 侧没有 settings 读取面（与 corum-git 当年只注册不退推同款约束），所以由
+   * 客户端在启动时与每次变更后推一次 `corumReview/setRetention`。
+   * 推送失败不阻断：host 会停在默认值（1 天），功能照常。
+   */
+  const reviewRetention = ctx.settingsScope.bind<{ retentionDays?: number }>({ namespace: 'corum-review' })
+  const pushRetention = (): void => {
+    const days = reviewRetention.getSnapshot().value?.retentionDays ?? 1
+    void (ctx.get('connection') as ConnectionHandle)
+      .rpc.call('/api', 'corumReview/setRetention', { args: { days } })
+      .catch((error: unknown) => {
+        console.warn('[ui-chat] push review retention failed:', error)
+      })
+  }
+  pushRetention()
+  reviewRetention.subscribe(() => { pushRetention() })
+
+  // fork（corum）：Review 卡注册进 `conversation.input.dock`（与 TodoPanel 同槽），
+  // 由 ConversationRoot 的 sticky composerSeat 统一吸附 —— 不再依赖 DOM 选择器
+  // 捞 composerStack 做 portal（见 Chat/ReviewDock.tsx 顶部注释）。
+  registerReviewDock(ctx, (sessionId) => {
+    const binding = ctx.sessions.binding(sessionId)
+    if (binding === undefined) throw new Error(`ui-chat: unknown session "${sessionId}"`)
+    const source = reviewSource(binding)
+    return {
+      review: source,
+      cwd: ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd,
+      // 点击文件行 → 「本轮改动前 ↔ 当前」diff tab。两步：
+      //   ① source.fileBefore(path) 从影子 git 仓库取**精确**的改动前内容；
+      //   ② corumEditor.openContentDiff 把原文交给编辑器开 diff tab。
+      // 用户可见失败反馈走 __corumNotify（一次性只读桥，规范 §1 例外）。
+      openDiff: (path: string) => {
+        void (async () => {
+          const result = await source.fileBefore(path)
+          if (!result.ok) {
+            console.warn('[ui-chat] openDiff: fileBefore failed:', result.message, { path })
+            notifyUser('取不到该文件的改动前内容', result.message)
+            return
+          }
+          const editor = ctx.corumEditor as unknown as ContentDiffCapable
+          if (typeof editor.openContentDiff !== 'function') {
+            console.warn('[ui-chat] openDiff: corumEditor service missing openContentDiff face')
+            notifyUser('无法打开改动对比', '当前编辑器不支持 diff 视图')
+            return
+          }
+          const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+          const absolute = resolveWorkspacePath(cwd, path)
+          const opened = await editor.openContentDiff({
+            absolutePath: absolute,
+            originalContent: result.content,
+            ...result.complete ? {} : { note: result.note ?? '左侧为尽力重建的内容，可能不等于本轮改动前的完整原文' },
+          })
+          if (!opened.ok) {
+            console.warn('[ui-chat] openDiff failed:', opened.error, { path: absolute })
+            notifyUser('无法打开改动对比', opened.error)
+          }
+        })()
+      },
+    }
+  })
 
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
     name: 'settings.general.item',
@@ -195,7 +312,6 @@ export function apply(ctx: Context): void {
           }
         })
         return {
-          review: reviewSource(binding),
           hooks: { transcriptView: transcriptView.mode },
           keyedHooks: {
             chatNode: key => chat.getSnapshot().nodes.source(key),
@@ -206,32 +322,7 @@ export function apply(ctx: Context): void {
             ctx.layout.openDetails()
           },
           fileMentions: (owner: TurnTailOwnerProps) => ctx.get('chatFileMentions')?.forClosing(owner),
-          openFile: async (path) => {
-            const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
-            const absolute = resolveWorkspacePath(cwd, path)
-            // 用内置编辑器打开（替代 openWorkspacePath 跳系统）。统一事件中心
-            // 三-2：原 corum:open-in-editor 跨 bundle CustomEvent（fire-and-forget
-            // 无失败反馈）→ corumEditor cordis 服务直调（desktop client provide，
-            // 内部转相对路径 + 点亮编辑器 + pending 挂载认领）。{ ok, error }
-            // 结构化反馈：error 时 console.warn + 框架通知（用户可见）。
-            const editor = ctx.corumEditor as unknown as EditorOpenCapable
-            if (typeof editor.openFile !== 'function') {
-              console.warn('[ui-chat] openFile: corumEditor service missing openFile face')
-              return
-            }
-            try {
-              const result = await editor.openFile(absolute)
-              if (!result.ok) {
-                console.warn('[ui-chat] openFile failed:', result.error, { path: absolute })
-                // 用户可见反馈：__corumNotify 是一次性只读桥（规范 §1 例外，
-                // CorumNotification 面：tone/title/message）。
-                const notify = (window as unknown as { __corumNotify?: (n: { tone: 'error'; title: string; message?: string | undefined }) => void }).__corumNotify
-                notify?.({ tone: 'error', title: '无法在编辑器打开文件', message: result.error })
-              }
-            } catch (err) {
-              console.warn('[ui-chat] openFile threw:', err, { path: absolute })
-            }
-          },
+          openFile: async (path) => { await openFileAt(sessionId, path) },
           loadOlder: () => { void session.loadOlder() },
           loadThrough: seq => session.loadThrough(seq),
           loadImage: Object.assign(

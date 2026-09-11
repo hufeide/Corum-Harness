@@ -1,6 +1,6 @@
 {
   "name": "corum-desktop",
-  "description": "Corum\uff08\u77e9\u9053\uff09desktop carrier: Electron shell + host bridge + IPC transport, booting the corum profile over the official dsh foundation (zero HTTP).",
+  "description": "Corum（矩道）desktop carrier: Electron shell + host bridge + IPC transport, booting the corum profile over the official dsh foundation (zero HTTP).",
   "version": "0.1.0",
   "type": "module",
   "private": true,
@@ -91,7 +91,7 @@
           "zh-Hans"
         ],
         "CFBundleAllowMixedLocalizations": true,
-        "CFBundleDisplayName": "\u77e9\u9053"
+        "CFBundleDisplayName": "矩道"
       }
     }
   },
@@ -101,7 +101,6 @@
     "@corum/corum-api-remotes": "workspace:*",
     "@corum/corum-artgen": "workspace:*",
     "@corum/corum-credentials-local": "workspace:*",
-    "@corum/corum-ide-conversation-ui": "workspace:*",
     "@corum/corum-ide-explorer-ui": "workspace:*",
     "@corum/corum-ide-panel-bottom-ui": "workspace:*",
     "@corum/corum-ide-plugin-manager-ui": "workspace:*",

@@ -79,8 +79,57 @@ interface AgentSessionProjections {
  */
 interface SessionListState {
   current?: string | undefined
-  byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
+  byId: Record<string, {
+    blank?: boolean
+    displayTitle?: string
+    projectionValues?: unknown
+    /** 该会话此刻是否在跑。 */
+    running?: boolean
+  } | undefined>
+  /**
+   * 官方「直接子会话目录」（durable catalog，key = 父会话 id）。**子 Agent 花名册的
+   * 权威冷启动基线**：它由宿主 `subagent.list` 读子会话血缘得到，durable、随会话
+   * 选择自动拉一次、并在 `setCatalogOpen` 期间随成员变更增量刷新。
+   *
+   * 为什么不用 `byId` 血缘兜底（前一版的错）：官方 `SessionSummary` 的字段名是
+   * `parentId`（不是 `parentSessionId`），而且 `byId` **只装列表根行 + 当前寻址的
+   * 面包屑链**，普通子 Agent 会话根本不在里面 —— 于是基线恒为空，胶囊与浮层都
+   * 不显示子 Agent（就是用户实测到的现象）。
+   */
+  subagentsByParent?: Record<string, SessionCatalogSnapshot | undefined>
 }
+
+/** 官方子会话目录快照的窄化形（只读消费；结构同构于 `SubagentCatalogSnapshot`）。 */
+interface SessionCatalogSnapshot {
+  entries?: ReadonlyArray<SessionCatalogRow | undefined>
+  state?: 'loading' | 'ready' | 'error'
+}
+
+/** 目录中的一行（只取本组件渲染所需字段；`diagnostic` 行没有 `activity`）。 */
+interface SessionCatalogRow {
+  kind?: 'child' | 'diagnostic'
+  id?: string
+  /** `inactive` = 只存在于持久化里（已不在跑）→ 展示为「已完成」。 */
+  activity?: 'running' | 'inactive'
+  /** 官方续聊能力（`one-shot` 不可续聊、`continuable` 可续聊）。 */
+  mode?: 'one-shot' | 'continuable'
+  label?: string
+  hasChildren?: boolean
+}
+
+/**
+ * `ctx.sessions` 的目录能力面（红线 3/4：由 inject 下发的本地能力接口收窄，
+ * 不 import 官方 controller 实现包）。
+ */
+export interface SubagentCatalogFace {
+  /** 主动拉一次直接子会话目录。 */
+  refresh: (parentSessionId: string) => void
+  /** 声明「本会话的目录有消费方」：为真期间官方按成员变更增量重拉，卸载后释放。 */
+  setCatalogOpen: (parentSessionId: string, open: boolean) => void
+}
+
+/** 会话列表 selector hook（本组件只读血缘 / 标题 / 运行态）。 */
+type UseSessionsHook = <T>(selector: (state: SessionListState) => T) => T
 
 /** `ctx.remote` 的窄化面（只用到转发事件订阅）。 */
 export interface RemoteEventFace {
@@ -311,8 +360,13 @@ function SpeedChart({ samples, width = 300, height = 138 }: {
 interface SubagentRosterEntry {
   readonly childSessionId: string
   readonly label: string
-  readonly mode: 'foreground' | 'background'
-  readonly isolated: boolean
+  /**
+   * 前后台 / 隔离：**只有 corum 推送帧带这两个字段**（官方目录不带）。
+   * 故它们是 optional 而非默认值——基线行不能凭空声明「后台」，否则浮层会对
+   * 每个历史子 Agent 都挂一个不成立的徽标（用户看到的正是「全是后台」）。
+   */
+  readonly mode?: 'foreground' | 'background'
+  readonly isolated?: boolean
   readonly step: number
   readonly currentAction?: string
   readonly done: boolean
@@ -343,7 +397,81 @@ interface ChildFrame {
  * 最近活动排序。页面刷新后无回放帧，花名册从空开始，下一次派遣即恢复
  * （与 SubagentCard 的「广播优先、时间就近兜底」同源，这里只取精确通道）。
  */
-function useSubagentRoster(remote: RemoteEventFace | undefined, sessionId: string | undefined): readonly SubagentRosterEntry[] {
+/**
+ * 子 Agent 花名册 = **官方直接子会话目录（durable 基线）** + **corum 推送帧增量**。
+ *
+ * ① 基线为什么必须有：推送帧（`corum/subagent/child` / `corum/subagent/progress`）只在
+ *    **变更时**发，页面刷新 / 应用重启 / 会话切走再切回**都不会重放** —— 纯推送订阅会让
+ *    「已经跑完的子 Agent」永远消失。用户实测到的「胶囊与展开浮层都不显示子 Agent」
+ *    就是这么来的：设计稿的浮层明确要求列出 `2 运行中 · 1 已完成`，而 roster 是空的。
+ *    这与 host `getWorktreeLedger` 注释记载的是同一个坑（推送为主 + 快照冷启动基线）。
+ *    基线源 = 官方 `ctx.sessions` 同步过来的 `subagentsByParent`（宿主 `subagent.list`
+ *    读子会话血缘，durable、零新增 RPC）；编排模式下派出的子 Agent 同样是 subagent
+ *    会话，所以一并覆盖。
+ *
+ * ② 「是否还在跑」以目录行的 `activity` 为准（`running` / `inactive`）；推送帧的
+ *    `done` 只在目录里找不到该子会话时兜底（避免帧停在旧状态）。
+ *
+ * ③ 目录的**新鲜度**靠 `setCatalogOpen(parent, true)`：官方在成员变更帧到达时防抖重拉
+ *    该父的目录，本组件常驻会话顶栏，所以整个会话生命周期内都订阅（见下方 effect）。
+ */
+function useSubagentRoster(
+  remote: RemoteEventFace | undefined,
+  sessionId: string | undefined,
+  useSessions: UseSessionsHook,
+  catalog: SubagentCatalogFace | undefined,
+): readonly SubagentRosterEntry[] {
+  const rows = useSessions((state: SessionListState) => {
+    return sessionId === undefined ? undefined : state.subagentsByParent?.[sessionId]?.entries
+  })
+  /**
+   * 打开目录订阅（官方机制）：
+   * `refresh` 补一次立即拉取；`setCatalogOpen(true)` 让官方在**成员变更帧**到达时
+   * 防抖重拉——这是「新派出的子 Agent 无需刷新页面就出现在胶囊里」的唯一正路
+   * （推送帧 `corum/subagent/*` 不重放，只做增量覆盖）。卸载时释放，避免常驻订阅。
+   */
+  useEffect(() => {
+    if (sessionId === undefined || catalog === undefined) return undefined
+    catalog.refresh(sessionId)
+    catalog.setCatalogOpen(sessionId, true)
+    return () => { catalog.setCatalogOpen(sessionId, false) }
+  }, [catalog, sessionId])
+  const baseline = useMemo((): readonly SubagentRosterEntry[] => {
+    const out: SubagentRosterEntry[] = []
+    if (rows === undefined) return out
+    for (const row of rows) {
+      // `diagnostic` 行是目录读取失败的占位（没有 activity/label），不进花名册。
+      if (row === undefined || row.kind !== 'child' || row.id === undefined) continue
+      out.push({
+        childSessionId: row.id,
+        label: row.label !== undefined && row.label !== '' ? row.label : row.id,
+        // mode/isolated 故意**不给默认值**（官方目录没有这两轴，见类型注释）；
+        // step 先给 0，corum 推送帧到了由下面的合并覆盖。
+        step: 0,
+        done: row.activity !== 'running',
+        lastActive: 0,
+      })
+    }
+    return out
+  }, [rows])
+  const live = useLiveRoster(remote, sessionId)
+  return useMemo(() => {
+    const merged = new Map<string, SubagentRosterEntry>()
+    for (const entry of baseline) merged.set(entry.childSessionId, entry)
+    for (const entry of live) {
+      const prior = merged.get(entry.childSessionId)
+      merged.set(entry.childSessionId, {
+        ...entry,
+        ...prior === undefined ? {} : { label: entry.label === '' ? prior.label : entry.label, done: prior.done },
+        ...prior !== undefined && entry.step === 0 ? { step: prior.step } : {},
+      })
+    }
+    return [...merged.values()]
+  }, [baseline, live])
+}
+
+/** 推送帧累积（历史上的唯一来源；现在只作基线之上的增量）。 */
+function useLiveRoster(remote: RemoteEventFace | undefined, sessionId: string | undefined): readonly SubagentRosterEntry[] {
   const [entries, setEntries] = useState<readonly SubagentRosterEntry[]>([])
   useEffect(() => {
     if (remote === undefined || sessionId === undefined) { setEntries([]); return undefined }
@@ -356,8 +484,8 @@ function useSubagentRoster(remote: RemoteEventFace | undefined, sessionId: strin
           return [...prev, {
             childSessionId: patch.childSessionId,
             label: patch.label,
-            mode: patch.mode ?? 'foreground',
-            isolated: patch.isolated ?? false,
+            ...(patch.mode === undefined ? {} : { mode: patch.mode }),
+            ...(patch.isolated === undefined ? {} : { isolated: patch.isolated }),
             step: patch.step ?? 0,
             ...(patch.currentAction === undefined ? {} : { currentAction: patch.currentAction }),
             done: patch.done ?? false,
@@ -683,7 +811,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               <span className={css.statusDetailAgentStep}>
                 {entry.done ? '已完成' : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
               </span>
-              {entry.isolated && <span className={css.statusDetailAgentBadge}>隔离</span>}
+              {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
               {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
               <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
             </button>
@@ -730,6 +858,11 @@ export interface SessionStatusInjected {
    * 结构窄化到「调用一个具名 RPC」——不 import connection 包的具体类型（红线 3）。
    */
   readonly connection?: RpcFace | undefined
+  /**
+   * 官方 `ctx.sessions` 的直接子会话目录面（卷取子 Agent 花名册的 durable 基线）。
+   * 缺省时花名册退化为「仅推送帧」——旧行为，不会报错。
+   */
+  readonly catalog?: SubagentCatalogFace | undefined
 }
 
 /** `ctx.get('connection')` 的窄化面（只用到一元 RPC 调用）。 */
@@ -771,7 +904,7 @@ export interface TrajectoryCapableProps {
  * @param props - 槽运行时 share（sessionId/useSessions/useTrajectory）+ 业务注入面。
  * @returns 状态胶囊与其展开的统计详情卡。
  */
-export function SessionStatusPill({ sessionId, useSessions, remote, openSession, useTrajectory, connection }: SessionStatusPillProps) {
+export function SessionStatusPill({ sessionId, useSessions, remote, openSession, useTrajectory, connection, catalog }: SessionStatusPillProps) {
   const wrapRef = useRef<HTMLSpanElement | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [anchor, setAnchor] = useState({ left: 0, width: 0 })
@@ -781,8 +914,10 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
   })
   const title = useSessions((s: SessionListState) => s.byId[sessionId]?.displayTitle) ?? '会话'
   // 子 Agent 花名册（2026-09-10 用户定调：胶囊与状态展示合并到同一 pill）。
-  const roster = rankRoster(useSubagentRoster(remote, sessionId))
+  const roster = rankRoster(useSubagentRoster(remote, sessionId, useSessions, catalog))
   const running = roster.filter(entry => !entry.done)
+  const done = roster.filter(entry => entry.done)
+  // 领跑者 = 运行中的第一个；全已结束时为 undefined（胶囊改显示「已完成 M」）。
   const lead = running[0]
   // 生成速度序列（chart-speed 实时曲线）：来自轨迹快照的逐步真实速度。
   const speedSeries = useSpeedSeries(useTrajectory)
@@ -861,16 +996,35 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
           >
             <span className={css.agentStatusDot} />
             <span className={css.agentStats}>{agentStatsSummary(projections)}</span>
-            {/* 常驻子 Agent 胶囊（用户 2026-09-10 定调：放 Title 右边、与状态展示合并）：
-                仅在当前会话有运行中子 Agent 时出现，空闲时整段不渲染。 */}
-            {lead !== undefined && (
+            {/* 常驻子 Agent 胶囊（用户 2026-09-10 定调：放 Title 右边、与状态展示合并；
+                2026-09-11 补充：**已运行结束的与编排模式下派出的子 Agent 也要显示**，
+                所以这里不再只认「运行中」——只要名册非空就渲染这一段：
+                  有运行中 → `运行中 N` + 领跑者 + `Step x` + `+K`（其余） + `M 已完成`
+                  全已结束 → `已完成 M` + 最后一个 + `+K`
+                名册本身是「会话血缘基线 + 推送帧增量」（见 useSubagentRoster）。 */}
+            {roster.length > 0 && (
               <>
                 <span className={css.agentCapsuleDivider} />
-                <span className={css.agentCapsuleDot} />
-                <span className={css.agentCapsuleCount}>运行中 {running.length}</span>
-                <span className={css.agentCapsuleLabel}>{lead.label}</span>
-                <span className={css.agentCapsuleStep}>Step {lead.step}</span>
-                {running.length > 1 && <span className={css.agentCapsuleMore}>+{running.length - 1}</span>}
+                <span className={css.agentCapsuleDot} data-done={lead === undefined ? 'true' : undefined} />
+                <span className={css.agentCapsuleCount}>
+                  {lead === undefined ? `已完成 ${done.length}` : `运行中 ${running.length}`}
+                </span>
+                {lead !== undefined
+                  ? (
+                    <>
+                      <span className={css.agentCapsuleLabel}>{lead.label}</span>
+                      {/* step 为 0 = 目录基线还没收到 corum 进度帧，此时不假装知道步骤数。 */}
+                      {lead.step > 0 && <span className={css.agentCapsuleStep}>Step {lead.step}</span>}
+                      {running.length > 1 && <span className={css.agentCapsuleMore}>+{running.length - 1}</span>}
+                      {done.length > 0 && <span className={css.agentCapsuleDone}>{done.length} 已完成</span>}
+                    </>
+                  )
+                  : (
+                    <>
+                      <span className={css.agentCapsuleLabel}>{roster[0]?.label}</span>
+                      {roster.length > 1 && <span className={css.agentCapsuleMore}>+{roster.length - 1}</span>}
+                    </>
+                  )}
               </>
             )}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${css.agentChev}${detailOpen ? ` ${css.agentChevOpen}` : ''}`}><path d="m6 9 6 6 6-6" /></svg>

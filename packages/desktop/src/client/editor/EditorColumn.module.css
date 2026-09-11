@@ -197,6 +197,51 @@
   padding: 0 14px 14px;
 }
 
+/* Review 卡 diff tab 的「重建不完整」提示横幅（见 EditorColumn 的 openContentDiff）。
+   是如实告知，不是错误 —— 用玻璃卡弱化底，不抢 diff 的注意力。 */
+.diffNote {
+  flex: none;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* diff 工具条：目前只有布局切换（并排/内联）。右对齐，不抢 diff 的视觉。 */
+.diffBar {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.diffToggle {
+  padding: 2px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 6px;
+  background: var(--corum-glass-2);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.diffToggle:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--corum-glass-3);
+}
+
+.diffToggle[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+}
+
 /* ── wsYCi Editor Status（pad[6,14,8,14] gap10） ───────────────────── */
 
 .status {

@@ -300,6 +300,18 @@ export function apply(ctx: ClientContext): void {
       remote,
       openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
       connection: ctx.get('connection') as ConnectionHandle | undefined,
+      /**
+       * 子 Agent 花名册的 durable 基线源（官方直接子会话目录）。
+       * 胶囊必须显示**已经跑完的**与**编排模式下派出的**子 Agent，而 corum 推送帧只在
+       * 变更时发、刷新后不重放，所以基线走官方目录（宿主 `subagent.list` 读子会话血缘）。
+       * 这里只下发能力，拉取与订阅生命周期留在组件内（红线 4：经 inject 交付）。
+       */
+      catalog: {
+        refresh: (parentSessionId: string) => { void ctx.sessions.refreshSubagents(parentSessionId as never) },
+        setCatalogOpen: (parentSessionId: string, open: boolean) => {
+          ctx.sessions.setSubagentCatalogOpen(parentSessionId as never, open)
+        },
+      },
     })
     /** 轨迹按钮注入面：切换壳的轨迹区域显隐（浮窗内 layout 无网格，静默 no-op）。 */
     const trajectoryInjected = () => ({

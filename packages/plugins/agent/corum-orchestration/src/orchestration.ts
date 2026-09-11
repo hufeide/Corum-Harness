@@ -272,6 +272,12 @@ export function corumVisibleToolNames(ctx: Context): ReadonlySet<string> {
  * 继续 fail-loud（那是配置错误，不是平台差异）。preset 里**手写**的 config.toolFilter
  * 也不收敛（作者断言，同 allow 口径）。
  *
+ * BUG-6（2026-09-11）：deny 中的裸 MCP 服务名（如 `pencil-mcp`）需要展开为
+ * 带前缀的完整工具名列表（`mcp__<服务名>__*`）。MCP 工具在系统中的注册名是
+ * `mcp__<服务名>__<工具名>` 格式（dsh-mcp-client），但 compile.ts 的
+ * `mcpDenyNames` 只放了服务名本身。本函数在收敛时把裸服务名展开为该服务的
+ * 全部已知工具名，保持 deny 语义（research 实例真的禁掉 MCP 工具）。
+ *
  * @param filter - 机制生成的过滤器（config 原样透传的除外，见调用点）。
  * @param known - 目标 scope 可见的工具名（父 Agent scope 的可见名是其超集）。
  * @returns 收敛后的过滤器；deny 全被丢弃且无 allow 时返回 undefined（等于不限制）。
@@ -281,8 +287,27 @@ export function corumNarrowDenyFilter(
   known: ReadonlySet<string>,
 ): { allow?: string[]; deny?: string[] } | undefined {
   if (filter === undefined || filter.deny === undefined) return filter
-  const deny = filter.deny.filter(name => known.has(name))
-  if (deny.length === filter.deny.length) return filter
+  const deny: string[] = []
+  // 是否发生过「丢弃 / 展开」——都没发生时原样返回**同一个引用**。
+  // 这是既有约定（且已被单测锁定）：调用方会拿返回值做引用比较来判断「过滤器是否
+  // 被改过」，无谓复制会让它误判。BUG-6 的展开逻辑早期版本丢了这条快路径，
+  // 被 `isolation.spec.ts` 抓回来。
+  let changed = false
+  for (const name of filter.deny) {
+    if (known.has(name)) {
+      deny.push(name)
+      continue
+    }
+    // BUG-6：裸 MCP 服务名展开为 `mcp__<服务名>__<工具名>` 前缀的全部已知工具。
+    // 前缀格式 `mcp__<name>__`：已知工具名以此前缀开头的全部收入 deny。
+    // 前缀无命中（服务未装载/名写错）时什么都不加 —— 等价于原「丢弃未知名」语义。
+    const prefix = `mcp__${name}__`
+    for (const tool of known) {
+      if (tool.startsWith(prefix)) deny.push(tool)
+    }
+    changed = true
+  }
+  if (!changed) return filter
   if (deny.length === 0 && filter.allow === undefined) return undefined
   return { ...filter.allow !== undefined ? { allow: filter.allow } : {}, deny }
 }

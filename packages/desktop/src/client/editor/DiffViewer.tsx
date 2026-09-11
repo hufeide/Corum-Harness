@@ -1,8 +1,20 @@
 /**
- * DiffViewer — VS Code 语义的双侧只读 diff 视图（「与已选项目比较」的呈现）。
- * 用 monaco 的 `editor.createDiffEditor`，双侧 readOnly，original=先选文件、
- * modified=后选文件。模型不共享主编辑器的 per-path cache（diff 是临时只读
- * 视图，卸载即 dispose），URI 用 `inmemory://diff/…` 避免与真实文件模型撞车。
+ * DiffViewer — VS Code 语义的双侧只读 diff 视图。两种用法：
+ *   ① 「与已选项目比较」：两侧都是**磁盘上的文件路径**（original/modified）。
+ *   ② Review 卡「点击文件看改动」：左侧是**内存里重建的原文**
+ *      （originalContent，来自 host 影子 git 仓库 corumReview/fileBefore —— 每个轮次
+ *      的起始状态都提交过，所以是精确的改动前内容），右侧仍是磁盘当前文件。
+ * 用 monaco 的 `editor.createDiffEditor`，双侧 readOnly。模型不共享主编辑器的
+ * per-path cache（diff 是临时只读视图，卸载即 dispose），URI 用
+ * `inmemory://diff/…` 避免与真实文件模型撞车。
+ *
+ * 布局（并排 / 内联）由**调用方显式决定**（`sideBySide` prop，用户在编辑器里切换、
+ * 偏好持久化），不再用宽度自动判定。为什么放弃自动：
+ *   - `useInlineViewWhenSpaceIsLimited` + 断点即使显式给出，早期实现里也**压不住**
+ *     窄容器（左侧被压成 0–36px 的 gutter，用户看不到「改前」那一侧）；
+ *   - 更重要的是「自动」会在用户**明确选了并排**之后又偷偷切成内联 —— 那就没有
+ *     「切换」可言了。
+ * 所以这里把两个自动选项全部拿掉，只从 prop 取。
  *
  * 主题复用 corum-light/corum-dark（defineCorumThemes 全局一次性注册，与
  * MonacoEditor 同源）；`useShadowDOM: false` 与主编辑器一致（避免 overflow
@@ -11,9 +23,10 @@
  */
 import { useEffect, useRef } from 'react'
 import { editor, Uri } from 'monaco-editor'
+import { applyCorumTheme, defineCorumThemes } from './monaco-theme.ts'
 
 export interface DiffViewerProps {
-  /** 原文（先选的文件）相对路径。 */
+  /** 原文（先选的文件）相对路径；仅用于**标题/URI 标识**，`originalContent` 存在时不读盘。 */
   original: string
   /** 新文（后选的文件）相对路径。 */
   modified: string
@@ -23,19 +36,31 @@ export interface DiffViewerProps {
   readFile: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { content: string; language: string } }>
   /** 主题。 */
   dark: boolean
+  /**
+   * 左侧原文的**内存内容**（Review 卡的 diff 用）。给了它就不再读盘取左侧 ——
+   * 重建出的原文并不存在于磁盘上。右侧始终读盘（当前文件）。
+   */
+  originalContent?: string | undefined
+  /** 左右并排（true）还是内联单栏（false）。缺省 true。 */
+  sideBySide?: boolean | undefined
 }
 
-export function DiffViewer({ original, modified, language, readFile, dark }: DiffViewerProps): React.ReactElement {
+export function DiffViewer({ original, modified, language, readFile, dark, originalContent, sideBySide = true }: DiffViewerProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const diffRef = useRef<editor.IStandaloneDiffEditor | null>(null)
 
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
+    // 先注册主题再创建 diff：传未注册的主题名会被 monaco 静默回落到浅色 `vs`。
+    defineCorumThemes()
     const diff = editor.createDiffEditor(host, {
       readOnly: true,
       originalEditable: false,
-      renderSideBySide: true,
+      renderSideBySide: sideBySide,
+      // 两个「自动」选项都显式关掉：用户在编辑器里选了并排就必须真并排，
+      // 不能被「空间有限」再偷偷切回内联（见文件头注释）。
+      useInlineViewWhenSpaceIsLimited: false,
       automaticLayout: true,
       useShadowDOM: false,
       minimap: { enabled: false },
@@ -45,14 +70,31 @@ export function DiffViewer({ original, modified, language, readFile, dark }: Dif
       // VS Code 默认：内联差异高亮 + 忽略前导/尾随空白关闭（精确对比）
       renderIndicators: true,
       ignoreTrimWhitespace: false,
+      // 自动折叠中间未改动的代码段（VS Code 的「Hide Unchanged Regions」）：
+      // 只留改动处 + 每侧 3 行上下文，其余折叠成可点开的「N 行未改动」条。
+      // 这是 monaco 内置能力，不要自己实现折叠。
+      hideUnchangedRegions: {
+        enabled: true,
+        contextLineCount: 3,
+        minimumLineCount: 3,
+        revealLineCount: 20,
+      },
     })
     diffRef.current = diff
 
     let cancelled = false
     void (async () => {
-      const [ra, rb] = await Promise.all([readFile(original), readFile(modified)])
+      // 左侧：给了内存原文就不读盘（重建出的原文不落盘）；否则读 original 文件。
+      let contentA: string
+      if (originalContent !== undefined) {
+        contentA = originalContent
+      } else {
+        const ra = await readFile(original)
+        if (cancelled) return
+        contentA = ra.ok && ra.value !== undefined ? ra.value.content : `（无法读取 ${original}：${ra.error?.message ?? '未知错误'}）`
+      }
+      const rb = await readFile(modified)
       if (cancelled) return
-      const contentA = ra.ok && ra.value !== undefined ? ra.value.content : `（无法读取 ${original}：${ra.error?.message ?? '未知错误'}）`
       const contentB = rb.ok && rb.value !== undefined ? rb.value.content : `（无法读取 ${modified}：${rb.error?.message ?? '未知错误'}）`
       const uriA = Uri.parse(`inmemory://diff${original}`)
       const uriB = Uri.parse(`inmemory://diff${modified}`)
@@ -71,13 +113,20 @@ export function DiffViewer({ original, modified, language, readFile, dark }: Dif
       model?.modified.dispose()
     }
     // original/modified/language 在同一 diff tab 生命周期内不变（tab 级固定），
-    // 变化即重开 tab（新 path），故只需 mount 一次。
+    // 变化即重开 tab（新 path）。`sideBySide` 例外：它由用户在工具条上实时切换，
+    // 而 `diff.updateOptions({renderSideBySide})` 在这版 monaco 上无效（实测），
+    // 所以必须**重建**编辑器才能换布局 —— 故把它放进依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [sideBySide])
 
-  // 主题跟随
+  // 主题跟随。
+  //
+  // 必须走 `applyCorumTheme`（它先 defineCorumThemes 再 setTheme）：早期这里直接
+  // `editor.setTheme('corum-dark')`，而在**没打开过任何文件**的情况下 monaco 还不知道
+  // 这个主题名 —— 回落到默认的 `vs`（浅色），编辑区就变成白底。这就用户实测到的
+  // 「看差异时背景是浅色」。
   useEffect(() => {
-    editor.setTheme(dark ? 'corum-dark' : 'corum-light')
+    applyCorumTheme(dark)
   }, [dark])
 
   return <div ref={hostRef} style={{ width: '100%', height: '100%' }} data-diff-viewer="" />

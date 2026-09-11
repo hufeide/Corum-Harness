@@ -197,11 +197,9 @@
     # conversation.blocks 拦截发送（答完才能发）。替代上面禁用的官方行。
     - id: corum-questions
       name: '@corum/corum-ui-questions'
-    # 自研对话区 @corum/corum-ide-conversation-ui 已退役（B 方案由 fork 接管 conversation
-    # 槽；其自研数据通路 getTaskSessionEvents/streamFollow/buildCards 与自研 composer
-    # 被官方数据流取代）。代码保留备查，如需回退重新挂载本行并禁用上面两行 fork。
-    # - id: ide-conversation
-    #   name: '@corum/corum-ide-conversation-ui'
+    # 自研对话区 @corum/corum-ide-conversation-ui **已整体删除**（2026-09-11 用户定调）：
+    # 它在 B 方案里已被 fork（corum-ui-conversation + corum-ui-chat）取代、挂载行长期注释，
+    # 而且其 taskLine 是写死的假数据。需要时从 git 历史取回该包并恢复本行、禁用上面两行 fork。
     # 底部面板：终端/待办/队列 tabs + 终端（design.pen ⑥）。
     - id: ide-panel-bottom
       name: '@corum/corum-ide-panel-bottom-ui'

@@ -22,6 +22,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
+import { VISION_CAPABILITY, VISION_SECTION } from './vision.ts'
 
 /** 会话级模型选择投影里本文件用到的最小形状（官方 api-session-controller 注册）。 */
 interface ModelSelectionProjectionLike {
@@ -42,6 +43,33 @@ function sameSelection(left: ModelSelection | null, right: ModelSelection): bool
     && left.provider === right.provider
     && left.model === right.model
     && left.reasoningEffort === right.reasoningEffort
+}
+
+/** `ctx.llm` 的最小能力面（按需取，避免加载顺序耦合）。 */
+interface ModelInfoProbe {
+  resolveModelInfo: (provider: string, model: string) => Promise<{ inputModalities?: readonly string[] }>
+}
+
+/**
+ * 目标模型是否显式支持图片输入。
+ *
+ * **语义严格对齐官方**（`api-session-controller/commands.ts` 的准入校验）：
+ * `inputModalities` 为 `undefined` 表示「未知」，**不当作不支持**——否则本地模型
+ * 未声明模态时会被误判为纯文本，视觉提示词永远挂不上。只有显式声明且不含
+ * `image` 才算不支持。查询失败同样返回 false（不注入，宁缺勿错）。
+ * @param provider - 供应商路由 id。
+ * @param model - 模型 id。
+ * @returns 是否为已确认的视觉模型。
+ */
+async function supportsImageModel(ctx: Context, provider: string, model: string): Promise<boolean> {
+  try {
+    const llm = (ctx as unknown as { llm?: ModelInfoProbe }).llm
+    if (llm === undefined || typeof llm.resolveModelInfo !== 'function') return false
+    const info = await llm.resolveModelInfo(provider, model)
+    return info.inputModalities !== undefined && info.inputModalities.includes('image')
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -70,8 +98,15 @@ export function installTaskModelSelection(agentCtx: Context, selection: ModelSel
     const assembled = await next()
     selection.assembled = selected
     if (selected === undefined) return assembled
+    // 视觉能力段：目标模型显式声明支持 image 输入时，把「你现在能收图」这一
+    // 事实注入本次组装（模型本身不知道会话此刻绑的是哪个模型，部署默认是纯文本时
+    // 尤其明显）。能力查询是异步且可能失败——失败即不注入，绝不影响组装。
+    const vision = await supportsImageModel(agentCtx, selected.provider, selected.model)
     return {
       ...assembled,
+      sections: vision
+        ? [...assembled.sections, { name: VISION_SECTION, text: VISION_CAPABILITY }]
+        : assembled.sections,
       variables: {
         ...assembled.variables,
         provider: selected.provider,

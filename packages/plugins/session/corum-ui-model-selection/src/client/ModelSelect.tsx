@@ -43,7 +43,7 @@ interface EffortChoice {
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, blank, load, select, t }:
+  { locked, available, directory, blank, load, select, imageCompatibility, t }:
   ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
 ) {
   const state = useSyncExternalStore(
@@ -58,6 +58,12 @@ export function ModelSelect(
   const [pane, setPane] = useState<Pane>('root')
   /** 待确认的换模型选择（非空会话换模型前需确认；null = 无弹窗）。 */
   const [pending, setPending] = useState<ModelSelection | null>(null)
+  /**
+   * 换模型确认弹窗里的图片能力预警（异步探测结果；null = 无预警）。
+   * 序数守卫防止「先探测 A、用户改选 B」时 A 的结果落到 B 的弹窗上。
+   */
+  const [imageWarning, setImageWarning] = useState<{ seq: number; text: string } | null>(null)
+  const imageWarningSeq = useRef(0)
   // The in-menu error strip serves catalog loads (its Retry re-runs the
   // load); a rejected SELECTION announces through the transient toast
   // instead, so the strip renders only while the latest failure-capable
@@ -197,11 +203,22 @@ export function ModelSelect(
     // 2026-09-02 用户定调：换模型前提示——可能导致效果变差，建议在新任务中更换。
     // 2026-09-08 修订：新会话（空日志）无上下文代价，直接换不弹；非空会话
     // 弹统一风格的 ConfirmDialog（替掉原生 window.confirm），确认后才执行。
+    // 2026-09-10 追加：切换前查「会话含图 × 目标模型视觉能力」——会话已含图而
+    // 目标模型不支持图片输入时，把这一后果写进确认弹窗（**只提示不阻断**，
+    // 用户知情后仍可切换；官方本就在发图时才拦，这里只是把代价提前说清）。
     if (isBlank) {
       applySelection(selection)
       return
     }
     setPending(selection)
+    imageWarningSeq.current += 1
+    const seq = imageWarningSeq.current
+    setImageWarning(null)
+    void imageCompatibility(selection).then(result => {
+      if (seq !== imageWarningSeq.current) return
+      if (result === null || !result.hasImage || result.supportsImage !== false) return
+      setImageWarning({ seq, text: t('confirm.imageWarning') })
+    })
   }
 
   const chooseEffort = (effort: string | undefined): void => {
@@ -392,16 +409,19 @@ export function ModelSelect(
         <ConfirmDialog
           title={t('confirm.switchTitle')}
           message={t('confirm.switchMessage')}
-          warning={t('confirm.switchWarning')}
+          warning={imageWarning !== null
+            ? <>{t('confirm.switchWarning')}<br />{imageWarning.text}</>
+            : t('confirm.switchWarning')}
           tone="primary"
           confirmLabel={t('confirm.switchConfirm')}
           cancelLabel={t('confirm.switchCancel')}
           onConfirm={() => {
             const selection = pending
             setPending(null)
+            setImageWarning(null)
             applySelection(selection)
           }}
-          onCancel={() => { setPending(null) }}
+          onCancel={() => { setPending(null); setImageWarning(null) }}
         />
       )}
     </div>

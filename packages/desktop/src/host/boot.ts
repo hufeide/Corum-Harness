@@ -54,6 +54,7 @@ import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plug
 import { CorumFsService } from './corum-fs.ts'
 import { CorumTerminalService } from './corum-terminal.ts'
 import { CorumGitService } from './corum-git.ts'
+import { CorumReviewService } from './corum-review.ts'
 
 /**
  * Resolve the desktop UI mode. The shell injects `CORUM_DESKTOP_MODE` per
@@ -421,6 +422,11 @@ export async function bootDesktop(): Promise<Context> {
       // 的 git 依赖前置），同时注册 corum-workspace settings namespace（「新工作区
       // 始终初始化 git」通用开关的持久化面）。与 corumFs 同一注册时机。
       new CorumGitService(hostCtx)
+      // 改动审查的影子 git 仓库 Host 半（Typert Remote，service 名 corumReview）：
+      // Review 卡的数据源。只对「本轮被写过的路径」做 plumbing 提交（绝不 git add -A），
+      // pre-image 在 session/event 的 tool/call 上同步读取（早于工具落盘）。与 corumFs
+      // 同一注册时机；同时注册 corum-review settings namespace（保留天数）。
+      new CorumReviewService(hostCtx)
       // ui-onboarding 命名空间注册：官方 ui-settings-general 的 host 半负责本
       // 注册，IDE overlay 禁用它后无人注册 → settings.describe 找不到 →
       // WelcomeNotice（内测声明）load/acknowledge 失败，弹窗卡「暂时无法保存

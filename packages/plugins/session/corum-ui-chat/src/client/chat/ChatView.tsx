@@ -12,7 +12,6 @@ import type { ChatSnapshot } from '../contract/snapshot.ts'
 import { AgentNameContext } from './agent-name-context.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
-import { ReviewCard } from './ReviewCard.tsx'
 import { TurnNavigator } from './TurnNavigator.tsx'
 import { mergeTurnRailItems, type TurnRailItem } from './turn-rail-items.ts'
 import { formatRunDuration } from './message-chrome.ts'
@@ -219,7 +218,7 @@ const ChatNodeList = memo(function ChatNodeList({ order, ...seatProps }: ChatNod
 export function ChatView({
   useSession, useChat, useChatNode, useChatNodeProcess, useSessions, useStore, actions, renderSlot,
   sessionId, openFile, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt, fileMentions,
-  useTranscriptView, useProjection, review, t, getAgentName,
+  useTranscriptView, useProjection, t, getAgentName,
 }: ChatViewSlotProps) {
   // 对话区 Agent 头昵称（2026-08-31 用户定调：显示 nickname 而非通用「Corum
   // Agent」）：ChatView 查一次放进 context，AssistantMarkdown 的 AgentHeader 消费。
@@ -229,17 +228,6 @@ export function ChatView({
     getAgentName().then((name) => { if (alive) setAgentName(name) }).catch(() => { /* 查询失败回退通用文案 */ })
     return () => { alive = false }
   }, [getAgentName])
-  // fork（corum）：Review 卡数据源（文件更改审查），订阅聚合 + 撤销/保留动作。
-  const reviewChanges = useSyncExternalStore(review.subscribe, review.getSnapshot)
-  const [reviewBusy, setReviewBusy] = useState(false)
-  const revertAll = useCallback(async () => {
-    setReviewBusy(true)
-    try {
-      return await review.revertAll()
-    } finally {
-      setReviewBusy(false)
-    }
-  }, [review])
   const order = useChat(s => s.order)
   const nodeStore = useChat(s => s.nodes)
   // The rail's items are accumulated in the Chat snapshot, so this selector is
@@ -855,21 +843,11 @@ export function ChatView({
           </div>
         )}
       </div>
-      {/* fork（corum）：Review 卡（文件更改审查）——固定在 chat-flow 底部、composer
-          上方（scroll 容器外，不随消息滚动），有未确认写操作时显示。
-          宽度行为与其它卡片一致：max-width: var(--dsh-chat-content-width) + margin: 0 auto。 */}
-      {reviewChanges.files.length > 0 && (
-        <div className={css.reviewCardWrapper}>
-          <ReviewCard
-            changes={reviewChanges}
-            cwd={cwd}
-            busy={reviewBusy}
-            onRevertAll={revertAll}
-            onKeepAll={() => { review.keepAll() }}
-            t={t as unknown as (key: string, params?: Record<string, string | number>) => string}
-          />
-        </div>
-      )}
+      {/* fork（corum）：Review 卡（文件更改审查）**已移出本视图** —— 它现在是
+          `conversation.input.dock` 槽的一个条目（Chat/ReviewDock.tsx，
+          apply.ts 里注册），与 TodoPanel 同槽、由 composerSeat 统一吸附。
+          曾短暂用 createPortal + DOM 选择器把节点搬进 composerStack，那会因
+          宿主类名改名而静默失效；槽注册是同一效果且不依赖 DOM 结构。 */}
       {fileOpenError !== null && (
         <FileOpenErrorDialog
           path={fileOpenError.path}

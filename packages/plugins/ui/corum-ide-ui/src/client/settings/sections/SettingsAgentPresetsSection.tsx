@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Box, Brain, Check, ChevronLeft, ChevronRight, Cpu, Database, Ghost, Globe, Layers, Lock, Maximize2, Minimize2, Plus, Search, Server, Sparkles, Star, Trash2, Upload, X } from 'lucide-react'
+import { Box, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Database, Ghost, Globe, Info, Layers, Lock, Maximize2, Minimize2, Minus, Plus, Search, Server, Smile, Sparkles, Star, Trash2, Upload, X } from 'lucide-react'
 import { SelectField } from '../SelectField.tsx'
 import { Switch } from '../Switch.tsx'
 import { ConfirmDialog } from '../ConfirmDialog.tsx'
@@ -72,6 +72,8 @@ interface AgentProfileSummary {
   dimension?: string
   experience?: string
   persona?: string
+  /** 人格预设（工作场景人格原型 id，或 'custom'）。 */
+  personaPreset?: string
   avatar?: string
   baseMode?: string
   prompt: string
@@ -92,16 +94,15 @@ interface AgentProfileSummary {
   source: 'corum' | 'official'
 }
 
-/** 并行开发策略的 UI 投影（与 host profile.ts ParallelWorkPolicy 逐字段对齐）。 */
+/**
+ * 并行编排策略的 UI 投影。
+ *
+ * 编排统一化后旧字段（isolation/worktreeRoot/branchPrefix/merger/autoCleanup/
+ * denyDirectFs/integrateChecks）已作废，UI 仅保留 `maxParallelChildren`
+ * （「模型与并发」卡片的子 Agent 并发数）；保留该宽类型仅为兼容 host 回读。
+ */
 interface ParallelWorkDraft {
-  isolation?: 'always' | 'write-tasks' | 'off'
-  worktreeRoot?: string
-  branchPrefix?: string
-  merger?: 'parent' | 'merger'
   maxParallelChildren?: number
-  autoCleanup?: boolean
-  denyDirectFs?: boolean
-  integrateChecks?: string[]
 }
 
 const AGENT_DIMENSIONS = ['研发', '产品', '设计', '市场', '自媒体', '创作', '通用'] as const
@@ -237,6 +238,9 @@ interface EditDraft {
   domain: string
   dimension: string
   experience: string
+  personaPreset: string
+  /** 自定义人格名称（personaPreset === 'custom' 时填；≤20 字）。 */
+  personaCustom: string
   persona: string
   avatar: string
   baseMode: string
@@ -250,11 +254,12 @@ interface EditDraft {
   researchEnabled: boolean
   researchProvider: string
   researchModel: string
-  /** 并行开发策略（undefined 段 = 跟随全局/默认）。 */
-  pwIsolation: '' | 'always' | 'write-tasks' | 'off'
-  pwMerger: '' | 'parent' | 'merger'
-  pwMaxParallel: string
-  pwIntegrateChecks: string
+  /** 自定义设置开关（设计稿 v4 card-模型与并发：关闭 = 跟随系统统一设置）。 */
+  customEnabled: boolean
+  /** 「模型与并发」卡片是否展开（设计稿 v4：默认折叠）。 */
+  modelCardExpanded: boolean
+  /** 子 Agent 并发数（自定义设置开启时生效；空 = 跟随系统默认）。 */
+  maxParallel: string
   terminal: 'sandbox' | 'host'
   /** 记忆功能开关（设计稿 GHBvv「记忆功能」switch；持久化在 memoryPolicy.scope）。 */
   memoryEnabled: boolean
@@ -265,11 +270,12 @@ interface EditDraft {
 
 function emptyDraft(): EditDraft {
   return {
-    name: '', nickname: '', title: '', domain: '', dimension: '研发', experience: '', persona: '', avatar: '',
+    name: '', nickname: '', title: '', domain: '', dimension: '研发', experience: '',
+    personaPreset: DEFAULT_PERSONA_PRESET, personaCustom: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
     researchEnabled: false, researchProvider: 'deepseek-official', researchModel: 'deepseek-v4-flash',
-    pwIsolation: '', pwMerger: '', pwMaxParallel: '', pwIntegrateChecks: '',
+    customEnabled: false, modelCardExpanded: false, maxParallel: '',
     terminal: 'sandbox', memoryEnabled: false, skills: [], mcpServers: [], trust: 'user',
   }
 }
@@ -282,6 +288,9 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     domain: p.domain ?? '',
     dimension: p.dimension ?? inferDimension(p),
     experience: p.experience ?? '',
+    // 人格预设回填：无预设时按 legacy persona 文本兜底判为「自定义」，避免丢失旧数据。
+    personaPreset: p.personaPreset ?? (p.persona !== undefined && p.persona !== '' ? 'custom' : DEFAULT_PERSONA_PRESET),
+    personaCustom: p.personaPreset === 'custom' ? (p.persona ?? '') : '',
     persona: p.persona ?? '',
     avatar: p.avatar ?? '',
     baseMode: p.baseMode ?? 'standard',
@@ -296,10 +305,12 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     researchEnabled: p.researchModel !== undefined,
     researchProvider: p.researchModel?.provider ?? 'deepseek-official',
     researchModel: p.researchModel?.model ?? 'deepseek-v4-flash',
-    pwIsolation: p.parallelWork?.isolation ?? '',
-    pwMerger: p.parallelWork?.merger ?? '',
-    pwMaxParallel: p.parallelWork?.maxParallelChildren !== undefined ? String(p.parallelWork.maxParallelChildren) : '',
-    pwIntegrateChecks: p.parallelWork?.integrateChecks?.join('\n') ?? '',
+    // 自定义设置：任一覆盖项已配（子/研究模型或并发上限）即视为开启，并默认展开卡片。
+    customEnabled: p.subagentModel !== undefined || p.researchModel !== undefined
+      || p.parallelWork?.maxParallelChildren !== undefined,
+    modelCardExpanded: p.subagentModel !== undefined || p.researchModel !== undefined
+      || p.parallelWork?.maxParallelChildren !== undefined,
+    maxParallel: p.parallelWork?.maxParallelChildren !== undefined ? String(p.parallelWork.maxParallelChildren) : '',
     terminal: (p.terminal.mode === 'host' ? 'host' : 'sandbox') as 'sandbox' | 'host',
     memoryEnabled: p.memoryEnabled === true,
     skills: p.skills,
@@ -308,17 +319,22 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
   }
 }
 
-/** 从编辑草稿构造 parallelWork 载荷：全空 → 不带键（跟随全局/默认）。 */
+/**
+ * 「模型与并发」卡片 → parallelWork 载荷。
+ *
+ * 设计稿 v4：自定义设置**关闭**时不覆盖系统统一设置（返回空对象，不写键）；
+ * 开启时只写「子 Agent 并发数」（模型走 subagentModel/researchModel 顶层字段，
+ * 旧的 isolation/merger/integrateChecks 已随编排统一化作废）。
+ */
 function buildParallelWork(draft: EditDraft): { parallelWork?: ParallelWorkDraft } {
-  const pw: ParallelWorkDraft = {}
-  if (draft.pwIsolation !== '') pw.isolation = draft.pwIsolation
-  if (draft.pwMerger !== '') pw.merger = draft.pwMerger
-  const maxParallel = Number.parseInt(draft.pwMaxParallel, 10)
-  if (draft.pwMaxParallel.trim() !== '' && Number.isInteger(maxParallel) && maxParallel > 0) pw.maxParallelChildren = maxParallel
-  const checks = draft.pwIntegrateChecks.split('\n').map(s => s.trim()).filter(s => s !== '')
-  if (checks.length > 0) pw.integrateChecks = checks
-  return Object.keys(pw).length > 0 ? { parallelWork: pw } : {}
+  if (!draft.customEnabled) return {}
+  const maxParallel = Number.parseInt(draft.maxParallel, 10)
+  if (draft.maxParallel.trim() === '' || !Number.isInteger(maxParallel) || maxParallel <= 0) return {}
+  return { parallelWork: { maxParallelChildren: maxParallel } }
 }
+
+/** 自定义人格名称的字数上限（设计稿 DA4gi row-custom：5 / 20）。 */
+const PERSONA_CUSTOM_MAX = 20
 
 /* ── 虚位以待占位卡（每行不足 3 张时补齐）───────────────────────────── */
 
@@ -485,6 +501,26 @@ const TERMINAL_OPTIONS = [
 
 const DIMENSION_OPTIONS = AGENT_DIMENSIONS.map(d => ({ id: d, label: d }))
 
+/**
+ * 人格预设下拉（设计稿 DA4gi menu：6 个内置人格 + 「自定义」）。
+ *
+ * id 必须与 host `PersonaPreset` 联合类型一致（profile.ts），
+ * 中文标签对应 compile.ts `PERSONA_PRESET_PROMPTS` 的语义。
+ */
+const PERSONA_PRESET_OPTIONS = [
+  { id: 'efficient-executor', label: '务实高效' },
+  { id: 'steady-coach', label: '简洁直接' },
+  { id: 'rigorous-architect', label: '严谨细致' },
+  { id: 'innovative-explorer', label: '创新探索' },
+  { id: 'custom', label: '自定义' },
+]
+const DEFAULT_PERSONA_PRESET = 'efficient-executor'
+
+/** 取人格预设中文标签（未知 id 回退原值）。 */
+function personaPresetLabel(id: string): string {
+  return PERSONA_PRESET_OPTIONS.find(o => o.id === id)?.label ?? id
+}
+
 /** 模型下拉兜底目录（corumAgent/listModels 不可用时；与设计稿文案一致）。 */
 const FALLBACK_PROVIDERS = [
   { id: 'deepseek-official', label: 'deepseek-official' },
@@ -623,13 +659,20 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           ...(draft.domain.trim() !== '' ? { domain: draft.domain.trim() } : {}),
           dimension: draft.dimension,
           ...(draft.experience.trim() !== '' ? { experience: draft.experience.trim() } : {}),
-          ...(draft.persona.trim() !== '' ? { persona: draft.persona.trim() } : {}),
+          personaPreset: draft.personaPreset,
+          // 仅「自定义」写 persona 自由文本；内置预设由 host 端 PERSONA_PRESET_PROMPTS 解析。
+          ...(draft.personaPreset === 'custom' && draft.personaCustom.trim() !== ''
+            ? { persona: draft.personaCustom.trim() }
+            : {}),
           ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
           baseMode: draft.baseMode as EditDraft['baseMode'],
           prompt: draft.prompt,
           model: { provider: draft.provider, model: draft.model },
-          ...(draft.subEnabled ? { subagentModel: { provider: draft.subProvider, model: draft.subModel } } : {}),
-          ...(draft.researchEnabled ? { researchModel: { provider: draft.researchProvider, model: draft.researchModel } } : {}),
+          // 自定义设置关闭时不覆盖系统统一设置：不写子/研究模型与并发键。
+          ...(draft.customEnabled && draft.subEnabled
+            ? { subagentModel: { provider: draft.subProvider, model: draft.subModel } } : {}),
+          ...(draft.customEnabled && draft.researchEnabled
+            ? { researchModel: { provider: draft.researchProvider, model: draft.researchModel } } : {}),
           ...buildParallelWork(draft),
           skills: draft.skills,
           mcpServers: draft.mcpServers,
@@ -796,8 +839,9 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
         </div>
       </div>
 
-      {/* 下方单一纵向表单列（设计稿 GHBvv formCol: gap 4；整页滚动流，不再局部滚动）。
-          顺序 = 设计稿 formCol.children：继承 → 工作经验 → 人格 → 提示词 → 模型 → 技能+MCP → 终端/记忆 → 页脚。 */}
+      {/* 下方单一纵向表单列（设计稿 v4 formCol: gap 4；整页滚动流，不再局部滚动）。
+          顺序 = 设计稿 v4 formCol.children：继承(仅开发者) → 工作经验 → 人格 → 提示词 →
+          技能/工具 → 终端/记忆 → 模型与并发(页面最下方·默认折叠) → 页脚。 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
         {/* 继承自（设计稿 GHBvv g-inherit：仅开发者模式显示；非开发者模式固定
             继承标准模式并覆盖其 persona，不展示该选项） */}
@@ -826,34 +870,42 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           </div>
         </div>
 
-        {/* 人格设置（设计稿 GHBvv g-persona：AI 润色在文本域内底部行，与字数统计同行） */}
-        <div className={css.formGroup}>
+        {/* 人格设置（设计稿 v4 g-persona：300 宽预设下拉 + smile icon + 右侧说明；
+            选「自定义」时下方展开单行输入（≤20 字）+ 计数 + 底部说明） */}
+        <div className={css.formGroup} style={{ gap: 3 }}>
           <div className={css.formGroupTitle}>人格设置</div>
-          <label className={css.fieldLabel}>用一段话描述 Agent 的人格特质与行为倾向（不超过 500 字符）</label>
-          <div className={css.promptArea}>
-            <textarea
-              className={css.promptTextarea}
-              value={draft.persona}
-              onChange={e => set('persona', e.target.value.slice(0, 500))}
-              placeholder="务实、简洁、注重结果。接到任务后先理解目标再动手，不废话不拖延。"
-              rows={3}
-              maxLength={500}
-            />
-            <div className={css.promptActionsRow}>
-              <span className={css.promptCount}>{draft.persona.length} / 500</span>
-              <button
-                type="button"
-                className={css.btnPolish}
-                disabled={polishing || draft.persona.trim() === ''}
-                title={draft.persona.trim() === '' ? '先填写人格描述' : '用润色模型改写这段人格描述'}
-                onClick={() => {
-                  void polish(draft.persona).then(next => { if (next !== null) set('persona', next.slice(0, 500)) })
-                }}
-              >
-                <Sparkles size={11} className={css.btnPolishIcon} />{polishing ? '润色中…' : 'AI 润色'}
-              </button>
+          <div className={css.personaRow}>
+            <div className={css.personaTriggerWrap}>
+              <Smile size={14} className={css.personaTriggerIcon} />
+              <SelectField
+                value={draft.personaPreset}
+                options={PERSONA_PRESET_OPTIONS}
+                onChange={v => set('personaPreset', v)}
+                variant="fill"
+              />
             </div>
+            <span className={css.personaCap}>
+              决定该 Agent 的沟通风格与行为倾向；可选内置预设，或自定义人格名称
+            </span>
           </div>
+          {draft.personaPreset === 'custom' && (
+            <div className={css.personaCustomCol}>
+              <div className={css.personaCustomInput}>
+                <input
+                  className={css.personaCustomField}
+                  value={draft.personaCustom}
+                  placeholder="例如：复盘驱动型"
+                  maxLength={PERSONA_CUSTOM_MAX}
+                  onChange={e => set('personaCustom', e.target.value.slice(0, PERSONA_CUSTOM_MAX))}
+                />
+                <span className={css.personaCustomCount}>{draft.personaCustom.length} / {PERSONA_CUSTOM_MAX}</span>
+              </div>
+              <div className={css.personaCustomNoteRow}>
+                <Info size={11} className={css.personaCustomNoteIcon} />
+                <span className={css.personaCustomNote}>自定义人格名称，最多 {PERSONA_CUSTOM_MAX} 个字符，用于生成该 Agent 的行为描述</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 提示词（设计稿 GHBvv g-prompt：放大钮为 ghost 小钮；AI 润色在文本域内底部行） */}
@@ -877,109 +929,6 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
               >
                 <Sparkles size={11} className={css.btnPolishIcon} />{polishing ? '润色中…' : 'AI 润色'}
               </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 模型（设计稿 GHBvv g-model: model-row 横向两组，各 pair=供应商+模型两列并排，
-            每个下拉上方有 10px tertiary 小字「供应商」「模型」标签） */}
-        <div className={css.formGroup}>
-          <div className={css.formGroupTitle}>模型</div>
-          <div className={css.formColsStretch}>
-            <div className={css.formCol} style={{ gap: 4 }}>
-              <span className={css.formSubLabel}>主 Agent</span>
-              <div className={css.selectStack}>
-                <div className={css.formCol} style={{ gap: 3 }}>
-                  <label className={css.fieldLabelSm}>供应商</label>
-                  <SelectField value={draft.provider} options={mainProviderOptions} onChange={v => set('provider', v)} variant="fill" />
-                </div>
-                <div className={css.formCol} style={{ gap: 3 }}>
-                  <label className={css.fieldLabelSm}>模型</label>
-                  <SelectField value={draft.model} options={mainModelOptions} onChange={v => set('model', v)} variant="fill" />
-                </div>
-              </div>
-            </div>
-            <div className={css.formCol} style={{ gap: 4 }}>
-              <span className={css.formSubLabel}>子 Agent（可选，缺省同主 Agent）</span>
-              <div className={css.selectStack}>
-                <div className={css.formCol} style={{ gap: 3 }}>
-                  <label className={css.fieldLabelSm}>供应商</label>
-                  <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} variant="fill" />
-                </div>
-                <div className={css.formCol} style={{ gap: 3 }}>
-                  <label className={css.fieldLabelSm}>模型</label>
-                  <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.subEnabled} variant="fill" />
-                </div>
-              </div>
-            </div>
-            <div className={css.formCol} style={{ gap: 4 }}>
-              <span className={css.formSubLabel}>研究子 Agent（只读实例，不可移除；可选，缺省同子 Agent）</span>
-              <div className={css.selectStack}>
-                <div className={css.formCol} style={{ gap: 3 }}>
-                  <label className={css.fieldLabelSm}>供应商</label>
-                  <SelectField value={draft.researchEnabled ? draft.researchProvider : ''} options={subProviderOptions} onChange={v => { set('researchEnabled', v !== ''); if (v !== '') set('researchProvider', v) }} variant="fill" />
-                </div>
-                <div className={css.formCol} style={{ gap: 3 }}>
-                  <label className={css.fieldLabelSm}>模型</label>
-                  <SelectField value={draft.researchEnabled ? draft.researchModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('researchModel', v) }} disabled={!draft.researchEnabled} variant="fill" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 并行开发（子 Agent 硬隔离编排；空 = 跟随全局/默认。机制：fork #10
-            双实例——worker 召唤写任务自动独立 worktree+分支，integrate 召唤合并） */}
-        <div className={css.formCol} style={{ gap: 6 }}>
-          <div className={css.formGroupTitle}>并行开发</div>
-          <div className={css.formColsStretch}>
-            <div className={css.formCol} style={{ gap: 3 }}>
-              <label className={css.fieldLabelSm}>隔离模式（默认 write-tasks：并发写任务隔离）</label>
-              <SelectField
-                value={draft.pwIsolation}
-                options={[
-                  { id: '', label: '（跟随全局/默认）' },
-                  { id: 'write-tasks', label: 'write-tasks · 并发写任务隔离' },
-                  { id: 'always', label: 'always · 凡召唤必隔离' },
-                  { id: 'off', label: 'off · 不隔离' },
-                ]}
-                onChange={v => set('pwIsolation', v as EditDraft['pwIsolation'])}
-                variant="fill"
-              />
-            </div>
-            <div className={css.formCol} style={{ gap: 3 }}>
-              <label className={css.fieldLabelSm}>合并者（默认 parent：主 Agent 合并）</label>
-              <SelectField
-                value={draft.pwMerger}
-                options={[
-                  { id: '', label: '（跟随全局/默认）' },
-                  { id: 'parent', label: 'parent · 主 Agent 合并' },
-                  { id: 'merger', label: 'merger · 专职合并子 Agent' },
-                ]}
-                onChange={v => set('pwMerger', v as EditDraft['pwMerger'])}
-                variant="fill"
-              />
-            </div>
-          </div>
-          <div className={css.formColsStretch}>
-            <div className={css.formCol} style={{ gap: 3 }}>
-              <label className={css.fieldLabelSm}>并行子 Agent 上限（默认 4）</label>
-              <input
-                className={css.textInput}
-                value={draft.pwMaxParallel}
-                placeholder="4"
-                onChange={e => set('pwMaxParallel', e.target.value)}
-              />
-            </div>
-            <div className={css.formCol} style={{ gap: 3 }}>
-              <label className={css.fieldLabelSm}>集成核查命令（每行一条，默认 pnpm -r typecheck）</label>
-              <textarea
-                className={css.textInput}
-                rows={2}
-                value={draft.pwIntegrateChecks}
-                placeholder={'pnpm -r typecheck\npnpm lint'}
-                onChange={e => set('pwIntegrateChecks', e.target.value)}
-              />
             </div>
           </div>
         </div>
@@ -1049,6 +998,106 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
         </div>
 
         {error !== null && <p className={css.hintText}>{error}</p>}
+
+        {/* 模型与并发（设计稿 v4 card-模型与并发：页面最下方、**默认折叠**；
+            自定义设置默认关闭 = 跟随系统统一设置；开启后展开三档模型 + 并发数覆盖） */}
+        <div className={css.mcpCard}>
+          <button
+            type="button"
+            className={css.modelCardHead}
+            onClick={() => set('modelCardExpanded', !draft.modelCardExpanded)}
+          >
+            <span className={css.modelCardHeadLeft}>
+              <span className={css.modelCardTitle}>模型与并发</span>
+              <span className={draft.customEnabled ? css.modelCardTipActive : css.modelCardTip}>
+                {draft.customEnabled ? '本预设的执行模型与并发策略 · 已自定义' : '本预设的执行模型与并发策略 · 跟随系统'}
+              </span>
+            </span>
+            {draft.modelCardExpanded
+              ? <ChevronUp size={14} className={css.modelCardChev} />
+              : <ChevronDown size={14} className={css.modelCardChev} />}
+          </button>
+
+          <div className={css.modelCardOverride}>
+            <span className={css.modelCardOverrideLeft}>
+              <span className={css.modelCardOverrideTitle}>自定义设置</span>
+              <span className={css.modelCardOverrideHint}>
+                {draft.customEnabled ? '已覆盖系统统一设置（模型 / 并发）' : '开启后可覆盖系统统一设置（模型 / 并发）'}
+              </span>
+            </span>
+            <Switch checked={draft.customEnabled} onChange={v => set('customEnabled', v)} />
+          </div>
+
+          {draft.modelCardExpanded && (
+            <>
+              <div className={css.modelCardDivider} />
+
+              {/* 三档执行模型（关闭自定义时只读） */}
+              <div className={css.formColsStretch}>
+                <div className={css.formCol} style={{ gap: 4 }}>
+                  <label className={css.fieldLabelSm}>主 Agent 模型</label>
+                  <div className={css.selectStack}>
+                    <div className={css.formCol} style={{ gap: 3 }}>
+                      <label className={css.fieldLabelSm}>供应商</label>
+                      <SelectField value={draft.provider} options={mainProviderOptions} onChange={v => set('provider', v)} disabled={!draft.customEnabled} variant="fill" />
+                    </div>
+                    <div className={css.formCol} style={{ gap: 3 }}>
+                      <label className={css.fieldLabelSm}>模型</label>
+                      <SelectField value={draft.model} options={mainModelOptions} onChange={v => set('model', v)} disabled={!draft.customEnabled} variant="fill" />
+                    </div>
+                  </div>
+                </div>
+                <div className={css.formCol} style={{ gap: 4 }}>
+                  <label className={css.fieldLabelSm}>子 Agent 模型（缺省同主 Agent）</label>
+                  <div className={css.selectStack}>
+                    <div className={css.formCol} style={{ gap: 3 }}>
+                      <label className={css.fieldLabelSm}>供应商</label>
+                      <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} disabled={!draft.customEnabled} variant="fill" />
+                    </div>
+                    <div className={css.formCol} style={{ gap: 3 }}>
+                      <label className={css.fieldLabelSm}>模型</label>
+                      <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.customEnabled || !draft.subEnabled} variant="fill" />
+                    </div>
+                  </div>
+                </div>
+                <div className={css.formCol} style={{ gap: 4 }}>
+                  <label className={css.fieldLabelSm}>调查 Agent 模型（缺省同子 Agent）</label>
+                  <div className={css.selectStack}>
+                    <div className={css.formCol} style={{ gap: 3 }}>
+                      <label className={css.fieldLabelSm}>供应商</label>
+                      <SelectField value={draft.researchEnabled ? draft.researchProvider : ''} options={subProviderOptions} onChange={v => { set('researchEnabled', v !== ''); if (v !== '') set('researchProvider', v) }} disabled={!draft.customEnabled} variant="fill" />
+                    </div>
+                    <div className={css.formCol} style={{ gap: 3 }}>
+                      <label className={css.fieldLabelSm}>模型</label>
+                      <SelectField value={draft.researchEnabled ? draft.researchModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('researchModel', v) }} disabled={!draft.customEnabled || !draft.researchEnabled} variant="fill" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 子 Agent 并发数（− [n] ＋ 步进器） */}
+              <div className={css.formCol} style={{ gap: 4 }}>
+                <label className={css.fieldLabelSm}>子 Agent 并发数</label>
+                <div className={css.stepperRow}>
+                  <button
+                    type="button"
+                    className={css.stepperBtn}
+                    disabled={!draft.customEnabled}
+                    onClick={() => set('maxParallel', String(Math.max(1, (Number.parseInt(draft.maxParallel, 10) || 4) - 1)))}
+                  ><Minus size={13} /></button>
+                  <span className={css.stepperValue}>{draft.maxParallel.trim() === '' ? '4' : draft.maxParallel}</span>
+                  <button
+                    type="button"
+                    className={css.stepperBtn}
+                    disabled={!draft.customEnabled}
+                    onClick={() => set('maxParallel', String(Math.min(8, (Number.parseInt(draft.maxParallel, 10) || 4) + 1)))}
+                  ><Plus size={13} /></button>
+                  <span className={css.stepperHint}>同时运行的最大子 Agent 数（1–8）</span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
 
         {/* footer（设计稿 GHBvv footer s8r0w：左 信任级 badge + 记忆管理(brain)，
             右 删除(error)/取消/保存；删除走内联二次确认弹窗 confirm-pop） */}

@@ -43,6 +43,7 @@ import 'monaco-editor/nls/lang/zh-cn.js'
 // seed（monaco-editor 裸名），其内部依赖全部内联，不产生运行时 require。
 import { editor } from 'monaco-editor'
 import type { editor as MonacoEditorApi } from 'monaco-editor'
+import { applyCorumTheme, corumThemeName, defineCorumThemes } from './monaco-theme.ts'
 import { installMonacoWorkerEnvironment } from './worker.ts'
 import { setCorumMonacoInstance, type CorumMonacoInstance } from './monaco-bridge.ts'
 
@@ -81,96 +82,6 @@ export interface MonacoEditorProps {
  * design's label tokens; values are the design.pen hex (Monaco themes take
  * literal colors, not CSS variables).
  */
-const CORUM_THEMES: Record<'corum-light' | 'corum-dark', MonacoEditorApi.IStandaloneThemeData> = {
-  'corum-light': {
-    base: 'vs',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#00000000',
-      'editorGutter.background': '#00000000',
-      'editor.lineHighlightBackground': '#0E0E1C08',
-      'editor.lineHighlightBorder': '#00000000',
-      'editorLineNumber.foreground': '#8B8BA3',
-      'editorLineNumber.activeForeground': '#0E0E1C',
-      'editorCursor.foreground': '#5B21F5',
-      'editor.foreground': '#0E0E1C',
-      'editorWidget.background': '#FFFFFFCC',
-      'editorWidget.border': '#FFFFFF',
-      'scrollbarSlider.background': '#8B8BA333',
-      'scrollbarSlider.hoverBackground': '#8B8BA355',
-      'minimap.background': '#00000000',
-      'minimapSlider.background': '#8B8BA322',
-      'minimapSlider.hoverBackground': '#8B8BA333',
-      'minimapSlider.activeBackground': '#8B8BA344',
-      'editorIndentGuide.background1': '#8B8BA326',
-      'editorIndentGuide.activeBackground1': '#8B8BA355',
-      'editorBracketMatch.background': '#5B21F522',
-      'editorBracketMatch.border': '#5B21F566',
-      'editor.foldBackground': '#0E0E1C06',
-      'editorGutter.foldingControlForeground': '#8B8BA3',
-      'editor.findMatchBackground': '#5B21F544',
-      'editor.findMatchHighlightBackground': '#5B21F522',
-      'editor.findMatchBorder': '#5B21F5',
-      'editor.selectionBackground': '#5B21F533',
-      'editor.selectionHighlightBackground': '#5B21F522',
-      'editorGhostText.foreground': '#8B8BA388',
-    },
-  },
-  'corum-dark': {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#00000000',
-      'editorGutter.background': '#00000000',
-      'editor.lineHighlightBackground': '#F3ECFF0A',
-      'editor.lineHighlightBorder': '#00000000',
-      'editorLineNumber.foreground': '#7E719E',
-      'editorLineNumber.activeForeground': '#F3ECFF',
-      'editorCursor.foreground': '#01CDFE',
-      'editor.foreground': '#F3ECFF',
-      'editorWidget.background': '#2A1840D9',
-      'editorWidget.border': '#B98CFF2E',
-      'scrollbarSlider.background': '#7E719E33',
-      'scrollbarSlider.hoverBackground': '#7E719E55',
-      // minimap / 缩进参考线 / 括号匹配 / 折叠（corum 玻璃暗色对齐）。
-      'minimap.background': '#00000000',
-      'minimapSlider.background': '#7E719E22',
-      'minimapSlider.hoverBackground': '#7E719E33',
-      'minimapSlider.activeBackground': '#7E719E44',
-      'editorIndentGuide.background1': '#7E719E26',
-      'editorIndentGuide.activeBackground1': '#7E719E55',
-      'editorBracketMatch.background': '#01CDFE22',
-      'editorBracketMatch.border': '#01CDFE66',
-      'editorBracketHighlight.foreground1': '#01CDFE',
-      'editorBracketHighlight.foreground2': '#B98CFF',
-      'editorBracketHighlight.foreground3': '#01FEA5',
-      'editorBracketHighlight.unexpectedBracket.foreground': '#FF5B5B',
-      'editor.foldBackground': '#F3ECFF08',
-      'editorGutter.foldingControlForeground': '#7E719E',
-      // 查找高亮。
-      'editor.findMatchBackground': '#01CDFE44',
-      'editor.findMatchHighlightBackground': '#01CDFE22',
-      'editor.findMatchBorder': '#01CDFE',
-      // 选区。
-      'editor.selectionBackground': '#5B21F533',
-      'editor.selectionHighlightBackground': '#5B21F522',
-      // 幽灵文本（补全）。
-      'editorGhostText.foreground': '#7E719E88',
-    },
-  },
-}
-
-/** Registered-once flag (defineTheme is global, not per-editor). */
-let corumThemesDefined = false
-function defineCorumThemes(): void {
-  if (corumThemesDefined) return
-  corumThemesDefined = true
-  editor.defineTheme('corum-light', CORUM_THEMES['corum-light'])
-  editor.defineTheme('corum-dark', CORUM_THEMES['corum-dark'])
-}
-
 /** Resolve a stable language id from a file path (no model guessing needed). */
 export function languageFromPath(path: string, fallback: string): string {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
@@ -256,11 +167,14 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     installMonacoWorkerEnvironment()
   }, [])
 
-  // Create the editor once, on the host node. Theme switches call setTheme on
+  // Create the editor once, on the host node. Theme switches go through the shared
+  // `applyCorumTheme` (module corum-desktop/client/editor/monaco-theme), which also
+  // guarantees the theme is registered first.
   // the live instance instead of recreating it (preserves view state).
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
+    // 先注册主题再创建：传未注册的主题名会让 monaco 回落到浅色 `vs`。
     defineCorumThemes()
     // find widget 窄栏修复：monaco findWidget.js 按 editorWidth 算三档（reduced/
     // narrow/collapsed）——编辑器列 ~420px 时命中 narrowFindWidget（419+28+minimap
@@ -286,7 +200,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         automaticLayout: true,
         // minimap：VS Code 标志性代码缩略图（slider 模式滑块常驻）。
         minimap: { enabled: true, showSlider: 'always', renderCharacters: false, maxColumn: 80 },
-        theme: dark ? 'corum-dark' : 'corum-light',
+        theme: corumThemeName(dark),
         scrollBeyondLastLine: false,
         fixedOverflowWidgets: true,
         // 关键：关掉 shadow DOM（0.56 默认 true）。否则右键菜单等 overflow
@@ -377,8 +291,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
 
   // Theme switch on the live editor (no recreation → cursor/scroll survive).
   useEffect(() => {
-    defineCorumThemes()
-    editor.setTheme(dark ? 'corum-dark' : 'corum-light')
+    applyCorumTheme(dark)
   }, [dark])
 
   // Bind the cached per-path model to the editor (tab switch = setModel).

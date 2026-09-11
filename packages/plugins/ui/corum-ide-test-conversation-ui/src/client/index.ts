@@ -5,7 +5,7 @@
  * (disabled in the S0 IDE overlay) so the ENTIRE frame is test modules. The
  * module carries an openDetails button that exercises the details-drawer
  * panel action across the shell/plugin boundary. S2 replaces this probe with
- * @corum/corum-ide-conversation-ui (the real message flow).
+ * the fork conversation area (corum-ui-conversation) — the S2 owner, @corum/corum-ide-conversation-ui, was deleted 2026-09-11.
  *
  * The slot is declared only by @corum/corum-ide-ui (IDE mode); the type-only
  * import pulls the SlotMap row + the ctx.layout Context merge so the register

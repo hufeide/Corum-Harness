@@ -11,6 +11,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+import { setStallAutoRecoverMinutes } from './runtime-state.ts'
 import { CorumAgentService } from './agent-service.ts'
 import { AgentRuntime } from './runtime.ts'
 import { CorumProjectService } from './project-service.ts'
@@ -79,8 +81,55 @@ export const name = 'agent'
 /** 运行时依赖的服务（boot 后即就绪）。 */
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence']
 
+/**
+ * `corum-agent` settings namespace（C4：卡住自动恢复阈值可配置）。
+ *
+ * 默认 10 分钟（bash 工具 300s 超时 + 模型恢复余量），范围 1–120 分钟。
+ * 项目制扫描与 task 泳道共用这一个值（见 runtime-state.ts 的 holder）。
+ */
+export const CORUM_AGENT_SETTINGS_NAMESPACE = 'corum-agent'
+
+/** 设置形。 */
+export interface CorumAgentSettings {
+  /** 执行中任务无活动多久后主动恢复（分钟）。 */
+  readonly stallRecoverMinutes?: number
+}
+
+/** 默认值（分钟），与 STALL_AUTO_RECOVER_MS_DEFAULT 同源。 */
+export const STALL_RECOVER_MINUTES_DEFAULT = 10
+
+const CORUM_AGENT_SETTINGS_SCHEMA = z.object({
+  stallRecoverMinutes: z.number().default(STALL_RECOVER_MINUTES_DEFAULT),
+})
+
 /** 挂载 CorumAgentService + AgentRuntime + CorumProjectService + CorumTeamService 单例服务。 */
 export function apply(ctx: Context): void {
+  // settings namespace 注册 + 订阅：settings 服务在 boot 早期可能尚未挂载（与
+  // corum-review / corum-git 同款短轮询），拿到后注册并 watch，实时更新阈值。
+  const registerSettings = (): boolean => {
+    const settings = ctx.get('settings') as
+      | { register: (ns: unknown, schema: unknown) => { get: () => unknown; watch: (cb: (next: unknown) => void) => () => void } }
+      | undefined
+    if (settings === undefined) return false
+    const scope = settings.register(CORUM_AGENT_SETTINGS_NAMESPACE, CORUM_AGENT_SETTINGS_SCHEMA) as
+      { get: () => CorumAgentSettings; watch: (cb: (next: CorumAgentSettings) => void) => () => void }
+    const adopt = (value: CorumAgentSettings): void => {
+      setStallAutoRecoverMinutes(value?.stallRecoverMinutes ?? STALL_RECOVER_MINUTES_DEFAULT)
+    }
+    adopt(scope.get())
+    scope.watch(adopt)
+    ctx.logger.info('corum-agent namespace registered')
+    return true
+  }
+  if (!registerSettings()) {
+    const poll = setInterval(() => {
+      try { if (registerSettings()) clearInterval(poll) } catch (error) {
+        ctx.logger.warn(`corum-agent settings register failed: ${String(error)}`)
+      }
+    }, 100)
+    setTimeout(() => clearInterval(poll), 15000)
+  }
+
   const service = new CorumAgentService(ctx)
   new AgentRuntime(ctx, service)
   new CorumProjectService(ctx)

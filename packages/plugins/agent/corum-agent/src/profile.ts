@@ -174,3 +174,9 @@ export function isValidProfileId(id: string): boolean {
 export function isValidAgentDimension(v: string): v is AgentDimension {
   return v === '研发' || v === '产品' || v === '设计' || v === '市场' || v === '自媒体' || v === '创作' || v === '通用'
 }
+
+/** 校验人格预设值（可选；不合法值在 saveProfile 处丢弃）。 */
+export function isValidPersonaPreset(v: string): v is PersonaPreset {
+  return v === 'rigorous-architect' || v === 'steady-coach' || v === 'efficient-executor'
+    || v === 'innovative-explorer' || v === 'custom'
+}

@@ -32,6 +32,7 @@ export const zh = {
   'confirm.switchTitle': '更换模型',
   'confirm.switchMessage': '更换模型有可能导致效果变差。',
   'confirm.switchWarning': '建议在新任务中更换模型。',
+  'confirm.imageWarning': '本会话已包含图片，而所选模型不支持图片输入——切换后再发送图片会被拒绝。',
   'confirm.switchConfirm': '仍要更换',
   'confirm.switchCancel': '取消',
 } satisfies Record<string, string>
@@ -63,6 +64,7 @@ export const en = {
   'confirm.switchTitle': 'Switch model',
   'confirm.switchMessage': 'Switching models may degrade quality.',
   'confirm.switchWarning': 'Consider switching in a new task instead.',
+  'confirm.imageWarning': 'This conversation already contains images, but the selected model does not accept image input — sending images after the switch will be rejected.',
   'confirm.switchConfirm': 'Switch anyway',
   'confirm.switchCancel': 'Cancel',
 } satisfies Record<ModelKey, string>

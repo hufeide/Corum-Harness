@@ -39,7 +39,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
-import { isValidProfileId, isValidAgentDimension } from './profile.ts'
+import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
@@ -81,6 +81,7 @@ async function readPersistedEvents(
 }
 import { scanSkills } from './skill-catalog.ts'
 import { corumHome } from './home.ts'
+import { stallAutoRecoverMsValue } from './runtime-state.ts'
 import type { SkillEntry } from './skill-entry.ts'
 // 统一事件中心三-3：'corum/subagent/progress' 的 cordis Events 声明（自包含
 // 在 fork 包 corum-api-remotes；type-only import 只拉编译面，不进运行时依赖图）。
@@ -118,8 +119,10 @@ export interface ProfileSummary {
   dimension?: string
   /** 名片履历（可选）。 */
   experience?: string
-  /** 人格设置（可选，不超过 500 字符）。 */
+  /** 人格设置（可选，不超过 500 字符；personaPreset==='custom' 时使用）。 */
   persona?: string
+  /** 人格预设（工作场景人格原型；编辑回填用）。 */
+  personaPreset?: string
   /** 头像（dataURL 或 URL，可选）。 */
   avatar?: string
   /** 基础模式（编辑回填用）。 */
@@ -219,6 +222,45 @@ export interface TranslatePromptResult {
   translated: string
 }
 
+/** `sessionProjections` 的最小能力面（与 task-model-selection.ts 同款，避免耦合官方类型增强）。 */
+interface ModelSelectionProjections {
+  stateOf: (session: Session, key: 'modelSelection') => unknown
+}
+
+/** `modelSelection` 投影里的选择形状（只读 provider/model）。 */
+interface ProjectedSelection {
+  provider: string
+  model: string
+}
+
+/**
+ * 会话历史里是否出现过图片内容块。
+ *
+ * 与官方 `session-controller/commands.ts` 的 `imageInEvent` 同判据（content /
+ * message.content / assistant 流式块），但**不看 attachment 匹配、只看有无**：
+ * 换模型预警只关心「历史里有没有图」，不关心是哪一张。
+ * 形态不认就返回 false（宁可不提示，不可误报阻塞用户切换）。
+ */
+function eventHasImage(event: SessionEvent): boolean {  const data = event.data as {
+    readonly content?: unknown
+    readonly message?: { readonly content?: unknown }
+  }
+  if (contentHasImage(data.content)) return true
+  if (contentHasImage(data.message?.content)) return true
+  return false
+}
+
+/** 内容块数组里是否存在 image 块（不做 attachment 字段校验，容忍历史形态差异）。 */
+function contentHasImage(content: unknown): boolean {  if (!Array.isArray(content)) return false
+  for (const value of content) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+    const block = value as { readonly type?: unknown; readonly content?: unknown }
+    if (block.type === 'image') return true
+    if (block.type === 'tool-result' && contentHasImage(block.content)) return true
+  }
+  return false
+}
+
 /**
  * 解析润色模型的 JSON 信封（polishConversation）。
  * 模型常把 JSON 包在 ```json 代码块或前后加解释文字里，故先抓第一个平衡的 `{...}`。
@@ -283,8 +325,10 @@ export interface SaveProfileInput {
   dimension?: string
   /** 名片履历。 */
   experience?: string
-  /** 人格设置（不超过 500 字符）。 */
+  /** 人格设置（不超过 500 字符；personaPreset==='custom' 时使用）。 */
   persona?: string
+  /** 人格预设（工作场景人格原型：内置预设 id 或 'custom'）。 */
+  personaPreset?: string
   avatar?: string
   baseMode: AgentProfile['baseMode']
   prompt: string
@@ -804,6 +848,7 @@ export class CorumAgentService extends TypertRemoteService {
       ...(p.dimension !== undefined ? { dimension: p.dimension } : {}),
       ...(p.experience !== undefined ? { experience: p.experience } : {}),
       ...(p.persona !== undefined ? { persona: p.persona } : {}),
+      ...(p.personaPreset !== undefined ? { personaPreset: p.personaPreset } : {}),
       ...(p.avatar !== undefined ? { avatar: p.avatar } : {}),
       baseMode: p.baseMode,
       prompt: p.prompt,
@@ -904,6 +949,7 @@ export class CorumAgentService extends TypertRemoteService {
       ...(input.dimension !== undefined && isValidAgentDimension(input.dimension) ? { dimension: input.dimension } : {}),
       ...(input.experience !== undefined && input.experience.trim() !== '' ? { experience: input.experience.trim() } : {}),
       ...(input.persona !== undefined && input.persona.trim() !== '' ? { persona: input.persona.trim().slice(0, 500) } : {}),
+      ...(input.personaPreset !== undefined && isValidPersonaPreset(input.personaPreset) ? { personaPreset: input.personaPreset } : {}),
       ...(input.avatar !== undefined && input.avatar.trim() !== '' ? { avatar: input.avatar.trim() } : {}),
       baseMode: input.baseMode,
       prompt: input.prompt,
@@ -936,6 +982,7 @@ export class CorumAgentService extends TypertRemoteService {
         ...(saved.dimension !== undefined ? { dimension: saved.dimension } : {}),
         ...(saved.experience !== undefined ? { experience: saved.experience } : {}),
         ...(saved.persona !== undefined ? { persona: saved.persona } : {}),
+        ...(saved.personaPreset !== undefined ? { personaPreset: saved.personaPreset } : {}),
         ...(saved.avatar !== undefined ? { avatar: saved.avatar } : {}),
         baseMode: saved.baseMode,
         prompt: saved.prompt,
@@ -1498,7 +1545,12 @@ export class CorumAgentService extends TypertRemoteService {
     this.flushPendingPermission(agent.session, sessionId)
     const firstSeq = agent.session.seq
     agent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'user' } }))
-    await agent.whenIdle()
+    // BUG-5（2026-09-11）：task 模式 turn 级超时兜底——不能依赖 corumRuntime 的
+    // stalled 扫描（它只扫 this.profiles 项目×角色，taskAgents 不其中）。
+    // 当 bash 工具 300s 超时但 model turn 未收到 tool_result 时，agent.whenIdle()
+    // 会永久 pending（实测 13min、18min 未恢复）。超时后主动 cancel + 注入
+    // tool_result 让模型继续（与「停止生成」同款恢复路径，但自动化）。
+    await this.whenIdleWithTimeout(agent, sessionId)
     await this.ctx.sessions.flush(agent.session)
     const reply = summarizeText(agent.session.snapshotEvents(), firstSeq)
     const events: SessionEventDto[] = []
@@ -1508,6 +1560,42 @@ export class CorumAgentService extends TypertRemoteService {
     }
     const { systemPrompt, tools } = extractHeader(agent.session.snapshotEvents(), firstSeq)
     return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
+  }
+
+  /**
+   * BUG-5（2026-09-11）：task 模式 turn 级超时兜底——当 `agent.whenIdle()` 阻塞
+   * 超时（bash 工具 300s 超时但 model turn 未收到 tool_result，实测 13min/18min
+   * 未恢复），主动 cancel + 注入 tool_result 让模型继续，避免只能手动「停止生成」。
+   *
+   * 不能依赖 corumRuntime 的 stalled 扫描（它只扫 this.profiles 项目×角色，
+   * taskAgents 不在其中——补丁对 task 模式完全无效）。此处是 task 泳道自己的
+   * turn 级恢复机制，与项目制调度层的 stalled 自动恢复互补。
+   *
+   * 恢复路径与「停止生成」同款：cancel({kind:'hook', reason}) 中止当前 turn，
+   * 模型 turn 以 aborted 结束；后续的 followup 会从 aborted 状态恢复。
+   * @param agent - task 泳道的活 Agent。
+   * @param sessionId - task 会话 id（日志用）。
+   */
+  private async whenIdleWithTimeout(agent: Agent, sessionId: string): Promise<void> {
+    // 与项目制 stalled 恢复**共用同一个可配置阈值**（C4）：此前这里另写了一份
+    // 硬编码 10min，两处容易漂移。现在统一读 runtime-state 的 holder。
+    const TIMEOUT_MS = stallAutoRecoverMsValue()
+    return new Promise<void>((resolve) => {
+      let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        this.ctx.logger.warn(
+          `corumAgent(task): whenIdle 超 ${TIMEOUT_MS / 1000}s 未返回 — session "${sessionId}"，主动 cancel 恢复（tool 超时或状态不同步）`,
+        )
+        agent.cancel({ kind: 'hook', reason: `task 会话 turn 超 ${TIMEOUT_MS / 1000}s 无活动，自动恢复` })
+        resolve()
+      }, TIMEOUT_MS)
+      void agent.whenIdle().then(() => {
+        clearTimeout(timer)
+        if (!timedOut) resolve()
+        // timedOut 时 timer 已 resolve——cancel 后的 whenIdle 很快返回（aborted 收敛）。
+      })
+    })
   }
 
   /**
@@ -1528,6 +1616,67 @@ export class CorumAgentService extends TypertRemoteService {
       events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
     }
     return { events }
+  }
+
+  /**
+   * 会话图片态 + 模型视觉能力（composer 换模型提示的数据源）。
+   *
+   * 官方只在 **prompt 准入**时校验图片-模型匹配（`session-controller/commands.ts`
+   * 的 `hasImage` 分支抛 `MODEL_DOES_NOT_SUPPORT_IMAGES`），`selectModel` 本身
+   * 不读历史。corum 需要在**切换那一刻**就给出预警，故补此读端点：
+   *
+   * - `hasImage`：扫会话历史，任一条 user/assistant 消息含 image 内容块即为真
+   *   （与官方 `imageInEvent` 同判据：content / message.content / assistant 流块）。
+   * - `supportsImage`：`ctx.llm.resolveModelInfo` 的 `inputModalities`。**语义与
+   *   官方一致——`undefined` 表示未知（不当作「不支持」）**，仅显式声明且不含
+   *   `image` 才算不支持（否则本地模型未声明模态会被误判）。
+   *
+   * 读失败一律降级为「未知」（`hasImage:false` / `supportsImage:null`），绝不阻断切换。
+   * @param sessionId - 泳道 id。
+   * @param provider - 目标供应商（缺省用会话当前选择）。
+   * @param model - 目标模型。
+   */
+  @Remote('getImageCompatibility')
+  async getImageCompatibilityRemote(
+    sessionId: string,
+    provider?: string,
+    model?: string,
+  ): Promise<{ hasImage: boolean; supportsImage: boolean | null }> {
+    let hasImage = false
+    try {
+      const stored = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)
+      hasImage = stored.some(event => eventHasImage(event))
+    } catch {
+      hasImage = false
+    }
+
+    let supportsImage: boolean | null = null
+    try {
+      // 目标模型：显式入参优先；否则读会话的 `modelSelection` 投影（next 优先于
+      // lastUsed），再退到部署默认。不用 `agents.selectionFor`——那是官方
+      // session-controller 内部注册表，不是本服务可依赖的公开面。
+      const target = provider !== undefined && model !== undefined
+        ? { provider, model }
+        : (() => {
+            const live = this.taskAgents.get(sessionId)
+            const projections = (this.ctx as unknown as { sessionProjections?: ModelSelectionProjections }).sessionProjections
+            const state = live === undefined || projections === undefined
+              ? undefined
+              : projections.stateOf(live.agent.session, 'modelSelection')
+            const projected = state !== undefined && state !== null && typeof state === 'object'
+              ? (state as { next?: ProjectedSelection | null; lastUsed?: ProjectedSelection | null })
+              : undefined
+            const picked = projected?.next ?? projected?.lastUsed ?? this.ctx.agentDefaultModel.currentSelection()
+            return { provider: picked.provider, model: picked.model }
+          })()
+      const info = await this.ctx.llm.resolveModelInfo(target.provider, target.model)
+      supportsImage = info.inputModalities === undefined
+        ? null
+        : info.inputModalities.includes('image')
+    } catch {
+      supportsImage = null
+    }
+    return { hasImage, supportsImage }
   }
 
   /**

@@ -31,7 +31,7 @@ export function TestConversation(props: TestConversationProps) {
         </div>
       )}
       <div className={css.caption}>
-        对话区列（② flex 兜底）。S2 由 @corum/corum-ide-conversation-ui（消息流）接管。
+        对话区列（② flex 兜底）。S2 由 fork 的 corum-ui-conversation（消息流）接管。
       </div>
       <ul className={css.facts}>
         <li>sessionId: {sessionId ?? '(no session)'}</li>
