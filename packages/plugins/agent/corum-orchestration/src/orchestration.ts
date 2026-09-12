@@ -682,6 +682,20 @@ export function corumCleanupLedgerEntries(
   }
 }
 
+/**
+ * fork（corum）：台账里**终态记录**（integrated/discarded）的保留上限。
+ *
+ * 终态条目是「并行工作区」这一栏的历史与分类来源（用户 2026-09-12 实测：
+ * 隔离任务那一栏整段消失了）。现场（worktree 目录 + 分支）回收后记录仍要留下，
+ * 否则该栏会随着清理一起消失；但也不能无限增长，故保留最近 N 条。
+ */
+const CORUM_LEDGER_TERMINAL_KEEP = 30
+
+/** fork（corum）：条目是否已到终态（integrated / discarded）。 */
+function isTerminalEntry(entry: Pick<CorumWorktreeEntry, 'status'>): boolean {
+  return entry.status === 'integrated' || entry.status === 'discarded'
+}
+
 /** fork（corum）：integrate 准入——active 或 settled 的待集成条目。 */
 export function corumPendingIntegration(entries: CorumWorktreeEntry[]): CorumWorktreeEntry[] {
   return entries.filter(entry => entry.status === 'active' || entry.status === 'settled')
@@ -1013,13 +1027,20 @@ export class CorumOrchestration extends Service {
     void this.domainPromise.then(async (domain) => {
       const entries = this.ledger.get(sessionId)
       const cwd = this.ledgerCwds.get(sessionId)
-      // 只落盘待集成条目（active/settled）；integrated/discarded 已清理，删记录。
-      const pending = entries?.filter(e => e.status === 'active' || e.status === 'settled') ?? []
-      if (pending.length === 0 || cwd === undefined) {
+      // 落盘待集成条目 + **最近 N 条终态记录**。
+      //
+      // 2026-09-12 修正（用户实测「隔离那一栏整段消失」）：旧实现只落 active/settled，
+      // 现场一回收记录就没了 → 「并行工作区」栏（含 已集成/已丢弃 分类）随之消失，
+      // 重启后也回不来。终态记录是那一栏的历史与分类来源，必须留下；
+      // 用 CORUM_LEDGER_TERMINAL_KEEP 限制条数以免无限增长。
+      const pending = entries?.filter(e => !isTerminalEntry(e)) ?? []
+      const terminal = (entries?.filter(isTerminalEntry) ?? []).slice(-CORUM_LEDGER_TERMINAL_KEEP)
+      const kept = [...pending, ...terminal]
+      if (kept.length === 0 || cwd === undefined) {
         await domain.table('ledger').delete(sessionId)
         return
       }
-      await domain.table('ledger').put(sessionId, { cwd, entries: pending.map(e => ({ ...e })) })
+      await domain.table('ledger').put(sessionId, { cwd, entries: kept.map(e => ({ ...e })) })
     }).catch((error: unknown) => {
       this.ctx.logger.warn(`corumOrchestration: persist ledger failed: ${String(error)}`)
     })
@@ -1074,7 +1095,10 @@ export class CorumOrchestration extends Service {
     const entries = this.ledger.get(sessionId) ?? []
     const cwd = this.ledgerCwds.get(sessionId)
     if (cwd === undefined || entries.length === 0) return entries
-    const alive = entries.filter(entry => !corumEntryDead(cwd, entry))
+    // 死条目的剔除只针对**待集成**条目（active/settled 占并发额度、且已无法集成）；
+    // 终态记录（integrated/discarded）即使现场已回收也留着——那是「并行工作区」栏的
+    // 历史与分类（见 persist 的说明）。
+    const alive = entries.filter(entry => isTerminalEntry(entry) || !corumEntryDead(cwd, entry))
     const reconciled = this.reconcileAndReclaim(sessionId, alive)
     if (alive.length === entries.length && !reconciled.flipped) return entries
     const next = [...reconciled.entries]

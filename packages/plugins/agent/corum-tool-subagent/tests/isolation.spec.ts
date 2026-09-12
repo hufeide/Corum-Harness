@@ -377,10 +377,30 @@ describe('entriesOf/emitFrame — 认账「主 Agent 派子 Agent 合并掉的�
     const entries = orchestration.entriesOf(sessionId)
     expect(entries[0].status).toBe('integrated')
     expect(existsSync(worktree)).toBe(false) // 现场已回收
-    // 回收干净 = 目录与分支都没了 → 下一条 lifeline 走既有的死条目剔除（不再占位）。
-    // 与机制自身的 markIntegrated(cleanup:true) 路径同款（那会把条目留成 discarded，
-    // 下一次 entriesOf 同样被剔掉）。
-    expect(orchestration.entriesOf(sessionId)).toEqual([])
+    // 现场回收了，但**记录留着**：终态条目是「并行工作区」栏的历史与分类来源
+    // （2026-09-12 用户实测「隔离那一栏整段消失」后定的口径）。死条目剔除只针对
+    // 待集成（active/settled）条目，它们才占 maxParallelChildren 额度。
+    const after = orchestration.entriesOf(sessionId)
+    expect(after.length).toBe(1)
+    expect(after[0]?.status).toBe('integrated')
+  })
+
+  it('终态记录在 worktree/分支都已消失后仍然保留（那一栏不会随清理消失）', () => {
+    const { repo, worktree, branch } = settledWorktreeEntry('recon-repo-7', 'wt-r7')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-recon-7'
+    orchestration.addActiveEntry(sessionId, repo, { slug: 'wt-r7', branch, path: worktree })
+    orchestration.bindRunId(sessionId, 'wt-r7', 'run-r7')
+    orchestration.settleFromEnd({ runId: 'run-r7', id: 'child-r7' } as never, { session: { id: sessionId } } as never)
+    corumGit(repo, ['-c', 'user.name=c', '-c', 'user.email=c@corum.local', 'merge', '--no-ff', '-m', 'merge(wt-r7)', branch])
+    expect(orchestration.entriesOf(sessionId)[0]?.status).toBe('integrated')
+    // 现场被彻底清掉（目录 + 分支都不在——上面那次 entriesOf 的安全回收已经删了分支）后，
+    // 记录仍应保留（终态条目例外于死条目剔除）。
+    rmSync(worktree, { recursive: true, force: true })
+    expect(execFileSync('git', ['-C', repo, 'branch', '--list', branch], { encoding: 'utf8' }).trim()).toBe('')
+    const kept = orchestration.entriesOf(sessionId)
+    expect(kept.length).toBe(1)
+    expect(kept[0]?.status).toBe('integrated')
   })
 
   it('settle 的 worktree 有未提交改动 → 认账 integrated 但保留现场（安全清理）', () => {
