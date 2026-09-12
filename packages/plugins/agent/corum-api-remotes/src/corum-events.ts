@@ -480,6 +480,7 @@ export interface CorumWorktreeLedgerFrameEvent {
     readonly path: string
     readonly status: 'active' | 'settled' | 'integrated' | 'discarded'
     readonly runId?: string
+    readonly childSessionId?: string
   }[]
   readonly pending: number
 }

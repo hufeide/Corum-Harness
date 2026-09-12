@@ -1330,8 +1330,8 @@
 .statusDetailAgentBadge[data-status='integrated'] { color: var(--dsw-alias-state-success-primary, #3EE6B0); }
 .statusDetailAgentBadge[data-status='discarded'] { color: var(--dsw-alias-label-dimmed, var(--dsw-alias-label-tertiary)); }
 
-/* 并行工作区行（P8 后 chip 的新家）：只读展示，不可点（与子 Agent 行的 goto 区分）。 */
-.statusDetailAgentRow[data-worktree] {
+/* 并行工作区行（P8 后 chip 的新家）：不可点时显式标 default（与可点行的 pointer 区分）。 */
+.statusDetailAgentRow[data-worktree]:not([data-navigable]) {
   cursor: default;
 }
 

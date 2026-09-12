@@ -1850,11 +1850,11 @@ export class CorumAgentService extends TypertRemoteService {
    */
   @Remote('getWorktreeLedger')
   async getWorktreeLedgerRemote(sessionId: string): Promise<{
-    entries: Array<{ slug: string; branch: string; path: string; status: string }>
+    entries: Array<{ slug: string; branch: string; path: string; status: string; childSessionId?: string }>
     pending: number
   }> {
     const orchestration = this.ctx.get('corumOrchestration') as
-      | { entriesOf(id: string): Array<{ slug: string; branch: string; path: string; status: string }> }
+      | { entriesOf(id: string): Array<{ slug: string; branch: string; path: string; status: string; childSessionId?: string }> }
       | undefined
     if (orchestration === undefined) return { entries: [], pending: 0 }
     try {

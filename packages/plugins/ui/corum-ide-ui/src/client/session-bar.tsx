@@ -678,6 +678,7 @@ interface WorktreeLedgerFrame {
     branch?: string
     path?: string
     status?: string
+    childSessionId?: string
   }>
   pending?: number
 }
@@ -689,6 +690,8 @@ interface WorktreeEntry {
   readonly status: string
   /** 该工作区对应的子 Agent 真实模型（child 帧 worktree.slug 关联）。 */
   readonly model?: { provider: string; model: string }
+  /** 子会话 id（绑定 runId 后才有；有则行可点 → 进入子会话）。 */
+  readonly childSessionId?: string
 }
 
 /** 台账状态文案（与 SubagentCard 的 WORKTREE_STATUS_LABEL 同口径）。 */
@@ -758,6 +761,7 @@ function useWorktreeLedger(
           slug: entry.slug,
           branch: entry.branch,
           status: entry.status ?? 'active',
+          ...(entry.childSessionId !== undefined ? { childSessionId: entry.childSessionId } : {}),
           ...m !== undefined ? { model: m } : {},
         })
       }
@@ -1102,8 +1106,37 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               {worktrees.length} 个隔离工作区
             </span>
           </div>
-          {/* active/settled 条目：始终逐条渲染（BUG-26 不变式）。 */}
-          {worktreeActive.map(entry => (
+          {/* active/settled 条目：始终逐条渲染（BUG-26 不变式）。
+              wt-8921e4：有 childSessionId 的条目渲染为可点 <button data-navigable>。 */}
+          {worktreeActive.map(entry => {
+            const childId = entry.childSessionId
+            if (childId !== undefined) {
+              return (
+            <button
+              key={entry.slug}
+              type="button"
+              className={css.statusDetailAgentRow}
+              data-worktree
+              data-navigable
+              title={`进入子会话 ${childId}`}
+              aria-label={`进入子会话 ${entry.branch}`}
+              onClick={() => { openSession?.(childId) }}
+            >
+              <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
+              <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
+              <span className={css.statusDetailAgentStep}>{entry.slug}</span>
+              <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
+                {entry.model?.model ?? '未记录'}
+              </span>
+              <span className={css.statusDetailAgentBadge} data-status={entry.status}>
+                {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+              </span>
+              <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
+            </button>
+              )
+            }
+            // 无 childSessionId → 只读展示（不可点，保持灰态）。
+            return (
             <div key={entry.slug} className={css.statusDetailAgentRow} data-worktree>
               <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
               <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
@@ -1115,7 +1148,8 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                 {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
               </span>
             </div>
-          ))}
+          )
+          })}
           {/* integrated/discarded 折叠摘要行（有终态条目时才出现）。 */}
           {worktreeTerminal.length > 0 && (
             <>
@@ -1131,7 +1165,34 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               </button>
               {worktreeFoldOpen && (
                 <div className={css.statusDetailFoldList}>
-                  {worktreeTerminal.map(entry => (
+                  {worktreeTerminal.map(entry => {
+                    const childId = entry.childSessionId
+                    if (childId !== undefined) {
+                      return (
+                    <button
+                      key={entry.slug}
+                      type="button"
+                      className={css.statusDetailAgentRow}
+                      data-worktree
+                      data-navigable
+                      title={`进入子会话 ${childId}`}
+                      aria-label={`进入子会话 ${entry.branch}`}
+                      onClick={() => { openSession?.(childId) }}
+                    >
+                      <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
+                      <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
+                      <span className={css.statusDetailAgentStep}>{entry.slug}</span>
+                      <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
+                        {entry.model?.model ?? '未记录'}
+                      </span>
+                      <span className={css.statusDetailAgentBadge} data-status={entry.status}>
+                        {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+                      </span>
+                      <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
+                    </button>
+                      )
+                    }
+                    return (
                     <div key={entry.slug} className={css.statusDetailAgentRow} data-worktree>
                       <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
                       <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
@@ -1143,7 +1204,8 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                         {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
                       </span>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </>
