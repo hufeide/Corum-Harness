@@ -104,7 +104,13 @@ const PROGRESS_FALLBACK_POLL_MS = 2000
  * 零 RPC）；挂载时一次性 RPC 基线回填推送开始前已发生的历史；宽限期内零
  * 推送帧（旧 host 不 emit）回退 2s RPC 轮询，一旦有帧到达轮询永不起动。
  */
-function useChildProgress(childSessionId: string | undefined): SubagentProgressSnapshot | undefined {
+/**
+ * 子会话精确进度（推送主路径 + 冷启动基线 + 降级轮询）。
+ *
+ * **导出给编排卡复用**（2026-09-12）：`orchestrate` 的每个分支也要按自己子会话的实时
+ * 进度翻状态，否则并行任务各自完成后仍显示「运行中」，要等整批 settle 才一起翻。
+ */
+export function useChildProgress(childSessionId: string | undefined): SubagentProgressSnapshot | undefined {
   const [progress, setProgress] = useState<SubagentProgressSnapshot | undefined>(undefined)
   useEffect(() => {
     if (childSessionId === undefined) return undefined
