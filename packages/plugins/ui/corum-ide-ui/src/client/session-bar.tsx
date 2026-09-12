@@ -763,6 +763,8 @@ interface WorktreeLedgerFrame {
     status?: string
     /** 与 childSessionId 同值（存量台账可能只有这个）——行可点性的兜底来源。 */
     runId?: string
+    /** 现场已回收标记（见 WorktreeEntry.reclaimed）。 */
+    reclaimed?: boolean
     childSessionId?: string
   }>
   pending?: number
@@ -773,6 +775,9 @@ interface WorktreeEntry {
   readonly slug: string
   readonly branch: string
   readonly status: string
+  /** 现场（worktree 目录 + 分支）已回收；与 `status==='integrated'` 组合出
+   *  「已集成 · 现场已回收」，与 discarded（真丢弃）区分开（2026-09-12 用户定调）。 */
+  readonly reclaimed?: boolean
   /** 该工作区对应的子 Agent 真实模型（child 帧 worktree.slug 关联）。 */
   readonly model?: { provider: string; model: string }
   /** 子会话 id（绑定 runId 后才有；有则行可点 → 进入子会话）。 */
@@ -791,7 +796,22 @@ const SUBAGENT_ROLE_BADGE: Readonly<Record<'worker' | 'research' | 'fork', strin
   fork: '分叉',
 }
 
-/** 台账状态文案（与 SubagentCard 的 WORKTREE_STATUS_LABEL 同口径）。 */
+/**
+ * 台账条目的状态文案：`integrated + reclaimed` → 「已集成 · 现场已回收」。
+ * @param entry - 渲染形工作区条目。
+ * @returns 中文状态文案。
+ */
+function worktreeStatusLabel(entry: { readonly status: string; readonly reclaimed?: boolean }): string {
+  if (entry.status === 'integrated' && entry.reclaimed === true) return '已集成 · 现场已回收'
+  return WORKTREE_STATUS_LABEL[entry.status] ?? entry.status
+}
+
+/** 台账状态文案（与 SubagentCard 的 WORKTREE_STATUS_LABEL 同口径）。
+ *
+ * `integrated + reclaimed` 单列成「已集成 · 现场已回收」：工作确实进了主树，只是
+ * worktree/分支被安全回收了——它**不是**「已丢弃」（那份工作没进主树才会是丢弃）。
+ * 2026-09-12 用户实测：旧口径把成功集成写成「已丢弃」，折叠行读起来像把工作扔了。
+ */
 const WORKTREE_STATUS_LABEL: Record<string, string> = {
   active: '进行中',
   settled: '待集成',
@@ -862,6 +882,7 @@ function useWorktreeLedger(
           slug: entry.slug,
           branch: entry.branch,
           status: entry.status ?? 'active',
+          ...(entry.reclaimed === true ? { reclaimed: true } : {}),
           ...(childId !== undefined ? { childSessionId: childId } : {}),
           ...m !== undefined ? { model: m } : {},
         })
@@ -1249,7 +1270,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                 {entry.model?.model ?? '未记录'}
               </span>
               <span className={css.statusDetailAgentBadge} data-status={entry.status}>
-                {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+                {worktreeStatusLabel(entry)}
               </span>
               <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
             </button>
@@ -1265,7 +1286,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                 {entry.model?.model ?? '未记录'}
               </span>
               <span className={css.statusDetailAgentBadge} data-status={entry.status}>
-                {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+                {worktreeStatusLabel(entry)}
               </span>
             </div>
           )
@@ -1306,7 +1327,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                         {entry.model?.model ?? '未记录'}
                       </span>
                       <span className={css.statusDetailAgentBadge} data-status={entry.status}>
-                        {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+                        {worktreeStatusLabel(entry)}
                       </span>
                       <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
                     </button>
@@ -1321,7 +1342,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                         {entry.model?.model ?? '未记录'}
                       </span>
                       <span className={css.statusDetailAgentBadge} data-status={entry.status}>
-                        {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+                        {worktreeStatusLabel(entry)}
                       </span>
                     </div>
                     )

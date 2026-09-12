@@ -284,6 +284,38 @@ describe('corumAutoIntegrate — 声明即执行（2026-09-12 用户定调：去
   })
 })
 
+describe('corumCleanupLedgerEntries — 已集成与已丢弃分档（2026-09-12 用户定调）', () => {
+  it('已集成 + 完整清理 → 状态保持 integrated 并标 reclaimed（不是「已丢弃」）', () => {
+    const { repo, worktree, branch, entry } = makeRepoWithWorktree('wt-split1')
+    commitInWorktree(worktree, 'SPLIT-1.txt')
+    corumGit(repo, ['-c', 'user.name=c', '-c', 'user.email=c@corum.local', 'merge', '--no-ff', '-m', 'merge(wt-split1)', branch])
+    const rows: CorumWorktreeEntry[] = [{ ...entry, status: 'integrated' }]
+    corumCleanupLedgerEntries(repo, rows, ['integrated'], { force: true })
+    expect(rows[0]?.status).toBe('integrated') // 工作进了主树 → 不能写「已丢弃」
+    expect(rows[0]?.reclaimed).toBe(true)
+    expect(existsSync(worktree)).toBe(false)
+  })
+
+  it('未集成就被清掉 → 落 discarded（那才是真丢弃）', () => {
+    const { repo, worktree, branch, entry } = makeRepoWithWorktree('wt-split2')
+    commitInWorktree(worktree, 'SPLIT-2.txt')
+    const rows: CorumWorktreeEntry[] = [{ ...entry, status: 'settled' }]
+    corumCleanupLedgerEntries(repo, rows, ['settled'], { force: true })
+    expect(rows[0]?.status).toBe('discarded')
+    expect(rows[0]?.reclaimed).toBe(true)
+    expect(branchExists(repo, branch)).toBe(false)
+  })
+
+  it('安全清理没清干净 → 状态与 reclaimed 都不动（现场还在）', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree('wt-split3')
+    writeFileSync(join(worktree, 'wip.txt'), 'x')
+    const rows: CorumWorktreeEntry[] = [{ ...entry, status: 'settled' }]
+    corumCleanupLedgerEntries(repo, rows, ['settled'], { force: false })
+    expect(rows[0]?.status).toBe('settled')
+    expect(rows[0]?.reclaimed).toBeUndefined()
+  })
+})
+
 describe('corumReapRestoredEntries — 启动清扫（重启杀掉的僵尸子 Agent 不再永远占着 worktree）', () => {
   it('空分支 + 干净 worktree → 现场回收，条目剔除', () => {
     const { repo, worktree, branch, entry } = makeRepoWithWorktree('wt-reap1')

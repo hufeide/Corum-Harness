@@ -64,6 +64,16 @@ export interface CorumWorktreeEntry {
   /** fork（corum）：子会话 id（与 runId 同值；浮层行点击 → 进入子会话）。 */
   childSessionId?: string
   /**
+   * fork（corum）：现场（worktree 目录 + 分支）是否已被回收。
+   *
+   * 只在**完整清理成功**后置 true（`corumCleanupWorktree` 返回 true）。
+   * 用途：把「工作已进主树、现场已回收」与「未集成就被丢弃」在 UI 上分开——
+   * 前者是 `integrated + reclaimed`（显示「已集成 · 现场已回收」），后者才是 `discarded`
+   * （「已丢弃」）。2026-09-12 用户实测：机制集成成功+清理后条目落成 discarded，
+   * 折叠行写成「已集成 0 · 已丢弃 1」，看着像把成功的工作扔了。
+   */
+  reclaimed?: boolean
+  /**
    * fork（corum）：分支创建点（`git worktree add -b` 那一刻的 HEAD）。
    *
    * 对账判据的一部分：`tip === base` 说明这条分支**一个提交都没做**——空分支在
@@ -110,6 +120,7 @@ const corumLedgerRecordSchema = z.object({
     runId: z.string().optional(),
     childSessionId: z.string().optional(),
     base: z.string().optional(),
+    reclaimed: z.boolean().optional(),
   })),
 }) as unknown as z.ZodType<CorumLedgerRecord>
 
@@ -370,7 +381,14 @@ export function corumReapOrphanWorktrees(cwd: string, keep: ReadonlySet<string> 
  * @returns 保留的条目（现场未清干净的一律保留，状态如实）。
  */
 export function corumReapRestoredEntries(cwd: string, entries: readonly CorumWorktreeEntry[]): CorumWorktreeEntry[] {
-  return entries.filter(entry => !corumCleanupWorktree(cwd, entry, { force: false }))
+  return entries.filter(entry => {
+    if (!corumCleanupWorktree(cwd, entry, { force: false })) return true
+    // 清干净了：已集成的记录保持 integrated 并标 reclaimed（见 corumCleanupLedgerEntries
+    // 的分档说明），未被集成的僵尸条目才落 discarded。
+    if (entry.status === 'integrated') entry.reclaimed = true
+    else { entry.status = 'discarded'; entry.reclaimed = true }
+    return false
+  })
 }
 
 /**
@@ -666,9 +684,13 @@ export function corumCleanupWorktree(
 /**
  * fork（corum）：删除指定状态的台账条目（worktree remove + branch -D + 标 discarded）。
  *
- * 2026-09-09 加固：仅在**完整清理**（目录已消失 + 分支已删）时标 `discarded`——
+ * 2026-09-09 加固：仅在**完整清理**（目录已消失 + 分支已删）时才改状态——
  * 安全模式下被保留的未合并分支/脏 worktree 保持原 status 并落盘，台账状态如实
  * 反映现场（此前无条件标 discarded 导致「worktree 已清、台账仍 active」的漂移）。
+ *
+ * 2026-09-12 修正（分档，用户实测）：清理成功后**已集成的条目保持 `integrated`**
+ * 并置 `reclaimed: true`（工作确已进主树，只是现场回收了）；只有「没集成就被清掉」
+ * 的才落 `discarded`。此前一律落 discarded，UI 会把成功集成写成「已丢弃」。
  */
 export function corumCleanupLedgerEntries(
   cwd: string,
@@ -678,7 +700,19 @@ export function corumCleanupLedgerEntries(
 ): void {
   for (const entry of entries) {
     if (!statuses.includes(entry.status)) continue
-    if (corumCleanupWorktree(cwd, entry, options)) entry.status = 'discarded'
+    // 清理前先记住「工作是否已进主树」——它决定清理后落哪个状态。
+    const landedInMain = entry.status === 'integrated'
+    if (!corumCleanupWorktree(cwd, entry, options)) continue
+    if (landedInMain) {
+      // 已集成 + 现场回收：状态如实保持 integrated，只补 reclaimed 标记
+      // （UI 显示「已集成 · 现场已回收」）。**不能写 discarded**——那在 UI 上是
+      // 「已丢弃」，对一份已经进主树的工作是谎（2026-09-12 用户实测指出）。
+      entry.reclaimed = true
+    } else {
+      // 没集成却被清掉（显式丢弃 / 现场已不存在的僵尸条目）→ discarded 才是实话。
+      entry.status = 'discarded'
+      entry.reclaimed = true
+    }
   }
 }
 
@@ -1077,7 +1111,8 @@ export class CorumOrchestration extends Service {
     if (reconciled.flipped.length === 0) return { entries, flipped: false }
     for (const entry of reconciled.entries) {
       if (entry.status !== 'integrated' || !wasSettled.has(entry.slug)) continue
-      corumCleanupWorktree(cwd, entry, { force: false })
+      // 完整回收成功才标 reclaimed（安全清理可能保留脏 worktree / 未并分支）。
+      if (corumCleanupWorktree(cwd, entry, { force: false })) entry.reclaimed = true
     }
     return { entries: reconciled.entries, flipped: true }
   }
