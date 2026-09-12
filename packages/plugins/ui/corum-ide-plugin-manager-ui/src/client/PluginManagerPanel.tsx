@@ -407,20 +407,8 @@ export function PluginManagerPanel({
       </div>
       <div className={css.divider} />
 
-      {/* ── body Gyvyc ── */}
+      {/* ── body Gyvyc：严格三段 = tabs → filter → 卡片网格 ── */}
       <div className={css.body}>
-        {notice !== null && (
-          <div className={css.notice}>
-            <span className={css.noticeText}>{notice}</span>
-            {notice.includes('重启') && (
-              <button type="button" className={css.noticeAction} onClick={onRestart}>立即重启</button>
-            )}
-            <button type="button" className={css.noticeClose} aria-label="关闭提示" onClick={() => { setNotice(null) }}>
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
         {view === 'market' ? (
           <>
             <button type="button" className={css.backRow} onClick={() => { setView('list') }}>
@@ -505,51 +493,20 @@ export function PluginManagerPanel({
               ))}
             </div>
 
-            {tab === 'views' ? (
-              <>
-                <div className={css.hintText}>控制各区域在窗口中的显示/隐藏，隐藏后插件仍在后台运行。</div>
-                {regionSlots.length === 0 && <div className={css.hintText}>没有可管理的区域</div>}
-                {regionSlots.map((slot): ReactNode => {
-                  const isHidden = hiddenSet.has(slot)
-                  const label = getSlotMeta(slot)?.label ?? slot
-                  return (
-                    <div key={slot} className={css.card}>
-                      <div className={css.cardMeta}>
-                        <div className={css.cardNameRow}>
-                          <span className={css.cardName}>{label}</span>
-                          <span className={css.cardVer}>{slot}</span>
-                        </div>
-                      </div>
-                      <div className={css.cardOps}>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={!isHidden}
-                          aria-label={`${label} 显示开关`}
-                          className={css.switch}
-                          data-on={!isHidden || undefined}
-                          onClick={() => { onToggleRegion(slot, isHidden) }}
-                        >
-                          <span className={css.switchKnob} />
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </>
-            ) : (
-              <>
-                {/* filter Z6xac：search（220 宽）+ 状态下拉（140 宽） */}
-                <div className={css.filter}>
-                  <div className={css.searchWrap}>
-                    <Search size={13} className={css.searchIcon} />
-                    <input
-                      className={css.searchInput}
-                      value={query}
-                      placeholder="搜索已装插件…"
-                      onChange={e => { setQuery(e.target.value) }}
-                    />
-                  </div>
+            {/* filter Z6xac：search（220 宽）+ 状态下拉（140 宽）；视图管理 tab 无设计稿
+                对应行，沿用同一 filter 行承载区域说明。 */}
+            <div className={css.filter}>
+              {tab === 'views' ? (
+                <span className={css.hintText}>控制各区域在窗口中的显示/隐藏，隐藏后插件仍在后台运行。</span>
+              ) : (
+                <>
+                  <input
+                    className={css.searchField}
+                    value={query}
+                    placeholder="搜索已装插件…"
+                    aria-label="搜索已装插件"
+                    onChange={e => { setQuery(e.target.value) }}
+                  />
                   <div className={css.select} ref={selectRef}>
                     <button
                       type="button"
@@ -577,8 +534,45 @@ export function PluginManagerPanel({
                       </div>
                     )}
                   </div>
-                </div>
+                </>
+              )}
+            </div>
 
+            {tab === 'views' ? (
+              <>
+                {regionSlots.length === 0 && <div className={css.hintText}>没有可管理的区域</div>}
+                <div className={css.grid}>
+                  {regionSlots.map((slot): ReactNode => {
+                    const isHidden = hiddenSet.has(slot)
+                    const label = getSlotMeta(slot)?.label ?? slot
+                    return (
+                      <div key={slot} className={css.card}>
+                        <div className={css.cardMeta}>
+                          <div className={css.cardNameRow}>
+                            <span className={css.cardName}>{label}</span>
+                            <span className={css.cardVer}>{slot}</span>
+                          </div>
+                        </div>
+                        <div className={css.cardOps}>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={!isHidden}
+                            aria-label={`${label} 显示开关`}
+                            className={css.switch}
+                            data-off={isHidden || undefined}
+                            onClick={() => { onToggleRegion(slot, isHidden) }}
+                          >
+                            <span className={css.switchKnob} />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
                 {loadError !== null && <div className={css.errorText}>加载失败：{loadError}</div>}
                 {entries === null && loadError === null && <div className={css.hintText}>加载中…</div>}
                 {detailLoading && <div className={css.hintText}>加载详情…</div>}
@@ -603,6 +597,19 @@ export function PluginManagerPanel({
           </>
         )}
       </div>
+
+      {/* 操作反馈条：body 严格三段之外的 footer（仅在有提示时渲染） */}
+      {notice !== null && (
+        <div className={css.notice}>
+          <span className={css.noticeText}>{notice}</span>
+          {notice.includes('重启') && (
+            <button type="button" className={css.noticeAction} onClick={onRestart}>立即重启</button>
+          )}
+          <button type="button" className={css.noticeClose} aria-label="关闭提示" onClick={() => { setNotice(null) }}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -646,7 +653,7 @@ function PluginCard({ entry, busy, readOnly, onToggle, onOpenDetail, onUninstall
           aria-checked={entry.enabled}
           aria-label={`${name} ${readOnly ? '状态（运行时组件不可停用）' : '启用开关'}`}
           className={css.switch}
-          data-on={entry.enabled || undefined}
+          data-off={!entry.enabled || undefined}
           disabled={busy || readOnly}
           onClick={onToggle}
         >

@@ -1,0 +1,25 @@
+[patch-locales] CFBundleLocalizations already present; skipping
+
+DevTools listening on ws://127.0.0.1:9333/devtools/browser/e619109c-5459-4c2d-b233-15196cc4245a
+[corum-shell] window min size effective: 1219x427
+[corum-shell] dock: visible=true hidden=false badge="" (未签名/未授权时 macOS 不绘制徽标)
+[corum-shell] tray bounds: {"x":0,"y":1117,"width":34,"height":0}
+[corum-desktop] tray: ready
+[corum-desktop] dock: ready
+[corum-desktop] window created (combo launcher)
+[corum-desktop] generated a safeStorage-wrapped master key at /Users/kukucai/work/kkc-desktop/packages/desktop/.corum-verify-home/.master-key
+[corum-desktop] desktop mode: ide
+[corum-desktop] monaco workers served at /monaco/
+[corum-desktop] media preview served at /corumfs/
+[corum-desktop] combo "coding" host ready (http://127.0.0.1:52427/?token=VM14xz7M8emxgzTPBhjcURGoGnoQN-qadELkCMTdgiA)
+[corum-desktop] ui-onboarding namespace registered
+[renderer:warning] %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://electronjs.org/docs/tutorial/security.
+This warning will not show up
+once the app is packaged.
+[corum-shell] tray bounds (settled): {"x":888,"y":0,"width":34,"height":33}
+[renderer:error] Uncaught TypeError: Cannot read properties of undefined (reading 'replace')
