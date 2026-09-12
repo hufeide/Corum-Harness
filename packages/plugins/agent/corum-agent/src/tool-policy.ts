@@ -55,6 +55,15 @@ export const TOOL_POLICY_TEXT = [
   'Edits made through `bash` never appear in the change-review card and cannot be reverted file by file.',
   'When a dedicated tool rejects a call — "file has not been read" or "old_string was not found" — fix the call',
   '(read the file first, then retry with a more precise old_string) instead of switching to the shell.',
+  '',
+  'Re-reading before retrying an `edit` is mandatory, because "old_string was not found" has two very different causes:',
+  '- The anchor never matched (wrong whitespace / stale text) → re-read that region and use the exact text you see.',
+  '- **Your own earlier edit already consumed that anchor** — by far the more common case when you sent several edits',
+  '  to one file: the first one succeeded, so the anchor you still hold no longer exists. Re-sending the same',
+  '  old_string cannot succeed, no matter how many times you retry.',
+  'So: after any successful edit to a file, treat every anchor taken from before that edit as consumed — re-read the',
+  'file before the next edit to it, and never resend an old_string that a previous call already applied.',
+  'If your intended new text is already present in the file, the edit landed: stop, verify, and move on.',
 ].join('\n')
 
 /**
