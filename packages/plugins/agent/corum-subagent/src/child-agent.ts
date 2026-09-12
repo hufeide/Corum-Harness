@@ -235,9 +235,10 @@ export function applyChildComposition(
       text: persona,
     })
   }
-  const toolFilter = conductorParent
+  const raw = conductorParent
     ? mergeDelegationDeny(composition.toolFilter, delegationToolNames(childCtx))
     : composition.toolFilter
+  const toolFilter = raw === undefined ? undefined : narrowChildToolFilter(childCtx, raw)
   if (toolFilter !== undefined) childCtx.tools.restrict(toolFilter)
 }
 
@@ -261,6 +262,51 @@ interface ConductorFace {
 function delegationToolNames(childCtx: Context): readonly string[] {
   const visible = corumVisibleToolNames(childCtx)
   return [...visible].filter(name => name === 'orchestrate' || name.startsWith('subagent'))
+}
+
+/**
+ * 把子 Agent 的 toolFilter 收敛到**该子 scope 真实可见**的工具名上。
+ *
+ * 为什么必须做（2026-09-12 实机事故）：`preset` 里给的 deny 名单是**编译期写死**的，
+ * 它会随装配漂移，而 `tools.restrict()` 对未知名 **fail-loud**（docs/LESSONS.md §6.18）。
+ * 实测两次踩坑：
+ *  1. `str_replace_editor` 从 corum preset 退场后，研究实例的 deny 仍写着它 →
+ *     **每一次 `subagent_research` 都抛 `names unknown global tools`**，指挥者只能退回
+ *     用 `subagent` 重发同一件事（用户看到「两个重复的子 Agent」），还白占一个隔离 worktree；
+ *  2. `mcpDenyNames` 取的是 **MCP 服务名**（`pencil-mcp`），而实际工具名是
+ *     `mcp__pencil-mcp__*` —— 服务名同样不是全局工具名，一配上 MCP 就必炸。
+ *
+ * 处理口径：
+ *  - 名字直接可见 → 原样保留；
+ *  - 名字是**某个 MCP 服务名**（隐藏前缀形态）→ 展开成该服务**实际可见**的工具名
+ *    （保住「pencil 有写能力，只读研究实例也必须 deny 它」的原始意图）；
+ *  - 其余不可见的名字 → 丢弃（拒绝一个不存在的工具没有意义，只会炸掉整次派遣）。
+ * @param childCtx - 已 join 父 preset 的子 scope。
+ * @param filter - 调用方给的过滤器（编译期 deny / 集成者过滤 / 禁委派）。
+ * @returns 只含可见工具名的过滤器；deny 与 allow 收敛后皆空时 undefined。
+ */
+export function narrowChildToolFilter(
+  childCtx: Context,
+  filter: ToolRestriction,
+): ToolRestriction | undefined {
+  const visible = corumVisibleToolNames(childCtx)
+  const deny = new Set<string>()
+  for (const name of filter.deny ?? []) {
+    if (visible.has(name)) {
+      deny.add(name)
+      continue
+    }
+    // MCP 服务名 → 该服务下实际可见的工具名（否则「只读实例不得用 pencil」形同虚设）。
+    for (const candidate of visible) {
+      if (candidate.startsWith(`mcp__${name}__`)) deny.add(candidate)
+    }
+  }
+  const allow = filter.allow?.filter(name => visible.has(name))
+  if (deny.size === 0 && (allow === undefined || allow.length === 0)) return undefined
+  return {
+    ...(allow === undefined || allow.length === 0 ? {} : { allow }),
+    ...(deny.size === 0 ? {} : { deny: [...deny] }),
+  }
 }
 
 /**

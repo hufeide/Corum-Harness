@@ -122,6 +122,16 @@ const CORUM_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh'
  * compile.ts 的 corumWriteToolsForPlatform 逐字对账（dev-conventions §4a 第 2 条
  * 两处对账）。orchestrate 任务级 research 的只读硬约束用它预 deny 写工具。
  */
+/**
+ * 本平台的「写/执行」工具名清单（**可能含未装载的名字**，如 `str_replace_editor`
+ * 在 corum preset 里已退场）。
+ *
+ * 纪律（2026-09-12 事故后补）：本清单只表达**意图**，落到 `tools.restrict()` 之前
+ * **必须**先按目标 scope 真实可见的工具名收敛（`corumNarrowDenyFilter` /
+ * `corum-subagent` 的 `narrowChildToolFilter`）——`tools.restrict()` 对未知名
+ * fail-loud，直接拿本清单去 restrict 会让整次派遣抛错（实测：`subagent_research`
+ * 100% 失败，表现为「指挥者发两份重复的子 Agent」）。
+ */
 export function corumWriteToolsForPlatform(): readonly string[] {
   return process.platform === 'win32'
     ? CORUM_WRITE_TOOLS
