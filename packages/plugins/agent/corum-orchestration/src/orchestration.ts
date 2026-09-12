@@ -565,6 +565,26 @@ export interface CorumIntegrationTruth {
  * 该条目**保持 pending 并保留现场**（不标 integrated、不清理），并在结果里显式告知，
  * 而不是把整次 fan-in 判死。真未落地（分支不在 HEAD）依旧抛错 + 保留现场。
  */
+/**
+ * fork（corum）：`orchestrate` 的合并开关判定（纯函数，2026-09-12 用户实测后改默认）。
+ *
+ * 用户实测「编排工作流的最后一个节点始终不会运行」，全库数据：12 个用过 orchestrate 的
+ * 会话里 `autoIntegrate` 声明 true 仅 5 次、false 10 次、未声明 6 次，而**真正发生过集成
+ * 的只有 3 个会话**——旧默认「不声明/false 一律只报告」把合并交给模型记性，它大多不会
+ * 回来做，隔离分支就此静默搁浅（唯一一份提交没人看得到）。
+ *
+ * 新口径：**声明了 `merge.verify` 就等于要跑完流水线** → 默认自动 merge + verify + commit；
+ * 只有显式 `autoIntegrate: false` 才交回主 Agent（此时由 pending 通知兜底）。
+ *
+ * @param merge - orchestrate 的 merge 声明（可能整体缺省）。
+ * @returns 是否由机制自动集成。
+ */
+export function corumAutoIntegrate(merge: { verify?: string; autoIntegrate?: boolean } | undefined): boolean {
+  if (merge === undefined) return false
+  if (merge.autoIntegrate !== undefined) return merge.autoIntegrate
+  return typeof merge.verify === 'string' && merge.verify.trim() !== ''
+}
+
 export function corumIntegrationTruth(
   cwd: string,
   entries: readonly CorumWorktreeEntry[],

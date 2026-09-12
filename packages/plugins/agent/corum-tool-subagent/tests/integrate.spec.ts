@@ -24,6 +24,7 @@ import {
   corumCleanupLedgerEntries,
   corumCleanupWorktree,
   corumGit,
+  corumAutoIntegrate,
   corumIntegrationFailure,
   corumIntegrationTruth,
   corumIntegratorPersona,
@@ -261,5 +262,22 @@ describe('corumWorktreeHasUncommitted — worktree 脏判定', () => {
     writeFileSync(join(worktree, 'dirty.txt'), 'x')
     expect(corumWorktreeHasUncommitted(worktree)).toBe(true)
     expect(corumWorktreeHasUncommitted(join(worktree, 'nope'))).toBe(false)
+  })
+})
+
+describe('corumAutoIntegrate — 收尾节点默认要真的运行（2026-09-12 用户实测）', () => {
+  it('声明了 verify → 默认自动集成（旧默认是只报告，导致分支静默搁浅）', () => {
+    expect(corumAutoIntegrate({ verify: 'pnpm build && ./scripts/verify-fork-drift.sh' })).toBe(true)
+  })
+  it('verify 是空白字符串 → 不自动集成', () => {
+    expect(corumAutoIntegrate({ verify: '   ' })).toBe(false)
+  })
+  it('显式 autoIntegrate 优先（false = 交回主 Agent，此时由 pending 通知兜底）', () => {
+    expect(corumAutoIntegrate({ verify: 'x', autoIntegrate: false })).toBe(false)
+    expect(corumAutoIntegrate({ autoIntegrate: true })).toBe(true)
+  })
+  it('无 merge 声明 → 不自动集成', () => {
+    expect(corumAutoIntegrate(undefined)).toBe(false)
+    expect(corumAutoIntegrate({})).toBe(false)
   })
 })

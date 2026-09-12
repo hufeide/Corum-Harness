@@ -55,6 +55,7 @@ import {
 // fork（corum）：隔离编排纯函数从 orchestration.ts 引入（含 re-export 到下游）。
 import {
   CorumOrchestration,
+  corumAutoIntegrate,
   corumCleanupWorktree,
   corumDetectIntegrateChecks,
   corumDirectWriteNotice,
@@ -451,6 +452,44 @@ function corumNotifyPartialIntegration(
 }
 
 /**
+ * fork（corum）：**待集成分支**的通知（2026-09-12 用户实测后补）。
+ *
+ * 数据：12 个用过 orchestrate 的会话里 `autoIntegrate` 声明 true 仅 5 次、false 10 次、
+ * 未声明 6 次，而真正发生过集成的只有 3 个会话——旧默认「不声明/false 一律只报告」
+ * 把合并交给模型记性，它大多不会回来做，于是隔离分支静默搁浅（唯一一份提交没人看得到）。
+ * 现在：声明 `verify` 即默认自动集成；**显式 opt-out 时由本通知兜底**，把「还有 N 条分支
+ * 没合并、怎么收尾」推到父会话的第一步，而不是埋在工具结果里。
+ *
+ * @param parent - 委派方 Agent（注入目标）。
+ * @param branches - 仍未合并的分支名。
+ * @param logger - 注入失败时的告警出口。
+ */
+function corumNotifyPendingIntegration(
+  parent: Agent,
+  branches: readonly string[],
+  logger: { warn: (message: string) => void },
+): void {
+  if (branches.length === 0) return
+  try {
+    parent.inject(createUserMessage({
+      content: [{
+        type: 'text',
+        text: `[corum] ${branches.length} isolated branch(es) are NOT merged into the main tree: ${branches.join(', ')}. `
+          + 'Their commits are the only copy of that work — nobody sees them otherwise. '
+          + 'Finish it yourself with `subagent { integrate: true }` (merge + verify + commit), or discard them explicitly.',
+      }],
+      source: {
+        kind: 'subagent-settled',
+        form: 'notice',
+        summary: boundContextSummary('pending integration: branches not merged'),
+      } as unknown as MessageSource,
+    }))
+  } catch (error: unknown) {
+    logger.warn(`pending-integration notice was not delivered to its parent: ${String(error)}`)
+  }
+}
+
+/**
  * fork（corum）：前台子 Agent 的最终汇报以「settlement notice」形态注入父会话。
  *
  * 2026-09-09 用户实机反馈「子 Agent 结束后反馈没有注入主 Agent」：汇报本来就在
@@ -593,6 +632,7 @@ export {
   corumMarkSettled,
   corumNarrowDenyFilter,
   corumMutationToolsForPlatform,
+  corumAutoIntegrate,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
@@ -1315,7 +1355,7 @@ export function apply(ctx: Context, config: Config): void {
               '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `model`, `schema` (structured output) and `background`.',
               '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await; hooks `agent`, `parallel`, `pipeline`, `phase`, `log`; end with `return <json-value>`). Use this when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
               'ISOLATION: scripted children are ISOLATED in their own git worktree + branch by default (`isolate: "always"`), so concurrent writers never touch the same tree; pass `isolate: "off"` for a read-only script that must see the parent tree exactly as it is (isolated children see the branch base, not uncommitted parent edits). Declarative tasks keep the concurrency-aware rule: 2+ concurrent write tasks isolate, a lone foreground write task works directly in the parent tree.',
-              'FINISH: declare `merge.verify` (how to build/run/verify this repo) and set `merge.autoIntegrate: true` to merge + commit after the checks pass; otherwise the call reports the pending branches so you can integrate or discard them yourself.',
+              'FINISH: declare `merge.verify` (how to build/run/verify this repo) — that alone makes the mechanism merge + verify + commit the isolated branches when every task is done (`autoIntegrate` defaults to TRUE once `verify` is declared). Pass `merge.autoIntegrate: false` only to inspect first; the call then reports the pending branches AND raises a pending-integration notice, because branches you never merge are work nobody can see.',
             ].join('\n'),
             parameters: {
               script: { type: 'string', description: 'SCRIPTED mode: the plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`). Requires `meta`; mutually exclusive with `tasks`.' },
@@ -1367,7 +1407,7 @@ export function apply(ctx: Context, config: Config): void {
                 description: 'How to integrate the isolated worktrees after all tasks settle.',
                 properties: {
                   verify: { type: 'string', description: 'How to build, run, and verify this repository after merging (e.g. "cd studio && npm test"). Declare it: you know this repo — the mechanism injects your declaration verbatim and enforces it. Omit to fall back to detected checks (minimal format bar).' },
-                  autoIntegrate: { type: 'boolean', description: 'Set true to merge + commit after all checks pass. Defaults to false (report only; the delegating agent makes the final acceptance call).' },
+                  autoIntegrate: { type: 'boolean', description: 'Merge + commit the isolated branches after all checks pass. DEFAULTS TO TRUE whenever you declare `verify` (declaring how to verify means you want the pipeline finished); pass false explicitly only when you want to inspect the branches before merging — then the call reports them and a pending-integration notice is raised so they are never silently stranded.' },
                 },
               },
             },
@@ -1489,7 +1529,15 @@ export function apply(ctx: Context, config: Config): void {
                 const pending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
                 if (pending.length === 0) return { pendingBranches: [], integrated: false }
                 const branches = pending.map(entry => entry.branch)
-                if (merge?.autoIntegrate !== true) return { pendingBranches: branches, integrated: false }
+                // fork（corum）2026-09-12 修正（用户实测「最后一个节点始终不会运行」+ 全库数据）：
+                // 12 个用过 orchestrate 的会话里 autoIntegrate 声明 true 仅 5 次、false 10 次、
+                // 没声明 6 次，而**真正发生过集成的只有 3 个会话**——因为旧默认是
+                // 「不声明/false 一律只报告」，把合并交给模型记性（它大多不会回来做）。
+                // 新默认：**声明了 merge.verify 就等于要跑完流水线** → 默认自动集成；
+                // 只有显式 autoIntegrate:false 才交回主 Agent（此时会另发一条 pending 通知）。
+                if (merge === undefined || !corumAutoIntegrate(merge)) {
+                  return { pendingBranches: branches, integrated: false }
+                }
                 // fork（corum）：integrate 结果**必须**被检查（2026-09-09 事故 RC4）
                 // ——此前 `await spawnOne(...)` 丢弃返回值，集成没落地时任务结果照样
                 // 逐条报 `[task N] done`，主 Agent 据此以为全部完成。integrate 恒前台
@@ -1556,6 +1604,7 @@ export function apply(ctx: Context, config: Config): void {
                   throw new Error(`scripted orchestration "${meta.name}" ${settled.stopReason}${settled.error !== undefined ? `: ${settled.error}` : ''}`)
                 }
                 const integration = await runIntegrate(args.merge as { verify?: string; autoIntegrate?: boolean } | undefined)
+                if (!integration.integrated) corumNotifyPendingIntegration(parent, integration.pendingBranches, runtimeCtx.logger)
                 return {
                   mode: 'script' as const,
                   // 引擎的 result.value 已是 JSON-safe（跨 worker realm 物化过）；类型面收窄到 JsonValue。
@@ -1618,6 +1667,7 @@ export function apply(ctx: Context, config: Config): void {
               // 若任务均未隔离（isolation:off / research），台账无待集成条目——
               // 静默跳过 integrate（结果已由任务直接产出，无需 fan-in）。
               const integration = await runIntegrate(args.merge as { verify?: string; autoIntegrate?: boolean } | undefined)
+              if (!integration.integrated) corumNotifyPendingIntegration(parent, integration.pendingBranches, runtimeCtx.logger)
               return {
                 mode: 'tasks' as const,
                 results,
@@ -1725,8 +1775,8 @@ export function apply(ctx: Context, config: Config): void {
               'How the mechanism works (rely on it, do not re-implement):',
               '- Write-capable children get ISOLATED git worktrees (own branch; the parent working tree is write-denied to that child) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and leaves git to you. Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) — even a forced `isolation: "always"` is skipped rather than failing, and the child is told so. Nothing to do either way.',
               '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
-              '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Set `merge.autoIntegrate: true` to merge+commit the isolated branches after all checks pass, or false to only report and decide yourself.',
-              '- INTEGRATION IS YOURS (or the mechanism\'s — never a child\'s). Merging isolated branches back into the main tree happens either via `merge.autoIntegrate: true` on the call, or by YOU calling `subagent` with `integrate: true` afterwards. NEVER delegate a main-tree write to an ISOLATED child and expect it to land: that child works in its own worktree, so its writes cannot reach the parent tree — delegating that way silently produces work that never merges.',
+              '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Declaring it is enough — the mechanism then merges + commits the isolated branches once every task is done (`autoIntegrate` defaults to TRUE with `verify`). Only pass `merge.autoIntegrate: false` when you deliberately want to inspect the branches first; then finish the job yourself with `subagent {integrate: true}`, because an unmerged branch is invisible work.',
+              '- INTEGRATION IS THE MECHANISM\'S when you declare `merge.verify` (it merges + commits once every task is done — never a child\'s job). If you opted out with `merge.autoIntegrate: false`, YOU must finish it with `subagent {integrate: true}`; the mechanism raises a pending-integration notice so the branches cannot silently strand. NEVER delegate a main-tree write to an ISOLATED child and expect it to land: that child works in its own worktree, so its writes cannot reach the parent tree.',
               '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
             )
           } else {

@@ -34,6 +34,7 @@ export {
   corumNarrowDenyFilter,
   corumPartialIntegrationNotice,
   corumMutationToolsForPlatform,
+  corumAutoIntegrate,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
