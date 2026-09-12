@@ -1,0 +1,80 @@
+/* fork（corum）：子 Agent 卡展开区的紧凑计划段（与 .detail 同族的玻璃块）。 */
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
+}
+
+.planHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.planIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+}
+
+.planTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+}
+
+.planList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.itemIcon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.itemIconActive {
+  flex: none;
+  margin-top: 1px;
+  color: var(--dsw-alias-brand-text);
+}
+
+.itemText {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 当前进行中的任务项高亮（brand 色 + 全文，设计稿 active 节点语义）。 */
+.itemTextActive {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 已完成的任务项弱化（划掉感不强求，色调已降为 tertiary）。 */
+.planItem[data-tone='done'] .itemText {
+  text-decoration: line-through;
+  text-decoration-color: var(--dsw-alias-label-quaternary, rgba(185, 140, 255, 0.3));
+}

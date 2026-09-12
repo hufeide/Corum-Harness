@@ -89,7 +89,7 @@ import type { SkillEntry } from './skill-entry.ts'
 // （自包含在 fork 包 corum-api-remotes；type-only import 只拉编译面，不进运行时依赖图）。
 import type {} from '@corum/corum-api-remotes/corum-events'
 // 值导入 stopReasonOfTurnEnd：turn/end.reason.kind → SubagentStopReason（同口径，同包依赖已存在）。
-import { stopReasonOfTurnEnd, type SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
+import { stopReasonOfTurnEnd, type SubagentStopReason, type SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 
 // 再导出：保持既有消费方（index.ts / project-service.ts / runtime.ts /
 // contract/agent.ts）的 import 面不变——包内拆分对外的稳定锚。
@@ -575,8 +575,9 @@ export class CorumAgentService extends TypertRemoteService {
       const reason = info.stopReason as SubagentStopReason
       const turn = state?.turn ?? 0
       const step = state?.step ?? 0
+      const todos = state?.todos
       this.subagentProgress.delete(sid)
-      this.subagentProgress.set(sid, { turn, step, done: true, stopReason: reason })
+      this.subagentProgress.set(sid, { turn, step, done: true, stopReason: reason, ...todos === undefined ? {} : { todos } })
       this.ctx.emit('corum/subagent/progress', {
         sessionId: sid,
         turn,
@@ -584,6 +585,7 @@ export class CorumAgentService extends TypertRemoteService {
         done: true,
         stopReason: reason,
         lastActive: Date.now(),
+        ...todos === undefined ? {} : { todos },
       })
     }) as never, { global: true })
   }
@@ -595,6 +597,8 @@ export class CorumAgentService extends TypertRemoteService {
     currentAction?: string
     done: boolean
     stopReason?: SubagentStopReason
+    /** 子 Agent 的当前计划列表（todo/write 折叠；turn/start 重置为 undefined）。 */
+    todos?: readonly SubagentTodoItem[]
   }>()
 
   /** 进度折叠表容量上限（超出时淘汰最久未活动条目；dispose 已精确清理）。 */
@@ -612,6 +616,7 @@ export class CorumAgentService extends TypertRemoteService {
     done: boolean
     stopReason?: SubagentStopReason
     lastActive: number
+    todos?: readonly SubagentTodoItem[]
   } | undefined {
     let state = this.subagentProgress.get(sessionId)
     if (state === undefined) {
@@ -628,12 +633,14 @@ export class CorumAgentService extends TypertRemoteService {
     let currentAction = prev.currentAction
     let done = prev.done
     let stopReason = prev.stopReason
+    let todos = prev.todos
     switch (event.type) {
       case 'turn/start': {
         const t = (event.data as { turn?: number }).turn ?? 0
         if (t > turn) { turn = t; step = 0 }
         done = false
         stopReason = undefined // 新一轮开始＝不再有终态
+        todos = undefined // 投影语义：turn/start 重置 todos 为 null（空列表）
         break
       }
       case 'step/end': {
@@ -659,15 +666,20 @@ export class CorumAgentService extends TypertRemoteService {
         currentAction = undefined
         break
       }
+      case 'todo/write': {
+        // 与 dsh-tool-todo 投影同口径：last-write-wins，turn/start 重置。
+        todos = (event.data as { todos?: SubagentTodoItem[] }).todos ?? undefined
+        break
+      }
       default:
         return undefined // 非进度事件（user/message、step/start 等）不产生帧。
     }
-    if (turn === prev.turn && step === prev.step && currentAction === prev.currentAction && done === prev.done && stopReason === prev.stopReason) {
+    if (turn === prev.turn && step === prev.step && currentAction === prev.currentAction && done === prev.done && stopReason === prev.stopReason && todos === prev.todos) {
       return undefined // 折叠无变化（如乱序/重复事件），不广播。
     }
     // 置顶为最近活动（容量淘汰的 LRU 依据）。
     this.subagentProgress.delete(sessionId)
-    this.subagentProgress.set(sessionId, { turn, step, ...currentAction === undefined ? {} : { currentAction }, done, ...stopReason === undefined ? {} : { stopReason } })
+    this.subagentProgress.set(sessionId, { turn, step, ...currentAction === undefined ? {} : { currentAction }, done, ...stopReason === undefined ? {} : { stopReason }, ...todos === undefined ? {} : { todos } })
     return {
       sessionId,
       turn,
@@ -676,6 +688,7 @@ export class CorumAgentService extends TypertRemoteService {
       done,
       ...stopReason === undefined ? {} : { stopReason },
       lastActive: event.time,
+      ...todos === undefined ? {} : { todos },
     }
   }
 
@@ -1878,6 +1891,7 @@ export class CorumAgentService extends TypertRemoteService {
       done: boolean
       stopReason?: SubagentStopReason
       lastActive: number
+      todos?: readonly SubagentTodoItem[]
     }
   }> {
     let stored: readonly SessionEvent[]
@@ -1893,6 +1907,7 @@ export class CorumAgentService extends TypertRemoteService {
     let done = false
     let currentAction: string | undefined
     let stopReason: SubagentStopReason | undefined
+    let todos: readonly SubagentTodoItem[] | undefined
     for (const event of stored) {
       switch (event.type) {
         case 'turn/start': {
@@ -1900,6 +1915,7 @@ export class CorumAgentService extends TypertRemoteService {
           if (t > turn) { turn = t; step = 0 }
           done = false
           stopReason = undefined // 新一轮开始＝不再有终态
+          todos = undefined // 投影语义：turn/start 重置 todos
           break
         }
         case 'step/end': {
@@ -1925,6 +1941,10 @@ export class CorumAgentService extends TypertRemoteService {
           currentAction = undefined
           break
         }
+        case 'todo/write': {
+          todos = (event.data as { todos?: SubagentTodoItem[] }).todos ?? undefined
+          break
+        }
       }
     }
     const lastActive = stored[stored.length - 1].time
@@ -1936,6 +1956,7 @@ export class CorumAgentService extends TypertRemoteService {
         done,
         ...stopReason === undefined ? {} : { stopReason },
         lastActive,
+        ...todos === undefined ? {} : { todos },
       },
     }
   }

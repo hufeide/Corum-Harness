@@ -1,6 +1,6 @@
 /** Subagent progress-card payload shared between the Chat Node and its renderer. */
 
-import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
+import type { SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 
 /** Turn-local subagent invocation encoded as a reference-stable Location-data scalar. */
 export type SubagentTurnSignature = string
@@ -17,6 +17,8 @@ export interface SubagentProgressSnapshot {
   readonly done: boolean
   /** 终局原因；仅在该 turn 闭合时给出（undefined = 运行中/未结束）。 */
   readonly stopReason?: SubagentStopReason
+  /** 子 Agent 的当前计划列表（todo/write 折叠；无计划时缺省）。 */
+  readonly todos?: readonly SubagentTodoItem[]
 }
 
 /** Static identity of one delegated subagent invocation, folded from the parent log. */
@@ -132,19 +134,39 @@ export function encodeSubagentTurn(invocations: readonly SubagentInvocation[]): 
       invocation.progress.currentAction ?? '',
       invocation.progress.done ? 1 : 0,
       invocation.progress.stopReason ?? '',
+      ...invocation.progress.todos === undefined ? [] : [';' + JSON.stringify(invocation.progress.todos)],
     ].join(','),
   ].join('~')).join('|')
 }
 
 function decodeProgress(raw: string | undefined): SubagentProgressSnapshot | undefined {
   if (raw === undefined || raw === '') return undefined
-  const [turn, step, action, done, stopReason] = raw.split(',')
+  // todos 段以 `;` 分隔附在 progress 逗号串尾（JSON 含逗号，故不用 `,` 分隔）。
+  const semiIdx = raw.indexOf(';')
+  const progressPart = semiIdx === -1 ? raw : raw.slice(0, semiIdx)
+  const todosPart = semiIdx === -1 ? undefined : raw.slice(semiIdx + 1)
+  const [turn, step, action, done, stopReason] = progressPart.split(',')
+  let todos: readonly SubagentTodoItem[] | undefined
+  if (todosPart !== undefined && todosPart !== '') {
+    try {
+      const parsed: unknown = JSON.parse(todosPart)
+      if (Array.isArray(parsed)) {
+        todos = (parsed as unknown[]).filter((item): item is SubagentTodoItem =>
+          typeof item === 'object' && item !== null
+          && typeof (item as { content?: unknown }).content === 'string'
+          && ['pending', 'in_progress', 'completed'].includes((item as { status?: unknown }).status as string))
+      }
+    } catch {
+      // 损坏的 todos 段忽略（不影响进度渲染）。
+    }
+  }
   return {
     turn: Number(turn),
     step: Number(step),
     ...action === '' ? {} : { currentAction: action },
     done: done === '1',
     ...stopReason === undefined || stopReason === '' ? {} : { stopReason: stopReason as SubagentStopReason },
+    ...todos === undefined ? {} : { todos },
   }
 }
 

@@ -19,10 +19,11 @@
 import { memo, useEffect, useState } from 'react'
 import { ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, Loader, X } from 'lucide-react'
 import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
-import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
+import type { SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
 import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe } from '../chat-runtime.ts'
+import { SubagentPlan } from './SubagentPlan.tsx'
 import css from './SubagentCard.module.css'
 
 /** 子会话进度 RPC 返回形（与 host getChildSessionProgress 对齐）。 */
@@ -34,6 +35,7 @@ interface ChildProgressValue {
     done: boolean
     stopReason?: string
     lastActive: number
+    todos?: readonly SubagentTodoItem[]
   }
 }
 
@@ -149,6 +151,7 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
               ...p.currentAction === undefined ? {} : { currentAction: p.currentAction },
               done: p.done,
               ...sr === undefined ? {} : { stopReason: sr },
+              ...p.todos === undefined ? {} : { todos: p.todos },
             })
           }
         }
@@ -171,6 +174,7 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
         ...frame.currentAction === undefined ? {} : { currentAction: frame.currentAction },
         done: frame.done,
         ...sr === undefined ? {} : { stopReason: sr },
+        ...frame.todos === undefined ? {} : { todos: frame.todos },
       })
     })
 
@@ -395,6 +399,8 @@ function SubagentRow({
           <span className={css.stepText}>{runningStepText(progress, delegationPrompt, t)}</span>
         </div>
       )}
+      {/* ② 子 Agent 计划段（展开区）：子会话 todo/write 折叠列表，无计划时不渲染。 */}
+      {expanded && progress?.todos !== undefined && progress.todos.length > 0 && <SubagentPlan todos={progress.todos} />}
       {/* ③ 任务详情（展开区）：父 Agent 注入的提示词全文，仅展开时显示。 */}
       {expanded && (
         <div className={css.detail}>
