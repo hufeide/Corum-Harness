@@ -1539,9 +1539,43 @@ export const SESSION_BAR_SLOTS = {
 } as const
 
 /** 槽 occupant 的注册 id（诊断用；同名槽由 conversation 插件声明）。 */
+/**
+ * 浮窗里的「收回到主窗口」按钮（占用会话顶栏右端同一个 utilities 槽）。
+ *
+ * 为什么放在会话顶栏而不是自绘 chrome：承载会话的浮窗**没有独立 chrome 行**
+ * （会话顶栏卡片本身就是窗口顶栏，见 AppFrame 的 SELF_CHROME_FLOATING_SLOTS），
+ * 所以只有落在这个右端簇里才不会和顶栏内容重叠。非浮窗（普通主窗）返回 null——
+ * 这个按钮只在 `?floating=<slotKey>` 窗口里存在。
+ *
+ * 走 `corumDesktop.closeFloating(slotKey)`（2026-09-12 补的桥方法）：主进程
+ * `win.close()` → 既有 `closed` 钩子通知主窗恢复被折叠的列，调用方不必自己改状态。
+ */
+export function FloatingCloseButton() {
+  const slotKey = new URLSearchParams(window.location.search).get('floating')
+  if (slotKey === null || slotKey === '') return null
+  const bridge = (window as unknown as {
+    corumDesktop?: { closeFloating?: (slotKey?: string) => Promise<unknown> }
+  }).corumDesktop
+  return (
+    <button
+      type="button"
+      className={css.agentTrajBtn}
+      title="收回到主窗口"
+      aria-label="收回到主窗口"
+      onClick={() => { void bridge?.closeFloating?.(slotKey) }}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M9 3H5a2 2 0 0 0-2 2v4" /><path d="M15 21h4a2 2 0 0 0 2-2v-4" />
+        <path d="M21 3l-7 7" /><path d="M3 21l7-7" />
+      </svg>
+    </button>
+  )
+}
+
 export const SESSION_BAR_IDS = {
   status: 'corum-session-status',
   trajectory: 'corum-session-trajectory',
+  floatingClose: 'corum-session-floating-close',
 } as const
 
 /** 轨迹按钮点亮的壳网格区域（corum-ide-ui 的轨迹区域槽）。 */

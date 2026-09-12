@@ -317,6 +317,31 @@ export function registerIpc(
     return { ok: true }
   })
 
+  /**
+   * Close a detached floating window (the counterpart of `corum:open-floating`).
+   *
+   * 为什么必须有：桥里原先只有 open —— 窗口一旦打开，程序化路径**没有任何办法关掉它**
+   * （2026-09-12 验证时实测：探测完浮窗只能请用户手动关）。关闭走
+   * `win.close()` → 既有 `closed` 钩子照常 `floatingWindows.delete` + 通知主窗
+   * 「detached → restored」（主窗据此把被折叠的列恢复回来），所以这里不重复做状态清理。
+   *
+   * `slotKey` 缺省 = 关掉**所有**浮窗（退出/重置场景）；指定则只关那一个。
+   * @returns `closed` = 实际关掉的数量（0 = 本来就没开，调用方无需当错误处理）。
+   */
+  ipcMain.handle('corum:close-floating', (_event, request?: { slotKey?: string }) => {
+    const key = request?.slotKey
+    const targets = key === undefined
+      ? [...floatingWindows.entries()]
+      : [...floatingWindows.entries()].filter(([slotKey]) => slotKey === key)
+    let closed = 0
+    for (const [, win] of targets) {
+      if (win.isDestroyed()) continue
+      win.close()
+      closed += 1
+    }
+    return { ok: true, closed }
+  })
+
   // ── Session archive: native save/open dialogs over the host's ZIP builder ──
 
   // Save one session's log: host builds the ZIP (in-process, reusing the

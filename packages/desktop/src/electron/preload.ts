@@ -40,6 +40,13 @@ contextBridge.exposeInMainWorld('corumDesktop', {
     ipcRenderer.invoke('corum:open-floating', { slotKey }),
 
   /**
+   * Close a detached floating window. `slotKey` 缺省 = 关掉所有浮窗。
+   * @returns `closed` = 实际关掉的数量（0 = 本来没开）。
+   */
+  closeFloating: (slotKey?: string): Promise<{ ok: boolean; closed: number }> =>
+    ipcRenderer.invoke('corum:close-floating', slotKey === undefined ? {} : { slotKey }),
+
+  /**
    * 发一条**系统通知**（macOS 通知中心）。返回 ok:false 表示平台不支持或失败，
    * 调用方应静默降级（应用内 toast 仍然在）。
    */

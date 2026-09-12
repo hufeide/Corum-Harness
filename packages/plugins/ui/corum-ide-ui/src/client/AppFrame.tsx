@@ -25,7 +25,7 @@ interface SessionListState {
 }
 import type { createLayoutStore } from './stores.ts'
 import type { GridActions } from './service.ts'
-import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal } from 'lucide-react'
+import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
@@ -254,17 +254,38 @@ function renderDynamicSlot(
 /** The desktop preload bridge face this frame uses for floating windows. */
 interface FloatingBridge {
   openFloating?: (slotKey: string) => Promise<unknown>
+  /**
+   * 关闭浮动窗（`slotKey` 缺省 = 全部关掉）。主进程 `win.close()` 后既有
+   * `closed` 钩子会通知主窗「detached → restored」，故调用方不必自己改状态。
+   */
+  closeFloating?: (slotKey?: string) => Promise<unknown>
   onFloatingChange?: (cb: (slotKey: string, detached: boolean) => void) => () => void
 }
 
-/** 浮动窗的 Window Chrome 顶栏（系统拖拽区，app-region:drag）。 */
+/**
+ * 浮动窗的 Window Chrome 顶栏（系统拖拽区，app-region:drag）。
+ *
+ * 右侧带一个「收回到主窗口」按钮：浮窗此前只能靠系统红黄绿圆点关（桥里也没有关闭
+ * API，2026-09-12 实测只能请用户手动关）。按钮走 `corumDesktop.closeFloating(slotKey)`
+ * → 主进程 `win.close()` → 既有 `closed` 钩子通知主窗恢复被折叠的列。
+ */
 function FloatingChrome({ slotKey }: { slotKey: string }) {
+  const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
   return (
     <div className={css.windowChrome}>
       {/* 系统红黄绿圆点由 titleBarStyle:'hidden' 保留在左上角，这里给它让位，
           不自绘（否则重叠）。标题/提示右移避开。 */}
       <span className={css.chromeTitle}>{slotKey}</span>
       <span className={css.chromeHint}>浮动窗 · 关闭即回到主窗口</span>
+      <button
+        type="button"
+        className={css.chromeClose}
+        aria-label="收回到主窗口"
+        title="收回到主窗口"
+        onClick={() => { void bridge?.closeFloating?.(slotKey) }}
+      >
+        <X size={14} strokeWidth={2} />
+      </button>
     </div>
   )
 }

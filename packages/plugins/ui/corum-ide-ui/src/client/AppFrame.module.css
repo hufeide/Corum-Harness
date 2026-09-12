@@ -852,7 +852,28 @@
   --corum-session-topbar-margin: 12px 12px 0 74px;
 }
 
-.floatingRoot[data-self-chrome] .floatingBody {
+.floatingRoot[data-self-chrome] /* 「收回到主窗口」按钮：app-region:no-drag 才能在拖拽区里点到（否则整条 chrome
+   都是系统拖拽面，点击会被吞掉拿去拖窗）。 */
+.chromeClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.chromeClose:hover {
+  background: var(--corum-glass-2, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-primary);
+}
+
+.floatingBody {
   padding-top: 0;
 }
 

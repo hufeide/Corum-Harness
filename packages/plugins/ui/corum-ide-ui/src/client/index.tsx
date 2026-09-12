@@ -37,7 +37,7 @@ import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GridActions, PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 import {
-  SessionStatusPill, SessionTrajectoryButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
+  SessionStatusPill, SessionTrajectoryButton, FloatingCloseButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
 } from './session-bar.tsx'
 import type { RemoteEventFace } from './session-bar.tsx'
 import { createLayoutStore } from './stores.ts'
@@ -329,9 +329,16 @@ export function apply(ctx: ClientContext): void {
       order: 10,
       inject: trajectoryInjected,
     }, SessionTrajectoryButton))
+    // 浮窗里的「收回到主窗口」（order 20 = 排在轨迹按钮右侧；非浮窗自身返回 null）。
+    const disposeFloatingClose = ctx.slots.inject(SESSION_BAR_SLOTS.trajectory, () => ctx.slots.register({
+      name: SESSION_BAR_SLOTS.trajectory,
+      id: SESSION_BAR_IDS.floatingClose,
+      order: 20,
+    }, FloatingCloseButton))
     return () => {
       disposeStatus()
       disposeTrajectory()
+      disposeFloatingClose()
     }
   }, 'ide-shell: session bar slots (status pill + trajectory)')
 
