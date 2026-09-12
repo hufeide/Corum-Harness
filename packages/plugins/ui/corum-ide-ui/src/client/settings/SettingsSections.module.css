@@ -2682,40 +2682,494 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   color: var(--dsw-alias-label-dimmed);
 }
 
-/* ═══ 插件管理（一排两卡 + 详情）═══ */
-.pluginCardGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.pluginCard {
-  display: flex; flex-direction: column; gap: 8px; padding: 12px;
-  border-radius: 12px; border: 1px solid var(--corum-border);
-  background: var(--corum-bg-tint); cursor: pointer; transition: border-color .15s;
-}
-.pluginCard:hover { border-color: var(--corum-brand); }
-.pluginCardHead { display: flex; align-items: flex-start; gap: 10px; }
-.pluginCardIcon { width: 40px; height: 40px; border-radius: 10px; flex: none; object-fit: cover; }
-.pluginCardNameCol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.pluginCardName { font-size: 13px; font-weight: 600; color: var(--corum-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pluginCardVer { font-size: 10px; color: var(--corum-text-secondary); }
-.pluginCardDesc {
-  font-size: 11px; color: var(--corum-text-secondary); line-height: 1.5;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  min-height: 33px;
-}
-.pluginCardFoot { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--corum-border); }
-.pluginStateDot { width: 6px; height: 6px; border-radius: 3px; background: var(--corum-text-secondary); flex: none; opacity: .4; }
-.pluginStateOn { background: var(--corum-brand); opacity: 1; }
-.pluginStateText { flex: 1; font-size: 11px; color: var(--corum-text-secondary); }
+/* ═══ 插件管理 · 已装插件管理（2026-09-12 重建）═══════════════════════════
+ * 视觉对齐 doc/UXDesign/design.pen 帧 zOmcc 的 w8h6DG content 的 body（Gyvyc）：
+ * section 根纵向 flex gap 14 → tabs（h5Hckf）→ scope 分段 + filter（Z6xac）→
+ * 两列卡片网格（Jkd7G/ouhlt/E9H6c）。色值全部走 --corum-* / --dsw-alias-* token。
+ * 类名前缀 plg（plugin-manager-in-settings）以区别于其他 section。
+ */
 
-.pluginDetail { display: flex; flex-direction: column; gap: 14px; }
-.pluginDetailHead { display: flex; align-items: center; gap: 12px; }
-.pluginDetailIcon { width: 48px; height: 48px; border-radius: 12px; flex: none; object-fit: cover; }
-.pluginDetailNameCol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.pluginDetailName { font-size: 15px; font-weight: 600; color: var(--corum-text-primary); }
-.pluginDetailMeta { font-size: 11px; color: var(--corum-text-secondary); }
-.pluginChangelog {
-  border-radius: 10px; border: 1px solid var(--corum-border); background: var(--corum-bg-tint);
-  padding: 10px 12px; font-size: 12px; color: var(--corum-text-secondary); line-height: 1.6;
+/* section 根：纵向 flex，gap 14（body Gyvyc 的 gap）。
+ * --plg-shadow 是唯一一条非 token 取色（下拉菜单的投影），集中在此声明，
+ * 对应参考实现 PluginManagerPanel.module.css 的 --pm-shadow；design.pen 变量表
+ * 里没有阴影变量，故不冒充 --corum-*。 */
+.plgSection {
+  --plg-shadow: rgb(0 0 0 / 25%);
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  font-family: 'Inter', -apple-system, sans-serif;
 }
-.pluginDetailActions { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--corum-border); }
+
+/* ── tabs h5Hckf：glass-2 / r10 / glass-border / p3 / gap4 ─────────────── */
+.plgTabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+
+.plgTab {
+  padding: 5px 14px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.plgTab:hover { color: var(--dsw-alias-label-primary); }
+
+.plgTabActive {
+  background: var(--corum-glass-1);
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+/* ── filter 行 Z6xac：space-between / align center ─────────────────────── */
+.plgFilterRow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.plgFilterRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+/* scope-switch：glass-2 / r10 / glass-border / p2 / gap2 */
+.plgScope {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+
+.plgScopeSeg {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.plgScopeSeg:hover { color: var(--dsw-alias-label-primary); }
+
+.plgScopeSegActive {
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-weight: 600;
+}
+
+/* search：宽 220 / glass-2 / r13 / glass-border / p[10,14] / 12px */
+.plgSearchWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 220px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 13px;
+  background: var(--corum-glass-2);
+}
+
+.plgSearchWrap:focus-within { border-color: var(--corum-glass-border-active); }
+
+.plgSearchIcon { flex: none; color: var(--dsw-alias-label-tertiary); }
+
+.plgSearchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.plgSearchInput::placeholder { color: var(--dsw-alias-label-secondary); }
+
+/* 状态下拉：宽 140 / glass-2 / r10 / glass-border / p[7,10] */
+.plgSelect { position: relative; width: 140px; }
+
+.plgSelectBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plgSelectValue { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+.plgSelectChevron { flex: none; color: var(--dsw-alias-label-tertiary); }
+
+.plgSelectMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 140px;
+  padding: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  box-shadow: 0 12px 32px var(--plg-shadow);
+}
+
+.plgSelectOption {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plgSelectOption:hover { color: var(--dsw-alias-label-primary); }
+
+.plgSelectOption[data-active] {
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+/* ── 卡片网格：两列 / gap 10 ───────────────────────────────────────────── */
+.plgGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+/* 卡片：glass-1 / r16 / glass-border / p14 / gap12 / align center / min-h 66 */
+.plgCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 66px;
+  padding: 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-1);
+  cursor: pointer;
+  transition: border-color .15s;
+}
+
+.plgCard:hover { border-color: var(--corum-glass-border-active); }
+
+/* 停用卡：视觉降级 */
+.plgCard[data-off] { opacity: .55; }
+
+/* icon-box：34×34 / glass-2 / r9 / glyph 17px brand */
+.plgCardIcon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-brand-primary);
+}
+
+.plgCardMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plgCardNameRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.plgCardName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plgCardVer {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+/* badge：brand-primary / r8 / p[2,7] / on-brand 10px 600 */
+.plgCardBadge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.plgCardDesc {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ops：gap 10 / align center */
+.plgCardOps { flex: none; display: flex; align-items: center; gap: 10px; }
+
+/* 开关：36×20 / r10 / on=brand-primary，off=glass-3；knob 16×16（on 左移 18） */
+.plgSwitch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 10px;
+  background: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.plgSwitch[data-off] { background: var(--corum-glass-3); }
+
+.plgSwitch:disabled { opacity: .45; cursor: default; }
+
+.plgSwitchKnob {
+  position: absolute;
+  top: 2px;
+  left: 18px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--corum-label-on-brand);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.plgSwitch[data-off] .plgSwitchKnob {
+  background: var(--dsw-alias-label-dimmed);
+  transform: translateX(-16px);
+}
+
+/* 「设置」按钮：glass-2 / r13 / glass-border / p[9,16] / 12px */
+.plgSetBtn {
+  padding: 9px 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 13px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plgSetBtn:hover:not(:disabled) { border-color: var(--corum-glass-border-active); }
+
+.plgSetBtn:disabled { opacity: .45; cursor: default; }
+
+/* 卸载：16×16 居中，glyph 20px label-primary，无底，hover 变 state-error */
+.plgDelBtn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.plgDelBtn:hover:not(:disabled) { color: var(--dsw-alias-state-error-primary); }
+
+.plgDelBtn:disabled { opacity: .45; cursor: default; }
+
+/* ── 详情视图 ──────────────────────────────────────────────────────────── */
+.plgDetail { display: flex; flex-direction: column; gap: 14px; }
+
+/* 返回行：ghost（chevron 14 + 12px secondary） */
+.plgBackRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plgBackRow:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--corum-glass-2);
+}
+
+/* 详情网格：glass-2 / r16 / p[12,16] / 纵向 gap 8 */
+.plgDetailGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-2);
+}
+
+.plgDetailField { display: flex; align-items: baseline; gap: 12px; }
+
+.plgDetailLabel {
+  flex: none;
+  width: 56px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.plgDetailValue {
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+.plgDetailLink { color: var(--dsw-alias-brand-text); text-decoration: none; }
+
+.plgDetailLink:hover { text-decoration: underline; }
+
+.plgDetailActions { display: flex; gap: 10px; }
+
+/* ── 提示 / 反馈 ───────────────────────────────────────────────────────── */
+.plgHint {
+  flex: none;
+  margin: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.plgError {
+  flex: none;
+  margin: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-state-error-primary);
+  overflow-wrap: anywhere;
+}
+
+.plgNotice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+}
+
+.plgNoticeText {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.plgNoticeAction {
+  flex: none;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.plgNoticeClose {
+  flex: none;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* ── 动效降级 ──────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .plgSwitch,
+  .plgSwitchKnob {
+    transition: none;
+  }
+}
 
 /* ══════════ MCP 与集成 · 2026-09 设计稿复刻（v167UO/gTFZK/YEGzN/Jbn7a）══════════ */
 
