@@ -16,6 +16,9 @@ dist/
 .corum-dev-home/
 .electron-cache/
 packages/desktop/.corum-dev-home/
+# 验证实例（scripts/verify-instance.sh）：Agent 自己的实例，运行文件同样不入库
+packages/desktop/.corum-verify-home/
+.corum-verify-home/
 packages/desktop/.kkc-dev-home/
 packages/desktop/.kkc-pack-home/
 packages/desktop/.electron-cache/
