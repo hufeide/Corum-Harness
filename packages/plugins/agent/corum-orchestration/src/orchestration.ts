@@ -566,23 +566,24 @@ export interface CorumIntegrationTruth {
  * 而不是把整次 fan-in 判死。真未落地（分支不在 HEAD）依旧抛错 + 保留现场。
  */
 /**
- * fork（corum）：`orchestrate` 的合并开关判定（纯函数，2026-09-12 用户实测后改默认）。
+ * fork（corum）：`orchestrate` 要不要由机制收尾（纯函数，2026-09-12 两轮用户实测后定稿）。
  *
- * 用户实测「编排工作流的最后一个节点始终不会运行」，全库数据：12 个用过 orchestrate 的
- * 会话里 `autoIntegrate` 声明 true 仅 5 次、false 10 次、未声明 6 次，而**真正发生过集成
- * 的只有 3 个会话**——旧默认「不声明/false 一律只报告」把合并交给模型记性，它大多不会
- * 回来做，隔离分支就此静默搁浅（唯一一份提交没人看得到）。
+ * 演进：旧口径是「`merge.autoIntegrate` 缺省 = 只报告」，把合并交给模型记性。实测代价极大——
+ * 12 个用过 orchestrate 的会话里 `autoIntegrate` 声明 true 仅 5 次、false 10 次、未声明 6 次，
+ * **真正发生过集成的只有 3 个会话**，隔离分支（那份工作的唯一副本）静默搁浅；用户据此报
+ * 「编排工作流的最后一个节点始终不会运行」。随后改成「声明 verify 即默认自动集成」，
+ * 但用户点出关键：**这个字段对模型是个诱人的 footgun**——10 次提及里 10 次设成 false，
+ * 而它几乎不会回来执行（见 BUG-29）。
  *
- * 新口径：**声明了 `merge.verify` 就等于要跑完流水线** → 默认自动 merge + verify + commit；
- * 只有显式 `autoIntegrate: false` 才交回主 Agent（此时由 pending 通知兜底）。
+ * 定稿口径：**声明即执行**。传了 `merge`（哪怕只有 verify，甚至是空对象）= 要机制跑完流水线；
+ * 不传 = 分支留着给调用方，收尾走**显式动作** `subagent { integrate: true }`——
+ * 从「随手设 false 就忘」变成「必须真的调一次」，这正是两者可靠性的差别。
  *
- * @param merge - orchestrate 的 merge 声明（可能整体缺省）。
- * @returns 是否由机制自动集成。
+ * @param merge - orchestrate 的 merge 声明（缺省 = 调用方自己收尾）。
+ * @returns 是否由机制自动 merge + verify + commit。
  */
-export function corumAutoIntegrate(merge: { verify?: string; autoIntegrate?: boolean } | undefined): boolean {
-  if (merge === undefined) return false
-  if (merge.autoIntegrate !== undefined) return merge.autoIntegrate
-  return typeof merge.verify === 'string' && merge.verify.trim() !== ''
+export function corumAutoIntegrate(merge: { verify?: string } | undefined): boolean {
+  return merge !== undefined
 }
 
 export function corumIntegrationTruth(

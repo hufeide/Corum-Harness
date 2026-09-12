@@ -265,19 +265,14 @@ describe('corumWorktreeHasUncommitted — worktree 脏判定', () => {
   })
 })
 
-describe('corumAutoIntegrate — 收尾节点默认要真的运行（2026-09-12 用户实测）', () => {
-  it('声明了 verify → 默认自动集成（旧默认是只报告，导致分支静默搁浅）', () => {
+describe('corumAutoIntegrate — 声明即执行（2026-09-12 用户定调：去掉 autoIntegrate 字段）', () => {
+  it('传了 merge（带 verify）→ 机制收尾', () => {
     expect(corumAutoIntegrate({ verify: 'pnpm build && ./scripts/verify-fork-drift.sh' })).toBe(true)
   })
-  it('verify 是空白字符串 → 不自动集成', () => {
-    expect(corumAutoIntegrate({ verify: '   ' })).toBe(false)
+  it('传了 merge（即使只有空对象）→ 机制收尾', () => {
+    expect(corumAutoIntegrate({})).toBe(true)
   })
-  it('显式 autoIntegrate 优先（false = 交回主 Agent，此时由 pending 通知兜底）', () => {
-    expect(corumAutoIntegrate({ verify: 'x', autoIntegrate: false })).toBe(false)
-    expect(corumAutoIntegrate({ autoIntegrate: true })).toBe(true)
-  })
-  it('无 merge 声明 → 不自动集成', () => {
+  it('不传 merge → 分支留给调用方，收尾走显式 subagent { integrate: true }', () => {
     expect(corumAutoIntegrate(undefined)).toBe(false)
-    expect(corumAutoIntegrate({})).toBe(false)
   })
 })

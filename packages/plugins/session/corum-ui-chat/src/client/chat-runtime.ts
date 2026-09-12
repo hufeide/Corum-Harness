@@ -116,13 +116,13 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   }
 
   /** openContentDiff 桥（SubagentChanges 用；apply 注入，幂等）。 */
-  #openContentDiff: ((input: { absolutePath: string; originalContent: string; note?: string }) => Promise<{ ok: boolean; error?: string }>) | undefined
+  #openContentDiff: ((input: { absolutePath: string; originalContent: string; note?: string | undefined }) => Promise<{ ok: boolean; error?: string }>) | undefined
   /** apply 挂载时注入 openContentDiff 桥（SubagentChanges 用；幂等）。 */
-  setOpenContentDiff(fn: (input: { absolutePath: string; originalContent: string; note?: string }) => Promise<{ ok: boolean; error?: string }>): void {
+  setOpenContentDiff(fn: (input: { absolutePath: string; originalContent: string; note?: string | undefined }) => Promise<{ ok: boolean; error?: string }>): void {
     this.#openContentDiff = fn
   }
   /** SubagentChanges 经此桥打开 diff tab（apply 已注入 corumEditor 直调）。 */
-  openContentDiff(input: { absolutePath: string; originalContent: string; note?: string }): Promise<{ ok: boolean; error?: string }> {
+  openContentDiff(input: { absolutePath: string; originalContent: string; note?: string | undefined }): Promise<{ ok: boolean; error?: string }> {
     if (this.#openContentDiff === undefined) return Promise.resolve({ ok: false, error: '编辑器服务未就绪' })
     return this.#openContentDiff(input)
   }

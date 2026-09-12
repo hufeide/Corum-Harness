@@ -45,9 +45,9 @@ export type OrchestrateTaskOutcome =
 
 /** 集成（fan-in）阶段状态。 */
 export type OrchestrateIntegration =
-  /** 声明了 merge.autoIntegrate，正在/已经跑集成者。 */
+  /** 声明了 `merge` → 机制在所有任务 settle 后跑集成者（merge + verify + commit）。 */
   | { readonly kind: 'integrated' }
-  /** 集成者未启动（有任务失败，或未声明 autoIntegrate）。 */
+  /** 集成者未跑（有任务失败而中止；或本次调用未声明 `merge`——那要主 Agent 自己 `subagent { integrate: true }`）。 */
   | { readonly kind: 'pending'; readonly reason: string; readonly branches: readonly string[] }
 
 /** 编排调用的整体模式。 */
@@ -62,8 +62,6 @@ export interface OrchestrateChatData {
   readonly scriptName?: string
   /** 是否声明了 `merge`（决定要不要画「集成者」节点）。 */
   readonly hasMerge: boolean
-  /** 是否声明了 `merge.autoIntegrate`。 */
-  readonly autoIntegrate: boolean
   /** 父侧 `tool/call` id（子会话广播按它 + label 关联）。 */
   readonly callId: string
   /** 锚定卡片位置的父事件 seq。 */
@@ -195,14 +193,13 @@ export function parseCallArguments(args: unknown): {
   mode: OrchestrateMode
   scriptName?: string
   hasMerge: boolean
-  autoIntegrate: boolean
 } {
   let parsed: unknown = args
   if (typeof args === 'string') {
-    try { parsed = JSON.parse(args) } catch { return { tasks: [], mode: 'tasks', hasMerge: false, autoIntegrate: false } }
+    try { parsed = JSON.parse(args) } catch { return { tasks: [], mode: 'tasks', hasMerge: false } }
   }
   if (typeof parsed !== 'object' || parsed === null) {
-    return { tasks: [], mode: 'tasks', hasMerge: false, autoIntegrate: false }
+    return { tasks: [], mode: 'tasks', hasMerge: false }
   }
   const record = parsed as Record<string, unknown>
   const merge = typeof record['merge'] === 'object' && record['merge'] !== null
@@ -238,7 +235,6 @@ export function parseCallArguments(args: unknown): {
     mode: scripted ? 'script' : 'tasks',
     ...(scripted ? { scriptName: str(meta?.['name']) ?? '(unnamed)' } : {}),
     hasMerge: merge !== undefined,
-    autoIntegrate: bool(merge?.['autoIntegrate']) === true,
   }
 }
 
@@ -272,9 +268,11 @@ export function summarize(data: OrchestrateChatData): OrchestrateSummary {
   }
   return {
     title: `编排工作流 · ${total} 任务并行`,
-    subtitle: data.hasMerge && data.autoIntegrate
+    // 2026-09-12：`autoIntegrate` 字段已随 BUG-29 移除（声明 `merge` 即由机制收尾），
+    // 所以副标题按「有没有声明 merge」区分：声明了就会自动集成，没声明则分支留给调用方。
+    subtitle: data.hasMerge
       ? 'fan-out 并发 → fan-in 汇合 → 自动集成'
-      : 'fan-out 并发 → fan-in 汇合',
+      : 'fan-out 并发 → fan-in 汇合 → 分支留待手动集成',
     done, aborted, failed, total,
   }
 }

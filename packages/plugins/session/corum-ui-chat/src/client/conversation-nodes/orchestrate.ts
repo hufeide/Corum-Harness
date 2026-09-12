@@ -46,7 +46,6 @@ interface OrchestrateCallState {
   readonly mode: OrchestrateMode
   readonly scriptName?: string
   readonly hasMerge: boolean
-  readonly autoIntegrate: boolean
   readonly outcomes: ReadonlyMap<number, { kind: 'done' } | { kind: 'aborted' } | { kind: 'failed'; error: string }>
   readonly settled: boolean
   readonly errored: boolean
@@ -69,7 +68,6 @@ function startCall(match: ConversationMatch): OrchestrateCallState {
     mode: parsed.mode,
     ...parsed.scriptName === undefined ? {} : { scriptName: parsed.scriptName },
     hasMerge: parsed.hasMerge,
-    autoIntegrate: parsed.autoIntegrate,
     outcomes: new Map(),
     settled: false,
     errored: false,
@@ -180,7 +178,6 @@ export function orchestrateCallDefinition(
         mode: state.mode,
         ...state.scriptName === undefined ? {} : { scriptName: state.scriptName },
         hasMerge: state.hasMerge,
-        autoIntegrate: state.autoIntegrate,
         callId: state.callId,
         anchorSeq: state.anchorSeq,
         time: state.time,

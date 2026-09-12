@@ -90,6 +90,10 @@ import type { SkillEntry } from './skill-entry.ts'
 import type {} from '@corum/corum-api-remotes/corum-events'
 // 值导入 stopReasonOfTurnEnd：turn/end.reason.kind → SubagentStopReason（同口径，同包依赖已存在）。
 import { stopReasonOfTurnEnd, type SubagentStopReason, type SubagentTodoItem, type SubagentChangeSummary } from '@corum/corum-api-remotes/corum-events'
+// 模块增强：加载 dsh-tool-todo 的 'todo/write' SessionEventMap 扩展声明
+// （corum-agent 在 compile.ts 里把 dsh-tool-todo 编进工具表，但 TS 不会自动
+// 拉取其类型增强——这里显式 import 只触发 declare module 合并，无运行时开销）。
+import type {} from '@deepseek-ai/dsh-tool-todo'
 
 // 再导出：保持既有消费方（index.ts / project-service.ts / runtime.ts /
 // contract/agent.ts）的 import 面不变——包内拆分对外的稳定锚。
