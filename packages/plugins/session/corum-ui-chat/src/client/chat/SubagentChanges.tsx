@@ -55,6 +55,11 @@ interface RollbackResult {
   message?: string
 }
 
+/** RPC `corumReview/snapshot` 返回形（与 host corum-review.ts 同款；只取 files）。 */
+interface ReviewSnapshotResult {
+  readonly files?: readonly { readonly path: string; readonly added: number; readonly removed: number }[]
+}
+
 /** `__corumNotify` 一次写只读桥（规范 §1 例外：CorumNotification 面）。 */
 interface CorumNotifyBridge {
   __corumNotify?: (n: { tone: 'error'; title: string; message?: string | undefined }) => void
@@ -88,6 +93,28 @@ function useChangeSummary(childSessionId: string | undefined): SubagentChangeSum
       if (cancelled || frame.sessionId !== childSessionId) return
       if (frame.changeSummary !== undefined) setSummary(frame.changeSummary)
     })
+    // 基线拉取（与「并行工作区」台账同款理由，2026-09-12 真机实测的必修项）：
+    // 本组件只在**卡片展开**时挂载，而 host 的 changeSummary 只在子 Agent 终态那一刻
+    // 发一帧——用户几乎总是跑完才展开，纯订阅永远收不到那一帧，改动段从不出现。
+    // 直连 host 真值 `corumReview/snapshot(childSessionId)` 补齐；帧后到者优先
+    // （帧带 worktreePath/committed/integrated，快照没有），故用 `prev ?? pulled`。
+    void (async () => {
+      const conn = chatRuntimeRef.current?.connection
+      if (conn === undefined) return
+      try {
+        const result = await conn.rpc.call('/api', 'corumReview/snapshot', {
+          args: { sessionId: childSessionId },
+        }) as { ok: boolean; value?: ReviewSnapshotResult }
+        if (cancelled || !result.ok || result.value === undefined) return
+        const files = result.value.files ?? []
+        setSummary(prev => prev ?? {
+          filesChanged: files.length,
+          files: files.map(f => ({ path: f.path, added: f.added, removed: f.removed })),
+        })
+      } catch {
+        // 取不到快照 → 保持缺省（不渲染改动段），与旧行为一致。
+      }
+    })()
     return () => { cancelled = true; sub.unsubscribe() }
   }, [childSessionId])
   return summary

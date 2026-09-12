@@ -678,6 +678,8 @@ interface WorktreeLedgerFrame {
     branch?: string
     path?: string
     status?: string
+    /** 与 childSessionId 同值（存量台账可能只有这个）——行可点性的兜底来源。 */
+    runId?: string
     childSessionId?: string
   }>
   pending?: number
@@ -757,11 +759,15 @@ function useWorktreeLedger(
       for (const entry of frame.entries ?? []) {
         if (entry.slug === undefined || entry.branch === undefined) continue
         const m = slugModelRef.current.get(entry.slug)
+        // 子会话 id：`childSessionId` 缺省时回退 `runId`——两者同值（见 CorumWorktreeEntry
+        // 注释），但存量台账（2026-09-12 之前的结算回退路径）只有 runId，只认
+        // childSessionId 的话工作区行会渲染成**不可点的死行**（无 → 与 title）。
+        const childId = entry.childSessionId ?? entry.runId
         next.push({
           slug: entry.slug,
           branch: entry.branch,
           status: entry.status ?? 'active',
-          ...(entry.childSessionId !== undefined ? { childSessionId: entry.childSessionId } : {}),
+          ...(childId !== undefined ? { childSessionId: childId } : {}),
           ...m !== undefined ? { model: m } : {},
         })
       }
@@ -879,14 +885,23 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
   const nowTps = speedSeries.length > 0 ? (speedSeries[speedSeries.length - 1]?.tps ?? avgTps) : avgTps
   const peakTps = speedSeries.length > 0 ? Math.max(...speedSeries.map(s => s.tps)) : 0
   // BUG-26：终态子 Agent / 已结工作区折叠。运行中条目**永不折叠**——
-  // outcome === undefined 的条目始终逐条渲染，不受折叠开关影响。
+  // 真运行中的条目始终逐条渲染，不受折叠开关影响。
   const [terminalFoldOpen, setTerminalFoldOpen] = useState(false)
   const [worktreeFoldOpen, setWorktreeFoldOpen] = useState(false)
-  // 子 Agent：终态 = completed/aborted/failed；运行中（undefined）始终单独渲染。
+  // 子 Agent 终态判据 = 「有 outcome」**或** `entry.done`。必须两者取或：`done` 是宿主
+  // 自己的终局标志（turn/end 落定、以及冷恢复时只存在于持久化里的 `inactive` 条目，
+  // 见本文件 roster 组装的注释），而 `stopReason` 只在能拿到终局原因时才有——进程被杀 /
+  // 冷恢复 / 异常结束的条目是 `done: true` + `stopReason: undefined`。旧实现只用
+  // stopReason 分类，于是这些条目**行内已经显示「已完成」却永不折叠**：
+  // 2026-09-12 真机实测（重启杀掉的 2 个子 Agent）浮层里就有 2 行这样的僵尸条目，
+  // BUG-26 的「条目越多越看不全」在它们身上依旧复现。
   const rankedRoster = rankRoster(roster)
-  const terminalEntries = rankedRoster.filter(e => subagentOutcomeOf(e.stopReason) !== undefined)
-  const runningEntries = rankedRoster.filter(e => subagentOutcomeOf(e.stopReason) === undefined)
-  const terminalCompleted = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'completed').length
+  const isTerminalEntry = (e: SubagentRosterEntry): boolean =>
+    subagentOutcomeOf(e.stopReason) !== undefined || e.done
+  const terminalEntries = rankedRoster.filter(isTerminalEntry)
+  const runningEntries = rankedRoster.filter(e => !isTerminalEntry(e))
+  const terminalCompleted = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) !== 'aborted'
+    && subagentOutcomeOf(e.stopReason) !== 'failed').length
   const terminalAborted = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'aborted').length
   const terminalFailed = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'failed').length
   // 工作区：integrated/discarded 折叠；active/settled 始终单独渲染。

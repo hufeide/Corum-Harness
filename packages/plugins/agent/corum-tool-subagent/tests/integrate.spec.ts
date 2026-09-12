@@ -29,6 +29,9 @@ import {
   corumMergedBranches,
   corumAutoIntegrate,
   corumReconcileIntegrated,
+  corumReapRestoredEntries,
+  corumReapOrphanWorktrees,
+  corumListIsolatedWorktrees,
   corumIntegrationFailure,
   corumIntegrationTruth,
   corumIntegratorPersona,
@@ -281,6 +284,36 @@ describe('corumAutoIntegrate — 声明即执行（2026-09-12 用户定调：去
   })
 })
 
+describe('corumReapRestoredEntries — 启动清扫（重启杀掉的僵尸子 Agent 不再永远占着 worktree）', () => {
+  it('空分支 + 干净 worktree → 现场回收，条目剔除', () => {
+    const { repo, worktree, branch, entry } = makeRepoWithWorktree('wt-reap1')
+    // 空分支（worktree 建好后一个提交都没做）——重启杀掉子 Agent 的典型形态
+    const kept = corumReapRestoredEntries(repo, [{ ...entry, status: 'active' }])
+    expect(kept).toEqual([])
+    expect(existsSync(worktree)).toBe(false)
+    expect(branchExists(repo, branch)).toBe(false)
+  })
+
+  it('未提交改动 → 保留目录，条目保留（唯一副本不能丢）', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree('wt-reap2')
+    writeFileSync(join(worktree, 'wip.txt'), '写了一半的工作')
+    const kept = corumReapRestoredEntries(repo, [{ ...entry, status: 'active' }])
+    expect(kept.length).toBe(1)
+    expect(existsSync(join(worktree, 'wip.txt'))).toBe(true)
+  })
+
+  it('分支有未并入 HEAD 的提交 → 保留分支与条目（那是唯一留存；目录按既有安全语义可清）', () => {
+    const { repo, worktree, branch, entry } = makeRepoWithWorktree('wt-reap3')
+    commitInWorktree(worktree, 'ORCH-REAP-3.txt')
+    const kept = corumReapRestoredEntries(repo, [{ ...entry, status: 'settled' }])
+    expect(kept.length).toBe(1)
+    // 安全清理的既有语义：**分支**（提交的唯一留存）必须保留，目录本身可清
+    // （与 cleanupOnDispose 同款——提交进了分支，工作没有丢）。
+    expect(branchExists(repo, branch)).toBe(true)
+    expect(existsSync(worktree)).toBe(false)
+  })
+})
+
 describe('corumReconcileIntegrated — 台账认账「外包出去的合并」（2026-09-12 用户实测）', () => {
   it('分支已被合并进 HEAD（机制没参与）→ 条目翻成 integrated', () => {
     const { repo, worktree, branch, entry } = makeRepoWithWorktree()
@@ -317,5 +350,49 @@ describe('corumReconcileIntegrated — 台账认账「外包出去的合并」�
     expect(corumBranchTip(repo, 'wt/wt-nope')).toBeUndefined()
     const reconciled = corumReconcileIntegrated(repo, [{ ...entry, status: 'settled' }])
     expect(reconciled.flipped).toEqual([])
+  })
+})
+
+describe('corumReapOrphanWorktrees — 台账之外的孤儿 worktree 清扫（2026-09-12 实测 10 个纯空目录）', () => {
+  it('干净 + 分支对 HEAD 零新增 → 目录与分支一起回收', () => {
+    const { repo, worktree, branch } = makeRepoWithWorktree('wt-orphan1')
+    expect(corumReapOrphanWorktrees(repo)).toBe(1)
+    expect(existsSync(worktree)).toBe(false)
+    expect(branchExists(repo, branch)).toBe(false)
+  })
+
+  it('分支带着独立提交 → 整个留（那是唯一留存）', () => {
+    const { repo, worktree, branch } = makeRepoWithWorktree('wt-orphan2')
+    commitInWorktree(worktree, 'ORPHAN-2.txt')
+    expect(corumReapOrphanWorktrees(repo)).toBe(0)
+    expect(branchExists(repo, branch)).toBe(true)
+    expect(existsSync(worktree)).toBe(true)
+  })
+
+  it('有未提交改动 → 留目录（重跑也不动）', () => {
+    const { repo, worktree } = makeRepoWithWorktree('wt-orphan3')
+    writeFileSync(join(worktree, 'wip.txt'), 'x')
+    expect(corumReapOrphanWorktrees(repo)).toBe(0)
+    expect(existsSync(join(worktree, 'wip.txt'))).toBe(true)
+  })
+
+  it('在册（keep 集合内）→ 不碰，即便干净无提交', () => {
+    const { repo, worktree, branch } = makeRepoWithWorktree('wt-orphan4')
+    expect(corumReapOrphanWorktrees(repo, new Set([worktree]))).toBe(0)
+    expect(existsSync(worktree)).toBe(true)
+    expect(branchExists(repo, branch)).toBe(true)
+  })
+
+  it('只扫本仓 .corum-worktrees 根下的 worktree（别人的不碰）', () => {
+    const { repo } = makeRepoWithWorktree('wt-orphan5')
+    const outside = join(repo, 'elsewhere', 'wt-manual')
+    corumGit(repo, ['worktree', 'add', '-q', outside, '-b', 'manual/branch'])
+    // 路径形态按 realpath 归一（macOS tmpdir 的 /var ↔ /private/var），只断言「是本仓
+    // .corum-worktrees 下那一个」——序号与后缀足够，不锁 tmpdir 前缀。
+    const listed = corumListIsolatedWorktrees(repo)
+    expect(listed.length).toBe(1)
+    expect(listed[0].path.endsWith(join('.corum-worktrees', 'wt-orphan5'))).toBe(true)
+    expect(corumReapOrphanWorktrees(repo)).toBe(1)
+    expect(existsSync(outside)).toBe(true)
   })
 })

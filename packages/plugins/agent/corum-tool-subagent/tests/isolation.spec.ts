@@ -230,6 +230,19 @@ describe('corumMarkSettled — fork（corum）subagent/end settle 联动', () =>
     const entries = [entry({ runId: 'run-2', status: 'settled' })]
     expect(corumMarkSettled(entries, { runId: 'run-2', childId: 'child-2' })).toBe(false)
   })
+
+  it('结算回退分支也写 childSessionId（否则浮层工作区行是死行，2026-09-12 真机实测）', () => {
+    const entries = [entry({ runId: undefined })]
+    expect(corumMarkSettled(entries, { runId: 'run-fb', childId: 'child-fb' })).toBe(true)
+    expect(entries[0].runId).toBe('run-fb')
+    expect(entries[0].childSessionId).toBe('child-fb')
+  })
+
+  it('精确命中路径补写缺失的 childSessionId（存量台账只有 runId）', () => {
+    const entries = [entry({ runId: 'run-only' })]
+    expect(corumMarkSettled(entries, { runId: 'run-only', childId: 'child-only' })).toBe(true)
+    expect(entries[0].childSessionId).toBe('child-only')
+  })
 })
 
 describe('corumMarkSettled — fork（corum）并行精确匹配（2026-09-09 settle 修复）', () => {
@@ -426,6 +439,23 @@ describe('entriesOf/emitFrame — 认账「主 Agent 派子 Agent 合并掉的�
     expect(orchestration.entriesOf(sessionId)[0].status).toBe('active')
     expect(existsSync(child.path)).toBe(true)
     expect(execFileSync('git', ['-C', repo, 'branch', '--list', child.branch], { encoding: 'utf8' }).trim()).not.toBe('')
+  })
+
+  it('空分支 + main 往前走（tip 变成 HEAD 的祖先）同样不认账：跨重启实测的误判路径', () => {
+    const repo = join(scratch, 'recon-repo-6')
+    rmSync(repo, { recursive: true, force: true })
+    execFileSync('git', ['init', '-q', '-b', 'main', repo], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 'test@corum.local'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'corum-test'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init'], { stdio: 'pipe' })
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-recon-6'
+    const child = orchestration.createWorktreeChild(sessionId, repo)
+    // main 往前一步：空分支的 tip 现在成了 HEAD 的**严格祖先** → `--merged` 会列出它，
+    // 只看 tip !== HEAD 判不出来（重启后真机就是这么被误判的）。
+    execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'main moves on'], { stdio: 'pipe' })
+    expect(orchestration.entriesOf(sessionId)[0].status).toBe('active')
+    expect(existsSync(child.path)).toBe(true)
   })
 })
 

@@ -28,10 +28,17 @@
  * ```
  *
  * - `before` 步骤（按序执行）：`click`（CSS 选择器，或 `text:` 前缀按可见文字找按钮）、
- *   `wait`（毫秒）、`eval`（原始 JS，返回值忽略）。
+ *   `wait`（毫秒）、`eval`（原始 JS，返回值忽略）、`type`（真打字：`{ type, into?, submit? }`
+ *   —— 走 CDP `Input.insertText`，React 受控组件只有这条路数；`submit: true` 追加 Enter）、
+ *   `key`（单键/组合键，如 `"Escape"`、`"Meta+a"`）。
  * - `assert` 条目（按序执行）：`exists` / `count` / `textContains` / `textEquals` /
- *   `style`（计算样式精确匹配，值做去空格比较）/ `screenshot`（存到 CDP_OUT）。
+ *   `style`（计算样式精确匹配，值做去空格比较）/ `js`（原始表达式，与 `expect` 做
+ *   JSON 深比较；省略 `expect` 即「取真值」——滚动量、折叠行数这类测得值用它）/
+ *   `screenshot`（存到 CDP_OUT）。
  *   任一条失败 → 该条标 FAIL，最后汇总并**以非零码退出**（可直接当门禁用）。
+ * - 顶层 `target`：`"main"`（缺省，排除浮窗）或 `"floating"`（`?floating=<slotKey>` 浮窗，
+ *   先用 `window.corumDesktop.openFloating(slotKey)` 打开）；`pageUrlIncludes` 可做任意子串
+ *   匹配。浮窗验证**必须**指定，否则断言打在主窗上（假绿）。
  *
  * ## 与 cdp.mjs 的关系
  *
@@ -135,11 +142,27 @@ async function getJson(url) {
   return r.json()
 }
 
-/** 连到指定端口的第一个 page（应用主窗口）。 */
-async function attach(port) {
+/**
+ * 连到指定端口的 page。
+ *
+ * 选面（`spec.target` / `spec.pageUrlIncludes`）：
+ *   - 缺省 / `'main'`：主窗口（**排除** `?floating=` 的浮窗——浮窗也是 page，
+ *     「取第一个」在浮窗先建时会挑错窗口，断言就会打在错的 DOM 上）；
+ *   - `'floating'`：浮窗（`?floating=<slotKey>`，用 `window.corumDesktop.openFloating(slotKey)` 打开）；
+ *   - `pageUrlIncludes`：任意子串匹配（优先级最高，用于多浮窗/自定义场景）。
+ */
+async function attach(port, target = 'main', pageUrlIncludes) {
   const list = await getJson(`http://127.0.0.1:${port}/json/list`)
-  const page = list.find(p => p.type === 'page')
-  if (page === undefined) throw new Error(`no page on :${port}（应用没起或端口不对）`)
+  const pages = list.filter(p => p.type === 'page')
+  if (pages.length === 0) throw new Error(`no page on :${port}（应用没起或端口不对）`)
+  const page = pageUrlIncludes !== undefined
+    ? pages.find(p => (p.url ?? '').includes(pageUrlIncludes))
+    : target === 'floating'
+      ? pages.find(p => (p.url ?? '').includes('floating='))
+      : pages.find(p => !(p.url ?? '').includes('floating=')) ?? pages[0]
+  if (page === undefined) {
+    throw new Error(`no page on :${port}（target=${target}${pageUrlIncludes === undefined ? '' : `, pageUrlIncludes=${pageUrlIncludes}`}）（应用没起、端口不对，或浮窗没打开）`)
+  }
   const version = await getJson(`http://127.0.0.1:${port}/json/version`)
   const cdp = await connect(version.webSocketDebuggerUrl)
   const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: page.id, flatten: true })
@@ -176,6 +199,49 @@ async function runStep(cdp, sessionId, step) {
     return `click ${step.click}`
   }
   if (step.eval !== undefined) { await evaluate(cdp, sessionId, step.eval); return 'eval' }
+  // 真打字（Input.insertText）——React 受控组件不吃 `el.value=`，必须走 Input 域。
+  // 先按 `into`（缺省：当前聚焦元素）聚焦，再插入文本；`submit: true` 追加一次 Enter。
+  if (step.type !== undefined) {
+    if (step.into !== undefined) {
+      const ok = await evaluate(cdp, sessionId, `(() => { const el = ${finder(step.into)}; if (!el) return false; el.focus(); return true })()`)
+      if (ok !== true) throw new Error(`before.type 的 into 找不到元素：${step.into}`)
+    }
+    await cdp.send('Input.insertText', { text: step.type }, sessionId)
+    if (step.submit === true) {
+      const key = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key }, sessionId)
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key }, sessionId)
+    }
+    return `type ${step.type.length} 字${step.submit === true ? ' + Enter' : ''}`
+  }
+  // 单个按键（含修饰键组合），如 `{ "key": "Escape" }` / `{ "key": "Meta+a" }`。
+  if (step.key !== undefined) {
+    const parts = String(step.key).split('+')
+    const main = parts.pop()
+    const mods = { alt: parts.includes('Alt'), ctrl: parts.includes('Control'), meta: parts.includes('Meta'), shift: parts.includes('Shift') }
+    const vk = main.length === 1 ? main.toUpperCase().charCodeAt(0) : (main === 'Enter' ? 13 : main === 'Escape' ? 27 : main === 'ArrowDown' ? 40 : main === 'ArrowUp' ? 38 : 0)
+    const ev = { key: main, code: main.length === 1 ? `Key${main.toUpperCase()}` : main, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: (mods.alt ? 1 : 0) | (mods.ctrl ? 2 : 0) | (mods.meta ? 4 : 0) | (mods.shift ? 8 : 0) }
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...ev }, sessionId)
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...ev }, sessionId)
+    return `key ${step.key}`
+  }
+  // 视口（`{ "resize": { "width": 1100, "height": 620 } }`，`{ "resize": { "reset": true } }` 复原）：
+  // 验证「内容超出上限才可滚」这类断言必须真的把视口压小，否则浮层自带 max-height
+  // 吸满、永远不溢出 → 假绿。走 Emulation 域（Electron 的浏览器级 Browser.setWindowBounds
+  // 在这条连接上不可用），vh 因此按模拟视口计算。
+  if (step.resize !== undefined) {
+    if (step.resize.reset === true) {
+      await cdp.send('Emulation.clearDeviceMetricsOverride', {}, sessionId)
+      return 'resize 复原'
+    }
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: step.resize.width,
+      height: step.resize.height,
+      deviceScaleFactor: 0,
+      mobile: false,
+    }, sessionId)
+    return `resize ${step.resize.width}x${step.resize.height}`
+  }
   throw new Error(`未知 before 步骤：${JSON.stringify(step)}`)
 }
 
@@ -225,6 +291,15 @@ async function runAssertion(cdp, sessionId, a) {
         : bad.map(n => `${n}: 期望 ${a.style[n]} 实得 ${String(got[n]).trim()}`).join('; '),
     }
   }
+  if (a.js !== undefined) {
+    const got = await evaluate(cdp, sessionId, a.js)
+    const ok = a.expect === undefined ? Boolean(got) : JSON.stringify(got) === JSON.stringify(a.expect)
+    return {
+      label,
+      pass: ok,
+      detail: `实得 ${JSON.stringify(got)}${a.expect === undefined ? '' : `（期望 ${JSON.stringify(a.expect)}）`}`,
+    }
+  }
   throw new Error(`未知断言：${JSON.stringify(a)}`)
 }
 
@@ -233,7 +308,7 @@ async function main() {
   const spec = await loadSpec(specPath)
   const port = Number(spec.port ?? process.env.CDP_PORT ?? 9333)
   assertMainInstanceAllowed(port)
-  const { cdp, sessionId } = await attach(port)
+  const { cdp, sessionId } = await attach(port, spec.target ?? 'main', spec.pageUrlIncludes)
   const results = []
   try {
     for (const step of spec.before ?? []) await runStep(cdp, sessionId, step)

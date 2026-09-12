@@ -22,7 +22,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -63,6 +63,14 @@ export interface CorumWorktreeEntry {
   runId?: string
   /** fork（corum）：子会话 id（与 runId 同值；浮层行点击 → 进入子会话）。 */
   childSessionId?: string
+  /**
+   * fork（corum）：分支创建点（`git worktree add -b` 那一刻的 HEAD）。
+   *
+   * 对账判据的一部分：`tip === base` 说明这条分支**一个提交都没做**——空分支在
+   * `git branch --merged HEAD` 里与「真合并过的分支」同形（main 往前走一步就认不出），
+   * 不设防就会把「什么都没干、甚至是还在跑」的条目签收成 `integrated`。
+   */
+  base?: string
 }
 
 /** 台账快照的一帧：某父会话的 worktree 条目全量投影（renderer 直接渲染）。 */
@@ -101,6 +109,7 @@ const corumLedgerRecordSchema = z.object({
     status: z.enum(['active', 'settled', 'integrated', 'discarded']),
     runId: z.string().optional(),
     childSessionId: z.string().optional(),
+    base: z.string().optional(),
   })),
 }) as unknown as z.ZodType<CorumLedgerRecord>
 
@@ -269,6 +278,101 @@ export function corumMergedBranches(cwd: string): Set<string> {
   }
 }
 
+/** fork（corum）：realpath（macOS 的 /var → /private/var 符号链接会让前缀/相等比较失配）。 */
+function corumRealPath(p: string): string {
+  try { return realpathSync(p) } catch { return p }
+}
+
+/** fork（corum）：分支是否带着 HEAD 之外的提交（true = 有独立工作，不能删）。 */
+export function corumBranchAddsCommits(cwd: string, branch: string): boolean {
+  try {
+    const out = execFileSync('git', ['rev-list', '--count', `HEAD..${branch}`], { cwd, encoding: 'utf8', stdio: 'pipe' })
+    return Number.parseInt(out.trim(), 10) > 0
+  } catch {
+    // 分支不存在/git 失败：当作「有独立工作」保守处理，绝不动它。
+    return true
+  }
+}
+
+/**
+ * fork（corum）：列出**本仓自己的**隔离 worktree（`<cwd>/.corum-worktrees/*`）。
+ *
+ * 只认这个根下的路径——别人的 worktree（用户手动建的、别的工具的）一律不进清扫面。
+ * @param cwd - 主树工作目录。
+ * @returns `{ path, branch }` 列表（git 失败返回空数组）。
+ */
+export function corumListIsolatedWorktrees(cwd: string): { path: string; branch: string }[] {
+  const root = `${corumRealPath(path.resolve(cwd, '.corum-worktrees'))}${path.sep}`
+  try {
+    const out = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd, encoding: 'utf8', stdio: 'pipe' })
+    const items: { path: string; branch: string }[] = []
+    let current: string | undefined
+    for (const raw of out.split('\n')) {
+      const line = raw.trimEnd()
+      if (line.startsWith('worktree ')) { current = line.slice('worktree '.length).trim(); continue }
+      if (line.startsWith('branch ') && current !== undefined) {
+        const branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '')
+        items.push({ path: current, branch })
+        current = undefined
+      }
+    }
+    return items.filter(item => corumRealPath(item.path).startsWith(root))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * fork（corum）：**孤儿 worktree 清扫**——台账已经不记得、也没有留存价值的隔离工作区。
+ *
+ * 为什么需要（2026-09-12 实测）：台账记录在「没有待集成条目」时会被删掉，而子 Agent
+ * 被进程退出杀掉时永远不会 settle → worktree 与分支留在磁盘上**没有任何记录引用它们**，
+ * 之后的对账/懒剔除都碰不到（本仓实测 10 个这样的纯空目录，加上台账内的共 17 个）。
+ *
+ * 只在启动调用（唯一能确定没有子 Agent 在跑的时刻）。三重保守闸门，任一不满足就跳过：
+ * ① 有未提交改动 → 留目录；② 分支带着 HEAD 之外的提交 → 整个留（那是唯一留存）；
+ * ③ 台账里还活着的条目 → 不碰。只有「干净 + 分支对 HEAD 零新增」才会目录和分支一起删。
+ *
+ * @param cwd - 主树工作目录。
+ * @param keep - 台账在册的 worktree 路径（活着的一律不动）。
+ * @returns 实际回收的数量。
+ */
+export function corumReapOrphanWorktrees(cwd: string, keep: ReadonlySet<string> = new Set()): number {
+  // keep 集合与 git 报的路径都可能带/不带符号链接解析（macOS tmpdir /var ↔ /private/var）
+  // → 两边统一成 realpath 再比。
+  const keepReal = new Set([...keep].map(corumRealPath))
+  let reaped = 0
+  for (const item of corumListIsolatedWorktrees(cwd)) {
+    if (keepReal.has(corumRealPath(item.path))) continue
+    if (corumWorktreeHasUncommitted(item.path)) continue
+    if (corumBranchAddsCommits(cwd, item.branch)) continue
+    if (corumCleanupWorktree(cwd, item, { force: false })) reaped += 1
+  }
+  return reaped
+}
+
+/**
+ * fork（corum）：**启动清扫**——恢复台账时把「已经没有留存价值」的条目连现场一起回收。
+ *
+ * 为什么只能在启动做：这是唯一能确定「没有任何子 Agent 还在跑」的时刻。子 Agent 被
+ * 进程退出杀掉时永远不会 settle，条目就以 `active` 留在台账里——既不回收（安全清理
+ * 只对 settle 过的条目生效，避免拔掉活子 Agent 的工作目录），也不消失（next `entriesOf`
+ * 判它「分支还在 = 活条目」），于是 `.corum-worktrees` 永久堆积（2026-09-12 实测 20+ 个，
+ * 其中 13 个零提交零改动的纯空目录）。
+ *
+ * 判据 = 既有的**安全清理**返回值：`corumCleanupWorktree(force:false)` 只在
+ * 「分支不并入 HEAD 就留分支、worktree 有未提交改动就留目录」都通过、现场真的被清干净时
+ * 才返回 true。清干净 ⇒ 磁盘上什么都没了 ⇒ 条目没有留存价值，从台账剔除（否则它会在
+ * 下一次 `entriesOf` 被判成「死条目」再剔一次，日志与状态都会多绕一圈）。
+ *
+ * @param cwd - 主树工作目录。
+ * @param entries - 恢复出来的台账条目。
+ * @returns 保留的条目（现场未清干净的一律保留，状态如实）。
+ */
+export function corumReapRestoredEntries(cwd: string, entries: readonly CorumWorktreeEntry[]): CorumWorktreeEntry[] {
+  return entries.filter(entry => !corumCleanupWorktree(cwd, entry, { force: false }))
+}
+
 /**
  * fork（corum）：分支 tip（sha；分支不存在/git 不可用 → undefined）。
  *
@@ -329,6 +433,10 @@ export function corumReconcileIntegrated(
     if (!merged.has(entry.branch)) return entry
     const tip = corumBranchTip(cwd, entry.branch)
     if (tip === undefined || tip === head) return entry
+    // 空分支（创建后从未提交）不认账：`tip === base` 说明这条分支与它的创建点分毫不差，
+    // 合并它等于什么都没并。缺 `base`（2026-09-12 之前的存量条目）时无从判断，
+    // 只靠上面的 `tip !== head` 兜底。
+    if (entry.base !== undefined && tip === entry.base) return entry
     flipped.push(entry.slug)
     return { ...entry, status: 'integrated' as const }
   })
@@ -593,9 +701,17 @@ export function corumMarkSettled(
 ): boolean {
   const match = (id: string | undefined): CorumWorktreeEntry | undefined =>
     id === undefined ? undefined : entries.find(entry => entry.status === 'active' && entry.runId === id)
+  // childSessionId 与 runId 同值（见 CorumWorktreeEntry 注释），但**必须单独补写**：
+  // 浮层「并行工作区」行的可点性只看 childSessionId。2026-09-12 真机实测：本仓台账里
+  // 2 条已结算条目只有 runId、没有 childSessionId（走的是下面的回退分支），于是
+  // 「工作区行点击进入子会话」在真实数据上**全是死行**（渲染成 div，没有 → 与 title）。
+  const childIdOf = (entry: CorumWorktreeEntry): string | undefined =>
+    entry.childSessionId ?? settle.childId ?? entry.runId
   const byId = match(settle.runId) ?? match(settle.childId)
   if (byId !== undefined) {
     byId.status = 'settled'
+    const childId = childIdOf(byId)
+    if (childId !== undefined) byId.childSessionId = childId
     return true
   }
   if (settle.childId === undefined) return false
@@ -603,6 +719,7 @@ export function corumMarkSettled(
   if (candidates.length === 1) {
     candidates[0].status = 'settled'
     candidates[0].runId = settle.runId ?? settle.childId
+    candidates[0].childSessionId = settle.childId ?? settle.runId
     return true
   }
   return false
@@ -868,8 +985,22 @@ export class CorumOrchestration extends Service {
       this.ctx.effect(() => () => { void domain.close() }, 'corumOrchestration.domainClose')
       // 启动恢复：重建台账（仅 active/settled 待集成条目——孤儿 worktree 识别）。
       for (const [sessionId, record] of domain.table('ledger').entries()) {
-        this.ledger.set(sessionId, record.entries.map(e => ({ ...e })))
+        // 存量修补：childSessionId 与 runId 同值（见 CorumWorktreeEntry 注释），但
+        // 2026-09-12 之前的结算回退路径只写了 runId → 恢复后的条目在浮层里是**死行**
+        // （「并行工作区」行的可点性只看 childSessionId）。这里就地补齐，不改动语义。
+        this.ledger.set(sessionId, corumReapRestoredEntries(record.cwd, record.entries.map(e => e.childSessionId !== undefined || e.runId === undefined
+          ? { ...e }
+          : { ...e, childSessionId: e.runId })))
         this.ledgerCwds.set(sessionId, record.cwd)
+        this.persist(sessionId)
+      }
+      // 台账之外的孤儿 worktree 也清一遍（台账记录会因「无待集成条目」被删掉，那些
+      // worktree 就再没有任何记录引用；实测本仓 10 个纯空目录属于这一类）。
+      for (const cwd of new Set(this.ledgerCwds.values())) {
+        const keep = new Set<string>()
+        for (const entries of this.ledger.values()) for (const entry of entries) keep.add(entry.path)
+        const reaped = corumReapOrphanWorktrees(cwd, keep)
+        if (reaped > 0) this.ctx.logger.info(`corumOrchestration: 启动清扫回收 ${reaped} 个孤儿 worktree（${cwd}）`)
       }
     }).catch((error: unknown) => {
       this.ctx.logger.error(`corumOrchestration: open domain failed: ${String(error)}`)
@@ -996,7 +1127,12 @@ export class CorumOrchestration extends Service {
       corumCleanupWorktree(parentCwd, { path: worktreePath, branch })
       throw error
     }
-    this.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath })
+    // 记下分支创建点（= 当时的 HEAD）。对账时用「tip 有没有离开 base」区分
+    // 「真的做了事的分支」与「一条提交都没有的空分支」——空分支一旦 main 往前走了，
+    // 在 `git branch --merged HEAD` 里与真合并过的分支完全同形（2026-09-12 实测：
+    // 两条刚建好的空分支在重启后就被误判成 integrated 并回收）。
+    const base = corumBranchTip(parentCwd, branch)
+    this.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath, ...base === undefined ? {} : { base } })
     return { slug, branch, path: worktreePath }
   }
 
