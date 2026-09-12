@@ -356,6 +356,21 @@ function SpeedChart({ samples, width = 300, height = 138 }: {
   )
 }
 
+/** 子 Agent 终局原因（与 `@corum/corum-api-remotes/corum-events` 的
+ *  `SubagentStopReason` 同构；本包不 import 该包——红线 3：跨 bundle 用本地
+ *  能力接口收窄，与 `WorktreeLedgerFrame` 窄化注释同惯例）。 */
+type SubagentStopReason = 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+
+/** stopReason → 三态终态（undefined = 运行中/未结束）；与 `subagentOutcomeOf` 同语义。 */
+function subagentOutcomeOf(stopReason: SubagentStopReason | undefined): 'completed' | 'aborted' | 'failed' | undefined {
+  switch (stopReason) {
+    case 'completed': return 'completed'
+    case 'aborted': return 'aborted'
+    case 'error': case 'max-tokens': case 'refusal': return 'failed'
+    case undefined: return undefined
+  }
+}
+
 /** 子 Agent 花名册条目（会话顶栏常驻胶囊 + 详情浮层的子 Agent 区数据源）。 */
 interface SubagentRosterEntry {
   readonly childSessionId: string
@@ -369,7 +384,10 @@ interface SubagentRosterEntry {
   readonly isolated?: boolean
   readonly step: number
   readonly currentAction?: string
+  /** 最新 turn 已闭合（turn/end）；只表示 turn 闭合，不代表终态。 */
   readonly done: boolean
+  /** 终局原因；仅在该 turn 闭合时给出（undefined = 运行中/未结束）。 */
+  readonly stopReason?: SubagentStopReason
   readonly lastActive: number
 }
 
@@ -386,6 +404,7 @@ interface ChildFrame {
   step?: number
   currentAction?: string
   done?: boolean
+  stopReason?: SubagentStopReason
   lastActive?: number
 }
 
@@ -448,6 +467,9 @@ function useSubagentRoster(
         // mode/isolated 故意**不给默认值**（官方目录没有这两轴，见类型注释）；
         // step 先给 0，corum 推送帧到了由下面的合并覆盖。
         step: 0,
+        // 目录基线只有 running/inactive 两态，无法区分 aborted：
+        // inactive 可能是已完成、也可能是手动终止——此处作为无推送帧时的兜底，
+        // 真正的终态判定以推送帧的 stopReason 为准（见合并与渲染）。
         done: row.activity !== 'running',
         lastActive: 0,
       })
@@ -460,9 +482,11 @@ function useSubagentRoster(
     for (const entry of baseline) merged.set(entry.childSessionId, entry)
     for (const entry of live) {
       const prior = merged.get(entry.childSessionId)
+      // done/stopReason 以推送帧（live）为准：目录基线只有 running/inactive 两态，
+      // 无法区分 aborted（见基线注释）；推送帧带 stopReason 时它才是权威终态。
       merged.set(entry.childSessionId, {
         ...entry,
-        ...prior === undefined ? {} : { label: entry.label === '' ? prior.label : entry.label, done: prior.done },
+        ...prior === undefined ? {} : { label: entry.label === '' ? prior.label : entry.label },
         ...prior !== undefined && entry.step === 0 ? { step: prior.step } : {},
       })
     }
@@ -489,6 +513,7 @@ function useLiveRoster(remote: RemoteEventFace | undefined, sessionId: string | 
             step: patch.step ?? 0,
             ...(patch.currentAction === undefined ? {} : { currentAction: patch.currentAction }),
             done: patch.done ?? false,
+            ...(patch.stopReason === undefined ? {} : { stopReason: patch.stopReason }),
             lastActive: patch.lastActive ?? Date.now(),
           }]
         }
@@ -514,6 +539,7 @@ function useLiveRoster(remote: RemoteEventFace | undefined, sessionId: string | 
         ...(frame.step === undefined ? {} : { step: frame.step }),
         ...(frame.currentAction === undefined ? {} : { currentAction: frame.currentAction }),
         ...(frame.done === undefined ? {} : { done: frame.done }),
+        ...(frame.stopReason === undefined ? {} : { stopReason: frame.stopReason }),
         ...(frame.lastActive === undefined ? {} : { lastActive: frame.lastActive }),
       })
     })
@@ -608,9 +634,13 @@ function useWorktreeLedger(
   return entries
 }
 
-/** 运行中在前、最近活动倒序（胶囊取第一个当「当前子 Agent」）。 */
+/** 运行中（无终态）在前、已结束在后，最近活动倒序（胶囊取第一个当「当前子 Agent」）。 */
 function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentRosterEntry[] {
-  return [...entries].sort((a, b) => (Number(a.done) - Number(b.done)) || (b.lastActive - a.lastActive))
+  return [...entries].sort((a, b) => {
+    const aEnded = subagentOutcomeOf(a.stopReason) !== undefined
+    const bEnded = subagentOutcomeOf(b.stopReason) !== undefined
+    return (Number(aEnded) - Number(bEnded)) || (b.lastActive - a.lastActive)
+  })
 }
 
 /**
@@ -786,36 +816,47 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
       </div>
       <div className={css.statusDetailDivider} />
       {/* 子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息，与统计同卡统一）。
-          运行中在前、已完成在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标，
+          运行中在前、已结束在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标，
           点击进入该子会话（官方 lineage 下拉已按「顶栏只保留一个下拉」屏蔽）。 */}
       {roster.length > 0 && (
         <div className={css.statusDetailAgents}>
           <div className={css.statusDetailAgentsHead}>
             <span className={css.statusDetailAgentsTitle}>子 Agent</span>
             <span className={css.statusDetailAgentsCount}>
-              {roster.filter(entry => !entry.done).length} 运行中 · {roster.filter(entry => entry.done).length} 已完成
+              {roster.filter(e => subagentOutcomeOf(e.stopReason) === undefined).length} 运行中{' · '}
+              {roster.filter(e => subagentOutcomeOf(e.stopReason) === 'completed').length} 已完成
+              {roster.some(e => subagentOutcomeOf(e.stopReason) === 'aborted') && ` · ${roster.filter(e => subagentOutcomeOf(e.stopReason) === 'aborted').length} 手动终止`}
+              {roster.some(e => subagentOutcomeOf(e.stopReason) === 'failed') && ` · ${roster.filter(e => subagentOutcomeOf(e.stopReason) === 'failed').length} 失败`}
             </span>
           </div>
-          {rankRoster(roster).map((entry) => (
+          {rankRoster(roster).map((entry) => {
+            const outcome = subagentOutcomeOf(entry.stopReason)
+            return (
             <button
               key={entry.childSessionId}
               type="button"
               className={css.statusDetailAgentRow}
-              data-done={entry.done || undefined}
+              data-done={outcome !== undefined || entry.done || undefined}
+              data-outcome={outcome ?? undefined}
               title={`进入子会话 ${entry.childSessionId}`}
               aria-label={`进入子会话 ${entry.label}`}
               onClick={() => { openSession?.(entry.childSessionId) }}
             >
-              <span className={css.statusDetailAgentDot} data-done={entry.done || undefined} />
+              <span className={css.statusDetailAgentDot} data-outcome={outcome ?? (entry.done ? 'completed' : undefined)} />
               <span className={css.statusDetailAgentLabel}>{entry.label}</span>
               <span className={css.statusDetailAgentStep}>
-                {entry.done ? '已完成' : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
+                {outcome === 'aborted' ? '手动终止'
+                  : outcome === 'failed' ? '失败'
+                  : outcome === 'completed' ? '已完成'
+                  : entry.done ? '已完成'
+                  : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
               </span>
               {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
               {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
               <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
             </button>
-          ))}
+            )
+          })}
         </div>
       )}
       {/* 并行工作区（隔离 worktree 台账）。用户 2026-09-10：P8 逐次成节点后卡内
@@ -915,9 +956,11 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
   const title = useSessions((s: SessionListState) => s.byId[sessionId]?.displayTitle) ?? '会话'
   // 子 Agent 花名册（2026-09-10 用户定调：胶囊与状态展示合并到同一 pill）。
   const roster = rankRoster(useSubagentRoster(remote, sessionId, useSessions, catalog))
-  const running = roster.filter(entry => !entry.done)
-  const done = roster.filter(entry => entry.done)
-  // 领跑者 = 运行中的第一个；全已结束时为 undefined（胶囊改显示「已完成 M」）。
+  // 终态分组（按 stopReason 派生；done 布尔仅作无推送帧时的兜底——见基线注释）。
+  const running = roster.filter(e => subagentOutcomeOf(e.stopReason) === undefined)
+  const completed = roster.filter(e => subagentOutcomeOf(e.stopReason) === 'completed' || (e.done && e.stopReason === undefined))
+  const aborted = roster.filter(e => subagentOutcomeOf(e.stopReason) === 'aborted')
+  // 领跑者 = 运行中的第一个；全已结束时为 undefined（胶囊改显示终态计数）。
   const lead = running[0]
   // 生成速度序列（chart-speed 实时曲线）：来自轨迹快照的逐步真实速度。
   const speedSeries = useSpeedSeries(useTrajectory)
@@ -1001,13 +1044,14 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
                 所以这里不再只认「运行中」——只要名册非空就渲染这一段：
                   有运行中 → `运行中 N` + 领跑者 + `Step x` + `+K`（其余） + `M 已完成`
                   全已结束 → `已完成 M` + 最后一个 + `+K`
-                名册本身是「会话血缘基线 + 推送帧增量」（见 useSubagentRoster）。 */}
+                终态判定走 stopReason（aborted 不算「已完成」）；名册本身是
+                「会话血缘基线 + 推送帧增量」（见 useSubagentRoster）。 */}
             {roster.length > 0 && (
               <>
                 <span className={css.agentCapsuleDivider} />
                 <span className={css.agentCapsuleDot} data-done={lead === undefined ? 'true' : undefined} />
                 <span className={css.agentCapsuleCount}>
-                  {lead === undefined ? `已完成 ${done.length}` : `运行中 ${running.length}`}
+                  {lead === undefined ? `已完成 ${completed.length}` : `运行中 ${running.length}`}
                 </span>
                 {lead !== undefined
                   ? (
@@ -1016,13 +1060,15 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
                       {/* step 为 0 = 目录基线还没收到 corum 进度帧，此时不假装知道步骤数。 */}
                       {lead.step > 0 && <span className={css.agentCapsuleStep}>Step {lead.step}</span>}
                       {running.length > 1 && <span className={css.agentCapsuleMore}>+{running.length - 1}</span>}
-                      {done.length > 0 && <span className={css.agentCapsuleDone}>{done.length} 已完成</span>}
+                      {completed.length > 0 && <span className={css.agentCapsuleDone}>{completed.length} 已完成</span>}
+                      {aborted.length > 0 && <span className={css.agentCapsuleAborted}>{aborted.length} 手动终止</span>}
                     </>
                   )
                   : (
                     <>
                       <span className={css.agentCapsuleLabel}>{roster[0]?.label}</span>
                       {roster.length > 1 && <span className={css.agentCapsuleMore}>+{roster.length - 1}</span>}
+                      {aborted.length > 0 && <span className={css.agentCapsuleAborted}>{aborted.length} 手动终止</span>}
                     </>
                   )}
               </>

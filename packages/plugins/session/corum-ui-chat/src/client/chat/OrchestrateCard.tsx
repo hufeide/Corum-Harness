@@ -16,7 +16,7 @@
 // 折叠），无新宿主通路。子会话跳转复用 subagent 卡同一套 runtime 桥。
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Ban, Check, ChevronDown, ChevronUp, Cpu, GitMerge, Layers, Loader, X } from 'lucide-react'
-import { subagentOutcomeOf } from '@corum/corum-api-remotes/corum-events'
+import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { OrchestrateChatData, OrchestrateTask } from '../contract/orchestrate.ts'
@@ -42,7 +42,11 @@ type BranchState = 'running' | 'done' | 'aborted' | 'failed'
  */
 function branchState(data: OrchestrateChatData, index: number, stopReason?: SubagentStopReason): BranchState {
   const outcome = data.outcomes.get(index)
-  if (outcome !== undefined) return outcome.kind === 'done' ? 'done' : 'failed'
+  if (outcome !== undefined) {
+    if (outcome.kind === 'done') return 'done'
+    if (outcome.kind === 'aborted') return 'aborted'
+    return 'failed'
+  }
   // 未 settle：子会话 outcome 给终态（不再等整批）；settle 却无 outcome 仍按失败。
   const live = subagentOutcomeOf(stopReason)
   if (data.settled) {
@@ -78,12 +82,17 @@ function branchSubtitle(
   return 'foreground · 父树直跑'
 }
 
-/** 状态 chip 文案 + 语义色键。 */
-function chipOf(state: BranchState): { text: string; tone: 'running' | 'done' | 'aborted' | 'failed' } {
-  if (state === 'done') return { text: '已完成', tone: 'done' }
-  if (state === 'aborted') return { text: '手动终止', tone: 'aborted' }
-  if (state === 'failed') return { text: '失败', tone: 'failed' }
-  return { text: '运行中', tone: 'running' }
+/** 状态 chip 文案 + 语义色键。tone 直接复用 `subagentOutcomeChipTone`（词表逐项
+ *  一致：running→运行中 / done→已完成 / aborted→手动终止 / failed→失败），
+ *  文案走既有 i18n key（与 SubagentCard 同 key）。 */
+function chipOf(state: BranchState, t: ChatNodeViewProps<'orchestrate-call'>['t']): { text: string; tone: 'running' | 'done' | 'aborted' | 'failed' } {
+  const outcome = state === 'done' ? 'completed' : state === 'running' ? undefined : state
+  const tone = subagentOutcomeChipTone(outcome)
+  const text = tone === 'done' ? t('subagent.done')
+    : tone === 'aborted' ? t('subagent.stopped')
+    : tone === 'failed' ? t('subagent.failed')
+    : t('subagent.running')
+  return { text, tone }
 }
 
 /** 子会话跳转：宿主 spawn 广播（'corum/subagent/child'）给出的精确 id。
@@ -201,16 +210,17 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
  * （React 不允许在循环里调 hook）。
  * @param props - 父 callId、任务声明、派生状态。
  */
-function BranchRow({ callId, task, outcomeState, onLiveSettled, worktrees, fallbackChildId, slugFallback }: {
+function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChildId, slugFallback, t }: {
   callId: string
   task: OrchestrateTask
-  /** 由工具终态派生的状态（未 settle 时多为 running）。 */
-  outcomeState: BranchState
+  /** 本卡的折叠数据（含终态 outcomes 与 settled 位）。 */
+  data: OrchestrateChatData
   /** 该分支的子会话刚 settle 时上报终态（供卡头计数同步，见 OrchestrateCardImpl）。 */
   onLiveSettled: (index: number, outcome: 'completed' | 'aborted' | 'failed') => void
   worktrees: readonly { readonly slug: string; readonly branch: string; readonly status: string }[]
   fallbackChildId: string | undefined
   slugFallback: string | undefined
+  t: ChatNodeViewProps<'orchestrate-call'>['t']
 }) {
   const child = useChildOfTask(callId, task.label, task.index, fallbackChildId)
   /**
@@ -219,14 +229,14 @@ function BranchRow({ callId, task, outcomeState, onLiveSettled, worktrees, fallb
    * 这里用该分支**自己子会话**的进度兜底：outcome 给终态（aborted 不算完成，终态=failed 时不覆盖）。
    */
   const live = useChildProgress(child)
+  // 终态判定走 branchState 三参签名：data.outcomes + data.settled + 实时 stopReason，
+  // 静态分支与 live 覆盖走同一判定（不再靠 outcomeState override）。
+  const state = branchState(data, task.index, live?.stopReason)
   const liveOutcome = subagentOutcomeOf(live?.stopReason)
-  const state: BranchState = outcomeState === 'running' && liveOutcome !== undefined
-    ? (liveOutcome === 'completed' ? 'done' : liveOutcome === 'aborted' ? 'aborted' : 'failed')
-    : outcomeState
   useEffect(() => {
     if (liveOutcome !== undefined) onLiveSettled(task.index, liveOutcome)
   }, [liveOutcome, onLiveSettled, task.index])
-  const chip = chipOf(state)
+  const chip = chipOf(state, t)
   // 模型：优先任务级声明（`tasks[i].model`），否则读子会话的 modelSelection 投影
   // （与 SubagentCard 同源——机制锁定的模型只有子会话自己知道）。
   const childModel = useChildModel(child)
@@ -270,7 +280,7 @@ function BranchRow({ callId, task, outcomeState, onLiveSettled, worktrees, fallb
  * @param props - 槽运行时 share（node.data = 本卡的折叠结果）与 i18n。
  * @returns 设计稿 orchestrate-flow-card 的渲染。
  */
-function OrchestrateCardImpl({ node }: ChatNodeViewProps<'orchestrate-call'>) {
+function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>) {
   const data = node.data
   const [expanded, setExpanded] = useState(true)
   // 隔离台账（分支 chip 显示 worktree 名；恢复被 c0e69443 孤立的可见性）。
@@ -294,7 +304,7 @@ function OrchestrateCardImpl({ node }: ChatNodeViewProps<'orchestrate-call'>) {
     }
   }, [])
   const doneCount = Math.max(summary.done, Math.min(liveCompleted.size, summary.total))
-  const abortedCount = liveAborted.size
+  const abortedCount = Math.max(summary.aborted, liveAborted.size)
   const failedCount = Math.max(summary.failed, liveFailed.size)
   // 整体状态：有失败=failed；否则全部有终态且 total>0 → 有 aborted 则 aborted，否则 done；否则 running。
   const failed = failedCount > 0 || (data.errored && !data.settled)
@@ -358,11 +368,12 @@ function OrchestrateCardImpl({ node }: ChatNodeViewProps<'orchestrate-call'>) {
                 key={task.index}
                 callId={data.callId}
                 task={task}
-                outcomeState={branchState(data, task.index)}
+                data={data}
                 onLiveSettled={markLiveSettled}
                 worktrees={worktrees}
                 fallbackChildId={data.childSessionIds?.[task.index]}
                 slugFallback={data.worktreeSlugs?.get(task.index)}
+                t={t}
               />
             ))}
             {data.hasMerge && (

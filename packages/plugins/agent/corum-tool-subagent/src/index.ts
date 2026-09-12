@@ -382,7 +382,11 @@ async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResu
       if (error !== undefined) {
         // The registry converts this throw to isError; partial output is not
         // success, but the preserved partial answer still reaches the parent.
-        throw new Error(withDiagnosticAndPartialText(error, result))
+        // fork（corum）：把权威 stopReason 挂到 Error 上，让 orchestrate 的
+        // catch 分支能按 stopReason（而非错误串匹配）区分「手动终止」与「失败」。
+        const thrown = new Error(withDiagnosticAndPartialText(error, result))
+        ;(thrown as { stopReason?: SubagentResult['stopReason'] }).stopReason = result.stopReason
+        throw thrown
       }
       return {
         kind: 'foreground',
@@ -1308,6 +1312,7 @@ export function apply(ctx: Context, config: Config): void {
                         index: { type: 'integer', required: true },
                         label: { type: 'string' },
                         ok: { type: 'boolean', required: true },
+                        aborted: { type: 'boolean' },
                         output: { type: 'string' },
                         error: { type: 'string' },
                       },
@@ -1335,7 +1340,7 @@ export function apply(ctx: Context, config: Config): void {
               render: (_args, value) => {
                 const out = value as {
                   mode: string
-                  results?: Array<{ index: number; label?: string; ok: boolean; output?: string; error?: string }>
+                  results?: Array<{ index: number; label?: string; ok: boolean; aborted?: boolean; output?: string; error?: string }>
                   script?: { name: string; agentsStarted: number; value?: unknown }
                   integration?: { pendingBranches: string[]; integrated: boolean }
                 }
@@ -1344,7 +1349,7 @@ export function apply(ctx: Context, config: Config): void {
                   parts.push(`[script · ${out.script.name}] ${out.script.agentsStarted} child agent(s) settled\nReturn value:\n${JSON.stringify(out.script.value, null, 2)}`)
                 } else {
                   parts.push((out.results ?? [])
-                    .map(r => `[task ${r.index}${r.label !== undefined ? ` · ${r.label}` : ''}] ${r.ok ? 'done' : `failed: ${r.error ?? ''}`}\n${r.output ?? ''}`)
+                    .map(r => `[task ${r.index}${r.label !== undefined ? ` · ${r.label}` : ''}] ${r.ok ? 'done' : r.aborted === true ? `aborted: ${r.error ?? ''}` : `failed: ${r.error ?? ''}`}\n${r.output ?? ''}`)
                     .join('\n\n'))
                 }
                 if (out.integration !== undefined) {
@@ -1376,7 +1381,7 @@ export function apply(ctx: Context, config: Config): void {
             presentResult: (_args, value) => {
               const out = value as unknown as {
                 mode: string
-                results?: Array<{ index: number; ok: boolean; error?: string }>
+                results?: Array<{ index: number; ok: boolean; aborted?: boolean; error?: string }>
                 script?: { name: string; agentsStarted: number }
               }
               if (out.mode === 'script') {
@@ -1388,11 +1393,15 @@ export function apply(ctx: Context, config: Config): void {
               }
               const results = out.results ?? []
               const done = results.filter(r => r.ok).length
-              const failed = results.length - done
+              const aborted = results.filter(r => r.aborted === true).length
+              const failed = results.length - done - aborted
+              const summary = aborted > 0
+                ? `${done} ok / ${failed} failed / ${aborted} aborted`
+                : `${done} ok / ${failed} failed`
               return {
                 card: 'generic' as const,
-                title: `orchestrate · ${done} ok / ${failed} failed`,
-                content: [{ type: 'text', text: results.map(r => `[task ${r.index}] ${r.ok ? '✓ done' : `✗ ${r.error ?? 'failed'}`}`).join('\n') }],
+                title: `orchestrate · ${summary}`,
+                content: [{ type: 'text', text: results.map(r => `[task ${r.index}] ${r.ok ? '✓ done' : r.aborted === true ? '⊘ aborted' : `✗ ${r.error ?? 'failed'}`}`).join('\n') }],
               }
             },
             isConcurrencySafe: () => true,
@@ -1493,7 +1502,7 @@ export function apply(ctx: Context, config: Config): void {
                 schema?: ObjectJsonSchema
               }>
               if (tasks === undefined || tasks.length === 0) throw new Error('orchestrate requires either `tasks` (1 or more) or `script`')
-              const run = (index: number): Promise<{ index: number; ok: boolean; output?: string; error?: string; label?: string }> => {
+              const run = (index: number): Promise<{ index: number; ok: boolean; aborted?: boolean; output?: string; error?: string; label?: string }> => {
                 const task = tasks[index]
                 const base = { index, ...task.label !== undefined ? { label: task.label } : {} }
                 return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal, callId: String(exec.callId) }, {
@@ -1518,7 +1527,15 @@ export function apply(ctx: Context, config: Config): void {
                   }
                   // 后台/continuable：本阶段 orchestrate 汇合要求前台（fan-in 语义）。
                   return { ...base, ok: false, error: `task ${index} ran in ${outcome.kind} mode; orchestrate currently requires foreground tasks` }
-                }).catch((error: unknown) => ({ ...base, ok: false, error: String(error) }))
+                }).catch((error: unknown) => {
+                  // fork（corum）：按权威 stopReason 区分「手动终止」与「失败」。
+                  // settleForegroundRun 把 SubagentResult.stopReason 挂到 Error 上；
+                  // 此处读它，不靠错误串匹配。
+                  if ((error as { stopReason?: SubagentResult['stopReason'] }).stopReason === 'aborted') {
+                    return { ...base, ok: false, aborted: true, error: String(error) }
+                  }
+                  return { ...base, ok: false, error: String(error) }
+                })
               }
               const results = await Promise.all(tasks.map((_, index) => run(index)))
               // fork（corum）：merge 联动——autoIntegrate 时，在所有任务 settle 后

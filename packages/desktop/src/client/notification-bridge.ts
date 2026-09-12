@@ -75,7 +75,6 @@ interface SubagentProgressFrame {
   turn?: number
   step?: number
   currentAction?: string
-  done?: boolean
   stopReason?: string
 }
 
@@ -325,9 +324,9 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   // ── 子 Agent：spawn 记账 + 结算通知（同 callId 合并）──────────────────
   //
   // 机制：`corum/subagent/child`（spawn 那一刻的精确父子映射）建账，
-  // `corum/subagent/progress`（子会话事件增量折叠）判完成。**只在 done 时提示**——
-  // 启动提示属于「已经知道的事」（父 Agent 刚派发），且 orchestrate 会一次派 N 个，
-  // 逐条提示就是刷屏（选型原则①）。
+  // `corum/subagent/progress`（子会话事件增量折叠）按 stopReason 判终态，
+  // 仅在 settle 时发通知。启动提示属于「已经知道的事」（父 Agent 刚派发），
+  // 且 orchestrate 会一次派 N 个，逐条提示就是刷屏（选型原则①）。
   const childLabels = new Map<string, { label: string; parentSessionId?: string }>()
   on<SubagentChildFrame>('corum/subagent/child', (frame) => {
     const child = frame.childSessionId

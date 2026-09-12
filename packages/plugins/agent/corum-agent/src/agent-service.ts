@@ -559,6 +559,33 @@ export class CorumAgentService extends TypertRemoteService {
     ctx.on('session/disposed', (session) => {
       this.subagentProgress.delete(String(session.id))
     })
+    /**
+     * subagent/end 终态兜底：子会话在首个 turn 打开前被取消时，
+     * session/event 不产生 turn/start / turn/end，foldSubagentProgress
+     * 一帧不发。此处用宿主权威终态事件补发进度帧，让 UI 卡片拿到终态。
+     *
+     * as never + { global: true } 收窄口径与 corum-tool-subagent/src/index.ts
+     * 同款（cordis Events 合并声明在 @corum/corum-subagent，跨包类型面不共享）。
+     */
+    ctx.on('subagent/end' as never, ((info: { readonly id: unknown; readonly stopReason: string }) => {
+      const sid = String(info.id)
+      const state = this.subagentProgress.get(sid)
+      // 已有终态帧（turn/end 已写入 stopReason）→ 不覆盖。
+      if (state?.stopReason !== undefined) return
+      const reason = info.stopReason as SubagentStopReason
+      const turn = state?.turn ?? 0
+      const step = state?.step ?? 0
+      this.subagentProgress.delete(sid)
+      this.subagentProgress.set(sid, { turn, step, done: true, stopReason: reason })
+      this.ctx.emit('corum/subagent/progress', {
+        sessionId: sid,
+        turn,
+        step,
+        done: true,
+        stopReason: reason,
+        lastActive: Date.now(),
+      })
+    }) as never, { global: true })
   }
 
   /** 子 Agent 进度折叠的每会话 O(1) 状态（session/event 增量维护）。 */

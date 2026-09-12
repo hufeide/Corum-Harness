@@ -366,6 +366,8 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
    - **真实验证（2026-09-09 23:24–23:25，dev 实例 CDP 三层）**：空白 task 泳道 composer chip 选「项目经理」（`.agent-presets/project-manager` 当时只有 agent.json）→ chip 变「项目经理-项目管理」、aria 无「切换失败」、`.agent-presets/project-manager/agent.cordis.yml` + `preset.yml` 落盘、会话 `agent-preset/selected=project-manager`、console 零错误；新建任务表单选「指挥者」复用同一空白泳道（`createAgentForTask` reuse 块）→ 同样成功、`conductor-lead/agent.cordis.yml` 落盘。**打包态需重打包才生效**（host 闭包是拷贝，非 symlink）。
 4. **模型选择让位**（新增 task-model-selection.ts，2026-09-09）：官方 `installModelSelection` 的 `agent/request` 监听用安装时的选择覆盖 `next()` 结果；corum 在 create setup 里先装了自己的 ref，官方 ref 更晚更内层 → 用户 `session/selectModel` 换的模型被吞。本文件是官方实现的「用户显式选择优先」变体（读会话 `modelSelection` 投影，pending 与安装时不同即永久让位），agent-service.ts 五处调用点全部改用它。官方若改 `installModelSelection` 的装配语义（assemble 快照 / request 应用两段），本文件需同步。见 `docs/LESSONS.md` §8.11。
 
+5. **subagent/end 终态兜底帧**（agent-service.ts 构造函数，2026-09-12）：子会话在**首个 turn 打开前**被取消时（one-shot 前台路径 driver/index.ts signal.aborted 跳过 followup，agent-loop 从不 append turn/start / turn/end），`foldSubagentProgress` 对每条 session/event 走 `default: return undefined`，进度帧一帧不发，UI 卡片永远停在 Running。此处新增 `subagent/end` 订阅（`as never` + `{ global: true }` + 本地窄化接口 `{ id, stopReason }`，与 corum-tool-subagent/src/index.ts:667-671 同款口径），收到后若进度表该 sessionId 的 `stopReason === undefined`（尚无更晚终态帧）则补发一帧 `corum/subagent/progress`，携带权威 `stopReason`（`turn`/`step` 沿用进度表已知值，未知取 0），并更新内部进度状态表。不引入对 `@corum/corum-subagent` 的运行时 import（字节锁定 fork 包）。
+
 **设计事实（实测确认，非改动）**：skill 注入**按 Agent 隔离**——每个 Agent 的 `profile.skills` 独立编成 preset 的 `skill-filesystem.customSkillDirs`（`CORUM_HOME/skills/<name>`），`skill-filesystem` 是 preset（agent scope）级 provider，各 Agent 只见自己绑的 skill 目录。
 
 **验证记录**（CDP 实机，2026-09-08）：
@@ -620,6 +622,30 @@ spec 需每版本重跑等价验证。
 | settle 联动 | `ctx.on('subagent/end' as never, (info, parent) => …)` 按 parent.session.id 定位台账；`corumMarkSettled`（runId 精确 + childId 唯一回退）；`as never` 原因注释（Events 合并声明在 corum-subagent 包，类型实例不匹配） | **中**（官方若改 subagent/end payload 签名需跟随） |
 | integrate 编排 | schema `integrate` 参数、准入 `corumPendingIntegration`（active∪settled，空拒绝）、前台限定（background/continuable 拒绝）、cwd=主干、persona+prompt 机制拼装（分支清单+Checks+汇报指令按 merger 分档）、settle 后标 integrated + autoCleanup | 低 |
 | 描述/exports | 工具描述头部隔离语义句；package.json exports 仅 `.` + `./invariant` | 低 |
+
+### 11.2a orchestrate settle 后「手动终止」口径修复（2026-09-12）
+
+**缺口 D**：orchestrate fan-out 中被手动终止（abort/interrupt/cancel）的分支，
+运行中在编排卡上按 stopReason 正确显示「手动终止」，但整批 settle 后翻成「失败」。
+
+**根因**：`spawnOne` → `settleForegroundRun(run)` 在 stopReason 非 `completed` 时
+抛 `Error`，`stopReason` 丢失；orchestrate 的 `run()` catch 把所有拒绝折成 `ok:false`，
+render 按 `failed:` 前缀输出，UI 解析成 `'failed'`。
+
+**修复（3 处，均在 `index.ts`）**：
+1. `settleForegroundRun`：抛出的 `Error` 上挂 `.stopReason`（取自 `SubagentResult.stopReason`）。
+2. orchestrate `run()` 的 `.catch()`：读 `error.stopReason`，若为 `'aborted'` 则结果
+   带 `aborted: true`（`ok` 保持 `false`——非成功完成）。
+3. `render` + `presentResult` + output schema：`r.aborted === true` 时渲染 `aborted:` 前缀
+   （与 `failed:` 并列、同风格）；presentResult 标题区分 aborted 计数。
+
+**判据**：`SubagentResult['stopReason'] === 'aborted'`（权威 stopReason 语义，不靠错误串匹配）。
+`ok` 保持 `false`：上层（contract 解析、UI 卡片）按渲染串 `aborted:` 区分终态，
+不再用 `ok` 布尔表达「结束了」（口径与 `corum-events.ts:306-309` 硬要求一致）。
+
+**并行任务配合**：`contract/orchestrate.ts` 需增加 `'aborted'` 分支解析 `aborted:` 前缀
+（与既有 `failed:` 解析并列）；`OrchestrateCard.tsx` 的 `branchState` 在 outcome 非 `done`
+时需检查 `aborted` 而非一律 `failed`。
 
 ### 11.3 组合接入（cordis.patch.yml）
 

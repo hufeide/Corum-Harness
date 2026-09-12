@@ -36,9 +36,11 @@ export interface OrchestrateTask {
   readonly model?: string
 }
 
-/** 一个任务的终态（来自工具结果正文）。 */
+/** 一个任务的终态（来自工具结果正文）。
+ *  `aborted` = 主 Agent 手动终止该分支（宿主渲染串 `aborted:<label>`）。 */
 export type OrchestrateTaskOutcome =
   | { readonly kind: 'done' }
+  | { readonly kind: 'aborted' }
   | { readonly kind: 'failed'; readonly error: string }
 
 /** 集成（fan-in）阶段状态。 */
@@ -91,11 +93,15 @@ export interface OrchestrateChatData {
   readonly worktreeSlugs?: ReadonlyMap<number, string>
 }
 
-/** `[task N · label] done|failed: msg` 行（label 可缺省）。 */
-const TASK_LINE = /^\[task (\d+)(?: · ([^\]]*))?\] (done|failed)(?::\s*(.*))?$/u
+/** `[task N · label] done|failed: msg | aborted: msg` 行（label 可缺省）。
+ *  `aborted` = 主 Agent 手动终止该分支（与 `failed:` 前缀并列，同样解析风格）。 */
+const TASK_LINE = /^\[task (\d+)(?: · ([^\]]*))?\] (done|aborted|failed)(?::\s*(.*))?$/u
 
 /**
  * 解析工具结果正文里的任务终态。
+ *
+ * 兼容 `failed:<error>`（旧前缀）与 `aborted:<error>`（手动终止前缀）；
+ * 旧会话的 `failed:` 结果仍可解析。
  * @param text - `tool/result` 的正文（宿主 render 的输出）。
  * @returns 下标 → 终态。
  */
@@ -106,9 +112,14 @@ export function parseOutcomes(text: string): ReadonlyMap<number, OrchestrateTask
     if (matched === null) continue
     const index = Number(matched[1])
     if (!Number.isSafeInteger(index)) continue
-    out.set(index, matched[3] === 'done'
-      ? { kind: 'done' }
-      : { kind: 'failed', error: matched[4]?.trim() ?? '' })
+    const kind = matched[3]
+    if (kind === 'done') {
+      out.set(index, { kind: 'done' })
+    } else if (kind === 'aborted') {
+      out.set(index, { kind: 'aborted' })
+    } else {
+      out.set(index, { kind: 'failed', error: matched[4]?.trim() ?? '' })
+    }
   }
   return out
 }
@@ -236,6 +247,7 @@ export interface OrchestrateSummary {
   readonly title: string
   readonly subtitle: string
   readonly done: number
+  readonly aborted: number
   readonly failed: number
   readonly total: number
 }
@@ -249,12 +261,13 @@ export interface OrchestrateSummary {
 export function summarize(data: OrchestrateChatData): OrchestrateSummary {
   const total = data.tasks.length
   const done = [...data.outcomes.values()].filter(o => o.kind === 'done').length
+  const aborted = [...data.outcomes.values()].filter(o => o.kind === 'aborted').length
   const failed = [...data.outcomes.values()].filter(o => o.kind === 'failed').length
   if (data.mode === 'script') {
     return {
       title: `编排工作流 · ${data.scriptName ?? '(unnamed)'}`,
       subtitle: '脚本编排 · 逐阶段推进',
-      done, failed, total,
+      done, aborted, failed, total,
     }
   }
   return {
@@ -262,6 +275,6 @@ export function summarize(data: OrchestrateChatData): OrchestrateSummary {
     subtitle: data.hasMerge && data.autoIntegrate
       ? 'fan-out 并发 → fan-in 汇合 → 自动集成'
       : 'fan-out 并发 → fan-in 汇合',
-    done, failed, total,
+    done, aborted, failed, total,
   }
 }

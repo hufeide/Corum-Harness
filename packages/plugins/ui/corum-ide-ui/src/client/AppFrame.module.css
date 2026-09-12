@@ -1225,6 +1225,12 @@
   font-size: 10.5px;
   color: var(--dsw-alias-label-tertiary);
 }
+/* 「N 手动终止」计数段（warn 色调，与已完成区分）。 */
+.agentCapsuleAborted {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
 
 /* 状态详情浮层的子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。 */
 .statusDetailAgents {
@@ -1277,6 +1283,9 @@
   background: var(--dsw-alias-brand-primary);
 }
 .statusDetailAgentDot[data-done] { background: var(--dsw-alias-state-success-primary); }
+.statusDetailAgentDot[data-outcome='completed'] { background: var(--dsw-alias-state-success-primary); }
+.statusDetailAgentDot[data-outcome='aborted'] { background: var(--dsw-alias-state-warn-primary, #FFB45C); }
+.statusDetailAgentDot[data-outcome='failed'] { background: var(--dsw-alias-state-error-primary, #FF5C7A); }
 .statusDetailAgentLabel {
   flex: 0 1 auto;
   min-width: 0;
@@ -1287,6 +1296,8 @@
   color: var(--dsw-alias-label-primary);
 }
 .statusDetailAgentRow[data-done] .statusDetailAgentLabel { color: var(--dsw-alias-label-secondary); }
+.statusDetailAgentRow[data-outcome='aborted'] .statusDetailAgentStep { color: var(--dsw-alias-state-warn-primary, #FFB45C); }
+.statusDetailAgentRow[data-outcome='failed'] .statusDetailAgentStep { color: var(--dsw-alias-state-error-primary, #FF5C7A); }
 .statusDetailAgentStep {
   flex: none;
   font-family: 'JetBrains Mono', monospace;

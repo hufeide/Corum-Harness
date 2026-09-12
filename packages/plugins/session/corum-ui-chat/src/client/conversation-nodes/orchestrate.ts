@@ -47,7 +47,7 @@ interface OrchestrateCallState {
   readonly scriptName?: string
   readonly hasMerge: boolean
   readonly autoIntegrate: boolean
-  readonly outcomes: ReadonlyMap<number, { kind: 'done' } | { kind: 'failed'; error: string }>
+  readonly outcomes: ReadonlyMap<number, { kind: 'done' } | { kind: 'aborted' } | { kind: 'failed'; error: string }>
   readonly settled: boolean
   readonly errored: boolean
   readonly integration?: OrchestrateIntegration
