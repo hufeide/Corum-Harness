@@ -33,6 +33,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { NotificationStore, NotificationTone } from './notifications.ts'
 import { isFloatingWindow } from './window-role.ts'
+import { subagentOutcomeOf, subagentOutcomeTone } from '@corum/corum-api-remotes/corum-events'
+import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 
 /** `ctx.remote` 的窄化面（只用到转发事件订阅）。 */
 interface RemoteFace {
@@ -74,6 +76,7 @@ interface SubagentProgressFrame {
   step?: number
   currentAction?: string
   done?: boolean
+  stopReason?: string
 }
 
 /** 子 Agent spawn 帧（`corum/subagent/child`）。 */
@@ -336,16 +339,27 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   })
 
   on<SubagentProgressFrame>('corum/subagent/progress', (frame) => {
-    if (frame.done !== true) return
+    // 合法化跨包 JSON 面的 stopReason（不认识的字符串不当成功）。
+    const VALID_STOP_REASONS = new Set(['completed', 'aborted', 'error', 'max-tokens', 'refusal'])
+    const sr = frame.stopReason !== undefined && VALID_STOP_REASONS.has(frame.stopReason)
+      ? frame.stopReason as SubagentStopReason
+      : undefined
+    const outcome = subagentOutcomeOf(sr)
+    if (outcome === undefined) return // 还在跑不提示（保持「只在结束时提示」的既有选型）。
     const child = frame.sessionId
     if (child === undefined || child === '') return
     const known = childLabels.get(child)
     const label = known?.label ?? '子 Agent'
     // 结算后清账（下次同名 label 是新的一轮）。
     childLabels.delete(child)
-    publish(store, `subagent:${child}:done`, {
-      tone: 'success',
-      title: '子 Agent 完成',
+    const title = outcome === 'completed'
+      ? '子 Agent 完成'
+      : outcome === 'aborted'
+        ? '子 Agent 已终止'
+        : '子 Agent 运行失败'
+    publish(store, `subagent:${child}:settled`, {
+      tone: subagentOutcomeTone(outcome),
+      title,
       message: frame.step === undefined ? label : `${label} · Step ${frame.step}`,
     }, opener(known?.parentSessionId ?? child))
   })

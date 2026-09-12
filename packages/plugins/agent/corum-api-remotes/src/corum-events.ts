@@ -214,6 +214,99 @@ export interface FileChangedEvent {
  * 会话维护 O(1) 折叠状态，仅在折叠快照变化时 emit——取代 SubagentCard 的
  * 2s 全量重读轮询，折叠口径与 corumAgent/getChildSessionProgress 一致）。
  */
+/**
+ * 子 Agent 终态推导的唯一口径家（corum fork 增量）。
+ *
+ * 根因：`done` 布尔只表达「最新 turn 已闭合（turn/end）」，中断同样闭合 turn，
+ * 于是 done=true 被渲染成成功。这里用 `turn/end.reason.kind` 推导真正的终局
+ * 原因，再映射成三态终态（completed / aborted / failed），供所有消费方统一走。
+ *
+ * 与 `corum-subagent/src/lifecycle.ts:236-261` 的 `epochStopReason` 同语义
+ * （那份在字节锁定文件里，不可 import）。未知原因绝不能算成功 → 归为 error。
+ */
+
+/** 子 Agent 终局原因（自包含重声明；事实源 corum-subagent/src/types.ts:215-229）。 */
+export type SubagentStopReason = 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+
+/**
+ * 宿主侧推导：`turn/end.reason.kind` → `SubagentStopReason`。
+ * aborted|interrupted → 'aborted'；max-tokens → 'max-tokens'；
+ * error → 'error'；blocked → 'refusal'；completed|undefined → 'completed'；
+ * 其它未知 → 'error'（未知原因绝不能算成功）。
+ */
+export function stopReasonOfTurnEnd(kind: string | undefined): SubagentStopReason {
+  switch (kind) {
+    case 'aborted':
+    case 'interrupted':
+      return 'aborted'
+    case 'max-tokens':
+      return 'max-tokens'
+    case 'error':
+      return 'error'
+    case 'blocked':
+      return 'refusal'
+    case 'completed':
+    case undefined:
+      return 'completed'
+    default:
+      return 'error'
+  }
+}
+
+/** 子 Agent 终态（三态；运行中 = undefined）。 */
+export type SubagentOutcome = 'completed' | 'aborted' | 'failed'
+
+/**
+ * stopReason → 终态；undefined（还没结束）→ undefined。
+ * completed → 'completed'；aborted → 'aborted'；
+ * error|max-tokens|refusal → 'failed'；undefined → undefined。
+ */
+export function subagentOutcomeOf(stopReason: SubagentStopReason | undefined): SubagentOutcome | undefined {
+  switch (stopReason) {
+    case 'completed':
+      return 'completed'
+    case 'aborted':
+      return 'aborted'
+    case 'error':
+    case 'max-tokens':
+    case 'refusal':
+      return 'failed'
+    case undefined:
+      return undefined
+  }
+}
+
+/** 终态 → 通知色调（与 notifications.ts 的 NotificationTone 同词）。 */
+export function subagentOutcomeTone(outcome: SubagentOutcome): 'success' | 'warn' | 'error' {
+  switch (outcome) {
+    case 'completed':
+      return 'success'
+    case 'aborted':
+      return 'warn'
+    case 'failed':
+      return 'error'
+  }
+}
+
+/** 终态 → 卡片/chip 色调词表（running/done/aborted/failed）。 */
+export function subagentOutcomeChipTone(outcome: SubagentOutcome | undefined): 'running' | 'done' | 'aborted' | 'failed' {
+  switch (outcome) {
+    case 'completed':
+      return 'done'
+    case 'aborted':
+      return 'aborted'
+    case 'failed':
+      return 'failed'
+    case undefined:
+      return 'running'
+  }
+}
+
+/**
+ * ⚠️ UI 口径规矩（硬要求）：UI 里禁止用 `done` 布尔表达「结束了」。
+ * `done` 只表示「最新 turn 已闭合」，中断同样闭合 turn。任何终态判定必须走
+ * `subagentOutcomeOf(stopReason)`。
+ */
 export interface SubagentProgressEvent {
   /** 子会话 id（origin='subagent' 的 UUID id）。 */
   readonly sessionId: string
@@ -223,8 +316,13 @@ export interface SubagentProgressEvent {
   readonly step: number
   /** 当前动作（最新工具调用名）；无进行中动作时缺省。 */
   readonly currentAction?: string
-  /** 最新 turn 已闭合（turn/end）。 */
+  /**
+   * 最新 turn 已闭合（turn/end）。
+   * ⚠️ 不代表终态，只表示 turn 闭合；中断同样闭合 turn。终态看 `stopReason`。
+   */
   readonly done: boolean
+  /** 终局原因；仅在该 turn 闭合时给出（undefined = 运行中/未结束）。 */
+  readonly stopReason?: SubagentStopReason
   /** 触发本帧的源事件时间（ms epoch）。 */
   readonly lastActive: number
 }

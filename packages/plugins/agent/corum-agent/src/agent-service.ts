@@ -84,9 +84,11 @@ import { scanSkills } from './skill-catalog.ts'
 import { corumHome } from './home.ts'
 import { stallAutoRecoverMsValue } from './runtime-state.ts'
 import type { SkillEntry } from './skill-entry.ts'
-// 统一事件中心三-3：'corum/subagent/progress' 的 cordis Events 声明（自包含
-// 在 fork 包 corum-api-remotes；type-only import 只拉编译面，不进运行时依赖图）。
+// 统一事件中心三-3：'corum/subagent/progress' 的 cordis Events 声明 + 终态推导口径
+// （自包含在 fork 包 corum-api-remotes；type-only import 只拉编译面，不进运行时依赖图）。
 import type {} from '@corum/corum-api-remotes/corum-events'
+// 值导入 stopReasonOfTurnEnd：turn/end.reason.kind → SubagentStopReason（同口径，同包依赖已存在）。
+import { stopReasonOfTurnEnd, type SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 
 // 再导出：保持既有消费方（index.ts / project-service.ts / runtime.ts /
 // contract/agent.ts）的 import 面不变——包内拆分对外的稳定锚。
@@ -548,6 +550,7 @@ export class CorumAgentService extends TypertRemoteService {
     step: number
     currentAction?: string
     done: boolean
+    stopReason?: SubagentStopReason
   }>()
 
   /** 进度折叠表容量上限（超出时淘汰最久未活动条目；dispose 已精确清理）。 */
@@ -563,6 +566,7 @@ export class CorumAgentService extends TypertRemoteService {
     step: number
     currentAction?: string
     done: boolean
+    stopReason?: SubagentStopReason
     lastActive: number
   } | undefined {
     let state = this.subagentProgress.get(sessionId)
@@ -579,11 +583,13 @@ export class CorumAgentService extends TypertRemoteService {
     let step = prev.step
     let currentAction = prev.currentAction
     let done = prev.done
+    let stopReason = prev.stopReason
     switch (event.type) {
       case 'turn/start': {
         const t = (event.data as { turn?: number }).turn ?? 0
         if (t > turn) { turn = t; step = 0 }
         done = false
+        stopReason = undefined // 新一轮开始＝不再有终态
         break
       }
       case 'step/end': {
@@ -605,24 +611,26 @@ export class CorumAgentService extends TypertRemoteService {
       }
       case 'turn/end': {
         done = true
+        stopReason = stopReasonOfTurnEnd((event.data as { reason?: { kind?: string } }).reason?.kind)
         currentAction = undefined
         break
       }
       default:
         return undefined // 非进度事件（user/message、step/start 等）不产生帧。
     }
-    if (turn === prev.turn && step === prev.step && currentAction === prev.currentAction && done === prev.done) {
+    if (turn === prev.turn && step === prev.step && currentAction === prev.currentAction && done === prev.done && stopReason === prev.stopReason) {
       return undefined // 折叠无变化（如乱序/重复事件），不广播。
     }
     // 置顶为最近活动（容量淘汰的 LRU 依据）。
     this.subagentProgress.delete(sessionId)
-    this.subagentProgress.set(sessionId, { turn, step, ...currentAction === undefined ? {} : { currentAction }, done })
+    this.subagentProgress.set(sessionId, { turn, step, ...currentAction === undefined ? {} : { currentAction }, done, ...stopReason === undefined ? {} : { stopReason } })
     return {
       sessionId,
       turn,
       step,
       ...currentAction === undefined ? {} : { currentAction },
       done,
+      ...stopReason === undefined ? {} : { stopReason },
       lastActive: event.time,
     }
   }
@@ -1824,6 +1832,7 @@ export class CorumAgentService extends TypertRemoteService {
       step: number
       currentAction?: string
       done: boolean
+      stopReason?: SubagentStopReason
       lastActive: number
     }
   }> {
@@ -1839,12 +1848,14 @@ export class CorumAgentService extends TypertRemoteService {
     let step = 0
     let done = false
     let currentAction: string | undefined
+    let stopReason: SubagentStopReason | undefined
     for (const event of stored) {
       switch (event.type) {
         case 'turn/start': {
           const t = (event.data as { turn?: number }).turn ?? 0
           if (t > turn) { turn = t; step = 0 }
           done = false
+          stopReason = undefined // 新一轮开始＝不再有终态
           break
         }
         case 'step/end': {
@@ -1866,6 +1877,7 @@ export class CorumAgentService extends TypertRemoteService {
         }
         case 'turn/end': {
           done = true
+          stopReason = stopReasonOfTurnEnd((event.data as { reason?: { kind?: string } }).reason?.kind)
           currentAction = undefined
           break
         }
@@ -1878,6 +1890,7 @@ export class CorumAgentService extends TypertRemoteService {
         step,
         ...currentAction === undefined ? {} : { currentAction },
         done,
+        ...stopReason === undefined ? {} : { stopReason },
         lastActive,
       },
     }

@@ -17,7 +17,9 @@
 // cordis 服务消费（统一事件中心二期 window 全局迁移；同 bundle 模块级
 // chatRuntimeRef 拿服务实例，见 ../chat-runtime.ts）。
 import { memo, useEffect, useState } from 'react'
-import { ArrowRight, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, Loader } from 'lucide-react'
+import { ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, Loader, X } from 'lucide-react'
+import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
+import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
 import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe } from '../chat-runtime.ts'
@@ -30,8 +32,17 @@ interface ChildProgressValue {
     step: number
     currentAction?: string
     done: boolean
+    stopReason?: string
     lastActive: number
   }
+}
+
+/** 合法化跨包 JSON 面的 stopReason（不认识的字符串不当成功）。 */
+const VALID_STOP_REASONS = new Set(['completed', 'aborted', 'error', 'max-tokens', 'refusal'])
+
+function normalizeStopReason(raw: string | undefined): SubagentStopReason | undefined {
+  if (raw === undefined) return undefined
+  return VALID_STOP_REASONS.has(raw) ? raw as SubagentStopReason : undefined
 }
 
 /** 子会话 meta RPC 返回形（与 host getSubagentSessionMeta 对齐）。 */
@@ -131,11 +142,13 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
           const value = result.value as ChildProgressValue
           if (value.progress !== undefined) {
             const p = value.progress
+            const sr = normalizeStopReason(p.stopReason)
             setProgress({
               turn: p.turn,
               step: p.step,
               ...p.currentAction === undefined ? {} : { currentAction: p.currentAction },
               done: p.done,
+              ...sr === undefined ? {} : { stopReason: sr },
             })
           }
         }
@@ -151,11 +164,13 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
     // 主路径：推送帧直收（帧即最终进度，按 sessionId 过滤本卡子会话）。
     const sub = subagentProgressSubscribe((frame) => {
       if (cancelled || frame.sessionId !== childSessionId) return
+      const sr = normalizeStopReason(frame.stopReason as string | undefined)
       setProgress({
         turn: frame.turn,
         step: frame.step,
         ...frame.currentAction === undefined ? {} : { currentAction: frame.currentAction },
         done: frame.done,
+        ...sr === undefined ? {} : { stopReason: sr },
       })
     })
 
@@ -210,7 +225,7 @@ function useSubagentPrompt(childSessionId: string | undefined, expanded: boolean
 
 /** 进度条填充比例：以 step 步数为最小步进（无总步数，单调爬升渐近 100%）。 */
 function progressRatio(progress: SubagentProgressSnapshot): number {
-  if (progress.done) return 1
+  if (subagentOutcomeOf(progress.stopReason) !== undefined) return 1
   return Math.min(0.1 + progress.step * 0.18, 0.9)
 }
 
@@ -286,8 +301,9 @@ function SubagentRow({
   const model = useChildModel(childSessionId)
   const [expanded, setExpanded] = useState(false)
   const detailPrompt = useSubagentPrompt(childSessionId, expanded)
-  const done = progress?.done === true
-  const running = !done
+  const outcome = subagentOutcomeOf(progress?.stopReason)
+  const running = outcome === undefined
+  const chipTone = subagentOutcomeChipTone(outcome)
 
   const openChild = () => {
     if (childSessionId === undefined) return
@@ -326,10 +342,17 @@ function SubagentRow({
             {t(mode === 'background' ? 'subagent.mode.background' : 'subagent.mode.foreground')}
           </span>
         )}
-        <span className={running ? css.runChip : css.doneChip}>
-          {running
+        <span
+          className={chipTone === 'running' ? css.runChip : chipTone === 'done' ? css.doneChip : chipTone === 'aborted' ? css.stopChip : css.failChip}
+          data-outcome={outcome ?? 'running'}
+        >
+          {chipTone === 'running'
             ? <><span className={css.runDot} />{t('subagent.running')}</>
-            : <><Check size={12} strokeWidth={2.5} />{t('subagent.done')}</>}
+            : chipTone === 'done'
+              ? <><Check size={12} strokeWidth={2.5} />{t('subagent.done')}</>
+              : chipTone === 'aborted'
+                ? <><Ban size={12} strokeWidth={2.5} />{t('subagent.stopped')}</>
+                : <><X size={12} strokeWidth={2.5} />{t('subagent.failed')}</>}
         </span>
         <button
           type="button"

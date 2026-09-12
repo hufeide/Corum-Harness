@@ -15,7 +15,9 @@
 // 数据源 = 本卡自己的 node data（orchestrate.ts 从 tool/call arguments + 结果正文
 // 折叠），无新宿主通路。子会话跳转复用 subagent 卡同一套 runtime 桥。
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, ChevronDown, ChevronUp, Cpu, GitMerge, Layers, Loader, X } from 'lucide-react'
+import { ArrowRight, Ban, Check, ChevronDown, ChevronUp, Cpu, GitMerge, Layers, Loader, X } from 'lucide-react'
+import { subagentOutcomeOf } from '@corum/corum-api-remotes/corum-events'
+import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { OrchestrateChatData, OrchestrateTask } from '../contract/orchestrate.ts'
 import { summarize } from '../contract/orchestrate.ts'
@@ -24,7 +26,7 @@ import { useChildProgress } from './SubagentCard.tsx'
 import css from './OrchestrateCard.module.css'
 
 /** 一条分支的渲染态。 */
-type BranchState = 'running' | 'done' | 'failed'
+type BranchState = 'running' | 'done' | 'aborted' | 'failed'
 
 /**
  * 分支状态派生：**终态优先，实时进度兜底**。
@@ -32,18 +34,27 @@ type BranchState = 'running' | 'done' | 'failed'
  * 工具结果（`data.outcomes`）是整批返回的，所以在并行执行过程中它是空的；旧实现据此
  * 把每个分支恒判为「运行中」，导致**某个分支自己跑完了卡片仍显示运行中，要等整批 settle
  * 才一起翻**（2026-09-12 用户实测）。现在用「该分支自己的子会话实时进度」兜底：
- * 子会话 done ⇔ 该分支已完成，逐条翻，互不牵连。
+ * 子会话 outcome ⇔ 该分支终态，逐条翻，互不牵连。
  * @param data - 本卡的折叠数据（含终态 outcomes 与 settled 位）。
  * @param index - 分支序号。
- * @param childDone - 该分支子会话的实时进度是否已结束（进度未知时 undefined）。
+ * @param stopReason - 该分支子会话的实时终局原因（undefined = 还没结束）。
  * @returns 分支渲染态。
  */
-function branchState(data: OrchestrateChatData, index: number, childDone?: boolean): BranchState {
+function branchState(data: OrchestrateChatData, index: number, stopReason?: SubagentStopReason): BranchState {
   const outcome = data.outcomes.get(index)
   if (outcome !== undefined) return outcome.kind === 'done' ? 'done' : 'failed'
-  // 未 settle：子会话已结束就是已完成（不再等整批）；settle 却无 outcome 仍按失败。
-  if (data.settled) return childDone === true ? 'done' : 'failed'
-  return childDone === true ? 'done' : 'running'
+  // 未 settle：子会话 outcome 给终态（不再等整批）；settle 却无 outcome 仍按失败。
+  const live = subagentOutcomeOf(stopReason)
+  if (data.settled) {
+    if (live === 'completed') return 'done'
+    if (live === 'aborted') return 'aborted'
+    if (live === 'failed') return 'failed'
+    return 'failed'
+  }
+  if (live === 'completed') return 'done'
+  if (live === 'aborted') return 'aborted'
+  if (live === 'failed') return 'failed'
+  return 'running'
 }
 
 /** 分支副行文案（设计稿 sub：`worktree · wt-1b3dcf` / `research · 只读`）。
@@ -68,8 +79,9 @@ function branchSubtitle(
 }
 
 /** 状态 chip 文案 + 语义色键。 */
-function chipOf(state: BranchState): { text: string; tone: 'running' | 'done' | 'failed' } {
+function chipOf(state: BranchState): { text: string; tone: 'running' | 'done' | 'aborted' | 'failed' } {
   if (state === 'done') return { text: '已完成', tone: 'done' }
+  if (state === 'aborted') return { text: '手动终止', tone: 'aborted' }
   if (state === 'failed') return { text: '失败', tone: 'failed' }
   return { text: '运行中', tone: 'running' }
 }
@@ -189,13 +201,13 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
  * （React 不允许在循环里调 hook）。
  * @param props - 父 callId、任务声明、派生状态。
  */
-function BranchRow({ callId, task, outcomeState, onLiveDone, worktrees, fallbackChildId, slugFallback }: {
+function BranchRow({ callId, task, outcomeState, onLiveSettled, worktrees, fallbackChildId, slugFallback }: {
   callId: string
   task: OrchestrateTask
   /** 由工具终态派生的状态（未 settle 时多为 running）。 */
   outcomeState: BranchState
-  /** 该分支的子会话刚跑完时上报一次（供卡头计数同步，见 OrchestrateCardImpl）。 */
-  onLiveDone: (index: number) => void
+  /** 该分支的子会话刚 settle 时上报终态（供卡头计数同步，见 OrchestrateCardImpl）。 */
+  onLiveSettled: (index: number, outcome: 'completed' | 'aborted' | 'failed') => void
   worktrees: readonly { readonly slug: string; readonly branch: string; readonly status: string }[]
   fallbackChildId: string | undefined
   slugFallback: string | undefined
@@ -204,11 +216,16 @@ function BranchRow({ callId, task, outcomeState, onLiveDone, worktrees, fallback
   /**
    * **逐分支实时状态**（2026-09-12 用户实测缺陷修复）：工具结果整批返回，运行中它是空的，
    * 旧实现于是把每条分支恒判为「运行中」，某个分支自己跑完也不翻，必须等全部完成才一起翻。
-   * 这里用该分支**自己子会话**的进度兜底：on done 立即升级为 done（终态=failed 时不覆盖）。
+   * 这里用该分支**自己子会话**的进度兜底：outcome 给终态（aborted 不算完成，终态=failed 时不覆盖）。
    */
   const live = useChildProgress(child)
-  const state: BranchState = outcomeState === 'running' && live?.done === true ? 'done' : outcomeState
-  useEffect(() => { if (live?.done === true) onLiveDone(task.index) }, [live?.done, onLiveDone, task.index])
+  const liveOutcome = subagentOutcomeOf(live?.stopReason)
+  const state: BranchState = outcomeState === 'running' && liveOutcome !== undefined
+    ? (liveOutcome === 'completed' ? 'done' : liveOutcome === 'aborted' ? 'aborted' : 'failed')
+    : outcomeState
+  useEffect(() => {
+    if (liveOutcome !== undefined) onLiveSettled(task.index, liveOutcome)
+  }, [liveOutcome, onLiveSettled, task.index])
   const chip = chipOf(state)
   // 模型：优先任务级声明（`tasks[i].model`），否则读子会话的 modelSelection 投影
   // （与 SubagentCard 同源——机制锁定的模型只有子会话自己知道）。
@@ -218,7 +235,7 @@ function BranchRow({ callId, task, outcomeState, onLiveDone, worktrees, fallback
     <div className={css.branchRow} data-state={state}>
       <span className={css.branchLine} data-tone={chip.tone} />
       <span className={css.branchNode} data-tone={chip.tone}>
-        {state === 'done' ? <Check size={9} /> : state === 'failed' ? <X size={9} /> : <Loader size={9} />}
+        {state === 'done' ? <Check size={9} /> : state === 'failed' ? <X size={9} /> : state === 'aborted' ? <Ban size={9} /> : <Loader size={9} />}
       </span>
       <div className={css.branchCard}>
         <span className={css.branchTx}>
@@ -260,23 +277,37 @@ function OrchestrateCardImpl({ node }: ChatNodeViewProps<'orchestrate-call'>) {
   const worktrees = useWorktreeLedger()
   const summary = summarize(data)
   /**
-   * 逐分支实时已完成集合（子 BranchRow 上报）。工具结果是整批返回的，只用
+   * 逐分支实时终态集合（子 BranchRow 上报）。工具结果是整批返回的，只用
    * `summary.done` 会让卡头计数在整批 settle 前一直停在 0/N，与分支 chip 不一致。
+   * aborted / failed 另记实时集合，保证卡头汇总也能区分。
    */
-  const [liveDone, setLiveDone] = useState<ReadonlySet<number>>(() => new Set())
-  const markLiveDone = useCallback((index: number): void => {
-    setLiveDone(prev => prev.has(index) ? prev : new Set(prev).add(index))
+  const [liveCompleted, setLiveCompleted] = useState<ReadonlySet<number>>(() => new Set())
+  const [liveAborted, setLiveAborted] = useState<ReadonlySet<number>>(() => new Set())
+  const [liveFailed, setLiveFailed] = useState<ReadonlySet<number>>(() => new Set())
+  const markLiveSettled = useCallback((index: number, outcome: 'completed' | 'aborted' | 'failed'): void => {
+    if (outcome === 'completed') {
+      setLiveCompleted(prev => prev.has(index) ? prev : new Set(prev).add(index))
+    } else if (outcome === 'aborted') {
+      setLiveAborted(prev => prev.has(index) ? prev : new Set(prev).add(index))
+    } else {
+      setLiveFailed(prev => prev.has(index) ? prev : new Set(prev).add(index))
+    }
   }, [])
-  const doneCount = Math.max(summary.done, Math.min(liveDone.size, summary.total))
-  // 整体状态：有失败=failed；全部有终态且无失败=done；否则 running。
-  const failed = summary.failed > 0 || (data.errored && !data.settled)
-  const allDone = summary.failed === 0 && summary.total > 0 && doneCount === summary.total
-  const overall: 'running' | 'done' | 'failed' = failed ? 'failed' : allDone ? 'done' : 'running'
+  const doneCount = Math.max(summary.done, Math.min(liveCompleted.size, summary.total))
+  const abortedCount = liveAborted.size
+  const failedCount = Math.max(summary.failed, liveFailed.size)
+  // 整体状态：有失败=failed；否则全部有终态且 total>0 → 有 aborted 则 aborted，否则 done；否则 running。
+  const failed = failedCount > 0 || (data.errored && !data.settled)
+  const allSettled = failedCount === 0 && abortedCount === 0 && summary.total > 0 && doneCount === summary.total
+  const allSettledWithAborted = failedCount === 0 && summary.total > 0 && (doneCount + abortedCount) === summary.total
+  const overall: 'running' | 'done' | 'aborted' | 'failed' = failed ? 'failed' : allSettled ? 'done' : allSettledWithAborted ? 'aborted' : 'running'
   const overallText = overall === 'done'
     ? `${doneCount}/${summary.total} 完成`
     : overall === 'failed'
-      ? `${doneCount}/${summary.total} · ${summary.failed} 失败`
-      : `并行执行中 · ${doneCount}/${summary.total}`
+      ? `${doneCount}/${summary.total} · ${failedCount} 失败`
+      : overall === 'aborted'
+        ? `${doneCount}/${summary.total} 完成 · ${abortedCount} 已终止`
+        : `并行执行中 · ${doneCount}/${summary.total}`
 
   return (
     <div className={css.card} data-state={overall} data-errored={data.errored || undefined}>
@@ -289,7 +320,7 @@ function OrchestrateCardImpl({ node }: ChatNodeViewProps<'orchestrate-call'>) {
         <span className={css.chip} data-tone={overall}>
           {overall === 'running'
             ? <Loader size={11} className={css.chipSpin} />
-            : overall === 'done' ? <Check size={11} /> : <X size={11} />}
+            : overall === 'done' ? <Check size={11} /> : overall === 'aborted' ? <Ban size={11} /> : <X size={11} />}
           <span className={css.chipText}>{overallText}</span>
         </span>
         <button
@@ -328,7 +359,7 @@ function OrchestrateCardImpl({ node }: ChatNodeViewProps<'orchestrate-call'>) {
                 callId={data.callId}
                 task={task}
                 outcomeState={branchState(data, task.index)}
-                onLiveDone={markLiveDone}
+                onLiveSettled={markLiveSettled}
                 worktrees={worktrees}
                 fallbackChildId={data.childSessionIds?.[task.index]}
                 slugFallback={data.worktreeSlugs?.get(task.index)}

@@ -6,6 +6,7 @@
   --orch-running: var(--dsw-alias-state-warn-primary, #FFB45C);
   --orch-done: var(--dsw-alias-state-success-primary, #3EE6B0);
   --orch-failed: var(--dsw-alias-state-error-primary, #FF5C7A);
+  --orch-aborted: var(--dsw-alias-state-warn-primary, #FFB45C);
   --orch-idle: var(--dsw-alias-label-tertiary, #7E719E);
   display: flex;
   flex-direction: column;
@@ -82,6 +83,7 @@
 .chip[data-tone='running'] { border: 1px solid var(--orch-running); color: var(--orch-running); }
 .chip[data-tone='done'] { border: 1px solid var(--orch-done); color: var(--orch-done); }
 .chip[data-tone='failed'] { border: 1px solid var(--orch-failed); color: var(--orch-failed); }
+.chip[data-tone='aborted'] { border: 1px solid var(--orch-aborted); color: var(--orch-aborted); }
 
 .chipText { white-space: nowrap; }
 
@@ -192,6 +194,7 @@
 .branchLine[data-tone='running'] { background: repeating-linear-gradient(to right, var(--orch-running) 0 3px, transparent 3px 5px); }
 .branchLine[data-tone='done'] { background: repeating-linear-gradient(to right, var(--orch-done) 0 3px, transparent 3px 5px); }
 .branchLine[data-tone='failed'] { background: repeating-linear-gradient(to right, var(--orch-failed) 0 3px, transparent 3px 5px); }
+.branchLine[data-tone='aborted'] { background: repeating-linear-gradient(to right, var(--orch-aborted) 0 3px, transparent 3px 5px); }
 .branchLine[data-tone='idle'] { background: repeating-linear-gradient(to right, var(--orch-idle) 0 3px, transparent 3px 5px); }
 
 /* 分支节点（设计稿 brX-node：22px 光环 + 8px 实心点 + 勾/叉）。 */
@@ -211,6 +214,7 @@
 .branchNode[data-tone='running'] { color: var(--orch-running); }
 .branchNode[data-tone='done'] { color: var(--orch-done); }
 .branchNode[data-tone='failed'] { color: var(--orch-failed); }
+.branchNode[data-tone='aborted'] { color: var(--orch-aborted); }
 .branchNode[data-tone='idle'] { color: var(--orch-idle); }
 
 /* 分支卡（设计稿 brX-card：r8 + 半透明底 + label/sub + chip + goto）。 */
@@ -288,6 +292,7 @@
 .branchChip[data-tone='running'] { color: var(--orch-running); }
 .branchChip[data-tone='done'] { color: var(--orch-done); }
 .branchChip[data-tone='failed'] { color: var(--orch-failed); }
+.branchChip[data-tone='aborted'] { color: var(--orch-aborted); }
 .branchChip[data-tone='idle'] { color: var(--orch-idle); }
 
 /* goto 按钮（设计稿 brX goto：22×22 r6 + arrow-right）。 */
