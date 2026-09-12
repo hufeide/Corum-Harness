@@ -1,0 +1,215 @@
+#!/usr/bin/env node
+/**
+ * ui-verify.mjs —— 声明式 UI 断言跑器（CDP）。
+ *
+ * ## 为什么需要它（2026-09-12 实测痛点）
+ *
+ * 指挥模式那轮实测：**实现只花 9.1 分钟，验证花了 98.8 分钟**（占整轮 84%），
+ * 因为验证子 Agent 写了 **48 个一次性探针脚本**（a0_inject_topbar.js / a1_open.js /
+ * a2_assert.js / a3_detail.js / a4_cards.js …）—— 每加一条断言就要新写一个脚本
+ * 加一次 bash 往返。本跑器把「一轮 UI 验证」压成**一份声明式规格 + 一次调用**：
+ *
+ *     node .agents/skills/corum-cdp-verify/scripts/ui-verify.mjs spec.json
+ *
+ * ## 规格格式（JSON 或导出同构对象的 .mjs）
+ *
+ * ```json
+ * {
+ *   "port": 9333,
+ *   "before": [ { "click": "button[aria-label='插件中心']" }, { "wait": 800 } ],
+ *   "assert": [
+ *     { "label": "浮层已打开", "selector": "[data-plugin-manager-overlay]", "exists": true },
+ *     { "label": "搜索框唯一", "selector": "input[type=search]", "count": 1 },
+ *     { "label": "标题含已安装", "selector": "[class*=panel]", "textContains": "已安装" },
+ *     { "label": "面板圆角 24", "selector": "[class*=panel]", "style": { "borderRadius": "24px" } },
+ *     { "label": "市场截图", "screenshot": "market-overlay" }
+ *   ]
+ * }
+ * ```
+ *
+ * - `before` 步骤（按序执行）：`click`（CSS 选择器，或 `text:` 前缀按可见文字找按钮）、
+ *   `wait`（毫秒）、`eval`（原始 JS，返回值忽略）。
+ * - `assert` 条目（按序执行）：`exists` / `count` / `textContains` / `textEquals` /
+ *   `style`（计算样式精确匹配，值做去空格比较）/ `screenshot`（存到 CDP_OUT）。
+ *   任一条失败 → 该条标 FAIL，最后汇总并**以非零码退出**（可直接当门禁用）。
+ *
+ * ## 与 cdp.mjs 的关系
+ *
+ * 同一个 CDP 连接方式（`ws` 从 desktop 包解析、`Target.attachToTarget` flatten）。
+ * cdp.mjs 是「跑一段 JS / 截一张图」的瑞士军刀；本跑器是「一份规格 → 一份 PASS/FAIL
+ * 报告」的验证装置。**多断言场景一律用本跑器**，不要退回一轮写一个脚本。
+ *
+ * ## 环境
+ *   CDP_PORT     默认 9333（= scripts/verify-instance.sh 的验证实例端口）
+ *   CDP_OUT      截图目录，默认 /tmp/corum-cdp/shots
+ *   CORUM_DESKTOP_PKG  desktop 包 package.json 路径（解析 `ws` 用）
+ *
+ * 退出码：0 = 全部 PASS；1 = 有 FAIL；2 = 连接/规格错误。
+ */
+
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { extname } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const DESKTOP_PKG = process.env.CORUM_DESKTOP_PKG
+  ?? '/Users/kukucai/work/kkc-desktop/packages/desktop/package.json'
+const require = createRequire(DESKTOP_PKG)
+const WebSocket = require('ws')
+
+const OUT = process.env.CDP_OUT ?? '/tmp/corum-cdp/shots'
+
+/** 读规格：支持 .json 与 .mjs（导出同构对象）。 */
+async function loadSpec(path) {
+  if (!path) throw new Error('缺少规格文件参数：ui-verify.mjs <spec.json|spec.mjs>')
+  if (extname(path) === '.mjs' || extname(path) === '.js') {
+    const mod = await import(pathToFileURL(path).href)
+    return mod.default ?? mod.spec
+  }
+  return JSON.parse(readFileSync(path, 'utf8'))
+}
+
+function connect(wsUrl) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl)
+    const pending = new Map()
+    let seq = 0
+    const send = (method, params = {}, sessionId) => new Promise((res, rej) => {
+      const id = ++seq
+      pending.set(id, { res, rej })
+      ws.send(JSON.stringify(sessionId === undefined ? { id, method, params } : { id, method, params, sessionId }))
+    })
+    ws.on('open', () => resolve({
+      send, close: () => ws.close(),
+    }))
+    ws.on('message', (d) => {
+      const m = JSON.parse(String(d))
+      if (m.id !== undefined && pending.has(m.id)) {
+        const { res, rej } = pending.get(m.id)
+        pending.delete(m.id)
+        m.error ? rej(new Error(m.error.message)) : res(m.result)
+      }
+    })
+    ws.on('error', reject)
+  })
+}
+
+async function getJson(url) {
+  const r = await fetch(url)
+  if (!r.ok) throw new Error(`${url} → HTTP ${r.status}`)
+  return r.json()
+}
+
+/** 连到指定端口的第一个 page（应用主窗口）。 */
+async function attach(port) {
+  const list = await getJson(`http://127.0.0.1:${port}/json/list`)
+  const page = list.find(p => p.type === 'page')
+  if (page === undefined) throw new Error(`no page on :${port}（应用没起或端口不对）`)
+  const version = await getJson(`http://127.0.0.1:${port}/json/version`)
+  const cdp = await connect(version.webSocketDebuggerUrl)
+  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: page.id, flatten: true })
+  await cdp.send('Runtime.enable', {}, sessionId)
+  await cdp.send('Page.enable', {}, sessionId)
+  return { cdp, sessionId }
+}
+
+async function evaluate(cdp, sessionId, expression) {
+  const { result, exceptionDetails } = await cdp.send(
+    'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId,
+  )
+  if (exceptionDetails) {
+    throw new Error('eval failed: ' + (exceptionDetails.exception?.description ?? exceptionDetails.text))
+  }
+  return result.value
+}
+
+/** 把「CSS 选择器 / text:可见文字」解析成一段返回元素（或 null）的 JS。 */
+function finder(target) {
+  if (target.startsWith('text:')) {
+    const want = JSON.stringify(target.slice(5))
+    return `[...document.querySelectorAll('button,a,[role=button]')].find(e => (e.innerText||'').trim() === ${want}) ?? null`
+  }
+  const sel = JSON.stringify(target)
+  return `document.querySelector(${sel})`
+}
+
+async function runStep(cdp, sessionId, step) {
+  if (step.wait !== undefined) { await new Promise(r => setTimeout(r, step.wait)); return 'wait' }
+  if (step.click !== undefined) {
+    const ok = await evaluate(cdp, sessionId, `(() => { const el = ${finder(step.click)}; if (!el) return false; el.click(); return true })()`)
+    if (ok !== true) throw new Error(`before.click 找不到元素：${step.click}`)
+    return `click ${step.click}`
+  }
+  if (step.eval !== undefined) { await evaluate(cdp, sessionId, step.eval); return 'eval' }
+  throw new Error(`未知 before 步骤：${JSON.stringify(step)}`)
+}
+
+async function runAssertion(cdp, sessionId, a) {
+  const label = a.label ?? JSON.stringify({ ...a, label: undefined })
+  if (a.screenshot !== undefined) {
+    const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId)
+    mkdirSync(OUT, { recursive: true })
+    const f = `${OUT}/${a.screenshot}.png`
+    writeFileSync(f, Buffer.from(data, 'base64'))
+    return { label, pass: true, detail: `截图 → ${f}` }
+  }
+  const sel = JSON.stringify(a.selector ?? 'body')
+  if (a.exists !== undefined) {
+    const n = await evaluate(cdp, sessionId, `document.querySelectorAll(${sel}).length`)
+    return { label, pass: (n > 0) === a.exists, detail: `count=${n}（期望 exists=${a.exists}）` }
+  }
+  if (a.count !== undefined) {
+    const n = await evaluate(cdp, sessionId, `document.querySelectorAll(${sel}).length`)
+    return { label, pass: n === a.count, detail: `count=${n}（期望 ${a.count}）` }
+  }
+  if (a.textContains !== undefined || a.textEquals !== undefined) {
+    const txt = await evaluate(cdp, sessionId, `(() => { const el = document.querySelector(${sel}); return el ? (el.innerText || '') : null })()`)
+    if (txt === null) return { label, pass: false, detail: `选择器无匹配：${a.selector}` }
+    if (a.textContains !== undefined) {
+      return { label, pass: txt.includes(a.textContains), detail: a.textContains }
+    }
+    return { label, pass: txt.trim() === a.textEquals, detail: `实际=${JSON.stringify(txt.trim().slice(0, 80))}` }
+  }
+  if (a.style !== undefined) {
+    const names = Object.keys(a.style)
+    const got = await evaluate(cdp, sessionId, `(() => {
+      const el = document.querySelector(${sel}); if (!el) return null
+      const cs = getComputedStyle(el)
+      const names = ${JSON.stringify(names)}
+      const out = {}
+      for (const n of names) out[n] = String(cs.getPropertyValue(n) || cs[n] || '').trim()
+      return out
+    })()`)
+    if (got === null) return { label, pass: false, detail: `选择器无匹配：${a.selector}` }
+    const bad = names.filter(n => String(got[n] ?? '').trim() !== String(a.style[n]).trim())
+    return {
+      label,
+      pass: bad.length === 0,
+      detail: bad.length === 0
+        ? names.map(n => `${n}=${a.style[n]}`).join(' ')
+        : bad.map(n => `${n}: 期望 ${a.style[n]} 实得 ${String(got[n]).trim()}`).join('; '),
+    }
+  }
+  throw new Error(`未知断言：${JSON.stringify(a)}`)
+}
+
+async function main() {
+  const specPath = process.argv[2]
+  const spec = await loadSpec(specPath)
+  const port = Number(spec.port ?? process.env.CDP_PORT ?? 9333)
+  const { cdp, sessionId } = await attach(port)
+  const results = []
+  try {
+    for (const step of spec.before ?? []) await runStep(cdp, sessionId, step)
+    for (const a of spec.assert ?? []) results.push(await runAssertion(cdp, sessionId, a))
+  } finally {
+    cdp.close()
+  }
+  const failed = results.filter(r => !r.pass)
+  console.log(`\nui-verify · 端口 :${port} · 规格 ${specPath}`)
+  for (const r of results) console.log(`  ${r.pass ? 'PASS' : 'FAIL'}  ${r.label}${r.detail ? `  — ${r.detail}` : ''}`)
+  console.log(`\n${results.length - failed.length}/${results.length} PASS${failed.length > 0 ? `  ❌ ${failed.length} 条失败` : '  ✅'}`)
+  process.exit(failed.length > 0 ? 1 : 0)
+}
+
+main().catch((e) => { console.error(`ui-verify 错误：${e instanceof Error ? e.message : String(e)}`); process.exit(2) })
