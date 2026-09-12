@@ -27,6 +27,7 @@ import {
   corumIntegrationFailure,
   corumIntegrationTruth,
   corumIntegratorPersona,
+  corumPartialIntegrationNotice,
   corumWorktreeHasUncommitted,
   type CorumWorktreeEntry,
 } from '../src/index.ts'
@@ -109,13 +110,31 @@ describe('corumBranchIntegrated — 分支工作是否真进入 HEAD', () => {
 })
 
 describe('corumIntegrationTruth — 机制真值门禁', () => {
-  it('写了没提交（分支无新提交 + worktree 脏）→ integrated=false 且报 uncommitted', () => {
+  // fork（corum）2026-09-12 语义修正：`uncommitted` 不再参与 `integrated`。
+  // 实测事故：兄弟 worktree 的一个 scratch 残留文件让**已落地**的集成被判失败
+  // （corum-task-d51272e3：主树 HEAD 704f855e → 254df321 已合并，却收到
+  // 「integrate did not persist into the main tree」），主 Agent 的后续
+  // 「验证 + 提交 + 落位」三阶段整条没起来。现在：
+  //   · 「分支是否已并入 HEAD」= 集成失败的唯一闸门（真未落地仍抛错 + 保留现场）；
+  //   · 未提交改动 = 该条目**保持 pending、保留现场**，由调用方通知主 Agent 处理。
+  it('写了没提交（分支无新提交 + worktree 脏）→ integrated=true（分支口径），但如实报 uncommitted', () => {
     const { repo, worktree, entry } = makeRepoWithWorktree()
     writeFileSync(join(worktree, 'ORCH-INT-1.txt'), 'written but never committed')
     const truth = corumIntegrationTruth(repo, [entry])
-    expect(truth.integrated).toBe(false)
+    expect(truth.integrated).toBe(true)
     expect(truth.unmerged).toEqual([])
     expect(truth.uncommitted.join(' ')).toContain(entry.slug)
+  })
+
+  it('部分集成会给出可读说明（未持久化条目 + 下一步）', () => {
+    const { repo, worktree, entry, branch } = makeRepoWithWorktree()
+    writeFileSync(join(worktree, 'ORCH-INT-1.txt'), 'written but never committed')
+    const truth = corumIntegrationTruth(repo, [entry])
+    const notice = corumPartialIntegrationNotice(truth, 'deadbeefdeadbeef')
+    expect(notice).toContain('PARTIALLY persisted')
+    expect(notice).toContain(entry.slug)
+    expect(notice).toContain('kept pending')
+    expect(branch).toBe(entry.branch)
   })
 
   it('已提交未合并 → integrated=false 且报 unmerged', () => {

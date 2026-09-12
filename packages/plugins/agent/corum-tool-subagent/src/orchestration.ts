@@ -32,6 +32,7 @@ export {
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
+  corumPartialIntegrationNotice,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,

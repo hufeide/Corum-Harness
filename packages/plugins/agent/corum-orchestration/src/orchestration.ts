@@ -530,6 +530,19 @@ export interface CorumIntegrationTruth {
  * @param cwd - 主树（父会话）工作目录。
  * @param entries - 待集成的台账条目（active/settled）。
  * @param dirtyBefore - 集成前 `corumGitStatusPorcelain(cwd)` 原文（dirtyDelta 基线）。
+ *
+ * fork（corum）2026-09-12 修正（实机事故）：判定条件里的 `uncommitted` 曾**参与
+ * `integrated`**，而 `entries` 是**该会话全部 active/settled 条目**——于是任何兄弟
+ * worktree 的未提交残留（哪怕与本次 fan-in 无关，实测是一个 scratch 文件）都会让一次
+ * 已经落地的集成被判失败：首轮派发的会话 corum-task-d51272e3 因此拿到
+ * 「integrate did not persist into the main tree … worktrees with UNCOMMITTED changes:
+ * wt-5700d6」，而主树 HEAD 明明已推进（704f855e → 254df321），主 Agent 后续的
+ * 「重启验证实例 / 三层实机验证 / 落位台账」三阶段整条没起来。
+ *
+ * 现在的口径：**「分支是否已并入 HEAD」才是集成失败的唯一闸门**（那是「接到的活儿
+ * 有没有落地」）；worktree 里的未提交改动属**未持久化**，由调用方按条目处理——
+ * 该条目**保持 pending 并保留现场**（不标 integrated、不清理），并在结果里显式告知，
+ * 而不是把整次 fan-in 判死。真未落地（分支不在 HEAD）依旧抛错 + 保留现场。
  */
 export function corumIntegrationTruth(
   cwd: string,
@@ -547,12 +560,37 @@ export function corumIntegrationTruth(
     .split('\n')
     .filter(line => line.trim() !== '' && !before.has(line))
   return {
-    integrated: unmerged.length === 0 && uncommitted.length === 0,
+    integrated: unmerged.length === 0,
     unmerged,
     uncommitted,
     dirtyDelta,
     head: corumGitHead(cwd),
   }
+}
+
+/**
+ * fork（corum）：**部分集成**的结果说明——所有待集成分支都已并入 HEAD，但有个别
+ * worktree 还留着未提交改动（写了没提交）。这些条目**不标 integrated、保留现场**，
+ * 由主 Agent 决定补提交还是丢弃；其余条目正常翻转并（按需）清理。
+ *
+ * @param truth - 集成真值（`integrated === true` 时调用）。
+ * @param headBefore - 集成前的主树 HEAD（报告里给前后对照）。
+ * @returns 给主 Agent 的说明文本（含未持久化条目与路径）。
+ */
+export function corumPartialIntegrationNotice(
+  truth: CorumIntegrationTruth,
+  headBefore: string,
+): string {
+  const lines: string[] = [
+    'integrate PARTIALLY persisted: every pending branch is now in the main tree, but some worktrees still hold UNCOMMITTED changes (written, never committed).',
+    `main tree HEAD: ${headBefore === '' ? '(unknown)' : headBefore.slice(0, 12)} -> ${truth.head === '' ? '(unknown)' : truth.head.slice(0, 12)}`,
+    `NOT integrated (kept pending, worktree + branch preserved): ${truth.uncommitted.join(', ')}`,
+  ]
+  if (truth.dirtyDelta.length > 0) {
+    lines.push(`main tree also has ${truth.dirtyDelta.length} uncommitted path(s) not present before integrate (e.g. ${truth.dirtyDelta.slice(0, 3).join(', ')})`)
+  }
+  lines.push('Next: commit (or discard) those leftovers in their worktrees, then call integrate again for them — or discard them explicitly.')
+  return lines.join('\n')
 }
 
 /**

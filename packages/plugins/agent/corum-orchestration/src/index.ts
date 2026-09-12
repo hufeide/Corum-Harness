@@ -50,6 +50,7 @@ export {
   corumGitStatusPorcelain,
   corumIntegrationFailure,
   corumIntegrationTruth,
+  corumPartialIntegrationNotice,
   corumIntegratorPersona,
   corumDirectWriteNotice,
   corumIsGitRepo,

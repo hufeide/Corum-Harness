@@ -70,6 +70,7 @@ import {
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
+  corumPartialIntegrationNotice,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
@@ -407,6 +408,35 @@ async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResu
 }
 
 /**
+ * fork（corum）：**部分集成**的通知——分支都落地了，但个别 worktree 还留着未提交
+ * 改动（写了没提交）。这类条目保持 pending、保留现场，由主 Agent 决定补提交还是丢弃；
+ * 其余条目已正常翻转。以 settlement notice 同款形态注入父会话，保证主 Agent 不会
+ * 以为「全清干净了」。注入失败只告警（可见性是增强，不能反过来让委托失败）。
+ *
+ * @param parent - 委派方 Agent（注入目标）。
+ * @param notice - `corumPartialIntegrationNotice()` 产出的说明文本。
+ * @param logger - 注入失败时的告警出口。
+ */
+function corumNotifyPartialIntegration(
+  parent: Agent,
+  notice: string,
+  logger: { warn: (message: string) => void },
+): void {
+  try {
+    parent.inject(createUserMessage({
+      content: [{ type: 'text', text: notice }],
+      source: {
+        kind: 'subagent-settled',
+        form: 'notice',
+        summary: boundContextSummary('integrate partially persisted — leftovers kept pending'),
+      } as unknown as MessageSource,
+    }))
+  } catch (error: unknown) {
+    logger.warn(`partial-integration notice was not delivered to its parent: ${String(error)}`)
+  }
+}
+
+/**
  * fork（corum）：前台子 Agent 的最终汇报以「settlement notice」形态注入父会话。
  *
  * 2026-09-09 用户实机反馈「子 Agent 结束后反馈没有注入主 Agent」：汇报本来就在
@@ -541,6 +571,7 @@ export {
   corumGitHead,
   corumGitStatusPorcelain,
   corumIntegrationFailure,
+  corumPartialIntegrationNotice,
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumIsGitRepo,
@@ -947,8 +978,20 @@ export function apply(ctx: Context, config: Config): void {
             outputValueText(outcome.output),
           ))
         }
-        // 真集成：翻转状态 + 落盘 + （可选）强清理（唯一合法的 force 清理点）。
-        orchestration.markIntegrated(sessionId, pending, corumAutoCleanup)
+        // fork（corum）2026-09-12：**部分集成**不再判死整次 fan-in。旧口径把
+        // `uncommitted`（任何兄弟 worktree 的未提交残留）也算进 `integrated`，实测
+        // 让一次已落地的集成被报成失败（corum-task-d51272e3：wt-5700d6 一个 scratch
+        // 文件 → 主 Agent 的「验证/提交」三阶段整条没起来）。现在只把**已并入 HEAD**
+        // 的条目翻转 + 清理；残留未提交的条目**保持 pending、保留现场**，并显式通知
+        // 主 Agent（补提交后再次 integrate，或明确丢弃）。
+        const leftover = new Set(corumTruth.uncommitted.map(text => text.split(' ')[0]))
+        const landed = pending.filter(entry => !leftover.has(entry.slug))
+        if (landed.length > 0) orchestration.markIntegrated(sessionId, landed, corumAutoCleanup)
+        if (corumTruth.uncommitted.length > 0) {
+          orchestration.emitFrame(sessionId)
+          runtimeCtx.logger.warn(`integrate partially persisted: ${corumTruth.uncommitted.join(', ')} kept pending`)
+          corumNotifyPartialIntegration(parent, corumPartialIntegrationNotice(corumTruth, corumHeadBefore), runtimeCtx.logger)
+        }
         return outcome
       }
 
