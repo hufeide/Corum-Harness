@@ -57,7 +57,18 @@ if (DESKTOP_PKG === undefined || !existsSync(DESKTOP_PKG)) {
 const require = createRequire(DESKTOP_PKG)
 const WebSocket = require('ws')
 
-const PORT = Number(process.env.CDP_PORT ?? 9222)
+// 默认端口 = **验证实例 :9333**（不是用户主实例 :9222）。2026-09-12 实测事故：子 Agent
+// 跑 cdp.mjs 时没设 CDP_PORT → 默认 9222 → 驱动了**用户主实例**、读到用户真实会话，
+// 并据此误判「:9333 宿主就是我」，差一步就去重启用户的应用。技能口径是「主实例永远
+// 不要碰」，工具默认值就不该指向它。
+const PORT = Number(process.env.CDP_PORT ?? 9333)
+// 显式要打主实例时必须有意识：CORUM_ALLOW_MAIN=1（用户授权的一次性动作，例如派发任务）。
+if (PORT === 9222 && process.env.CORUM_ALLOW_MAIN !== '1') {
+  process.stderr.write('[cdp] 拒绝操作 :9222（用户主实例）。技能纪律：主实例永远不要碰——'
+    + '验证一律打你自己的验证实例 :9333（CDP_PORT=9333 或省略即默认 9333）。'
+    + '确实需要（例如用户当场授权派发/取证）时显式加 CORUM_ALLOW_MAIN=1。\n')
+  process.exit(2)
+}
 const OUT = process.env.CDP_OUT ?? '/tmp/corum-cdp/shots'
 mkdirSync(OUT, { recursive: true })
 

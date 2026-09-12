@@ -44,6 +44,8 @@ DESKTOP="$ROOT/packages/desktop"
 SELF_MARK="$DESKTOP"
 COMBO_ID="coding"
 export CORUM_HOME="${CORUM_HOME:-$DESKTOP/.corum-dev-home}"
+# 注意：本脚本面向**用户主实例**（默认 9222）。Agent 的验证请改用技能里的
+# verify-instance.sh（:9333）；不要用本脚本去起/停验证实例（口径见 SKILL.md）。
 export CORUM_DEBUG_PORT="${CORUM_DEBUG_PORT:-9222}"
 export CORUM_DEV_HMR="${CORUM_DEV_HMR:-500}"
 RUN_DIR="$CORUM_HOME/run"

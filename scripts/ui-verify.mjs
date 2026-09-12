@@ -74,6 +74,13 @@ function resolveRepoRoot() {
   return undefined
 }
 
+/** 主实例硬闸（与 cdp.mjs 同口径）：缺省禁止打 :9222，需 CORUM_ALLOW_MAIN=1 显式放行。 */
+function assertMainInstanceAllowed(port) {
+  if (port !== 9222) return
+  if (process.env.CORUM_ALLOW_MAIN === '1') return
+  process.stderr.write('[ui-verify] 拒绝操作 :9222（用户主实例）；验证请用 :9333（spec.port 或 CDP_PORT）。\n')
+  process.exit(2)
+}
 const REPO_ROOT = resolveRepoRoot()
 const DESKTOP_PKG = process.env.CORUM_DESKTOP_PKG
   ?? (REPO_ROOT === undefined ? undefined : join(REPO_ROOT, 'packages/desktop/package.json'))
@@ -225,6 +232,7 @@ async function main() {
   const specPath = process.argv[2]
   const spec = await loadSpec(specPath)
   const port = Number(spec.port ?? process.env.CDP_PORT ?? 9333)
+  assertMainInstanceAllowed(port)
   const { cdp, sessionId } = await attach(port)
   const results = []
   try {
