@@ -61,6 +61,8 @@ export interface CorumWorktreeEntry {
   status: 'active' | 'settled' | 'integrated' | 'discarded'
   /** settle 关联键——subagent/start|end 事件的 runId（session 级去重）。 */
   runId?: string
+  /** fork（corum）：子会话 id（与 runId 同值；浮层行点击 → 进入子会话）。 */
+  childSessionId?: string
 }
 
 /** 台账快照的一帧：某父会话的 worktree 条目全量投影（renderer 直接渲染）。 */
@@ -98,6 +100,7 @@ const corumLedgerRecordSchema = z.object({
     path: z.string(),
     status: z.enum(['active', 'settled', 'integrated', 'discarded']),
     runId: z.string().optional(),
+    childSessionId: z.string().optional(),
   })),
 }) as unknown as z.ZodType<CorumLedgerRecord>
 
@@ -907,7 +910,10 @@ export class CorumOrchestration extends Service {
     const entry = this.ledger.get(sessionId)?.find(item => item.slug === slug)
     if (entry === undefined || entry.runId !== undefined) return
     entry.runId = runId
+    entry.childSessionId = runId
     this.persist(sessionId)
+    // 绑定后立即发射，让已打开的浮层行可点击（与 addActiveEntry/markIntegrated 同口径）。
+    this.emitFrame(sessionId)
   }
 
   /**
