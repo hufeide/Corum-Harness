@@ -361,6 +361,9 @@ function SpeedChart({ samples, width = 300, height = 138 }: {
  *  能力接口收窄，与 `WorktreeLedgerFrame` 窄化注释同惯例）。 */
 type SubagentStopReason = 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
 
+/** RPC 返回的 stopReason 合法化（不认识的字符串不当成功）。 */
+const VALID_STOP_REASONS = new Set<string>(['completed', 'aborted', 'error', 'max-tokens', 'refusal'])
+
 /** stopReason → 三态终态（undefined = 运行中/未结束）；与 `subagentOutcomeOf` 同语义。 */
 function subagentOutcomeOf(stopReason: SubagentStopReason | undefined): 'completed' | 'aborted' | 'failed' | undefined {
   switch (stopReason) {
@@ -439,6 +442,7 @@ function useSubagentRoster(
   sessionId: string | undefined,
   useSessions: UseSessionsHook,
   catalog: SubagentCatalogFace | undefined,
+  connection: RpcFace | undefined,
 ): readonly SubagentRosterEntry[] {
   const rows = useSessions((state: SessionListState) => {
     return sessionId === undefined ? undefined : state.subagentsByParent?.[sessionId]?.entries
@@ -476,10 +480,63 @@ function useSubagentRoster(
     }
     return out
   }, [rows])
+
+  /** 冷启动终态种子：目录基线只区分 running/inactive，已结束（inactive）的子会话
+   *  无法区分「正常完成」与「手动终止」。推送帧不重放（刷新/重启/切走后丢失），
+   *  故对已结束的子会话一次性 RPC 拉 stopReason，只填补、不覆盖推送帧的权威值。
+   *  会话切走/换 sessionId 时重置已拉记录。 */
+  const [seededStopReason, setSeededStopReason] = useState<ReadonlyMap<string, SubagentStopReason>>(new Map())
+  const seededRef = useRef<Set<string>>(new Set())
+  // 已结束的子会话 id 列表（只在成员变化时变，不受 step 等增量字段影响）。
+  const finishedIds = useMemo(
+    () => baseline.filter(e => e.done).map(e => e.childSessionId),
+    [baseline],
+  )
+  useEffect(() => {
+    // 会话切换时清空种子与已拉记录，避免跨会话串数据。
+    seededRef.current = new Set()
+    setSeededStopReason(new Map())
+    if (connection === undefined || sessionId === undefined) return undefined
+    let cancelled = false
+    for (const id of finishedIds) {
+      // 只拉尚未拉过的子会话（running 的不在 finishedIds 里）。
+      if (seededRef.current.has(id)) continue
+      seededRef.current.add(id)
+      void (async () => {
+        try {
+          const result = await connection.rpc.call('/api', 'corumAgent/getChildSessionProgress', {
+            args: { sessionId: id },
+          })
+          if (cancelled || !result.ok || result.value === undefined) return
+          const value = result.value as { progress?: { stopReason?: string } }
+          const raw = value.progress?.stopReason
+          if (raw === undefined) return
+          if (!VALID_STOP_REASONS.has(raw)) return
+          const sr = raw as SubagentStopReason
+          setSeededStopReason(prev => {
+            const next = new Map(prev)
+            next.set(id, sr)
+            return next
+          })
+        } catch {
+          // 拉取失败静默忽略（与兜底风格一致：可见性增强，绝不影响会话）。
+        }
+      })()
+    }
+    return () => { cancelled = true }
+  }, [connection, sessionId, finishedIds])
+
   const live = useLiveRoster(remote, sessionId)
   return useMemo(() => {
     const merged = new Map<string, SubagentRosterEntry>()
     for (const entry of baseline) merged.set(entry.childSessionId, entry)
+    // 冷启动种子填补 stopReason（仅当推送帧未给时；推送帧的值更权威）。
+    for (const [id, sr] of seededStopReason) {
+      const entry = merged.get(id)
+      if (entry !== undefined && entry.stopReason === undefined) {
+        merged.set(id, { ...entry, stopReason: sr })
+      }
+    }
     for (const entry of live) {
       const prior = merged.get(entry.childSessionId)
       // done/stopReason 以推送帧（live）为准：目录基线只有 running/inactive 两态，
@@ -491,7 +548,7 @@ function useSubagentRoster(
       })
     }
     return [...merged.values()]
-  }, [baseline, live])
+  }, [baseline, live, seededStopReason])
 }
 
 /** 推送帧累积（历史上的唯一来源；现在只作基线之上的增量）。 */
@@ -895,8 +952,9 @@ export interface SessionStatusInjected {
   /** 打开会话（浮层子 Agent 行点击 → 进入子会话）。 */
   readonly openSession: (sessionId: string) => void
   /**
-   * RPC 面（隔离台账的冷启动基线：推送帧不重放，刷新后需主动拉一次）。
-   * 结构窄化到「调用一个具名 RPC」——不 import connection 包的具体类型（红线 3）。
+   * RPC 面（隔离台账 + 子 Agent 花名册的冷启动基线：推送帧不重放，
+   * 刷新后需主动拉一次）。结构窄化到「调用一个具名 RPC」——不 import
+   * connection 包的具体类型（红线 3）。
    */
   readonly connection?: RpcFace | undefined
   /**
@@ -955,7 +1013,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
   })
   const title = useSessions((s: SessionListState) => s.byId[sessionId]?.displayTitle) ?? '会话'
   // 子 Agent 花名册（2026-09-10 用户定调：胶囊与状态展示合并到同一 pill）。
-  const roster = rankRoster(useSubagentRoster(remote, sessionId, useSessions, catalog))
+  const roster = rankRoster(useSubagentRoster(remote, sessionId, useSessions, catalog, connection))
   // 终态分组（按 stopReason 派生；done 布尔仅作无推送帧时的兜底——见基线注释）。
   const running = roster.filter(e => subagentOutcomeOf(e.stopReason) === undefined)
   const completed = roster.filter(e => subagentOutcomeOf(e.stopReason) === 'completed' || (e.done && e.stopReason === undefined))
