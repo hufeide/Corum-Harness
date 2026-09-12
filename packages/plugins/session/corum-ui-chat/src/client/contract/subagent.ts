@@ -1,6 +1,6 @@
 /** Subagent progress-card payload shared between the Chat Node and its renderer. */
 
-import type { SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
+import type { SubagentDelegationRole, SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 
 /** Turn-local subagent invocation encoded as a reference-stable Location-data scalar. */
 export type SubagentTurnSignature = string
@@ -37,6 +37,15 @@ export interface SubagentInvocation {
   readonly prompt?: string
   /** Matched child Session id (`origin: 'subagent'` + parent lineage + nearest start time). */
   readonly childSessionId?: string
+  /**
+   * 委派角色：由**父会话日志里那条 `tool/call` 的工具名**派生
+   * （`subagent`→worker / `subagent_research`→research / `subagent_fork`→fork），
+   * 用于卡片图标与会话条角色小标。**绝不按 label 文案猜**（2026-09-12 用户定调）：
+   * label 是模型写的自然语言，同一角色会被写成「调研」「recon」「查一下」……
+   * 取不到工具名的路径（历史截断 / 宿主补齐的 orchestrate 子会话）缺省 undefined，
+   * UI 退回通用图标而不是冒充某个角色。
+   */
+  readonly role?: SubagentDelegationRole
   /**
    * 前台一次性（父等结果）还是后台 agent（父继续干活、可续接）。
    * 首选宿主 `corum/subagent/child` 广播的权威值；页面刷新后由工具参数

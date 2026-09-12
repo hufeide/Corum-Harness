@@ -5,6 +5,7 @@ import type {
 import type { SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-tools/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import { subagentDelegationRoleOf } from '@corum/corum-api-remotes/corum-events'
 import { isSubagentDelegationTool } from '../contract/turn-process.ts'
 import { subagentChildOf } from '../chat-runtime.ts'
 import {
@@ -70,11 +71,14 @@ function refreshCorrelation(
 function startInvocation(match: ConversationMatch): SubagentInvocation {
   if (match.event.type !== 'tool/call') throw new Error('subagent start requires tool/call')
   const fields = subagentDelegationFields(match.event.data.arguments)
+  // 角色 = 这条 tool/call 的名字（权威面，就在本事件里）。
+  const role = subagentDelegationRoleOf(String(match.event.data.name))
   return {
     callId: String(match.event.data.callId),
     turn: match.event.data.turn,
     anchorSeq: match.event.seq,
     time: match.event.time,
+    ...role === undefined ? {} : { role },
     ...fields.description === undefined ? {} : { description: fields.description },
     ...fields.prompt === undefined ? {} : { prompt: fields.prompt },
     ...fields.mode === undefined ? {} : { mode: fields.mode },

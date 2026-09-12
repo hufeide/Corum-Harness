@@ -567,6 +567,21 @@ export class CorumAgentService extends TypertRemoteService {
       this.subagentProgress.delete(String(session.id))
     })
     /**
+     * 委派角色记账（`corum/subagent/child` 帧 → childSessionId → 角色）。
+     *
+     * 帧里带的是父侧工具名派生的角色（见 `SubagentChildEvent.role`）。这里留存一份，
+     * 供会话条花名册经 `getChildSessionProgress` 冷启动补标——推送帧不重放，不记就
+     * 只剩「本页加载之后新建的子 Agent」才显示角色（与 mode/isolated 的老缺口同源）。
+     */
+    ctx.on('corum/subagent/child' as never, ((info: {
+      readonly childSessionId?: string
+      readonly role?: 'worker' | 'research' | 'fork'
+    }) => {
+      if (info.childSessionId === undefined || info.role === undefined) return
+      this.subagentRoles.set(info.childSessionId, info.role)
+    }) as never, { global: true })
+
+    /**
      * subagent/end 终态兜底：子会话在首个 turn 打开前被取消时，
      * session/event 不产生 turn/start / turn/end，foldSubagentProgress
      * 一帧不发。此处用宿主权威终态事件补发进度帧，让 UI 卡片拿到终态。
@@ -604,6 +619,16 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /** 子 Agent 进度折叠的每会话 O(1) 状态（session/event 增量维护）。 */
+  /**
+   * fork（corum）：子会话 → 委派角色（调研/执行/分叉）。
+   *
+   * 为什么要有这张表：角色来自父侧 `tool/call` 的工具名，随 `corum/subagent/child`
+   * 帧推送；而推送帧**不重放**（刷新/重启/切走后丢失）——会话条花名册的 mode/isolated
+   * 今天就有同样的缺口。卡片走父会话日志（durable）不受影响；花名册由本表经
+   * `getChildSessionProgress` 的冷启动补标拿到（与 stopReason 的种子同一条路）。
+   */
+  private readonly subagentRoles = new Map<string, 'worker' | 'research' | 'fork'>()
+
   private readonly subagentProgress = new Map<string, {
     turn: number
     step: number
@@ -2018,6 +2043,11 @@ export class CorumAgentService extends TypertRemoteService {
 
   @Remote('getChildSessionProgress')
   async getChildSessionProgressRemote(sessionId: string): Promise<{
+    /**
+     * 委派角色：**独立于 progress 返回**（progress 只从子会话事件窗口折出来，而角色
+     * 来自父侧工具名）。花名册冷启动时用它补角色小标；本进程没记过该子会话则缺省。
+     */
+    role?: 'worker' | 'research' | 'fork'
     progress?: {
       turn: number
       step: number
@@ -2082,7 +2112,9 @@ export class CorumAgentService extends TypertRemoteService {
       }
     }
     const lastActive = stored[stored.length - 1].time
+    const role = this.subagentRoles.get(sessionId)
     return {
+      ...role === undefined ? {} : { role },
       progress: {
         turn,
         step,

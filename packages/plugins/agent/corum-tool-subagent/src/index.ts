@@ -347,6 +347,20 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
 }
 
 /**
+ * fork（corum）：委派工具名 → 角色（UI 图标/小标）。**与
+ * `@corum/corum-api-remotes` 的 `subagentDelegationRoleOf` 同表**——本包的编译
+ * 程序里看不到 api-remotes（fork 包各自声明，见下），故在此镜像一份；
+ * `@corum/corum-api-remotes` 的 `remote-events.host.spec.ts` 有单测逐项对账两处
+ * 的工具名表（改一处不同步就红），改一处必须两处一起改。
+ * 角色只从**工具名**派生，绝不按 label 文案猜（2026-09-12 用户定调）。
+ */
+const CORUM_DELEGATION_ROLE_BY_TOOL: Readonly<Record<string, 'worker' | 'research' | 'fork'>> = {
+  subagent: 'worker',
+  subagent_research: 'research',
+  subagent_fork: 'fork',
+}
+
+/**
  * fork（corum）：`corum/subagent/child` 载荷——spawn 成功那一刻的精确父子映射。
  *
  * 与 `@corum/corum-api-remotes` 的 `SubagentChildEvent` 同构（自包含声明：本包
@@ -360,6 +374,8 @@ interface CorumSubagentChildEvent {
   readonly childSessionId: string
   readonly label: string
   readonly isolated: boolean
+  /** 委派角色（工具名派生；见 `CORUM_DELEGATION_ROLE_BY_TOOL`）。 */
+  readonly role?: 'worker' | 'research' | 'fork'
   /** 前台一次性（父等结果）还是后台 agent（父继续干活、可续接）。 */
   readonly mode: 'foreground' | 'background'
   readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string }
@@ -807,6 +823,7 @@ export function apply(ctx: Context, config: Config): void {
      * 这里在 start 返回的同一刻按父侧 tool/call id 广播真实 id——卡片第一帧就能
      * 跳转并订阅进度。广播失败只告警（可见性增强，绝不影响委托）。
      */
+    const corumChildRole = CORUM_DELEGATION_ROLE_BY_TOOL[toolName]
     const corumEmitChildStarted = (
       parentSessionId: string,
       callId: string | undefined,
@@ -827,6 +844,9 @@ export function apply(ctx: Context, config: Config): void {
           childSessionId,
           label,
           isolated,
+          // 角色 = 本工具实例的名字（subagent_research → research / subagent_fork →
+          // fork / subagent → worker）。UI 图标与小标只认它，绝不按 label 文案猜。
+          ...corumChildRole === undefined ? {} : { role: corumChildRole },
           mode,
           ...worktree === undefined ? {} : { worktree: { ...worktree } },
           ...model === undefined ? {} : {

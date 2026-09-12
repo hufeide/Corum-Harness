@@ -253,6 +253,29 @@ export function stopReasonOfTurnEnd(kind: string | undefined): SubagentStopReaso
   }
 }
 
+/**
+ * 委派角色（UI 图标/小标用）——**只从委派工具名派生，绝不按 label 文案猜**
+ * （2026-09-12 用户定调）。
+ *
+ * - `research`：只读调研子 Agent（`subagent_research` 工具实例，工具层硬只读）；
+ * - `fork`：上下文继承子 Agent（`subagent_fork` 工具实例，官方 fork 语义 + corum 机制）；
+ * - `worker`：常规执行委派（`subagent`）；orchestrate/orchestrate 脚本派出的子 Agent
+ *   也归此类（它们没有父侧 tool/call 名，取不到即按执行算，不冒充调研/分叉）。
+ */
+export type SubagentDelegationRole = 'worker' | 'research' | 'fork'
+
+/**
+ * 委派工具名 → 角色。工具名是父会话日志里那条 `tool/call` 的 `name`（权威面）。
+ * @param toolName - 委派工具名（`subagent` / `subagent_research` / `subagent_fork`）。
+ * @returns 角色；不是已知的 corum 委派工具名时返回 undefined（调用方决定兜底）。
+ */
+export function subagentDelegationRoleOf(toolName: string | undefined): SubagentDelegationRole | undefined {
+  if (toolName === 'subagent_research') return 'research'
+  if (toolName === 'subagent_fork') return 'fork'
+  if (toolName === 'subagent') return 'worker'
+  return undefined
+}
+
 /** 子 Agent 终态（三态；运行中 = undefined）。 */
 export type SubagentOutcome = 'completed' | 'aborted' | 'failed'
 
@@ -408,6 +431,11 @@ export interface SubagentChildEvent {
   readonly label: string
   /** 是否隔离到独立 worktree（false = 直接在主工作区）。 */
   readonly isolated: boolean
+  /**
+   * 委派角色（父侧 tool/call 的工具名派生；取不到工具名的路径缺省）。
+   * 卡片图标与会话条角色小标只认这个字段——**不按 label 文案猜**。
+   */
+  readonly role?: SubagentDelegationRole
   /** 前台一次性（父等结果）还是后台 agent（父继续干活、可续接）。 */
   readonly mode: 'foreground' | 'background'
   /** 隔离时的 worktree 三件套（台账 chip 与卡片提示用）。 */

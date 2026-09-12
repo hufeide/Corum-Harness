@@ -18,6 +18,7 @@ import type {
 } from '@deepseek-ai/dsh-api-gateway'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import { describe, expect, it } from 'vitest'
+import { subagentDelegationRoleOf } from '../src/corum-events.ts'
 import { apply, inject } from '../src/index.ts'
 import { API_REMOTE_FORWARDED_EVENTS } from '../src/remote-events.ts'
 
@@ -309,5 +310,35 @@ describe('corum 事件转发（P2-4 运行时守护）', () => {
 
     abort.abort()
     await ctx.fiber.dispose()
+  })
+})
+
+describe('subagentDelegationRoleOf — 委派角色只认工具名（2026-09-12 用户定调，BUG-27）', () => {
+  it('三个 corum 委派工具名各自的角色', () => {
+    expect(subagentDelegationRoleOf('subagent')).toBe('worker')
+    expect(subagentDelegationRoleOf('subagent_research')).toBe('research')
+    expect(subagentDelegationRoleOf('subagent_fork')).toBe('fork')
+  })
+
+  it('未知/缺省工具名 → undefined（UI 退回通用图标，不冒充角色）', () => {
+    expect(subagentDelegationRoleOf(undefined)).toBeUndefined()
+    expect(subagentDelegationRoleOf('orchestrate')).toBeUndefined()
+    expect(subagentDelegationRoleOf('bash')).toBeUndefined()
+  })
+
+  it('不按 label 文案猜：label 里出现「调研」也不影响角色判定（判定输入根本没有 label）', () => {
+    // 角色函数的入参只有工具名——这条断言钉的是「签名不含 label」，防回归成文案匹配。
+    expect(subagentDelegationRoleOf.length).toBe(1)
+  })
+
+  it('工具名表与 host 侧镜像表一致（corum-tool-subagent 自带一份，守卫 §事件段对账）', async () => {
+    const fs = await import('node:fs')
+    const src = fs.readFileSync(
+      new URL('../../corum-tool-subagent/src/index.ts', import.meta.url), 'utf8',
+    )
+    expect(src).toContain('CORUM_DELEGATION_ROLE_BY_TOOL')
+    for (const [tool, role] of [['subagent', 'worker'], ['subagent_research', 'research'], ['subagent_fork', 'fork']] as const) {
+      expect(src).toContain(`${tool}: '${role}'`)
+    }
   })
 })

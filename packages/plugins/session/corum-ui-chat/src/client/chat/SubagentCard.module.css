@@ -32,6 +32,13 @@
   color: var(--corum-label-on-brand, #0A0612);
 }
 
+/* 委派角色 → 头像底色（图标形状本身也按角色换：调研=放大镜 / 执行=扳手 / 分叉=分叉）。
+   同一角色在两处（卡片头像 + 会话条小标）用同一色系，用户一眼能对上。
+   角色取不到（历史截断 / orchestrate 子会话）时不带 data-role → 保持原品牌粉。 */
+.avatar[data-role='research'] { background: var(--dsw-alias-state-business-primary, #6BA8FF); }
+.avatar[data-role='worker'] { background: var(--dsw-alias-brand-primary, #33C7F4); }
+.avatar[data-role='fork'] { background: #B48CFF; }
+
 .meta {
   flex: 1;
   min-width: 0;

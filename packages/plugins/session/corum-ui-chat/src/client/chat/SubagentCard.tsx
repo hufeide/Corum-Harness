@@ -17,10 +17,28 @@
 // cordis 服务消费（统一事件中心二期 window 全局迁移；同 bundle 模块级
 // chatRuntimeRef 拿服务实例，见 ../chat-runtime.ts）。
 import { memo, useEffect, useState } from 'react'
-import { ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, Loader, X } from 'lucide-react'
+import { ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, GitFork, Loader, Search, Wrench, X } from 'lucide-react'
 import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
-import type { SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
+import type { SubagentChangeSummary, SubagentDelegationRole, SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
+
+/**
+ * 委派角色 → 头像图标 + 文案 key（**卡片与会话条共用同一角色集**，口径一致）。
+ *
+ * 角色来自父会话日志里那条 `tool/call` 的**工具名**（`SubagentInvocation.role`）：
+ * `subagent_research` → 放大镜（只读调研）、`subagent` → 扳手（委派执行）、
+ * `subagent_fork` → 分叉（继承上下文）。**绝不按 label 文案猜**——label 是模型写的
+ * 自然语言，同一角色会被写成「调研」「recon」「查一下」。取不到工具名的路径
+ * （历史截断 / orchestrate 派出的子会话）退回通用 `Bot` 图标，不冒充角色。
+ */
+export const SUBAGENT_ROLE_VISUAL: Readonly<Record<SubagentDelegationRole, {
+  readonly icon: typeof Bot
+  readonly labelKey: 'subagent.role.research' | 'subagent.role.worker' | 'subagent.role.fork'
+}>> = {
+  research: { icon: Search, labelKey: 'subagent.role.research' },
+  worker: { icon: Wrench, labelKey: 'subagent.role.worker' },
+  fork: { icon: GitFork, labelKey: 'subagent.role.fork' },
+}
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
 import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe } from '../chat-runtime.ts'
 import { SubagentPlan } from './SubagentPlan.tsx'
@@ -291,13 +309,15 @@ function useLiveChildIdentity(
 /** 一个 delegation 召唤的卡片（进度由 'corum/subagent/progress' 推送注入，见 useChildProgress）。 */
 function SubagentRow({
   callId, description, prompt: delegationPrompt, childSessionId: foldedChildSessionId,
-  mode: foldedMode, t,
+  mode: foldedMode, role, t,
 }: {
   callId: string
   description: string | undefined
   prompt: string | undefined
   childSessionId: string | undefined
   mode: 'foreground' | 'background' | undefined
+  /** 委派角色（父侧工具名派生；见 SubagentInvocation.role）。 */
+  role: SubagentDelegationRole | undefined
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
   // hooks 顺序恒定（React #310）：必须在任何 early return 之前。
@@ -322,7 +342,16 @@ function SubagentRow({
       data-child-session-id={childSessionId || undefined}
     >
       <div className={css.head}>
-        <span className={css.avatar}><Bot size={16} strokeWidth={2} className={css.avatarIcon} /></span>
+        <span
+          className={css.avatar}
+          data-role={role ?? undefined}
+          title={role === undefined ? t('subagent.name') : t(SUBAGENT_ROLE_VISUAL[role].labelKey)}
+          aria-label={role === undefined ? t('subagent.name') : t(SUBAGENT_ROLE_VISUAL[role].labelKey)}
+        >
+          {role === undefined
+            ? <Bot size={16} strokeWidth={2} className={css.avatarIcon} />
+            : (() => { const Icon = SUBAGENT_ROLE_VISUAL[role].icon; return <Icon size={16} strokeWidth={2} className={css.avatarIcon} /> })()}
+        </span>
         <span className={css.meta}>
           <span className={css.name}>{t('subagent.name')}{description !== undefined ? ` · ${description}` : ''}</span>
           {model !== undefined && (
@@ -443,6 +472,7 @@ export const SubagentCard = memo(function SubagentCard({ node, t }: ChatNodeView
           prompt={invocation.prompt}
           childSessionId={invocation.childSessionId}
           mode={invocation.mode}
+          role={invocation.role}
           t={t}
         />
       ))}

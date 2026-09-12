@@ -1324,6 +1324,21 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* 委派角色小标（调研/执行/分叉）——与卡片头像图标同一角色集，颜色区分角色而非状态：
+   调研=业务蓝（只读调查） / 执行=品牌主色（干活） / 分叉=紫（继承上下文）。 */
+.statusDetailAgentRole {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--corum-glass-3, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+}
+.statusDetailAgentRole[data-role='research'] { color: var(--dsw-alias-state-business-primary, #6BA8FF); }
+.statusDetailAgentRole[data-role='worker'] { color: var(--dsw-alias-brand-primary); }
+.statusDetailAgentRole[data-role='fork'] { color: #B48CFF; }
+
 /* 台账状态徽标按状态着色（进行中=warn / 待集成=brand / 已集成=success / 已丢弃=dim）。 */
 .statusDetailAgentBadge[data-status='active'] { color: var(--dsw-alias-state-warn-primary, #FFB45C); }
 .statusDetailAgentBadge[data-status='settled'] { color: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); }

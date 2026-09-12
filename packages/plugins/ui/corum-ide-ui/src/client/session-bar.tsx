@@ -387,6 +387,11 @@ interface SubagentRosterEntry {
   readonly isolated?: boolean
   /** 子 Agent 实际在跑的模型（child 帧携带 + session/list 冷启动补强）。 */
   readonly model?: { provider: string; model: string }
+  /**
+   * 委派角色（`corum/subagent/child` 帧按工具名派生；卡片与会话条同一来源）。
+   * 官方目录基线不带这一轴，故 optional——取不到就不挂小标，不按 label 文案猜。
+   */
+  readonly role?: 'worker' | 'research' | 'fork'
   readonly step: number
   readonly currentAction?: string
   /** 最新 turn 已闭合（turn/end）；只表示 turn 闭合，不代表终态。 */
@@ -404,6 +409,8 @@ interface ChildFrame {
   label?: string
   mode?: 'foreground' | 'background'
   isolated?: boolean
+  /** child 帧携带的委派角色（工具名派生；卡片与会话条同源）。 */
+  role?: 'worker' | 'research' | 'fork'
   /** child 帧携带的 worktree 三件套（仅隔离时非空；用于 slug→model 关联）。 */
   worktree?: { slug?: string; branch?: string; path?: string }
   /** child 帧携带的真实生效模型路由（progress 帧不带）。 */
@@ -492,6 +499,8 @@ function useSubagentRoster(
    *  故对已结束的子会话一次性 RPC 拉 stopReason，只填补、不覆盖推送帧的权威值。
    *  会话切走/换 sessionId 时重置已拉记录。 */
   const [seededStopReason, setSeededStopReason] = useState<ReadonlyMap<string, SubagentStopReason>>(new Map())
+  /** 冷启动补来的委派角色（见下方种子的说明；推送帧不重放）。 */
+  const [seededRole, setSeededRole] = useState<ReadonlyMap<string, 'worker' | 'research' | 'fork'>>(new Map())
   const seededRef = useRef<Set<string>>(new Set())
   // 已结束的子会话 id 列表（只在成员变化时变，不受 step 等增量字段影响）。
   const finishedIds = useMemo(
@@ -502,6 +511,7 @@ function useSubagentRoster(
     // 会话切换时清空种子与已拉记录，避免跨会话串数据。
     seededRef.current = new Set()
     setSeededStopReason(new Map())
+    setSeededRole(new Map())
     if (connection === undefined || sessionId === undefined) return undefined
     let cancelled = false
     for (const id of finishedIds) {
@@ -514,7 +524,23 @@ function useSubagentRoster(
             args: { sessionId: id },
           })
           if (cancelled || !result.ok || result.value === undefined) return
-          const value = result.value as { progress?: { stopReason?: string } }
+          const value = result.value as {
+            role?: 'worker' | 'research' | 'fork'
+            progress?: { stopReason?: string }
+          }
+          // 角色：与 stopReason 同一条冷启动路（推送帧不重放，不补就只有「本页之后新建的
+          // 子 Agent」才带角色）。只认白名单里的三个值，别的一律不挂小标。
+          const seeded = value.role === 'worker' || value.role === 'research' || value.role === 'fork'
+            ? value.role
+            : undefined
+          if (seeded !== undefined) {
+            setSeededRole(prev => {
+              if (prev.get(id) === seeded) return prev
+              const next = new Map(prev)
+              next.set(id, seeded)
+              return next
+            })
+          }
           const raw = value.progress?.stopReason
           if (raw === undefined) return
           if (!VALID_STOP_REASONS.has(raw)) return
@@ -584,6 +610,13 @@ function useSubagentRoster(
         merged.set(id, { ...entry, stopReason: sr })
       }
     }
+    // 冷启动种子填补 role（仅当推送帧没给时）。
+    for (const [id, role] of seededRole) {
+      const entry = merged.get(id)
+      if (entry !== undefined && entry.role === undefined) {
+        merged.set(id, { ...entry, role })
+      }
+    }
     // 冷启动种子填补 model（仅当基线 / 推送帧都没给时；推送帧的值更权威）。
     for (const [id, m] of seededModel) {
       const entry = merged.get(id)
@@ -602,10 +635,12 @@ function useSubagentRoster(
         ...prior === undefined ? {} : { label: entry.label === '' ? prior.label : entry.label },
         ...prior !== undefined && entry.step === 0 ? { step: prior.step } : {},
         ...(entry.model === undefined && prior?.model !== undefined ? { model: prior.model } : {}),
+        // role 只来自 child 帧 / 冷启动种子：progress 帧不带它，别把已知角色抹掉。
+        ...(entry.role === undefined && prior?.role !== undefined ? { role: prior.role } : {}),
       })
     }
     return [...merged.values()]
-  }, [baseline, live, seededStopReason, seededModel])
+  }, [baseline, live, seededStopReason, seededModel, seededRole])
 }
 
 /** 推送帧累积（历史上的唯一来源；现在只作基线之上的增量）。 */
@@ -644,6 +679,7 @@ function useLiveRoster(remote: RemoteEventFace | undefined, sessionId: string | 
         ...(frame.label === undefined ? {} : { label: frame.label }),
         ...(frame.mode === undefined ? {} : { mode: frame.mode }),
         ...(frame.isolated === undefined ? {} : { isolated: frame.isolated }),
+        ...(frame.role === undefined ? {} : { role: frame.role }),
         ...(frame.model === undefined || frame.model.model === undefined || frame.model.provider === undefined
           ? {}
           : { model: { provider: frame.model.provider, model: frame.model.model } }),
@@ -694,6 +730,18 @@ interface WorktreeEntry {
   readonly model?: { provider: string; model: string }
   /** 子会话 id（绑定 runId 后才有；有则行可点 → 进入子会话）。 */
   readonly childSessionId?: string
+}
+
+/**
+ * 委派角色 → 会话条短标（调研 / 执行 / 分叉）。
+ *
+ * 与 `SubagentCard` 的 `SUBAGENT_ROLE_VISUAL`（图标 + 长文案）**同一角色集**，
+ * 只是本处是紧凑列表，用两字短标；角色来源同为父侧 tool/call 的工具名。
+ */
+const SUBAGENT_ROLE_BADGE: Readonly<Record<'worker' | 'research' | 'fork', string>> = {
+  research: '调研',
+  worker: '执行',
+  fork: '分叉',
 }
 
 /** 台账状态文案（与 SubagentCard 的 WORKTREE_STATUS_LABEL 同口径）。 */
@@ -1048,6 +1096,11 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
                 {entry.model?.model ?? '未记录'}
               </span>
+              {entry.role !== undefined && (
+                <span className={css.statusDetailAgentRole} data-role={entry.role}>
+                  {SUBAGENT_ROLE_BADGE[entry.role]}
+                </span>
+              )}
               {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
               {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
               <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
@@ -1094,6 +1147,11 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                       <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
                         {entry.model?.model ?? '未记录'}
                       </span>
+                      {entry.role !== undefined && (
+                        <span className={css.statusDetailAgentRole} data-role={entry.role}>
+                          {SUBAGENT_ROLE_BADGE[entry.role]}
+                        </span>
+                      )}
                       {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
                       {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
                       <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
