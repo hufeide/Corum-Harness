@@ -1110,6 +1110,12 @@ export function apply(ctx: Context, config: Config): void {
           ...corumIntegrateRequest,
           signal: exec.signal,
         })
+        // fork（corum）：**集成者也是子会话**——它这条路此前漏了 spawn 广播（前台/后台
+        // 两条路径都有），于是编排卡在「集成中」那一整段拿不到子会话 id：用户实测
+        // 「Agent 在集成但状态没有变，也没有按钮进入会话查看详情」。这里补上广播
+        // （label 由调用方给 = 'integrate'），卡的「进入集成者会话」按钮即可点。
+        // 集成者不建 worktree（`corumEntryInfo` 在这条路上不存在），故 worktree 传 undefined。
+        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, 'foreground', undefined, corumSpawnModel)
         const outcome = await settleForegroundRun(run)
         // fork（corum）：集成成功**不再由集成者自述决定**——`settleForegroundRun` 只
         // 保证子 Agent 正常结束，不代表它真的把分支合进了主树。2026-09-09 事故：
