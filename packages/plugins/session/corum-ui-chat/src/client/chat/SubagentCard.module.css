@@ -302,3 +302,17 @@
   border-color: var(--corum-glass-border-active, #01CDFE);
   color: var(--dsw-alias-brand-text);
 }
+
+/* 通知点击「滚到卡片」后的短暂高亮态（data-reveal 由 notification-bridge 在
+   滚动到位后置位、约 1.6s 后撤销）。用边框 + 轻微背景脉冲提示用户「就是这张」。 */
+.card[data-reveal] {
+  border-color: var(--corum-glass-border-active, #01CDFE);
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  animation: subagentReveal 1.6s ease-out;
+}
+
+@keyframes subagentReveal {
+  0% { box-shadow: 0 0 0 0 rgba(1, 205, 254, 0.5); }
+  30% { box-shadow: 0 0 0 4px rgba(1, 205, 254, 0.35); }
+  100% { box-shadow: 0 0 0 0 rgba(1, 205, 254, 0); }
+}

@@ -312,7 +312,10 @@ function SubagentRow({
   }
 
   return (
-    <div className={css.card}>
+    <div
+      className={css.card}
+      data-child-session-id={childSessionId || undefined}
+    >
       <div className={css.head}>
         <span className={css.avatar}><Bot size={16} strokeWidth={2} className={css.avatarIcon} /></span>
         <span className={css.meta}>
