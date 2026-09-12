@@ -76,9 +76,23 @@ cdp_ok() {
   curl -s --max-time 2 "http://127.0.0.1:$CORUM_DEBUG_PORT/json/version" 2>/dev/null | grep -q '"Browser"'
 }
 
+# 等端口空闲：Electron 的实例锁在 userData 上，进程退出到锁释放之间有间隙；
+# 不等就立刻 start 会命中 `another instance already owns the lock; handing over and exiting`
+# （2026-09-12 实测把自己坑了一次）。最多等 15 秒。
+wait_port_free() {
+  local i=0
+  while [[ $i -lt 30 ]]; do
+    if ! curl -s --max-time 1 "http://127.0.0.1:$CORUM_DEBUG_PORT/json/version" >/dev/null 2>&1; then return 0; fi
+    sleep 0.5; i=$((i+1))
+  done
+  log "警告：端口 $CORUM_DEBUG_PORT 仍被占用，继续尝试启动"
+  return 0
+}
+
 case "${1:-status}" in
   start)
     stop_own
+    wait_port_free
     log "启动验证实例：CORUM_HOME=$CORUM_HOME CDP=:$CORUM_DEBUG_PORT"
     # 后台 + 三重 fd 重定向：与调用方（Agent 的 bash 工具）彻底脱钩，脚本秒回。
     (
