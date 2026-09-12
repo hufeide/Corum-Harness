@@ -858,6 +858,37 @@ else
   fail "缺 packages/desktop/shipped-presets/official——官方 preset 的 corum 编排替换不存在"
 fi
 
+# ── 18. 技能打包副本与仓库脚本一致（2026-09-12 用户定调）────────────────────
+# 用户定调：**脚本和 skill 原文打包进 CORUM_HOME 的技能路径**，技能要自带全套脚本
+# （隔离 worktree 里的子 Agent 也要能用）。仓库 `scripts/*` 是源，技能里的 `scripts/*`
+# 是打包副本——两处漂移就等于「技能里那份是旧的」，而这类失效在实机上极难发现。
+section "[18] corum-cdp-verify 技能：打包副本 == 仓库脚本（逐字节）"
+SKILL_DIR="${CORUM_HOME:-$REPO_ROOT/packages/desktop/.corum-dev-home}/skills/corum-cdp-verify"
+if [ -d "$SKILL_DIR/scripts" ]; then
+  SKILL_ASSETS="cdp.mjs cdp.sh rpc-helper.js ui-verify.mjs verify-instance.sh app-launch-guard.sh"
+  skill_bad=0
+  for asset in $SKILL_ASSETS; do
+    if [ ! -f "$REPO_ROOT/scripts/$asset" ]; then
+      fail "仓库缺 scripts/$asset（技能打包的源）"
+      skill_bad=1
+      continue
+    fi
+    if [ ! -f "$SKILL_DIR/scripts/$asset" ]; then
+      fail "技能缺 scripts/$asset —— 打包：cp scripts/$asset \"$SKILL_DIR/scripts/\""
+      skill_bad=1
+      continue
+    fi
+    if ! cmp -s "$REPO_ROOT/scripts/$asset" "$SKILL_DIR/scripts/$asset"; then
+      fail "技能副本 scripts/$asset 与仓库不一致 —— 同步：cp scripts/$asset \"$SKILL_DIR/scripts/\""
+      skill_bad=1
+    fi
+  done
+  [ "$skill_bad" = "0" ] && pass "6 个验证脚本：技能副本与仓库逐字节一致（$SKILL_DIR/scripts）"
+  [ -f "$SKILL_DIR/SKILL.md" ] && pass "技能自带 SKILL.md" || fail "技能缺 SKILL.md"
+else
+  skip "未安装 corum-cdp-verify 技能（$SKILL_DIR 不存在）——跳过打包副本对账"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 printf '\n'
 if [ "$failures" -gt 0 ]; then

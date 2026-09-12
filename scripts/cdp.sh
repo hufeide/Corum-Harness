@@ -19,14 +19,27 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 仓库根定位：优先 CORUM_REPO 环境变量（skill 快照版在仓库外时用）；否则按脚本
-# 所在位置推断（仓库内 scripts/ → 上一级即仓库根）。
-ROOT="${CORUM_REPO:-$(dirname "$SCRIPT_DIR")}"
-DESKTOP="$ROOT/packages/desktop"
-if [[ ! -d "$DESKTOP" ]]; then
-  echo "[cdp] 错误：未找到 $DESKTOP。请设 CORUM_REPO=<kkc-desktop 仓库根> 后重试。" >&2
+# 仓库根解析（与 verify-instance.sh / cdp.mjs / ui-verify.mjs 同口径）：本脚本有两个部署
+# 位置（仓库 scripts/ 与技能包 $CORUM_HOME/skills/corum-cdp-verify/scripts/），也可能从
+# 隔离 worktree 的 cwd 调用。优先级：CORUM_REPO > 脚本自身所在仓库 > cwd 的 git 主仓。
+resolve_repo() {
+  local candidate common
+  if [[ -n "${CORUM_REPO:-}" && -d "$CORUM_REPO/packages/desktop" ]]; then printf '%s\n' "$CORUM_REPO"; return 0; fi
+  candidate="$(dirname "$SCRIPT_DIR")"
+  if [[ -d "$candidate/packages/desktop" ]]; then printf '%s\n' "$candidate"; return 0; fi
+  common="$(git -C "$PWD" rev-parse --git-common-dir 2>/dev/null || git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$common" ]]; then
+    candidate="$(cd "$(dirname "$common")" 2>/dev/null && pwd || true)"
+    if [[ -n "$candidate" && -d "$candidate/packages/desktop" ]]; then printf '%s\n' "$candidate"; return 0; fi
+  fi
+  return 1
+}
+if ! ROOT="$(resolve_repo)"; then
+  echo "[cdp] 错误：找不到主 checkout（本脚本在 $SCRIPT_DIR，cwd 是 $PWD）。" >&2
+  echo "[cdp] 可执行下一步：cd 到含 packages/desktop/lib/cli.js 的主 checkout，或设 CORUM_REPO=<主 checkout 根> 后重试。" >&2
   exit 1
 fi
+DESKTOP="$ROOT/packages/desktop"
 # 本仓库 desktop 的唯一标识子串：任何属于本实例的进程 cmdline 必含它；微信等绝无。
 SELF_MARK="$DESKTOP"
 COMBO_ID="coding"

@@ -30,7 +30,45 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(dirname "$SCRIPT_DIR")"
+
+# ── 解析**主 checkout**（2026-09-12 用户定调：脚本与技能原文打包进 CORUM_HOME 技能路径，
+# 而且要「不存在无法使用的问题」）──────────────────────────────────────────────
+# 本脚本有两个部署位置、三种调用场景，都必须指向同一个主 checkout：
+#   ① 仓库内 `scripts/verify-instance.sh`（日常/主实例侧调用）；
+#   ② 技能包 `<CORUM_HOME>/skills/corum-cdp-verify/scripts/verify-instance.sh`
+#      ——此时 `dirname(SCRIPT_DIR)` 是技能目录，**不是仓库**（旧实现直接取它 → 找不到
+#      `packages/desktop/lib/cli.js`，隔离 worktree 里的子 Agent 一用就失败）；
+#   ③ 从隔离 worktree 的 cwd 调用（子 Agent 的常态）——worktree 里没有构建产物，
+#      必须回到主 checkout。
+# 优先级：显式 CORUM_REPO > 脚本自身在仓库里 > cwd 的 git 主仓 > 失败即报（不猜）。
+resolve_repo() {
+  local candidate
+  if [[ -n "${CORUM_REPO:-}" && -f "$CORUM_REPO/packages/desktop/lib/cli.js" ]]; then
+    printf '%s\n' "$(cd "$CORUM_REPO" && pwd)"; return 0
+  fi
+  candidate="$(dirname "$SCRIPT_DIR")"
+  if [[ -f "$candidate/packages/desktop/package.json" ]]; then
+    printf '%s\n' "$candidate"; return 0
+  fi
+  # cwd 或 SCRIPT_DIR 所在仓库：worktree 里 --git-common-dir 指回主仓的 .git
+  local common
+  common="$(git -C "$PWD" rev-parse --git-common-dir 2>/dev/null || git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$common" ]]; then
+    candidate="$(cd "$(dirname "$common")" 2>/dev/null && pwd || true)"
+    if [[ -n "$candidate" && -f "$candidate/packages/desktop/package.json" ]]; then
+      printf '%s\n' "$candidate"; return 0
+    fi
+  fi
+  return 1
+}
+
+if ! ROOT="$(resolve_repo)"; then
+  printf '[verify-instance] 找不到主 checkout：本脚本在 %s，cwd 是 %s。\n' "$SCRIPT_DIR" "$PWD" >&2
+  printf '[verify-instance] 可执行下一步：cd 到主 checkout（含 packages/desktop/lib/cli.js 的那份），或设 CORUM_REPO=/abs/path 后重跑。\n' >&2
+  printf '[verify-instance] 注意：隔离 worktree 里没有构建产物，验证实例必须在主 checkout 上跑（不要自己 debug 环境）。\n' >&2
+  exit 2
+fi
+
 DESKTOP="$ROOT/packages/desktop"
 COMBO_ID="${COMBO_ID:-coding}"
 export CORUM_HOME="${CORUM_VERIFY_HOME:-$DESKTOP/.corum-verify-home}"

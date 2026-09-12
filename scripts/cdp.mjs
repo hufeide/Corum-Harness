@@ -16,10 +16,44 @@
  */
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+/**
+ * 主 checkout 解析（与 verify-instance.sh 同口径，2026-09-12 用户定调「脚本与技能原文
+ * 打包进 CORUM_HOME 技能路径，不存在无法使用的问题」）：本脚本有两个部署位置
+ * （仓库 `scripts/` 与技能包 `$CORUM_HOME/skills/corum-cdp-verify/scripts/`），
+ * 也可能从隔离 worktree 的 cwd 调用——三处都要能定位到同一份主 checkout。
+ * 优先级：CORUM_DESKTOP_PKG > CORUM_REPO > 脚本自身所在仓库 > cwd 的 git 主仓。
+ * @returns 主 checkout 绝对路径；解析失败返回 undefined（调用方给出可执行下一步）。
+ */
+function resolveRepoRoot() {
+  const fromEnv = process.env.CORUM_REPO
+  if (fromEnv !== undefined && fromEnv !== '' && existsSync(join(fromEnv, 'packages/desktop/package.json'))) return fromEnv
+  const own = dirname(dirname(fileURLToPath(import.meta.url)))
+  if (existsSync(join(own, 'packages/desktop/package.json'))) return own
+  for (const cwd of [process.cwd(), dirname(fileURLToPath(import.meta.url))]) {
+    try {
+      const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+      const root = dirname(resolve(cwd, common))
+      if (existsSync(join(root, 'packages/desktop/package.json'))) return root
+    } catch { /* 不在 git 仓库里：继续试下一个 */ }
+  }
+  return undefined
+}
 
 // ws 从桌面应用包的 node_modules 解析（kkc-desktop/packages/desktop 下有 ws 依赖）。
-// 若仓库位置不同，设 CORUM_DESKTOP_PKG 指向 desktop 包目录。
-const DESKTOP_PKG = process.env.CORUM_DESKTOP_PKG ?? '/Users/kukucai/work/kkc-desktop/packages/desktop/package.json'
+const REPO_ROOT = resolveRepoRoot()
+const DESKTOP_PKG = process.env.CORUM_DESKTOP_PKG
+  ?? (REPO_ROOT === undefined ? undefined : join(REPO_ROOT, 'packages/desktop/package.json'))
+if (DESKTOP_PKG === undefined || !existsSync(DESKTOP_PKG)) {
+  process.stderr.write('[cdp] 找不到主 checkout 的 packages/desktop/package.json；'
+    + '设 CORUM_REPO=<主 checkout 根> 或 CORUM_DESKTOP_PKG=<desktop/package.json> 后重试。'
+    + '（隔离 worktree 里没有依赖，验证一律回主 checkout 跑。）\n')
+  process.exit(2)
+}
 const require = createRequire(DESKTOP_PKG)
 const WebSocket = require('ws')
 

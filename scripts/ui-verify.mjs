@@ -47,13 +47,41 @@
  * 退出码：0 = 全部 PASS；1 = 有 FAIL；2 = 连接/规格错误。
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { extname } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { execFileSync } from 'node:child_process'
+import { dirname, extname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
+/**
+ * 主 checkout 解析（与 verify-instance.sh / cdp.mjs 同口径）：本脚本可能从仓库
+ * `scripts/`、技能包 `$CORUM_HOME/skills/corum-cdp-verify/scripts/`、或隔离 worktree 的
+ * cwd 调用，三处都要定位到同一份带依赖的主 checkout。
+ * @returns 主 checkout 绝对路径；解析失败返回 undefined。
+ */
+function resolveRepoRoot() {
+  const fromEnv = process.env.CORUM_REPO
+  if (fromEnv !== undefined && fromEnv !== '' && existsSync(join(fromEnv, 'packages/desktop/package.json'))) return fromEnv
+  const own = dirname(dirname(fileURLToPath(import.meta.url)))
+  if (existsSync(join(own, 'packages/desktop/package.json'))) return own
+  for (const cwd of [process.cwd(), dirname(fileURLToPath(import.meta.url))]) {
+    try {
+      const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+      const root = dirname(resolve(cwd, common))
+      if (existsSync(join(root, 'packages/desktop/package.json'))) return root
+    } catch { /* 不在 git 仓库里：继续试下一个 */ }
+  }
+  return undefined
+}
+
+const REPO_ROOT = resolveRepoRoot()
 const DESKTOP_PKG = process.env.CORUM_DESKTOP_PKG
-  ?? '/Users/kukucai/work/kkc-desktop/packages/desktop/package.json'
+  ?? (REPO_ROOT === undefined ? undefined : join(REPO_ROOT, 'packages/desktop/package.json'))
+if (DESKTOP_PKG === undefined || !existsSync(DESKTOP_PKG)) {
+  process.stderr.write('[ui-verify] 找不到主 checkout 的 packages/desktop/package.json；'
+    + '设 CORUM_REPO=<主 checkout 根> 后重试（隔离 worktree 里没有依赖，验证一律回主 checkout 跑）。\n')
+  process.exit(2)
+}
 const require = createRequire(DESKTOP_PKG)
 const WebSocket = require('ws')
 
