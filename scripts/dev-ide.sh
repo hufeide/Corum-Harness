@@ -65,8 +65,29 @@ cleanup() {
   fi
 
   # 兜底：只杀命令行含本仓库 packages/desktop/lib 或本 combo 相对 cli 的进程。
-  local pids pid
+  # ⚠️ 验证实例（scripts/verify-instance.sh，CORUM_HOME=packages/desktop/.corum-verify-home）
+  # 的命令行同样含本仓库 packages/desktop/lib，会被这条兜底误杀（2026-09-12 实测：起主实例
+  # 后验证实例静默消失、日志无报错，排查了半天）。所以先读它的 PID 记录把它们排除——
+  # 它是 agent 自己的实例，不该被主实例的清理带走。
+  local pids pid verify_pids="" pids_filtered="" vpid k
+  for vf in "$ROOT/packages/desktop/.corum-verify-home/run/"*.pid; do
+    [ -f "$vf" ] || continue
+    vpid="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['pid'])" "$vf" 2>/dev/null || true)"
+    [ -n "$vpid" ] || continue
+    # 连子进程一起排除：验证实例的主进程之下还挂着 Electron 渲染/GPU 与 host 子进程，
+    # 只排除主进程的话兜底 kill 仍会把它们带走（2026-09-12 实测：主进程活着但界面已死）。
+    verify_pids="$verify_pids $vpid $(descendants_of "$vpid" | tr '\n' ' ')"
+  done
   pids="$( { pgrep -f "$ROOT/packages/desktop/lib" 2>/dev/null || true; pgrep -f "node lib/cli.js --combo=$COMBO_ID" 2>/dev/null || true; } | sort -u )"
+  if [[ -n "$verify_pids" && -n "$pids" ]]; then
+    local kept=""
+    for pid in $pids; do
+      if [[ " $verify_pids " == *" $pid "* ]]; then kept="$kept $pid"; continue; fi
+      pids_filtered="$pids_filtered $pid"
+    done
+    if [[ -n "$kept" ]]; then log "跳过验证实例进程（不属于主实例）：$kept"; fi
+    pids="${pids_filtered# }"
+  fi
   if [[ -n "$pids" ]]; then
     log "兜底清理本仓库 desktop 残留进程：$(echo "$pids" | tr '\n' ' ')"
     for pid in $pids; do kill "$pid" 2>/dev/null || true; done
@@ -82,6 +103,16 @@ cleanup() {
 run_step() {
   log "$*"
   ( cd "$1" && shift && "$@" )
+}
+
+# 一个进程的全部后代 PID（递归；验证实例的排除集要用）。
+descendants_of() {
+  local root="$1" kids k
+  kids="$(pgrep -P "$root" 2>/dev/null || true)"
+  for k in $kids; do
+    printf '%s\n' "$k"
+    descendants_of "$k"
+  done
 }
 
 build_ui_pkg() {
