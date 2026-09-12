@@ -1,5 +1,7 @@
 /** Subagent progress-card payload shared between the Chat Node and its renderer. */
 
+import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
+
 /** Turn-local subagent invocation encoded as a reference-stable Location-data scalar. */
 export type SubagentTurnSignature = string
 
@@ -13,6 +15,8 @@ export interface SubagentProgressSnapshot {
   readonly currentAction?: string
   /** The child's latest turn closed (`turn/end`). */
   readonly done: boolean
+  /** 终局原因；仅在该 turn 闭合时给出（undefined = 运行中/未结束）。 */
+  readonly stopReason?: SubagentStopReason
 }
 
 /** Static identity of one delegated subagent invocation, folded from the parent log. */
@@ -127,18 +131,20 @@ export function encodeSubagentTurn(invocations: readonly SubagentInvocation[]): 
       invocation.progress.step,
       invocation.progress.currentAction ?? '',
       invocation.progress.done ? 1 : 0,
+      invocation.progress.stopReason ?? '',
     ].join(','),
   ].join('~')).join('|')
 }
 
 function decodeProgress(raw: string | undefined): SubagentProgressSnapshot | undefined {
   if (raw === undefined || raw === '') return undefined
-  const [turn, step, action, done] = raw.split(',')
+  const [turn, step, action, done, stopReason] = raw.split(',')
   return {
     turn: Number(turn),
     step: Number(step),
     ...action === '' ? {} : { currentAction: action },
     done: done === '1',
+    ...stopReason === undefined || stopReason === '' ? {} : { stopReason: stopReason as SubagentStopReason },
   }
 }
 
