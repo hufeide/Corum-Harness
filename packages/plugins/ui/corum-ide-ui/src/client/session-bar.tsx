@@ -385,6 +385,8 @@ interface SubagentRosterEntry {
    */
   readonly mode?: 'foreground' | 'background'
   readonly isolated?: boolean
+  /** 子 Agent 实际在跑的模型（child 帧携带 + session/list 冷启动补强）。 */
+  readonly model?: { provider: string; model: string }
   readonly step: number
   readonly currentAction?: string
   /** 最新 turn 已闭合（turn/end）；只表示 turn 闭合，不代表终态。 */
@@ -402,6 +404,10 @@ interface ChildFrame {
   label?: string
   mode?: 'foreground' | 'background'
   isolated?: boolean
+  /** child 帧携带的 worktree 三件套（仅隔离时非空；用于 slug→model 关联）。 */
+  worktree?: { slug?: string; branch?: string; path?: string }
+  /** child 帧携带的真实生效模型路由（progress 帧不带）。 */
+  model?: { provider?: string; model?: string; reasoningEffort?: string }
   sessionId?: string
   turn?: number
   step?: number
@@ -526,6 +532,47 @@ function useSubagentRoster(
     return () => { cancelled = true }
   }, [connection, sessionId, finishedIds])
 
+  /**
+   * 冷启动模型补强：基线（官方目录）不带模型字段，页面刷新后推送帧不重放。
+   * 按 SubagentCard.useChildModel 同口径一次性拉 session/list（limit 200），
+   * 批量映射 childSessionId → modelSelection.lastUsed。拉不到或不在表里 →
+   * 保持 undefined（渲染时显式显示「未记录」）。
+   *
+   * 并行工作区行不由此补强：台账 slug 无法经 session/list 关联，刷新后
+   * 显示「未记录」是预期且可接受的——不硬造数据。
+   */
+  const [seededModel, setSeededModel] = useState<ReadonlyMap<string, { provider: string; model: string }>>(new Map())
+  useEffect(() => {
+    setSeededModel(new Map())
+    if (connection === undefined || sessionId === undefined) return undefined
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await connection.rpc.call('/api', 'session/list', { args: { _request: { limit: 200 } } })
+        if (cancelled || !result.ok || result.value === undefined) return
+        const value = result.value as {
+          items?: ReadonlyArray<{
+            sessionId?: string
+            projections?: { values?: { modelSelection?: { lastUsed?: { provider?: string; model?: string } } } }
+          }>
+        }
+        const map = new Map<string, { provider: string; model: string }>()
+        for (const item of value.items ?? []) {
+          if (item.sessionId === undefined) continue
+          const m = item.projections?.values?.modelSelection?.lastUsed
+          if (m?.model === undefined || m.model === '' || m.provider === undefined) continue
+          map.set(item.sessionId, { provider: m.provider, model: m.model })
+        }
+        if (map.size === 0) return
+        if (cancelled) return
+        setSeededModel(map)
+      } catch {
+        // 单次失败静默忽略（模型行缺省显示「未记录」）。
+      }
+    })()
+    return () => { cancelled = true }
+  }, [connection, sessionId])
+
   const live = useLiveRoster(remote, sessionId)
   return useMemo(() => {
     const merged = new Map<string, SubagentRosterEntry>()
@@ -537,18 +584,28 @@ function useSubagentRoster(
         merged.set(id, { ...entry, stopReason: sr })
       }
     }
+    // 冷启动种子填补 model（仅当基线 / 推送帧都没给时；推送帧的值更权威）。
+    for (const [id, m] of seededModel) {
+      const entry = merged.get(id)
+      if (entry !== undefined && entry.model === undefined) {
+        merged.set(id, { ...entry, model: m })
+      }
+    }
     for (const entry of live) {
       const prior = merged.get(entry.childSessionId)
       // done/stopReason 以推送帧（live）为准：目录基线只有 running/inactive 两态，
       // 无法区分 aborted（见基线注释）；推送帧带 stopReason 时它才是权威终态。
+      // model 同步用与 label/step 同款的继承语义：live 无 model 时继承 prior（基线
+      // 或 session/list 补强的值），避免 progress 帧把已有 model 抹掉。
       merged.set(entry.childSessionId, {
         ...entry,
         ...prior === undefined ? {} : { label: entry.label === '' ? prior.label : entry.label },
         ...prior !== undefined && entry.step === 0 ? { step: prior.step } : {},
+        ...(entry.model === undefined && prior?.model !== undefined ? { model: prior.model } : {}),
       })
     }
     return [...merged.values()]
-  }, [baseline, live, seededStopReason])
+  }, [baseline, live, seededStopReason, seededModel])
 }
 
 /** 推送帧累积（历史上的唯一来源；现在只作基线之上的增量）。 */
@@ -567,6 +624,7 @@ function useLiveRoster(remote: RemoteEventFace | undefined, sessionId: string | 
             label: patch.label,
             ...(patch.mode === undefined ? {} : { mode: patch.mode }),
             ...(patch.isolated === undefined ? {} : { isolated: patch.isolated }),
+            ...(patch.model === undefined ? {} : { model: patch.model }),
             step: patch.step ?? 0,
             ...(patch.currentAction === undefined ? {} : { currentAction: patch.currentAction }),
             done: patch.done ?? false,
@@ -586,6 +644,9 @@ function useLiveRoster(remote: RemoteEventFace | undefined, sessionId: string | 
         ...(frame.label === undefined ? {} : { label: frame.label }),
         ...(frame.mode === undefined ? {} : { mode: frame.mode }),
         ...(frame.isolated === undefined ? {} : { isolated: frame.isolated }),
+        ...(frame.model === undefined || frame.model.model === undefined || frame.model.provider === undefined
+          ? {}
+          : { model: { provider: frame.model.provider, model: frame.model.model } }),
         lastActive: Date.now(),
       })
     })
@@ -626,6 +687,8 @@ interface WorktreeEntry {
   readonly slug: string
   readonly branch: string
   readonly status: string
+  /** 该工作区对应的子 Agent 真实模型（child 帧 worktree.slug 关联）。 */
+  readonly model?: { provider: string; model: string }
 }
 
 /** 台账状态文案（与 SubagentCard 的 WORKTREE_STATUS_LABEL 同口径）。 */
@@ -653,15 +716,50 @@ function useWorktreeLedger(
   connection: RpcFace | undefined,
 ): readonly WorktreeEntry[] {
   const [entries, setEntries] = useState<readonly WorktreeEntry[]>([])
+  // slug → model 映射：child 帧携带 worktree.slug + model，隔离子 Agent 的
+  // 工作区行据此关联模型。台账帧本身不带 model（不改 CorumWorktreeEntry）。
+  // 用 ref 而非 state——避免 child 帧到达时 effect 重跑（effect 依赖里没有它）。
+  const slugModelRef = useRef<ReadonlyMap<string, { provider: string; model: string }>>(new Map())
   useEffect(() => {
-    if (sessionId === undefined) { setEntries([]); return undefined }
+    if (sessionId === undefined) { setEntries([]); slugModelRef.current = new Map(); return undefined }
     setEntries([])
-    /** 帧 → 渲染形（归一字段、跳过畸形条目）。 */
+    slugModelRef.current = new Map()
+    // child 帧的 model 写入 slug→model 映射（只取隔离帧的 worktree.slug）。
+    const disposeChild = remote?.$on('corum/subagent/child', (frame: ChildFrame) => {
+      if (frame.parentSessionId !== sessionId) return
+      const slug = frame.worktree?.slug
+      const m = frame.model
+      if (slug === undefined || m?.provider === undefined || m?.model === undefined) return
+      // 提取为非可选 string 常量，避免闭包内类型收窄丢失。
+      const provider = m.provider
+      const model = m.model
+      const existing = slugModelRef.current.get(slug)
+      if (existing !== undefined && existing.provider === provider && existing.model === model) return
+      const next = new Map(slugModelRef.current)
+      next.set(slug, { provider, model })
+      slugModelRef.current = next
+      // 若已有该 slug 的台账行，就地更新 model 字段（台账帧不重放，child 帧后到时
+      // 需主动刷一次 entries）。
+      setEntries(prev => {
+        const idx = prev.findIndex(e => e.slug === slug)
+        if (idx < 0) return prev
+        const updated = [...prev]
+        updated[idx] = { ...updated[idx], model: { provider, model } }
+        return updated
+      })
+    })
+    /** 帧 → 渲染形（归一字段、跳过畸形条目、合并 slug→model）。 */
     const apply = (frame: WorktreeLedgerFrame): void => {
       const next: WorktreeEntry[] = []
       for (const entry of frame.entries ?? []) {
         if (entry.slug === undefined || entry.branch === undefined) continue
-        next.push({ slug: entry.slug, branch: entry.branch, status: entry.status ?? 'active' })
+        const m = slugModelRef.current.get(entry.slug)
+        next.push({
+          slug: entry.slug,
+          branch: entry.branch,
+          status: entry.status ?? 'active',
+          ...m !== undefined ? { model: m } : {},
+        })
       }
       setEntries(next)
     }
@@ -679,13 +777,14 @@ function useWorktreeLedger(
       }
     }
     void pullBaseline()
-    const dispose = remote?.$on('corum/worktree-ledger', (frame: WorktreeLedgerFrame) => {
+    const disposeLedger = remote?.$on('corum/worktree-ledger', (frame: WorktreeLedgerFrame) => {
       if (frame.sessionId !== sessionId) return
       apply(frame)
     })
     return () => {
       cancelled = true
-      dispose?.()
+      disposeChild?.()
+      disposeLedger?.()
     }
   }, [remote, sessionId, connection])
   return entries
@@ -908,6 +1007,9 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                   : entry.done ? '已完成'
                   : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
               </span>
+              <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
+                {entry.model?.model ?? '未记录'}
+              </span>
               {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
               {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
               <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
@@ -934,6 +1036,9 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
               <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
               <span className={css.statusDetailAgentStep}>{entry.slug}</span>
+              <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
+                {entry.model?.model ?? '未记录'}
+              </span>
               <span className={css.statusDetailAgentBadge} data-status={entry.status}>
                 {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
               </span>

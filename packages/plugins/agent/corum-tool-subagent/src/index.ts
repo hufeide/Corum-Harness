@@ -354,6 +354,15 @@ interface CorumSubagentChildEvent {
   /** 前台一次性（父等结果）还是后台 agent（父继续干活、可续接）。 */
   readonly mode: 'foreground' | 'background'
   readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string }
+  /**
+   * 本次 spawn 的真实生效模型路由（与 `SubagentChildEvent.model` 同构）。
+   * 取 `request.agentOptions`（锁定路径=fork compile 的角色锁模型；非锁定/fork
+   * 路径=从 `parentAgentOptionsForDelegation` 合并来的父真实路由），缺失退回
+   * `corumEffectiveModel`，两者都无则不写。fork 实例不写 config.model →
+   * `request.agentOptions` 来自 `parentAgentOptionsForDelegation(parent)` →
+   * 读父 `session.requestHeader().config` 的 provider/model → 即父真实路由。
+   */
+  readonly model?: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
   readonly time: number
 }
 
@@ -750,6 +759,9 @@ export function apply(ctx: Context, config: Config): void {
       isolated: boolean,
       mode: 'foreground' | 'background',
       worktree: { slug: string; branch: string; path: string } | undefined,
+      // 真实生效路由：取 request.agentOptions（锁定路径=角色锁；非锁定=fork 继承父
+      // 真实路由），缺失退回 corumEffectiveModel，两者都无则 undefined（不伪造）。
+      model: { provider: string; model: string; reasoningEffort?: string } | undefined,
     ): void => {
       if (callId === undefined || callId === '') return
       try {
@@ -761,6 +773,13 @@ export function apply(ctx: Context, config: Config): void {
           isolated,
           mode,
           ...worktree === undefined ? {} : { worktree: { ...worktree } },
+          ...model === undefined ? {} : {
+            model: {
+              provider: model.provider,
+              model: model.model,
+              ...model.reasoningEffort !== undefined ? { reasoningEffort: model.reasoningEffort } : {},
+            },
+          },
           time: Date.now(),
         })
       } catch (error: unknown) {
@@ -868,6 +887,42 @@ export function apply(ctx: Context, config: Config): void {
         exec.signal.throwIfAborted()
         if (requestedChildAgentOptions !== undefined) request.agentOptions = requestedChildAgentOptions
       } // fork（corum）：end 模型锁缺省分支（官方原逻辑）
+
+      // fork（corum）：提取本次 spawn 的真实生效模型路由，用于广播帧。
+      // 取 request.agentOptions 的 provider/model/reasoningEffort——它是 890 行
+      // 之前两条路径的终值：锁定路径（corumLockedOptions）= compile.ts 按角色锁
+      // 的 model；非锁定/fork 路径 = requestedAgentOptions，后者由
+      // parentAgentOptionsForDelegation(parent) 合并而来，读父
+      // session.requestHeader().config 的 provider/model——故 fork 实例（不写
+      // config.model）的帧显示父的真实路由。request.agentOptions 缺失时退回
+      // corumEffectiveModel（全局默认），两者都无则 undefined（不伪造空对象）。
+      const corumSpawnModel = request.agentOptions !== undefined
+        ? request.agentOptions.provider !== undefined && request.agentOptions.model !== undefined
+          ? {
+              provider: request.agentOptions.provider,
+              model: request.agentOptions.model,
+              ...request.agentOptions.reasoningEffort !== undefined
+                ? { reasoningEffort: request.agentOptions.reasoningEffort as string }
+                : {},
+            }
+          : corumEffectiveModel !== undefined
+            ? {
+                provider: corumEffectiveModel.provider,
+                model: corumEffectiveModel.model,
+                ...corumEffectiveModel.reasoningEffort !== undefined
+                  ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
+                  : {},
+              }
+            : undefined
+        : corumEffectiveModel !== undefined
+          ? {
+              provider: corumEffectiveModel.provider,
+              model: corumEffectiveModel.model,
+              ...corumEffectiveModel.reasoningEffort !== undefined
+                ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
+                : {},
+            }
+          : undefined
 
       // fork（corum）：写工具判定与隔离触发（纯函数，单测覆盖）。
       // 任务级覆盖（orchestrate 的 tasks[i].isolation/research）优先于实例配置终值。
@@ -1070,7 +1125,7 @@ export function apply(ctx: Context, config: Config): void {
           }))
           // continuable 登记的是 childId（settle 事件按 childId 精确匹配）。
           corumBindRun(String(started.childId))
-          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo)
+          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo, corumSpawnModel)
           return { kind: 'continuable' as const, subagentId: started.childId }
         }
         const jobs = runtimeCtx.get('jobs')
@@ -1087,7 +1142,7 @@ export function apply(ctx: Context, config: Config): void {
             // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
             void start.then((startedRun) => {
               corumBindRun(String(startedRun.id))
-              corumEmitChildStarted(parent.session.id, exec.callId, String(startedRun.id), args.label, corumIsolate, 'background', corumEntryInfo)
+              corumEmitChildStarted(parent.session.id, exec.callId, String(startedRun.id), args.label, corumIsolate, 'background', corumEntryInfo, corumSpawnModel)
             }).catch(() => {})
             return {
               cancel: (reason?: string) => {
@@ -1107,7 +1162,7 @@ export function apply(ctx: Context, config: Config): void {
           signal: exec.signal,
         }))
         corumBindRun(String(run.id))
-        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, 'foreground', corumEntryInfo)
+        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel)
         const outcome = await settleForegroundRun(run)
         // fork（corum）：前台子 Agent 的最终汇报注入父会话（2026-09-09 用户反馈
         // 「子 Agent 结束后反馈没有注入主 Agent」）。工具结果里本来就有汇报，但它埋在
