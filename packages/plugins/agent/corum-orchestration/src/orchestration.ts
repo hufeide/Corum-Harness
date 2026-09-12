@@ -29,10 +29,27 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
 import type {} from '@deepseek-ai/dsh-tools'
-import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
+
+/**
+ * `subagent/end` 载荷的**局部窄化形**（只取本包用到的两个字段）。
+ *
+ * 为什么不用官方 `SubagentRunEndInfo`：`import type ... from '@deepseek-ai/dsh-subagent'`
+ * 会把**发布版**的 d.ts 拉进编译图，而发布版与本仓 fork（`@corum/corum-subagent`）各自
+ * `declare module '@deepseek-ai/cordis' { subagents: SubagentRuntime }`——两份同名属性
+ * 来自不同来源的同名类型 → 任何 consumer 只要 import 本包就报 TS2717，编译不过
+ * （2026-09-11 实测：corum-subagent 加一行 import 就被这个卡住）。
+ * 与文件内既有做法一致（红线 3：跨包类型用局部能力接口收窄，不耦合官方实现包）。
+ */
+interface CorumSubagentEndInfo {
+  /** 与配对 start 事件共享的 run 身份。 */
+  readonly runId: unknown
+  /** 子 Agent 的会话 id。 */
+  readonly id: unknown
+}
+
 
 // ── 台账类型与事件 ─────────────────────────────────────────────────────────
 
@@ -887,7 +904,7 @@ export class CorumOrchestration extends Service {
    * （与 corum-tool-subagent 模型选择路径同款用法）。拿不到就返回 undefined——
    * 调用方静默跳过，绝不抛错（旧实现在此处抛错导致 settle 静默失效）。
    */
-  private parentSessionIdOf(info: SubagentRunEndInfo, parentAgent?: Agent): string | undefined {
+  private parentSessionIdOf(info: CorumSubagentEndInfo, parentAgent?: Agent): string | undefined {
     if (parentAgent !== undefined) return String(parentAgent.session.id)
     // 红线 3：跨包类型用局部能力接口收窄，不耦合官方实现包。
     const agents = this.ctx.get('agents') as
@@ -905,7 +922,7 @@ export class CorumOrchestration extends Service {
    * 此时用 `info.id`（子会话 id）经 agents 服务反查父会话（session.header.parentSession）
    * 兜底，绝不抛错（旧实现 `parentAgent.session.id` 恒抛、被 emitter 吞掉 → settle 从未生效）。
    */
-  settleFromEnd(info: SubagentRunEndInfo, parentAgent?: Agent): boolean {
+  settleFromEnd(info: CorumSubagentEndInfo, parentAgent?: Agent): boolean {
     const sessionId = this.parentSessionIdOf(info, parentAgent)
     if (sessionId === undefined) return false
     const entries = this.ledger.get(sessionId)

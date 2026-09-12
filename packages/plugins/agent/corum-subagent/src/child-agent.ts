@@ -26,6 +26,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // keeps its model-facing rows on the host plane, where the child already sees
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-presets'
+import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
 import { delegationDepthOf } from './depth.ts'
 
 /** Thrown when starting a child would exceed the requested depth cap. */
@@ -211,14 +212,75 @@ export function applyChildComposition(
     order: childCtx.systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),
     text: SUBAGENT_DELEGATION_CONTEXT,
   })
-  if (composition.persona !== undefined) {
+  /**
+   * 指挥模式（`corumConductor` 服务，可选）下的子 Agent 契约（2026-09-11 用户定调）：
+   *
+   * ① **不继承父的角色人格**：父是指挥者时，preset 里那段 persona（含指挥者 iron rule
+   *    "you physically cannot write / edit / bash"）会被原样继承到子 Agent —— 而子 Agent
+   *    有全套写工具、正在跑 bash，人格与工具面直接矛盾。这里用 `deployment:persona`
+   *    影子段换掉：中性工作型角色行 + **保留父的「工作风格人格」**（设置里那个，如专业干练）。
+   * ② **不再召唤孙 Agent**：指挥模式下子 Agent 只干活不分层，deny 掉全部委派工具。
+   *
+   * 两者都在**子 scope** 注册，对父与兄弟不可见（与既有 per-child persona/toolFilter 同法）。
+   * `corumConductor` 缺席时（精简装配）整段跳过，维持原行为。
+   */
+  const conductor = childCtx.get('corumConductor') as ConductorFace | undefined
+  const conductorParent = conductor !== undefined && conductor.isConductor(String(parent.session.id))
+  const persona = composition.persona
+    ?? (conductorParent ? conductor?.childPersonaFor(String(parent.session.id)) : undefined)
+  if (persona !== undefined) {
     childCtx.systemPrompt.section({
       name: 'deployment:persona',
       order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA'),
-      text: composition.persona,
+      text: persona,
     })
   }
-  if (composition.toolFilter !== undefined) childCtx.tools.restrict(composition.toolFilter)
+  const toolFilter = conductorParent
+    ? mergeDelegationDeny(composition.toolFilter, delegationToolNames(childCtx))
+    : composition.toolFilter
+  if (toolFilter !== undefined) childCtx.tools.restrict(toolFilter)
+}
+
+/**
+ * `corumConductor` 服务的**本地能力接口**（红线 3：跨 bundle 用能力接口收窄，不耦合实现包）。
+ * 服务由 `@corum/corum-agent` provide；本包按可选服务消费（缺席 = 无指挥模式语义）。
+ */
+interface ConductorFace {
+  isConductor: (sessionId: string) => boolean
+  childPersonaFor: (sessionId: string) => string | undefined
+}
+
+/**
+ * 子 scope 里**实际可见**的委派工具名（`subagent*` 全族 + `orchestrate`）。
+ *
+ * 按可见面取而不是写死清单：`tools.restrict({deny})` 对未注册的名字 fail-loud，
+ * 而委派工具在不同装配下可能缺席（精简 preset / 未来改名）。
+ * @param childCtx - 已 join 父 preset 的子 scope。
+ * @returns 需要 deny 的工具名（可能为空）。
+ */
+function delegationToolNames(childCtx: Context): readonly string[] {
+  const visible = corumVisibleToolNames(childCtx)
+  return [...visible].filter(name => name === 'orchestrate' || name.startsWith('subagent'))
+}
+
+/**
+ * 把「禁委派」并入调用方给的 toolFilter（调用方的 filter 优先语义不变，deny 取并集）。
+ * @param filter - 调用方（provider/集成者）给的过滤器。
+ * @param deny - 要额外禁止的工具名。
+ * @returns 合并后的过滤器；两者皆空时 undefined。
+ */
+function mergeDelegationDeny(
+  filter: ToolRestriction | undefined,
+  deny: readonly string[],
+): ToolRestriction | undefined {
+  if (deny.length === 0) return filter
+  // 注意：`ToolRestriction` 的字段是 readonly，而 `corumNarrowDenyFilter` 要可变数组
+  // （exactOptionalPropertyTypes 下也不接受显式 undefined）——这里显式重建一个可变对象。
+  const combined: string[] = [...(filter?.deny ?? []), ...deny]
+  const base: { allow?: string[]; deny?: string[] } = { deny: combined }
+  if (filter?.allow !== undefined) base.allow = [...filter.allow]
+  const merged = corumNarrowDenyFilter(base, new Set(combined))
+  return merged ?? filter ?? { deny: combined }
 }
 
 /** Policy seeded onto a child session's log at the delegation boundary. */

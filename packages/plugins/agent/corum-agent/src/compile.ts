@@ -339,6 +339,24 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * @param coreIdentity - 模式核心身份文本（MODE_CORE_IDENTITY 值，null 则不拼该段）。
  */
 /**
+ * 取一个 profile 的**工作风格人格**文本（= 设置里那个「人格」，如专业干练）。
+ *
+ * 与「角色人格」严格区分（2026-09-11 用户定调）：
+ * - **角色人格**（`title` / `domain` / `persona` / `prompt`）——「你是谁、你负责什么」，
+ *   指挥模式下**不**被子 Agent 继承（否则子 Agent 会自称指挥者、被 iron rule 告知
+ *   "you physically cannot write / edit / bash"，而它实际有全套写工具）；
+ * - **工作风格人格**（`personaPreset`）——「怎么干活」，**要**被子 Agent 继承。
+ *
+ * @param profile - Agent 配置。
+ * @returns 英文风格段；未设或自定义（`custom`）时 undefined。
+ */
+export function workStyleTextOf(profile: { personaPreset?: string | undefined }): string | undefined {
+  const preset = profile.personaPreset
+  if (preset === undefined || preset === 'custom') return undefined
+  return PERSONA_PRESET_PROMPTS[preset as Exclude<PersonaPreset, 'custom'>]
+}
+
+/**
  * 工作场景人格预设 → 英文系统提示词片段（组装时映射为英文，除非用户自定义写了汉字）。
  * 四大工作场景人格原型组合，覆盖代码审查/带教/执行/预研四类核心场景。
  */
@@ -531,7 +549,11 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     children: [
       { id: 'fs-local', name: '@deepseek-ai/dsh-fs-local', config: { cwd: '!!js process.env.DSH_CWD ?? process.cwd()' } },
       { id: 'agent-instructions', name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } },
-      { id: 'str-replace-editor', name: '@deepseek-ai/dsh-tool-str-replace-editor', config: { maxOutputChars: 16000 } },
+      // 2026-09-11 用户定调：**str_replace_editor 退场**。它与官方 `edit` 职责完全重叠
+      // （都是 old/new 字面替换），却多一套规则（要求绝对路径、独立错误文案），
+      // 全库实测它的失败率是三者最高的（29.8%）。TRAE 在 Agentic 阶段把编辑收敛成
+      // Write/Delete/Update 三个工具、Update 只留一个 —— 工具越多，模型越容易放弃它们
+      // 去用 bash（见 src/tool-policy.ts 的统计）。写工具面 = write + edit。
     ],
   }
   // 插在 standard 的 tool-fs/tool-fs-search 之后（filesystem 语义区）。

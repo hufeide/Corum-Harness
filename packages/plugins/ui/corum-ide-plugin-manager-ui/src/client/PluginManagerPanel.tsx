@@ -1,29 +1,35 @@
 /**
- * PluginManagerPanel —— 插件中心面板（ide-shell 自建，FloatingLayer 承载）。
+ * PluginManagerPanel —— 「设置中心 › 扩展 › 插件管理」content 区。
  *
- * 三个区：
- *   1. 已安装清单：pluginManager.list 的投影（名称/启停开关/状态点/卸载/更新）。
- *   2. 检索：pluginManager.search 走 npm registry，结果带安装按钮。
- *   3. 视图管理：网格注册表里每个槽位的「显示/隐藏区域」切换，经注入的
- *      onSetRegionHidden（壳内 = ctx.layout.setRegionHidden 直连网格
- *      setLeafHidden）联动（hidden 集合经 useSyncExternalStore 投影，任何
- *      网格变更实时刷新）。
+ * 1:1 复刻 doc/UXDesign/design.pen 帧 zOmcc「设置 · 扩展面板-已装插件 · 深色」
+ * 的 w8h6DG content（840×820）：header 56（标题 + scope 分段 + 关闭 + 发现更多
+ * 插件）→ 1px 分隔线 → body（tabs / filter / 卡片网格，gap 14、padding
+ * [20,24,24,24]，一排两张卡）。
  *
- * RPC 面：Host 的 pluginManager Typert Remote，0.1.2 起经官方
- * connection.rpc.call('/api', 'pluginManager/<method>', …) 到达（旧
- * corumDesktop.unary IPC 桥已退役）；caller 由壳 inject 注入。
- * 安装/更新/卸载成功后提示重启（restartHost bridge），不做免重启热载。
+ * 本组件只画 content：FloatingLayer 遮罩 / SettingsShell / 左 nav 不由本包
+ * 渲染（面板经壳的 openPluginManager 信号打开，见 index.tsx；遮罩类名 overlay
+ * 由 index.tsx 挂载时使用）。
+ *
+ * 分区：
+ *   - 已装插件（kind=plugin）：真实 pluginManager.list 投影，卡片 = icon-box +
+ *     名称/版本/徽标 + 介绍 + 开关/设置/卸载。
+ *   - 系统插件（kind=runtime）：cordis/dsh 运行时基元与不可关闭的基础能力插件，
+ *     只读（开关禁用、无卸载）——保留既有语义，非设计稿帧内容。
+ *   - 视图管理：网格区域显隐（既有能力保留，追加在两张设计稿 tab 之后）。
+ *   - 插件市场：「发现更多插件」进入，npm registry 检索 + 安装。
+ *
+ * 所有色值走本包 --pm-* 变量（design.pen variables 的深/浅双值，见 module.css），
+ * 组件内不出现裸 hex。
+ *
+ * 数据面：安装/更新/卸载成功后提示重启（restartHost bridge），不做免重启热载。
  */
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
-  ChevronLeft, Download, Eye, EyeOff, Power, RefreshCw, Search, Trash2, X,
-  Puzzle, GitBranch, Sun, TerminalSquare, Bug, ShieldCheck, Archive, Bot,
+  Cable, ChevronDown, ChevronLeft, Cpu, KeyRound, Puzzle, Search, Server, ServerCog,
+  Terminal, Trash2, X,
 } from 'lucide-react'
-import {
-  getAllRegisteredSlots, getSlotMeta,
-} from '@corum/corum-ui-base/client'
+import { getAllRegisteredSlots, getSlotMeta } from '@corum/corum-ui-base/client'
 import { fallbackName, pluginMeta } from './plugin-meta.ts'
 import css from './PluginManagerPanel.module.css'
 
@@ -67,30 +73,6 @@ interface PluginSearchResult {
   readonly date?: string
 }
 
-/** 检索卡片图标（npm 包无固定图标，按名称关键词映射语义图标，默认 Puzzle）。 */
-function searchResultIcon(name: string, size: number): ReactNode {
-  const n = name.toLowerCase()
-  if (/git|vcs|commit/.test(n)) return <GitBranch size={size} />
-  if (/theme|color|dark|light|aurora/.test(n)) return <Sun size={size} />
-  if (/terminal|shell|bash|tty|pty/.test(n)) return <TerminalSquare size={size} />
-  if (/debug|breakpoint|inspect/.test(n)) return <Bug size={size} />
-  if (/review|lint|code/.test(n)) return <ShieldCheck size={size} />
-  if (/export|archive|download|pdf/.test(n)) return <Archive size={size} />
-  if (/search|find|grep/.test(n)) return <Search size={size} />
-  if (/ai|llm|model|gpt|agent/.test(n)) return <Bot size={size} />
-  return <Puzzle size={size} />
-}
-
-/** 格式化 ISO 日期为 YYYY-MM-DD；非法输入回退原串。 */
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
 /** 变更类操作的结果（restartRequired = 需重启 host 生效）。 */
 interface MutationResult {
   readonly ok: boolean
@@ -119,6 +101,25 @@ interface RestartBridge {
   restartHost?: () => Promise<{ ok: boolean }>
 }
 
+/** content 的两个视图（list = 已装/系统/视图；market = 插件市场）。 */
+type PanelView = 'list' | 'market'
+
+/** 列表视图的三个 tab。 */
+type PanelTab = 'installed' | 'system' | 'views'
+
+/** scope 分段：全局（全部条目）/ 本项目（@corum/* 自带插件）。 */
+type ScopeMode = 'global' | 'project'
+
+/** 状态下拉的三档。 */
+type StatusFilter = 'all' | 'on' | 'off'
+
+/** 状态下拉文案（design.pen：值「全部状态」）。 */
+const STATUS_LABEL: Readonly<Record<StatusFilter, string>> = {
+  all: '全部状态',
+  on: '已启用',
+  off: '已停用',
+}
+
 /** 展示名：优先中文元数据表，否则回退格式化包名。 */
 function displayName(moduleName: string): string {
   return pluginMeta(moduleName)?.zhName ?? fallbackName(moduleName)
@@ -134,51 +135,112 @@ function originLabel(origin: PluginDetail['origin']): string {
   return origin === 'official' ? '官方' : origin === 'corum' ? '本项目' : '第三方'
 }
 
-/** 状态点的语义色（active=绿、failed=红、过渡=黄、无 fiber=灰）。 */
-function phaseTone(phase: PluginManagerEntry['fiberPhase'], enabled: boolean): string {
-  if (!enabled) return css.dotOff
-  if (phase === 'active') return css.dotActive
-  if (phase === 'failed') return css.dotFailed
-  if (phase === null) return css.dotOff
-  return css.dotBusy
+/** 运行态文案。 */
+function phaseLabel(entry: { fiberPhase: PluginManagerEntry['fiberPhase']; enabled: boolean }): string {
+  if (!entry.enabled) return '已停用'
+  if (entry.fiberPhase === 'active') return '运行中'
+  return entry.fiberPhase ?? '已启用'
 }
 
-/** 面板三个区的 tab id。 */
-type PanelTab = 'installed' | 'search' | 'views'
+/**
+ * 卡片徽标（design.pen：可选徽标 fill $brand-primary）。只给有真实依据的两类：
+ * 基础能力 = 不可关闭的 corum 基础能力插件（kind=runtime 且有界面半）；
+ * 第三方 = 非官方/非本项目的包。其余卡片不带徽标（设计稿亦然，六张里只有三张有）。
+ */
+function badgeOf(entry: PluginManagerEntry): string | null {
+  if (entry.kind === 'runtime' && entry.hasUi) return '基础能力'
+  if (!entry.moduleName.startsWith('@corum/') && !entry.moduleName.startsWith('@deepseek-ai/')) return '第三方'
+  return null
+}
 
-/** 插件中心面板主体。 */
-export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionSlot, onSetRegionHidden, onClose, callRemote }: PluginManagerPanelProps) {
+/** 卡片图标（lucide glyph，17px，按包名语义映射；design.pen 用 cpu/puzzle/terminal/plug/server）。 */
+function entryIcon(moduleName: string, size: number): ReactNode {
+  const n = moduleName.toLowerCase()
+  if (/mcp/.test(n)) return <ServerCog size={size} />
+  if (/serial|uart|modbus/.test(n)) return <Cable size={size} />
+  if (/ssh|sftp/.test(n)) return <KeyRound size={size} />
+  if (/terminal|shell|pty|panel-bottom/.test(n)) return <Terminal size={size} />
+  if (/model|llm|ollama|artgen/.test(n)) return <Cpu size={size} />
+  if (/skill|agent|orchestrat|subagent/.test(n)) return <Puzzle size={size} />
+  if (/server|api|remote|connection|desktop|session/.test(n)) return <Server size={size} />
+  return <Puzzle size={size} />
+}
+
+/** 检索卡片图标（npm 包无固定图标，按名称关键词映射语义图标，默认 Puzzle）。 */
+function searchResultIcon(name: string, size: number): ReactNode {
+  const n = name.toLowerCase()
+  if (/mcp/.test(n)) return <ServerCog size={size} />
+  if (/serial|uart|modbus/.test(n)) return <Cable size={size} />
+  if (/ssh|sftp|key/.test(n)) return <KeyRound size={size} />
+  if (/terminal|shell|bash|tty|pty/.test(n)) return <Terminal size={size} />
+  if (/theme|color|dark|light|aurora/.test(n)) return <Terminal size={size} />
+  if (/ai|llm|model|gpt|agent/.test(n)) return <Cpu size={size} />
+  if (/search|find|grep|server|api/.test(n)) return <Server size={size} />
+  return <Puzzle size={size} />
+}
+
+/** 格式化 ISO 日期为 YYYY-MM-DD；非法输入回退原串。 */
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** 插件管理 content 区主体。 */
+export function PluginManagerPanel({
+  subscribeGrid, getHiddenSnapshot, isRegionSlot, onSetRegionHidden, onClose, callRemote,
+}: PluginManagerPanelProps) {
+  const [view, setView] = useState<PanelView>('list')
   const [tab, setTab] = useState<PanelTab>('installed')
+  const [scope, setScope] = useState<ScopeMode>('global')
+  const [status, setStatus] = useState<StatusFilter>('all')
+  const [statusOpen, setStatusOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const [entries, setEntries] = useState<readonly PluginManagerEntry[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [notice, setNotice] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  const [searching, setSearching] = useState(false)
-  const [results, setResults] = useState<readonly PluginSearchResult[] | null>(null)
-  const [searchError, setSearchError] = useState<string | null>(null)
+
   // 详情视图：非 null 时替换列表区（detail = 选中条目的详情）。
   const [detail, setDetail] = useState<PluginDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  // DSH 基座（运行时组件）二级视图：true = 深入基元清单。
-  const [showRuntime, setShowRuntime] = useState(false)
+
+  // 插件市场（view='market'）的检索态。
+  const [mktQuery, setMktQuery] = useState('')
+  const [mktResults, setMktResults] = useState<readonly PluginSearchResult[] | null>(null)
+  const [mktSearching, setMktSearching] = useState(false)
+  const [mktError, setMktError] = useState<string | null>(null)
+
+  // 状态下拉：点外部关闭（无全局状态，纯组件本地 effect）。
+  const selectRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!statusOpen) return
+    const onDown = (e: MouseEvent): void => {
+      if (selectRef.current !== null && !selectRef.current.contains(e.target as Node)) setStatusOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => { document.removeEventListener('mousedown', onDown) }
+  }, [statusOpen])
 
   // 网格 hidden 集投影（壳的 useSyncExternalStore 源）。
   const hidden = useSyncExternalStore(subscribeGrid, getHiddenSnapshot)
-  const hiddenSet = new Set(hidden)
-  // 只列当前网格里的区域 leaf（过滤 cordis 内部 slot，避免混入 Dsh * 条目）。
-  // C1：visibility 'fixed'/'hidden' 的槽不进视图管理（fixed = 壳固定占位槽，
-  // hidden = 无独立 UI 的插件）；仅 'addable'（缺省）可被用户显隐。
-  const regionSlots = getAllRegisteredSlots()
-    .filter(isRegionSlot)
-    .filter((slot) => (getSlotMeta(slot)?.visibility ?? 'addable') === 'addable')
+  const hiddenSet = useMemo(() => new Set(hidden), [hidden])
+  // 只列当前网格里的区域 leaf（过滤 cordis 内部 slot）。visibility 'fixed'/'hidden'
+  // 的槽不进视图管理（fixed = 壳固定占位槽，hidden = 无独立 UI 的插件）。
+  const regionSlots = useMemo(
+    () => getAllRegisteredSlots()
+      .filter(isRegionSlot)
+      .filter((slot) => (getSlotMeta(slot)?.visibility ?? 'addable') === 'addable'),
+    [isRegionSlot],
+  )
 
-  const [dshVersion, setDshVersion] = useState<string | null>(null)
   const refresh = useCallback(async () => {
     try {
-      const snapshot = await callRemote<{ entries: PluginManagerEntry[]; dshVersion?: string }>('list', {})
+      const snapshot = await callRemote<{ entries: PluginManagerEntry[] }>('list', {})
       setEntries(snapshot.entries)
-      setDshVersion(snapshot.dshVersion ?? null)
       setLoadError(null)
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error))
@@ -217,7 +279,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     await refresh()
   }), [withBusy, refresh, callRemote])
 
-  const onUpdate = useCallback((entry: PluginManagerEntry) => withBusy(entry.entryId, async () => {
+  const onUpdate = useCallback((entry: PluginManagerEntry | PluginDetail) => withBusy(entry.entryId, async () => {
     const result = await callRemote<MutationResult>('update', { spec: entry.moduleName })
     if (!result.ok) {
       setNotice(`更新失败：${result.log ?? 'unknown error'}`)
@@ -226,7 +288,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     setNotice(`已更新 ${entry.moduleName}，重启后生效`)
   }), [withBusy, callRemote])
 
-  // 打开详情页：拉 detail 投影。entryId 来自 list（行点击）。
+  // 打开详情页：拉 detail 投影。entryId 来自 list（「设置」按钮）。
   const openDetail = useCallback(async (entryId: string) => {
     setDetailLoading(true)
     try {
@@ -238,6 +300,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
       setDetailLoading(false)
     }
   }, [callRemote])
+
   const closeDetail = useCallback(() => { setDetail(null) }, [])
 
   const onInstall = useCallback((name: string) => withBusy(`install:${name}`, async () => {
@@ -247,25 +310,25 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
       return
     }
     setNotice(`已安装 ${name}，重启后生效`)
-    setResults(prev => prev?.map(r => r.name === name ? { ...r, installed: true } : r) ?? prev)
+    setMktResults(prev => prev?.map(r => (r.name === name ? { ...r, installed: true } : r)) ?? prev)
     await refresh()
   }), [withBusy, refresh, callRemote])
 
   const onSearch = useCallback(async () => {
-    setSearching(true)
-    setSearchError(null)
+    setMktSearching(true)
+    setMktError(null)
     try {
-      const { results: rows } = await callRemote<{ results: PluginSearchResult[] }>('search', { query })
-      setResults(rows)
+      const { results: rows } = await callRemote<{ results: PluginSearchResult[] }>('search', { query: mktQuery })
+      setMktResults(rows)
     } catch (error) {
-      setSearchError(error instanceof Error ? error.message : String(error))
-      setResults(null)
+      setMktError(error instanceof Error ? error.message : String(error))
+      setMktResults(null)
     } finally {
-      setSearching(false)
+      setMktSearching(false)
     }
-  }, [query, callRemote])
+  }, [mktQuery, callRemote])
 
-  // 区域显隐切换：经注入的 onSetRegionHidden 直连网格（原 SET_REGION_HIDDEN_EVENT 桥已退役）。
+  // 区域显隐切换：经注入的 onSetRegionHidden 直连网格。
   const onToggleRegion = useCallback((slot: string, currentlyHidden: boolean) => {
     onSetRegionHidden(slot, !currentlyHidden)
   }, [onSetRegionHidden])
@@ -275,282 +338,341 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     void bridge?.restartHost?.().then(() => { setNotice(null) })
   }, [])
 
-  return (
-    <div className={css.panel} role="dialog" aria-modal="true" aria-label="插件中心">
-      {/* 头部：标题 + 三区胶囊 tab + 关闭（design.pen 插件中心头部）。 */}
-      <div className={css.header}>
-        <span className={css.title}>插件中心</span>
-        <div className={css.tabs} role="tablist" aria-label="插件中心分区">
-          {([
-            ['installed', '已安装'],
-            ['search', '检索'],
-            ['views', '视图管理'],
-          ] as ReadonlyArray<readonly [PanelTab, string]>).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              className={css.tab}
-              data-active={tab === key || undefined}
-              onClick={() => { setTab(key) }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <button type="button" className={css.iconButton} aria-label="关闭" onClick={onClose}>
-          <X size={16} />
-        </button>
-      </div>
+  // ── 列表投影：tab 分组 → scope → 状态 → 关键字 ──
+  const plugins = useMemo(() => (entries ?? []).filter(e => e.kind === 'plugin'), [entries])
+  const runtimes = useMemo(() => (entries ?? []).filter(e => e.kind === 'runtime'), [entries])
+  const visibleEntries = useMemo(() => {
+    const base = tab === 'system' ? runtimes : plugins
+    const scoped = scope === 'project' ? base.filter(e => e.moduleName.startsWith('@corum/')) : base
+    const q = query.trim().toLowerCase()
+    return scoped
+      .filter(e => (status === 'all' ? true : status === 'on' ? e.enabled : !e.enabled))
+      .filter(e => q === '' || e.moduleName.toLowerCase().includes(q) || displayName(e.moduleName).includes(q) || displayDesc(e.moduleName, e.description).includes(q))
+  }, [tab, plugins, runtimes, scope, status, query])
 
-      {notice !== null && (
-        <div className={css.notice}>
-          <span className={css.noticeText}>{notice}</span>
-          {notice.includes('重启') && (
-            <button type="button" className={css.noticeAction} onClick={onRestart}>立即重启</button>
-          )}
-          <button type="button" className={css.iconButton} aria-label="关闭提示" onClick={() => { setNotice(null) }}>
-            <X size={12} />
-          </button>
-        </div>
-      )}
+  const emptyText = tab === 'system' ? '没有系统插件' : '没有已装插件'
+  const filteredEmptyText = query.trim() !== '' || status !== 'all' || scope === 'project'
+    ? '没有符合条件的插件'
+    : emptyText
 
-      <div className={css.body}>
-        {/* ── 详情视图（选中条目后替换列表区）── */}
-        {detail !== null ? (
+  // 详情视图：整个 content 让位给详情（返回按钮回到列表）。
+  if (detail !== null) {
+    return (
+      <div className={css.panel} role="dialog" aria-modal="true" aria-label="插件管理">
+        <div className={css.header}>
+          <span className={css.headerTitle}>插件管理</span>
+          <div className={css.headerRight}>
+            <CloseButton onClose={onClose} />
+          </div>
+        </div>
+        <div className={css.divider} />
+        <div className={css.body}>
           <PluginDetailView
             detail={detail}
-            busy={busy}
+            busy={busy.has(detail.entryId)}
             onBack={closeDetail}
-            onToggleEnabled={(d) => { void onToggleEnabled(d as unknown as PluginManagerEntry).then(() => void openDetail(d.entryId)) }}
-            onUpdate={(d) => { void onUpdate(d as unknown as PluginManagerEntry) }}
-            onUninstall={(d) => { void onUninstall(d as unknown as PluginManagerEntry).then(() => closeDetail()) }}
+            onUpdate={onUpdate}
+            onUninstall={() => { void onUninstall(detail).then(() => { closeDetail() }) }}
           />
-        ) : (
-        <>
-        {/* ── 已安装清单 ── */}
-        {tab === 'installed' && (
-          <section className={css.section}>
-            {loadError !== null && <div className={css.errorText}>加载失败：{loadError}</div>}
-            {entries === null && loadError === null && <div className={css.dimText}>加载中…</div>}
-            {entries !== null && entries.length === 0 && <div className={css.dimText}>没有插件条目</div>}
-            {detailLoading && <div className={css.dimText}>加载详情…</div>}
-            {(() => {
-              const plugins = entries?.filter(e => e.kind === 'plugin') ?? []
-              const runtimes = entries?.filter(e => e.kind === 'runtime') ?? []
-              const corumRuntimes = runtimes.filter(e => e.moduleName.startsWith('@corum/') || e.moduleName.startsWith('corum-desktop'))
-              // DSH 基座二级视图：深入一层看全部运行时组件清单（只读）。
-              if (showRuntime) {
-                return (
-                  <>
-                    <button type="button" className={css.backBtn} onClick={() => { setShowRuntime(false) }}>
-                      <ChevronLeft size={14} /> 返回插件列表
-                    </button>
-                    <div className={css.dshCard}>
-                      <div className={css.dshCardHead}>
-                        <span className={css.dshCardName}>DSH 基座</span>
-                        {dshVersion !== null && <span className={css.dshCardVersion}>v{dshVersion}</span>}
-                        <span className={css.dshCardCount}>{runtimes.length} 个运行时组件</span>
-                      </div>
-                      <p className={css.dshCardDesc}>
-                        DeepSeek Harness 运行时底座：LLM 调用、会话存储、工具链、界面基元等系统组件。
-                        本项目覆盖的运行时（corum-desktop 模块加载/桌面连接等）也在此列。这些组件由壳托管，只读不可操作。
-                      </p>
-                    </div>
-                    {corumRuntimes.length > 0 && (
-                      <>
-                        <div className={css.groupLabel}>本项目覆盖的运行时</div>
-                        {corumRuntimes.map((entry) => (
-                          <PluginRow key={entry.entryId} entry={entry} busy={false}
-                            onOpen={() => { void openDetail(entry.entryId) }}
-                            onToggleEnabled={() => {}} onUpdate={() => {}} onUninstall={() => {}} readOnly />
-                        ))}
-                      </>
-                    )}
-                    <div className={css.groupLabel}>DSH 运行时组件</div>
-                    {runtimes.filter(e => !corumRuntimes.includes(e)).map((entry) => (
-                      <PluginRow key={entry.entryId} entry={entry} busy={false}
-                        onOpen={() => { void openDetail(entry.entryId) }}
-                        onToggleEnabled={() => {}} onUpdate={() => {}} onUninstall={() => {}} readOnly />
-                    ))}
-                  </>
-                )
-              }
-              // 主列表：功能插件 + DSH 基座聚合卡。
-              return (
-                <>
-                  {plugins.map((entry) => (
-                    <PluginRow
-                      key={entry.entryId}
-                      entry={entry}
-                      busy={busy.has(entry.entryId)}
-                      onOpen={() => { void openDetail(entry.entryId) }}
-                      onToggleEnabled={() => { void onToggleEnabled(entry) }}
-                      onUpdate={() => { void onUpdate(entry) }}
-                      onUninstall={() => { void onUninstall(entry) }}
-                      readOnly={false}
-                    />
-                  ))}
-                  {runtimes.length > 0 && (
-                    <button type="button" className={css.dshCardBtn} onClick={() => { setShowRuntime(true) }}>
-                      <div className={css.dshCardHead}>
-                        <span className={css.dshCardName}>DSH 基座</span>
-                        {dshVersion !== null && <span className={css.dshCardVersion}>v{dshVersion}</span>}
-                        <span className={css.dshCardCount}>{runtimes.length} 个运行时组件</span>
-                      </div>
-                      <p className={css.dshCardDesc}>
-                        DeepSeek Harness 运行时底座：LLM 调用、会话存储、工具链、界面基元等系统组件，含本项目覆盖的运行时。点入查看（只读）。
-                      </p>
-                    </button>
-                  )}
-                </>
-              )
-            })()}
-          </section>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={css.panel} role="dialog" aria-modal="true" aria-label="插件管理">
+      {/* ── header xQFRJ：标题 + scope 分段 + 关闭 + 发现更多插件 ── */}
+      <div className={css.header}>
+        <span className={css.headerTitle}>插件管理</span>
+        <div className={css.headerRight}>
+          <div className={css.scope} role="group" aria-label="插件作用域">
+            {([['global', '全局'], ['project', '本项目']] as ReadonlyArray<readonly [ScopeMode, string]>).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={css.scopeSeg}
+                data-active={scope === id || undefined}
+                aria-pressed={scope === id}
+                onClick={() => { setScope(id) }}
+              >{label}</button>
+            ))}
+          </div>
+          <CloseButton onClose={onClose} />
+          <button
+            type="button"
+            className={css.discoverBtn}
+            onClick={() => { setView('market') }}
+          >发现更多插件</button>
+        </div>
+      </div>
+      <div className={css.divider} />
+
+      {/* ── body Gyvyc ── */}
+      <div className={css.body}>
+        {notice !== null && (
+          <div className={css.notice}>
+            <span className={css.noticeText}>{notice}</span>
+            {notice.includes('重启') && (
+              <button type="button" className={css.noticeAction} onClick={onRestart}>立即重启</button>
+            )}
+            <button type="button" className={css.noticeClose} aria-label="关闭提示" onClick={() => { setNotice(null) }}>
+              <X size={14} />
+            </button>
+          </div>
         )}
 
-        {/* ── 检索 ── */}
-        {tab === 'search' && (
-          <section className={css.section}>
-            <div className={css.searchRow}>
-              <input
-                className={css.searchInput}
-                value={query}
-                placeholder="搜索插件，如 git、theme、terminal…"
-                onChange={e => { setQuery(e.target.value) }}
-                onKeyDown={(e) => { if (e.key === 'Enter') void onSearch() }}
-              />
-              <button type="button" className={css.searchButton} disabled={searching} onClick={() => { void onSearch() }}>
-                <Search size={14} />
+        {view === 'market' ? (
+          <>
+            <button type="button" className={css.backRow} onClick={() => { setView('list') }}>
+              <ChevronLeft size={14} /> 返回插件管理
+            </button>
+            <div className={css.tabs} role="tablist" aria-label="插件分区">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={false}
+                className={css.tab}
+                onClick={() => { setView('list') }}
+              >已装插件</button>
+              <button type="button" role="tab" aria-selected className={`${css.tab} ${css.tabActive}`}>插件市场</button>
+            </div>
+            <div className={css.filter}>
+              <div className={css.searchWrap}>
+                <Search size={13} className={css.searchIcon} />
+                <input
+                  className={css.searchInput}
+                  value={mktQuery}
+                  placeholder="搜索插件，如 git、theme、terminal…"
+                  onChange={e => { setMktQuery(e.target.value) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void onSearch() }}
+                />
+              </div>
+              <button type="button" className={css.setBtn} disabled={mktSearching} onClick={() => { void onSearch() }}>
+                {mktSearching ? '检索中…' : '检索'}
               </button>
             </div>
-            {searchError !== null && <div className={css.errorText}>检索失败：{searchError}</div>}
-            {results !== null && results.length === 0 && <div className={css.dimText}>没有匹配的包</div>}
-            {/* 插件市场卡片（设计稿 YU1gr：icon+名称‖安装钮右上 + 简介1行 + 版本·日期 meta，一排 2 张） */}
-            <div className={css.marketGrid}>
-              {results?.map((row) => (
-                <div key={row.name} className={css.marketCard}>
-                  <div className={css.marketCardHead}>
-                    <div className={css.marketCardLeft}>
-                      <div className={css.marketIconBox}>{searchResultIcon(row.name, 17)}</div>
-                      <span className={css.marketCardName}>{row.name}</span>
+            {mktError !== null && <div className={css.errorText}>检索失败：{mktError}</div>}
+            {mktResults !== null && mktResults.length === 0 && <div className={css.hintText}>没有匹配的包</div>}
+            <div className={css.grid}>
+              {mktResults?.map(row => (
+                <div key={row.name} className={css.card}>
+                  <div className={css.cardIcon}>{searchResultIcon(row.name, 17)}</div>
+                  <div className={css.cardMeta}>
+                    <div className={css.cardNameRow}>
+                      <span className={css.cardName}>{row.name}</span>
+                      <span className={css.cardVer}>v{row.version}</span>
+                      {row.date !== undefined && row.date !== '' && (
+                        <span className={css.cardVer}>{formatDate(row.date)}</span>
+                      )}
                     </div>
+                    {row.description !== undefined && row.description !== '' && (
+                      <span className={css.cardDesc}>{row.description}</span>
+                    )}
+                  </div>
+                  <div className={css.cardOps}>
                     {row.installed
-                      ? <span className={css.dimText}>已安装</span>
+                      ? <span className={css.hintText}>已安装</span>
                       : (
                         <button
                           type="button"
-                          className={css.marketInstallBtn}
+                          className={css.installBtn}
                           disabled={busy.has(`install:${row.name}`)}
                           onClick={() => { void onInstall(row.name) }}
                         >安装</button>
                       )}
                   </div>
-                  {row.description !== undefined && row.description !== '' && (
-                    <span className={css.marketCardDesc}>{row.description}</span>
-                  )}
-                  <div className={css.marketCardMeta}>
-                    <span className={css.marketVer}>v{row.version}</span>
-                    {row.date !== undefined && row.date !== '' && (
-                      <>
-                        <span className={css.marketSep}>·</span>
-                        <span className={css.marketDate}>{formatDate(row.date)}</span>
-                      </>
-                    )}
-                  </div>
                 </div>
               ))}
             </div>
-          </section>
-        )}
+          </>
+        ) : (
+          <>
+            {/* tabs h5Hckf：设计稿两张（已装插件 / 系统插件）+ 视图管理（既有能力） */}
+            <div className={css.tabs} role="tablist" aria-label="插件分区">
+              {([
+                ['installed', '已装插件'],
+                ['system', '系统插件'],
+                ['views', '视图管理'],
+              ] as ReadonlyArray<readonly [PanelTab, string]>).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === id}
+                  className={`${css.tab}${tab === id ? ' ' + css.tabActive : ''}`}
+                  onClick={() => { setTab(id) }}
+                >{label}</button>
+              ))}
+            </div>
 
-        {/* ── 视图管理（网格区域显隐）── */}
-        {tab === 'views' && (
-          <section className={css.section}>
-            <div className={css.viewsHint}>控制各区域在窗口中的显示/隐藏，隐藏后插件仍在后台运行。</div>
-            {regionSlots.length === 0 && <div className={css.dimText}>没有可管理的区域</div>}
-            {regionSlots.map((slot): ReactNode => {
-              const isHidden = hiddenSet.has(slot)
-              const label = getSlotMeta(slot)?.label ?? slot
-              return (
-                <div key={slot} className={css.row}>
-                  <div className={css.rowMain}>
-                    <span className={css.rowName}>{label}</span>
-                    <span className={css.rowMeta}>{slot}</span>
+            {tab === 'views' ? (
+              <>
+                <div className={css.hintText}>控制各区域在窗口中的显示/隐藏，隐藏后插件仍在后台运行。</div>
+                {regionSlots.length === 0 && <div className={css.hintText}>没有可管理的区域</div>}
+                {regionSlots.map((slot): ReactNode => {
+                  const isHidden = hiddenSet.has(slot)
+                  const label = getSlotMeta(slot)?.label ?? slot
+                  return (
+                    <div key={slot} className={css.card}>
+                      <div className={css.cardMeta}>
+                        <div className={css.cardNameRow}>
+                          <span className={css.cardName}>{label}</span>
+                          <span className={css.cardVer}>{slot}</span>
+                        </div>
+                      </div>
+                      <div className={css.cardOps}>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={!isHidden}
+                          aria-label={`${label} 显示开关`}
+                          className={css.switch}
+                          data-on={!isHidden || undefined}
+                          onClick={() => { onToggleRegion(slot, isHidden) }}
+                        >
+                          <span className={css.switchKnob} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            ) : (
+              <>
+                {/* filter Z6xac：search（220 宽）+ 状态下拉（140 宽） */}
+                <div className={css.filter}>
+                  <div className={css.searchWrap}>
+                    <Search size={13} className={css.searchIcon} />
+                    <input
+                      className={css.searchInput}
+                      value={query}
+                      placeholder="搜索已装插件…"
+                      onChange={e => { setQuery(e.target.value) }}
+                    />
                   </div>
-                  <button
-                    type="button"
-                    className={css.viewToggle}
-                    data-on={!isHidden || undefined}
-                    title={isHidden ? '显示区域' : '隐藏区域'}
-                    onClick={() => { onToggleRegion(slot, isHidden) }}
-                  >
-                    {isHidden ? <EyeOff size={12} /> : <Eye size={12} />}
-                    <span className={css.viewToggleKnob} />
-                  </button>
+                  <div className={css.select} ref={selectRef}>
+                    <button
+                      type="button"
+                      className={css.selectBtn}
+                      aria-haspopup="listbox"
+                      aria-expanded={statusOpen}
+                      onClick={() => { setStatusOpen(open => !open) }}
+                    >
+                      <span className={css.selectValue}>{STATUS_LABEL[status]}</span>
+                      <ChevronDown size={18} className={css.selectChevron} />
+                    </button>
+                    {statusOpen && (
+                      <div className={css.selectMenu} role="listbox" aria-label="插件状态">
+                        {(Object.keys(STATUS_LABEL) as StatusFilter[]).map(id => (
+                          <button
+                            key={id}
+                            type="button"
+                            role="option"
+                            aria-selected={status === id}
+                            className={css.selectOption}
+                            data-active={status === id || undefined}
+                            onClick={() => { setStatus(id); setStatusOpen(false) }}
+                          >{STATUS_LABEL[id]}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )
-            })}
-          </section>
-        )}
-        </>
+
+                {loadError !== null && <div className={css.errorText}>加载失败：{loadError}</div>}
+                {entries === null && loadError === null && <div className={css.hintText}>加载中…</div>}
+                {detailLoading && <div className={css.hintText}>加载详情…</div>}
+                {entries !== null && visibleEntries.length === 0 && (
+                  <div className={css.hintText}>{filteredEmptyText}</div>
+                )}
+                <div className={css.grid}>
+                  {visibleEntries.map(entry => (
+                    <PluginCard
+                      key={entry.entryId}
+                      entry={entry}
+                      busy={busy.has(entry.entryId)}
+                      readOnly={entry.kind === 'runtime'}
+                      onToggle={() => { void onToggleEnabled(entry) }}
+                      onOpenDetail={() => { void openDetail(entry.entryId) }}
+                      onUninstall={() => { void onUninstall(entry) }}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
   )
 }
 
-/** 列表行：状态点 + 中文名/包名 + 介绍 + 行内操作（运行时基元只读）。 */
-function PluginRow({ entry, busy, onOpen, onToggleEnabled, onUpdate, onUninstall, readOnly }: {
+/** header 右侧关闭按钮（18×18，lucide x 20px）。 */
+function CloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button type="button" className={css.closeBtn} aria-label="关闭" onClick={onClose}>
+      <X size={20} />
+    </button>
+  )
+}
+
+/** 插件卡片（design.pen：icon-box + meta + ops，一排两张）。 */
+function PluginCard({ entry, busy, readOnly, onToggle, onOpenDetail, onUninstall }: {
   entry: PluginManagerEntry
   busy: boolean
-  onOpen: () => void
-  onToggleEnabled: () => void
-  onUpdate: () => void
-  onUninstall: () => void
   readOnly: boolean
+  onToggle: () => void
+  onOpenDetail: () => void
+  onUninstall: () => void
 }) {
+  const name = displayName(entry.moduleName)
   const desc = displayDesc(entry.moduleName, entry.description)
+  const badge = badgeOf(entry)
   return (
-    <div className={css.row} data-disabled={!entry.enabled || undefined}>
-      <span className={`${css.dot} ${phaseTone(entry.fiberPhase, entry.enabled)}`}
-        title={entry.fiberPhase ?? 'no fiber'} />
-      <button type="button" className={css.rowMainBtn} onClick={onOpen} title="查看详情">
-        <span className={css.rowName}>{displayName(entry.moduleName)}</span>
-        <span className={css.rowMeta}>{entry.moduleName}{entry.version !== undefined ? ` · v${entry.version}` : ''}</span>
-        {desc !== '' && <span className={css.rowDesc}>{desc}</span>}
-      </button>
-      {!readOnly && (
-        <>
-          <button type="button" className={css.iconButton} disabled={busy}
-            title={entry.enabled ? '停用' : '启用'} onClick={onToggleEnabled}>
-            <Power size={14} data-on={entry.enabled || undefined} />
+    <div className={css.card} data-off={!entry.enabled || undefined}>
+      <div className={css.cardIcon}>{entryIcon(entry.moduleName, 17)}</div>
+      <div className={css.cardMeta}>
+        <div className={css.cardNameRow}>
+          <span className={css.cardName}>{name}</span>
+          {entry.version !== undefined && <span className={css.cardVer}>v{entry.version}</span>}
+          {badge !== null && <span className={css.cardBadge}>{badge}</span>}
+        </div>
+        {desc !== '' && <span className={css.cardDesc}>{desc}</span>}
+      </div>
+      <div className={css.cardOps}>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={entry.enabled}
+          aria-label={`${name} ${readOnly ? '状态（运行时组件不可停用）' : '启用开关'}`}
+          className={css.switch}
+          data-on={entry.enabled || undefined}
+          disabled={busy || readOnly}
+          onClick={onToggle}
+        >
+          <span className={css.switchKnob} />
+        </button>
+        <button type="button" className={css.setBtn} disabled={busy} onClick={onOpenDetail}>设置</button>
+        {!readOnly && (
+          <button type="button" className={css.delBtn} aria-label={`卸载 ${name}`} disabled={busy} onClick={onUninstall}>
+            <Trash2 size={20} />
           </button>
-          <button type="button" className={css.iconButton} disabled={busy} title="更新" onClick={onUpdate}>
-            <RefreshCw size={14} />
-          </button>
-          <button type="button" className={css.iconButton} disabled={busy} title="卸载" onClick={onUninstall}>
-            <Trash2 size={14} />
-          </button>
-        </>
-      )}
+        )}
+      </div>
     </div>
   )
 }
 
 /** 详情视图：来源/版本/发布者/操作（运行时基元只读）。 */
-function PluginDetailView({ detail, busy, onBack, onToggleEnabled, onUpdate, onUninstall }: {
+function PluginDetailView({ detail, busy, onBack, onUpdate, onUninstall }: {
   detail: PluginDetail
-  busy: ReadonlySet<string>
+  busy: boolean
   onBack: () => void
-  onToggleEnabled: (d: PluginDetail) => void
   onUpdate: (d: PluginDetail) => void
   onUninstall: (d: PluginDetail) => void
 }) {
   const readOnly = detail.kind === 'runtime'
   const meta = pluginMeta(detail.moduleName)
-  const isBusy = busy.has(detail.entryId)
   const field = (label: string, value: ReactNode): ReactNode =>
     value === undefined || value === null || value === '' ? null : (
       <div className={css.detailField}>
@@ -559,44 +681,40 @@ function PluginDetailView({ detail, busy, onBack, onToggleEnabled, onUpdate, onU
       </div>
     )
   return (
-    <section className={css.section}>
-      <button type="button" className={css.backBtn} onClick={onBack}>
-        <ChevronLeft size={14} /> 返回列表
+    <section className={css.detail}>
+      <button type="button" className={css.backRow} onClick={onBack}>
+        <ChevronLeft size={14} /> 返回插件管理
       </button>
-      <div className={css.detailHead}>
-        <span className={`${css.dot} ${phaseTone(detail.fiberPhase, detail.enabled)}`} />
-        <span className={css.detailName}>{meta?.zhName ?? fallbackName(detail.moduleName)}</span>
-        <span className={css.detailOrigin} data-origin={detail.origin}>{originLabel(detail.origin)}</span>
-        {readOnly && <span className={css.detailReadonly}>运行时组件 · 只读</span>}
+      <div className={css.card}>
+        <div className={css.cardIcon}>{entryIcon(detail.moduleName, 17)}</div>
+        <div className={css.cardMeta}>
+          <div className={css.cardNameRow}>
+            <span className={css.cardName}>{meta?.zhName ?? fallbackName(detail.moduleName)}</span>
+            {detail.version !== undefined && <span className={css.cardVer}>v{detail.version}</span>}
+            <span className={css.cardBadge}>{originLabel(detail.origin)}</span>
+            {readOnly && <span className={css.cardVer}>运行时组件 · 只读</span>}
+          </div>
+          <span className={css.cardDesc}>{meta?.zhDesc ?? detail.description ?? detail.moduleName}</span>
+        </div>
+        <div className={css.cardOps}>
+          <span className={css.hintText}>{phaseLabel(detail)}</span>
+        </div>
       </div>
-      <div className={css.detailPkg}>{detail.moduleName}</div>
-      {(meta?.zhDesc ?? detail.description) !== undefined && (
-        <p className={css.detailDesc}>{meta?.zhDesc ?? detail.description}</p>
-      )}
       <div className={css.detailGrid}>
+        {field('包名', detail.moduleName)}
         {field('版本', detail.version !== undefined ? `v${detail.version}` : undefined)}
         {field('发布者', detail.publisher)}
         {field('许可证', detail.license)}
         {field('主页', detail.homepage !== undefined ? <a className={css.detailLink} href={detail.homepage} target="_blank" rel="noreferrer">{detail.homepage}</a> : undefined)}
         {field('仓库', detail.repository !== undefined ? <a className={css.detailLink} href={detail.repository} target="_blank" rel="noreferrer">{detail.repository}</a> : undefined)}
         {field('界面', detail.hasUi ? '有界面' : '无界面（后台能力）')}
-        {field('状态', detail.enabled ? (detail.fiberPhase === 'active' ? '运行中' : detail.fiberPhase ?? '已启用') : '已停用')}
+        {field('状态', phaseLabel(detail))}
         {detail.keywords !== undefined && detail.keywords.length > 0 && field('标签', detail.keywords.join('、'))}
       </div>
       {!readOnly && (
         <div className={css.detailActions}>
-          <button type="button" className={css.detailActionBtn} disabled={isBusy}
-            onClick={() => { onToggleEnabled(detail) }}>
-            <Power size={14} data-on={detail.enabled || undefined} /> {detail.enabled ? '停用' : '启用'}
-          </button>
-          <button type="button" className={css.detailActionBtn} disabled={isBusy}
-            onClick={() => { onUpdate(detail) }}>
-            <RefreshCw size={14} /> 更新
-          </button>
-          <button type="button" className={`${css.detailActionBtn} ${css.danger}`} disabled={isBusy}
-            onClick={() => { onUninstall(detail) }}>
-            <Trash2 size={14} /> 移除
-          </button>
+          <button type="button" className={css.setBtn} disabled={busy} onClick={() => { onUpdate(detail) }}>更新</button>
+          <button type="button" className={css.setBtn} disabled={busy} onClick={() => { onUninstall(detail) }}>卸载</button>
         </div>
       )}
     </section>

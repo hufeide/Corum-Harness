@@ -79,7 +79,7 @@ export type {
 export const name = 'agent'
 
 /** 运行时依赖的服务（boot 后即就绪）。 */
-export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence']
+export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt']
 
 /**
  * `corum-agent` settings namespace（C4：卡住自动恢复阈值可配置）。

@@ -22,6 +22,7 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // fork（corum）：官方 installModelSelection 会用安装时的选择覆盖用户显式换的模型，
 // 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
 import { installTaskModelSelection } from './task-model-selection.ts'
+import { CHILD_WORKER_ROLE, TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -37,7 +38,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import { compilePreset } from './compile.ts'
+import { compilePreset, workStyleTextOf } from './compile.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
@@ -97,7 +98,29 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** corum Agent 实例服务（AgentProfile → preset → root Agent）。 */
     corumAgent: CorumAgentService
+    /**
+     * 指挥模式查询面（本服务 provide；`@corum/corum-subagent` 按**可选**服务消费）。
+     * 见 {@link CorumConductorFace}。
+     */
+    corumConductor?: CorumConductorFace
   }
+}
+
+/**
+ * `corumConductor` 服务的面：把「这个会话是不是指挥模式」交给子 Agent 组装方。
+ *
+ * 消费方（`@corum/corum-subagent` 的 `applyChildComposition`）按可选服务取用：
+ * - `isConductor` 为真 → 子 Agent 换掉继承来的**角色人格**（只保留工作风格），
+ *   并在子 scope deny 掉全部委派工具（指挥模式下不再召唤孙 Agent）；
+ * - `childPersonaFor` 给出替代人格文本（中性工作型角色行 + 父的工作风格段）。
+ *
+ * 缺席（精简装配里没挂 corumAgent）时消费方退化为原有行为——不报错、不阻断。
+ */
+export interface CorumConductorFace {
+  /** 该会话此刻是否处于指挥模式。 */
+  isConductor: (sessionId: string) => boolean
+  /** 指挥模式下子 Agent 的替代人格文本；非指挥模式返回 undefined。 */
+  childPersonaFor: (sessionId: string) => string | undefined
 }
 
 /** 创建结果。 */
@@ -368,7 +391,7 @@ export interface AgentLaneDescriptor {
 }
 
 export class CorumAgentService extends TypertRemoteService {
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence']
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt']
 
   /** 已创建的角色 root Agent（按 profile id）。 */
   private readonly agents = new Map<string, Agent>()
@@ -401,6 +424,40 @@ export class CorumAgentService extends TypertRemoteService {
   private readonly conductorEffects = new Map<string, () => void>()
 
   /**
+   * 每个会话**当前**的指挥模式形态（sessionId → ConductorMode）。
+   *
+   * 为什么要有这张表：子 Agent 组装发生在 `@corum/corum-subagent`，而「父是不是指挥模式」
+   * 只有本服务知道（preset id 只是其中一半口径，corum profile 走
+   * `executionTools: 'orchestrator'`）。经 `corumConductor` 服务暴露给子 Agent 组装方，
+   * 用它决定两件事：① 子 Agent 是否继承父的**角色人格**（指挥模式不继承，换成
+   * {@link CHILD_WORKER_ROLE} + 工作风格段）；② 子 Agent 是否还能召唤孙 Agent
+   * （指挥模式下不能，见 2026-09-11 用户定调）。
+   */
+  private readonly conductorModes = new Map<string, ConductorMode>()
+
+  /** 该会话此刻是否处于指挥模式（供 `corumConductor` 服务消费）。 */
+  private isConductorSession(sessionId: string): boolean {
+    return (this.conductorModes.get(sessionId) ?? 'off') !== 'off'
+  }
+
+  /**
+   * 指挥模式下给子 Agent 的替代人格 = **中性工作型角色行 + 父的「工作风格人格」**。
+   *
+   * 角色人格（title/domain/persona/prompt）在此**故意丢弃**——用户定调（2026-09-11）：
+   * 子 Agent 只继承「工作风格」（如专业干练），不继承「你是谁」。
+   * @param sessionId - 父会话 id。
+   * @returns 替代 persona 文本；非指挥模式或查不到 profile 时 undefined（= 维持原样继承）。
+   */
+  private childPersonaFor(sessionId: string): string | undefined {
+    if (!this.isConductorSession(sessionId)) return undefined
+    const profileId = this.taskAgents.get(sessionId)?.profileId
+    if (profileId === undefined) return undefined
+    const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
+    const style = profile === undefined ? undefined : workStyleTextOf(profile)
+    return style === undefined ? CHILD_WORKER_ROLE : `${CHILD_WORKER_ROLE}\n\n${style}`
+  }
+
+  /**
    * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
    * 调度派活的执行会话）在 create/resume 的 setup 里统一经过这些钩子装配。
    * AgentRuntime 借此给每个会话装调度工具（assign_task/list_team_tasks/
@@ -419,6 +476,32 @@ export class CorumAgentService extends TypertRemoteService {
     // 版本演进刷新，用户自建/已改的 user profile 不动。服务启动时一次性注册，
     // 让新建任务表单的 Agent 下拉与名片页立即可见全量预置角色。
     ensureBuiltinRoleProfiles()
+    /**
+     * 工具使用策略段（root scope，所有 corum 会话继承）。
+     *
+     * 用户实测：模型改代码一律走 bash（heredoc / sed -i / python -）。官方
+     * `tool:read`/`tool:write`/`tool:edit` 段只讲各自怎么用，没有任何一段讲
+     * 「别用 bash 干这个」；`tool:bash` 段只有一句 exit-code 提示。本段补这一层
+     * （Claude Code 同款做法），并说明代价：走 bash 的改动绕过改动审查捕获。
+     * 指挥模式下由 applyConductorMode 用空文本覆盖（内层覆盖外层）。
+     */
+    ctx.systemPrompt.section({
+      name: TOOL_POLICY_SECTION,
+      order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') - 50,
+      text: TOOL_POLICY_TEXT,
+    })
+    /**
+     * `corumConductor` 服务：把「这个会话是不是指挥模式」暴露给子 Agent 组装方。
+     *
+     * 为什么必须经服务：子 Agent 的组装点在 `@corum/corum-subagent`（跨包），而指挥模式的
+     * 权威判定在本服务（preset id + `executionTools: 'orchestrator'` 两个口径，见
+     * `conductor.ts` 的 conductorModeOf）。消费方按**可选服务**取用（`ctx.get`），
+     * 缺席时退化为「没有指挥模式语义」，不影响其它装配。
+     */
+    ctx.provide('corumConductor', {
+      isConductor: (sessionId: string): boolean => this.isConductorSession(sessionId),
+      childPersonaFor: (sessionId: string): string | undefined => this.childPersonaFor(sessionId),
+    } satisfies CorumConductorFace)
     /**
      * 用户发出第一条真实消息时，兑现待定的访问权限档位。
      *
@@ -1407,8 +1490,16 @@ export class CorumAgentService extends TypertRemoteService {
       this.conductorEffects.delete(sessionId)
       previous()
     }
+    this.conductorModes.set(sessionId, mode)
     if (mode === 'off') return
     const disposers: Array<() => void> = []
+    // 指挥者没有 write/edit/bash：工具策略段（「用专用工具而不是 bash」）对它只会误导，
+    // 用空文本覆盖（与 CONDUCTOR_STALE_SECTIONS 清 tool:write/tool:edit 同一手法）。
+    disposers.push(agentCtx.systemPrompt.section({
+      name: TOOL_POLICY_SECTION,
+      order: agentCtx.systemPrompt.getSectionOrder('TOOL_BASH') - 50,
+      text: '',
+    }))
     const deny = corumNarrowDenyFilter(
       { deny: conductorExecutionDeny() },
       corumVisibleToolNames(agentCtx),
