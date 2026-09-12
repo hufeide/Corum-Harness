@@ -353,6 +353,15 @@ export interface SubagentChildEvent {
   readonly mode: 'foreground' | 'background'
   /** 隔离时的 worktree 三件套（台账 chip 与卡片提示用）。 */
   readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string }
+  /**
+   * 本次 spawn 的真实生效模型路由（UI 侧花名册行 / 工作区行的模型 chip 用）。
+   *
+   * 取值 = `request.agentOptions` 的 provider/model/reasoningEffort（锁定路径 =
+   * 角色锁模型；非锁定/fork 路径 = 从父合并来的父真实路由）；若缺失则退回
+   * `corumEffectiveModel`；两者都无则不写该字段（不伪造空对象）。reasoningEffort
+   * 缺失时省略该键。
+   */
+  readonly model?: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
   /** 广播时间（ms epoch）。 */
   readonly time: number
 }
