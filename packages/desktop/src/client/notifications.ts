@@ -73,6 +73,15 @@ export interface NotificationStore {
   notify(input: Omit<CorumNotification, 'id' | 'createdAt' | 'collapsed' | 'read'> & { createdAt?: number }): string
   /** 触发一条通知的点击动作（无动作时 no-op）。 */
   open(id: string): void
+  /**
+   * 标记**单条**已读（点击该条 = 已确认）。
+   *
+   * 与 `markAllRead`（面板上的「全部已读」）并列：点击一条只该消掉它自己的未读，
+   * 旧实现点完没有任何已读副作用 —— 面板注释写着「点击 = 已确认：先标已读」，
+   * 但 `open(id)` 只跑 `onOpen` 动作，于是 bell 徽标点多少次都不减（2026-09-12 实测：
+   * 点过一条后 aria 仍是「通知（5 条未读）」）。
+   */
+  markRead(id: string): void
   /** 关闭指定通知（从列表移除）。 */
   dismiss(id: string): void
   /** 收起一条通知（5s 未处理 → 右下角 tray）。 */
@@ -209,6 +218,11 @@ export function createNotificationStore(): NotificationStore {
       } catch (error) {
         console.error('[corum-desktop] notification open action threw:', error)
       }
+    },
+    markRead: (id) => {
+      if (!items.some(n => n.id === id && !n.read)) return
+      items = items.map(n => (n.id === id ? { ...n, read: true } : n))
+      emit()
     },
     dismiss: (id) => {
       if (!items.some(n => n.id === id)) return

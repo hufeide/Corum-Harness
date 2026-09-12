@@ -53,10 +53,10 @@ export function installTrayBridge(store: NotificationStore): () => void {
   push()
   const unsubscribe = store.subscribe(push)
 
-  // 托盘菜单「通知中心」：展开面板（`expandAll` 让 5s 自动收起的历史条目回到视野里，
-  // 与点 bell 的路径一致 —— 见 NotificationHost 的 onOpenPanel）。
+  // 托盘菜单「通知中心」：打开面板。**不 expandAll**——面板本身列出全部条目（含
+  // 5s 已收起的），再展开一次会让所有历史条目一起冒回浮窗；与点 bell 的路径保持
+  // 一致（见 NotificationHost 的 onOpenPanel，2026-09-12 用户实测后定调）。
   const offCenter = bridge.onOpenNotificationCenter?.(() => {
-    store.expandAll()
     store.setPanelOpen(true)
   })
 

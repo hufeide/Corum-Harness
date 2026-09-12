@@ -305,13 +305,24 @@ export function NotificationHost({ store, mode = 'full' }: { store: Notification
   const onMarkAllRead = useRef(() => { store.markAllRead() }).current
   const onClosePanel = useRef(() => { store.setPanelOpen(false) }).current
   const onOpenNotification = useRef((id: string) => {
-    // 点击 = 已确认：先标已读，再收起通知中心，然后执行通知自带的跳转动作。
+    // 点击 = 已确认：先标该条已读，再收起通知中心，然后执行通知自带的跳转动作。
     // 顺序重要：跳转会切会话，通知中心留在原地会挡视线，故先收起再跳。
+    store.markRead(id)
     store.open(id)
     store.setPanelOpen(false)
   }).current
+  /**
+   * 打开通知中心（点 bell / 托盘菜单）。
+   *
+   * **不再 `expandAll()`**（2026-09-12 用户实测后定调「取消列表默认在浮窗操作」）：
+   * 面板本身就把全部条目列出来了（含 5s 已收起的），再把它们一次性展开，等于点一下
+   * bell 就让**所有**历史条目一起冒回浮窗；点列表中任意一条时面板关闭，那些条目留在
+   * 浮窗里继续杵着（用户原话：「右侧列表点一个，下方会弹出所有浮窗」）。实测复现：
+   * 5 条通知 → 点 bell 后浮窗 5 条 → 点其中一条后面板关了、浮窗仍是 5 条。
+   * 浮窗从此只表达「刚发生、还没处理的事」：收起状态由各自的 5s 计时与用户操作决定，
+   * 打开列表不动它。需要「把历史全部摊开」时再给显式动作（`store.expandAll()` 仍在）。
+   */
   const onOpenPanel = useRef(() => {
-    store.expandAll()
     store.setPanelOpen(true)
   }).current
 
