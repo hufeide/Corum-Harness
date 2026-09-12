@@ -349,6 +349,12 @@
   text-overflow: ellipsis;
 }
 
+/* 集成者节点的三态（2026-09-12）：queued=队列中（品牌蓝，与「运行中」区分——
+   它不是某个分支在跑，而是机制在等全部任务收尾）/ pending=待集成（warn，需要人插手）。
+   旧实现只有 idle（暗灰），配「未启动」文案让人以为这一阶段永远不会自己跑。 */
+.branchChip[data-tone='queued'] { color: var(--dsw-alias-brand-primary, #33C7F4); }
+.branchChip[data-tone='pending'] { color: var(--orch-running); }
+
 /* 分支状态 chip（设计稿 brX chip：r8 + 1px 描边 + 12/600）。 */
 .branchChip {
   flex: none;

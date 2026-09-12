@@ -399,22 +399,35 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
               // 此处不画横虚线。
               <div className={css.mergeStage} data-merge-stage>
                 <span className={css.mergeStageTitle}>串行汇总</span>
+                {/* 三种态（2026-09-12 用户实测后定稿，BUG-29 的 UI 半边）：
+                    ① 还没轮到（integration 缺省）= 队列中——**不能写「未启动」**：那让人
+                       以为这个阶段永远不会自己跑（用户就是据此判断「始终不会运行」）；
+                       声明了 merge ⇒ 机制保证会跑（merge.verify 即默认自动集成）。
+                    ② 跑完 = 已集成。
+                    ③ 跑过但没落地 = 待集成（含原因与分支数），这才是需要人/主 Agent
+                       插手的状态（`pending` 的 reason 由折叠器给出，如「2 个分支待集成」）。 */}
                 <div className={css.mergeCard} data-integrator
-                  data-state={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
+                  data-state={data.integration === undefined
+                    ? 'queued'
+                    : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
                   <span className={css.mergeIcon}><GitMerge size={16} /></span>
                   <span className={css.branchTx}>
                     <span className={css.branchLabel}>集成者 · 合并 + 验证 + 提交</span>
                     <span className={css.branchSub}>
                       {data.integration === undefined
-                        ? '全部并行任务完成后 · 串行启动'
+                        ? '队列中 · 全部并行任务完成后自动合并'
                         : data.integration.kind === 'integrated'
                           ? '已串行完成合并与提交'
                           : data.integration.reason}
                     </span>
                   </span>
                   <span className={css.branchChip} data-merge-chip
-                    data-tone={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
-                    {data.integration?.kind === 'integrated' ? '已集成' : '未启动'}
+                    data-tone={data.integration === undefined
+                      ? 'queued'
+                      : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
+                    {data.integration === undefined
+                      ? '队列中'
+                      : data.integration.kind === 'integrated' ? '已集成' : '待集成'}
                   </span>
                 </div>
               </div>
