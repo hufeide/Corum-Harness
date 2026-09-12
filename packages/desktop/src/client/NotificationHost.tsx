@@ -305,11 +305,10 @@ export function NotificationHost({ store, mode = 'full' }: { store: Notification
   const onMarkAllRead = useRef(() => { store.markAllRead() }).current
   const onClosePanel = useRef(() => { store.setPanelOpen(false) }).current
   const onOpenNotification = useRef((id: string) => {
-    // 点击 = 已确认：先标已读并收起通知中心，再执行跳转（顺序重要——跳转会切会话，
-    // 通知中心留在原地会挡视线）。
+    // 点击 = 已确认：先标已读，再收起通知中心，然后执行通知自带的跳转动作。
+    // 顺序重要：跳转会切会话，通知中心留在原地会挡视线，故先收起再跳。
     store.open(id)
     store.setPanelOpen(false)
-    store.expandAll()
   }).current
   const onOpenPanel = useRef(() => {
     store.expandAll()

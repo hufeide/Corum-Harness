@@ -132,6 +132,38 @@ function clip(text: string, max = 90): string {
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
 }
 
+/** 高亮态持续时长（ms）：到点后撤销 data-reveal。 */
+const REVEAL_HIGHLIGHT_MS = 1600
+/** 滚到卡片的重试上限（每次 rAF，约 20 帧 ≈ 1s 内找到即停）。 */
+const REVEAL_MAX_ATTEMPTS = 20
+
+/**
+ * 在同文档里按 childSessionId 找到子 Agent 卡片并滚动到它、短暂高亮。
+ *
+ * 两个 bundle 跑在同一个 renderer document 里，故 DOM 查询直连。sessions.open
+ * 后 React 重渲染是异步的，卡片可能还没挂载 → rAF 重试，找到即停、找不到静默
+ * 放弃（导航本身已发生，不报错）。高亮用临时 `data-reveal` 属性 + CSS 动画，
+ * 到点撤销，不留持久态。
+ */
+function revealSubagentCard(childSessionId: string): void {
+  const selector = `[data-child-session-id="${CSS.escape(childSessionId)}"]`
+  let attempts = 0
+  const tryReveal = (): void => {
+    attempts += 1
+    const card = document.querySelector(selector)
+    if (card !== null) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      card.setAttribute('data-reveal', '')
+      setTimeout(() => { card.removeAttribute('data-reveal') }, REVEAL_HIGHLIGHT_MS)
+      return
+    }
+    if (attempts < REVEAL_MAX_ATTEMPTS) {
+      requestAnimationFrame(tryReveal)
+    }
+  }
+  requestAnimationFrame(tryReveal)
+}
+
 /** 发布/更新一条通知（同键合并：已有则先撤旧的再发新的）。 */
 function publish(
   store: NotificationStore,
@@ -253,10 +285,40 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   const sessions = ctx.get('sessions') as SessionsFace | undefined
   if (remote === undefined) return () => {}
 
-  /** 打开来源会话（无 sessions 面无 sessionId 时不挂跳转）。 */
+  /** 打开来源会话（无 sessions 面或 sessionId 时不挂跳转）。 */
   const opener = (sessionId: string | undefined): (() => void) | undefined => {
     if (sessionId === undefined || sessionId === '' || sessions === undefined) return undefined
     return () => { sessions.open(sessionId as never) }
+  }
+
+  /**
+   * 子 Agent 通知的点击动作：先打开**父会话**（卡片的家），再在同文档里按
+   * childSessionId 找到子 Agent 卡片、滚到它、短暂高亮。
+   *
+   * 判定顺序的理由：卡片挂在父会话的瀑布里，所以父会话是定位的锚点；
+   * 没有 parentSessionId 时退回打开子会话本身——至少让用户到达那个会话，
+   * 只是看不到卡片上下文。sessions.open 后 React 重渲染是异步的，卡片可能
+   * 还没挂载，故用 rAF 重试（最多约 20 次 / 1s），找到即停、找不到静默放弃
+   * （导航已发生，不报错）。
+   */
+  const subagentOpener = (
+    parentSessionId: string | undefined,
+    childSessionId: string | undefined,
+  ): (() => void) | undefined => {
+    if (sessions === undefined) return undefined
+    // 有父会话：打开父会话 + 滚到卡片。
+    if (parentSessionId !== undefined && parentSessionId !== '') {
+      return () => {
+        sessions.open(parentSessionId as never)
+        if (childSessionId === undefined || childSessionId === '') return
+        revealSubagentCard(childSessionId)
+      }
+    }
+    // 无父会话：退回打开子会话本身（至少到达那个会话）。
+    if (childSessionId !== undefined && childSessionId !== '') {
+      return () => { sessions.open(childSessionId as never) }
+    }
+    return undefined
   }
 
   const disposers: Array<() => void> = []
@@ -360,7 +422,7 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
       tone: subagentOutcomeTone(outcome),
       title,
       message: frame.step === undefined ? label : `${label} · Step ${frame.step}`,
-    }, opener(known?.parentSessionId ?? child))
+    }, subagentOpener(known?.parentSessionId, child))
   })
 
   // ── 隔离分支待集成（同父会话合并成一条）──────────────────────────────
