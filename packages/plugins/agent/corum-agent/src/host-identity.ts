@@ -1,0 +1,73 @@
+/**
+ * fork（corum）：**宿主身份段**——把「你这个会话跑在哪个实例 / home / CDP 端口上」作为
+ * 事实注入系统提示词（2026-09-12 用户定调，起因是一次实测事故）。
+ *
+ * ## 为什么需要它
+ *
+ * 2026-09-12 首轮派发（corum-task-d51272e3）里，子 Agent 需要判断「哪个实例在跑、
+ * 我能不能重启它」，而**会话从内部无法知道自己的宿主**：实测它的 bash 里
+ * `echo $CORUM_HOME` 是空的。于是它用 `ps`（沙箱禁）→ `lsof` 拼凑，`cdp.mjs` 又因为
+ * 默认端口是 9222 而驱动了**用户主实例**，读到用户真实会话后得出错误结论
+ * 「:9333 的宿主就是我」，差一步就去重启用户正在用的应用。
+ *
+ * 结论：这不是提示词措辞问题，而是**事实缺失**——宿主身份必须由 host 注入，不能靠猜。
+ * 本段与 `home.ts`（把 CORUM_HOME 写进进程环境，供 bash/脚本继承）配套：
+ *   · 环境变量让**脚本**能拿到（技能里的 verify-instance.sh 等按它解析）；
+ *   · 本段让**模型**能拿到（提示词里直接写着，不必去翻环境）。
+ *
+ * 写作纪律：只写事实（实例角色 / home / 端口 / 谁可以重启谁），不写操作教程——
+ * 操作步骤是 `corum-cdp-verify` 技能的家。
+ *
+ * @module @corum/corum-agent/host-identity
+ */
+
+/** 宿主身份段的段名（root scope；所有 corum 会话继承）。 */
+export const HOST_IDENTITY_SECTION = 'corum:host-identity'
+
+/** 宿主实例角色：主实例（用户在用）/ 验证实例（Agent 自己可随便重启）。 */
+export type HostInstanceRole = 'main' | 'verify'
+
+/**
+ * 由 home 路径判定实例角色。
+ *
+ * 口径与 `scripts/verify-instance.sh` 一致：验证实例的 home 目录名是
+ * `.corum-verify-home`（或用户用 `CORUM_VERIFY_HOME` 起的 `*-verify*-home`）。
+ * @param home - 解析后的 home 绝对路径。
+ * @returns `verify` 表示这是 Agent 自己的验证实例，其余为 `main`。
+ */
+export function hostInstanceRole(home: string): HostInstanceRole {
+  return /\.corum-verify[^/]*home/.test(home) ? 'verify' : 'main'
+}
+
+/** 该实例默认的 CDP 端口（与两个启动脚本的口径一致）。 */
+export function hostInstancePort(role: HostInstanceRole, configured?: string): string {
+  if (configured !== undefined && configured.trim() !== '') return configured.trim()
+  return role === 'verify' ? '9333' : '9222'
+}
+
+/**
+ * 生成宿主身份段文本。
+ * @param home - 解析后的 home 绝对路径（CORUM_HOME/DSH_HOME 的值）。
+ * @param configuredPort - 进程环境里的 `CORUM_DEBUG_PORT`（缺省按角色取默认端口）。
+ * @param cwd - 会话工作目录（写进事实里，避免模型再去 pwd）。
+ * @returns 提示词段文本。
+ */
+export function hostIdentityText(home: string, configuredPort?: string, cwd?: string): string {
+  const role = hostInstanceRole(home)
+  const port = hostInstancePort(role, configuredPort)
+  const roleLine = role === 'verify'
+    ? 'This is the VERIFY instance: it exists for on-device verification and you may restart it freely.'
+    : 'This is the MAIN instance: the user is using it right now; it is not yours to restart or kill.'
+  return [
+    'You run inside a corum desktop instance. These are facts about it, not guesses:',
+    `- Instance role: ${role} (${roleLine})`,
+    `- Home (sessions, settings, skills, presets): ${home}`,
+    `- CDP port of this instance: ${port} (attach with CDP_PORT=${port})`,
+    ...(cwd === undefined || cwd === '' ? [] : [`- Working directory: ${cwd}`]),
+    '',
+    'Consequences:',
+    '- Verify against the port above; never drive another instance\'s port. The user\'s main instance is off-limits unless the user authorizes it in this conversation.',
+    '- Never restart or kill the instance hosting this session: you cannot see it from the inside, and restarting the main instance destroys the user\'s work. Ask the user (or let the main Agent decide) instead.',
+    `- Other instances may exist (a verify instance defaults to port 9333; the main instance to 9222). Reuse the one that is already running rather than starting a second one.`,
+  ].join('\n')
+}

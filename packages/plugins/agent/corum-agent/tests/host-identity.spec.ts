@@ -1,0 +1,48 @@
+/**
+ * 宿主身份段（2026-09-12 用户定调）：把「本会话跑在哪个实例 / home / 端口」作为事实
+ * 注入提示词。这里守住三个纯函数的事实口径，防止「角色判错 → 子 Agent 去动用户主实例」
+ * 那类事故（起因见 host-identity.ts 的模块注释）。
+ */
+import { describe, expect, it } from 'vitest'
+import { HOST_IDENTITY_SECTION, hostIdentityText, hostInstancePort, hostInstanceRole } from '../src/host-identity.ts'
+
+describe('宿主身份 — 角色 / 端口 / 文本', () => {
+  it('验证实例 home 判定为 verify（与 verify-instance.sh 的目录口径一致）', () => {
+    expect(hostInstanceRole('/Users/x/work/kkc-desktop/packages/desktop/.corum-verify-home')).toBe('verify')
+    expect(hostInstanceRole('/tmp/whatever/.corum-verify3-home')).toBe('verify')
+  })
+
+  it('用户 home 与开发 home 都判定为 main', () => {
+    expect(hostInstanceRole('/Users/kukucai/.corum')).toBe('main')
+    expect(hostInstanceRole('/Users/x/work/kkc-desktop/packages/desktop/.corum-dev-home')).toBe('main')
+  })
+
+  it('端口：按角色给默认值，显式配置优先', () => {
+    expect(hostInstancePort('verify', undefined)).toBe('9333')
+    expect(hostInstancePort('main', undefined)).toBe('9222')
+    expect(hostInstancePort('verify', '9355')).toBe('9355')
+    expect(hostInstancePort('main', ' 9444 ')).toBe('9444')
+  })
+
+  it('文本把 home/端口/角色写成事实，并含两条硬约束', () => {
+    const text = hostIdentityText('/Users/x/.corum', undefined, '/Users/x/work/kkc-desktop')
+    expect(text).toContain('/Users/x/.corum')
+    expect(text).toContain('CDP_PORT=9222')
+    expect(text).toContain('Instance role: main')
+    expect(text).toContain('Working directory: /Users/x/work/kkc-desktop')
+    expect(text).toContain('Never restart or kill the instance hosting this session')
+    expect(text).toContain('off-limits')
+  })
+
+  it('验证实例的文本明说「可以自由重启」，主实例不是', () => {
+    const verify = hostIdentityText('/tmp/.corum-verify-home', '9333')
+    expect(verify).toContain('may restart it freely')
+    expect(verify).not.toContain('the user is using it right now')
+    const main = hostIdentityText('/Users/x/.corum')
+    expect(main).toContain('the user is using it right now')
+  })
+
+  it('段名稳定（root scope 注册与排障都依赖它）', () => {
+    expect(HOST_IDENTITY_SECTION).toBe('corum:host-identity')
+  })
+})

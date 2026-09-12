@@ -23,6 +23,7 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
 import { installTaskModelSelection } from './task-model-selection.ts'
 import { CHILD_WORKER_ROLE, TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
+import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -491,6 +492,22 @@ export class CorumAgentService extends TypertRemoteService {
       name: TOOL_POLICY_SECTION,
       order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') - 50,
       text: TOOL_POLICY_TEXT,
+    })
+    /**
+     * 宿主身份段（root scope，所有 corum 会话继承）：把「本会话跑在哪个实例 / home /
+     * CDP 端口上」作为**事实**写进提示词。
+     *
+     * 2026-09-12 实测事故：子 Agent 需要判断「哪个实例在跑、我能不能重启它」，而会话从
+     * 内部无法知道自己的宿主（它的 bash 里 `echo $CORUM_HOME` 是空的）→ 它用 ps/lsof
+     * 拼凑，`cdp.mjs` 又因默认端口 9222 而驱动了**用户主实例**，读到用户真实会话后误判
+     * 「:9333 的宿主就是我」，差一步重启用户正在用的应用。结论：补事实，不靠猜。
+     * 配套：`home.ts` 把 CORUM_HOME 写进进程环境，让脚本也拿得到。
+     * 顺序放在最前（order 5）——它是后续所有工具/验证判断的前提。
+     */
+    ctx.systemPrompt.section({
+      name: HOST_IDENTITY_SECTION,
+      order: 5,
+      text: hostIdentityText(corumHome(), process.env.CORUM_DEBUG_PORT),
     })
     /**
      * `corumConductor` 服务：把「这个会话是不是指挥模式」暴露给子 Agent 组装方。

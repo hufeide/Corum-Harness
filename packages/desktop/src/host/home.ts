@@ -65,5 +65,10 @@ export function resolveDesktopHome(): string {
     : DEFAULT_DESKTOP_HOME
   const home = resolveDshHome(configured)
   process.env.DSH_HOME = home
+  // 2026-09-12：同时把 CORUM_HOME 写进进程环境——host 的子进程（bash 工具、技能脚本）
+  // 都继承它，Agent 因此能**看到**自己的 home 而不是靠猜（实测事故：子 Agent 用
+  // ps/lsof 拼凑宿主归属，误驱动了用户主实例）。语义上与本函数已设的 DSH_HOME 同值，
+  // 对 `corumHome()`（CORUM_HOME > DSH_HOME > ~/.corum）是等价的，不改变解析结果。
+  process.env.CORUM_HOME = home
   return home
 }
