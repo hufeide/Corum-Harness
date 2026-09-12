@@ -307,6 +307,18 @@ export function subagentOutcomeChipTone(outcome: SubagentOutcome | undefined): '
  * `done` 只表示「最新 turn 已闭合」，中断同样闭合 turn。任何终态判定必须走
  * `subagentOutcomeOf(stopReason)`。
  */
+/**
+ * 子 Agent 的计划项（与 `@deepseek-ai/dsh-tool-todo` 的 `TodoItem` 结构同构）。
+ * 结构镜像而非导入，避免给 corum-api-remotes 增加 dsh-tool-todo 依赖（该包
+ * 只做事件声明/转发，不应耦合工具实现包）。
+ */
+export interface SubagentTodoItem {
+  /** 任务内容（一句短祈使句）。 */
+  readonly content: string
+  /** 生命周期状态。 */
+  readonly status: 'pending' | 'in_progress' | 'completed'
+}
+
 export interface SubagentProgressEvent {
   /** 子会话 id（origin='subagent' 的 UUID id）。 */
   readonly sessionId: string
@@ -325,6 +337,11 @@ export interface SubagentProgressEvent {
   readonly stopReason?: SubagentStopReason
   /** 触发本帧的源事件时间（ms epoch）。 */
   readonly lastActive: number
+  /**
+   * 子 Agent 的当前计划列表（`todo/write` 折叠；`turn/start` 时重置为空）。
+   * 缺省表示无计划（子 Agent 未用 todo 工具）——消费者应隐藏计划区。
+   */
+  readonly todos?: readonly SubagentTodoItem[]
 }
 
 /**
