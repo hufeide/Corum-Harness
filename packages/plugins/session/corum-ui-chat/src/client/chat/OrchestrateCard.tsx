@@ -137,6 +137,32 @@ function useChildOfTask(
   return child
 }
 
+/**
+ * 集成者子会话 id。
+ *
+ * 两条来源，**运行期优先**：① `corum/subagent/child` 广播里 label === 'integrate'
+ * 的那次 spawn（机制里集成者就是一次普通 spawn，与任务分支同一 callId）；② 工具结果
+ * 正文里的 `· child <id>`（`integration.childSessionId`）——推送帧不重放，刷新/重启后
+ * 只有它还在。两条都没有就不渲染按钮（宁可不给入口，也不给错的）。
+ * @param callId - 本次 orchestrate 的 callId。
+ * @param fromResult - 结果里带的集成者子会话 id（缺省 = 结果还没到或未集成）。
+ * @returns 可跳转的子会话 id，或 undefined。
+ */
+function useIntegratorChild(callId: string, fromResult: string | undefined): string | undefined {
+  const resolve = (): string | undefined =>
+    subagentChildrenOf(callId).find(entry => entry.label === 'integrate')?.childSessionId ?? fromResult
+  const [child, setChild] = useState<string | undefined>(resolve)
+  useEffect(() => {
+    setChild(resolve())
+    const sub = subagentChildSubscribe((frame) => {
+      if (frame.callId !== callId) return
+      setChild(resolve())
+    })
+    return () => { sub.unsubscribe() }
+  }, [callId, fromResult])
+  return child
+}
+
 /** 会话 id 的取用（本卡所在会话；供隔离台账按父会话过滤）。uSES 源契约。 */
 function useCurrentSessionId(): string | undefined {
   const source = useMemo(() => chatRuntimeRef.current?.sessionIdSnapshot(), [])
@@ -310,6 +336,19 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
       setLiveFailed(prev => prev.has(index) ? prev : new Set(prev).add(index))
     }
   }, [])
+  /**
+   * 集成者是否正在跑（2026-09-12 用户实测：状态停在「队列中」直到结束才跳「已集成」，
+   * 中间那段 Agent 真的在合并却看不出来）。判据 = **全部任务都已拿到终态**，而工具结果
+   * 还没回来（`integration` 缺省）——机制在任务全 settle 后串行跑集成者，所以这正是那段窗口。
+   * 别用「工具是否 settled」单独判：任务还在跑时它同样是 false。
+   */
+  const branchesAllTerminal = summary.total > 0
+    && (Math.max(summary.done, Math.min(liveCompleted.size, summary.total))
+      + Math.max(summary.aborted, liveAborted.size)
+      + Math.max(summary.failed, liveFailed.size)) >= summary.total
+  const integrating = data.integration === undefined && branchesAllTerminal
+  // 集成者子会话（运行期靠 spawn 广播 label 'integrate'；刷新后靠结果里的 id）。
+  const integratorChild = useIntegratorChild(data.callId, data.integration?.kind === 'integrated' ? data.integration.childSessionId : undefined)
   const doneCount = Math.max(summary.done, Math.min(liveCompleted.size, summary.total))
   const abortedCount = Math.max(summary.aborted, liveAborted.size)
   const failedCount = Math.max(summary.failed, liveFailed.size)
@@ -407,27 +446,50 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                     ③ 跑过但没落地 = 待集成（含原因与分支数），这才是需要人/主 Agent
                        插手的状态（`pending` 的 reason 由折叠器给出，如「2 个分支待集成」）。 */}
                 <div className={css.mergeCard} data-integrator
-                  data-state={data.integration === undefined
-                    ? 'queued'
-                    : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
-                  <span className={css.mergeIcon}><GitMerge size={16} /></span>
+                  data-state={integrating
+                    ? 'integrating'
+                    : data.integration === undefined
+                      ? 'queued'
+                      : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
+                  <span className={css.mergeIcon}>
+                    {integrating ? <Loader size={16} className={css.spin} /> : <GitMerge size={16} />}
+                  </span>
                   <span className={css.branchTx}>
                     <span className={css.branchLabel}>集成者 · 合并 + 验证 + 提交</span>
                     <span className={css.branchSub}>
-                      {data.integration === undefined
-                        ? '队列中 · 全部并行任务完成后自动合并'
-                        : data.integration.kind === 'integrated'
-                          ? '已串行完成合并与提交'
-                          : data.integration.reason}
+                      {integrating
+                        ? '集成中 · 正在合并分支、跑验证并提交'
+                        : data.integration === undefined
+                          ? '队列中 · 全部并行任务完成后自动合并'
+                          : data.integration.kind === 'integrated'
+                            ? '已串行完成合并与提交'
+                            : data.integration.reason}
                     </span>
                   </span>
+                  {/* 进入集成者子会话看详情（新增 2026-09-12）：集成者就是一次普通子会话，
+                      运行中即可点进去看它到底在干什么（用户实测指出「没有按钮进入会话查看详情」）。 */}
+                  {integratorChild !== undefined && (
+                    <button
+                      type="button"
+                      className={css.gotoBtn}
+                      title={`进入集成者会话 ${integratorChild}`}
+                      aria-label="进入集成者会话"
+                      onClick={() => { chatRuntimeRef.current?.openSession?.(integratorChild) }}
+                    >
+                      <ArrowRight size={12} strokeWidth={2.5} />
+                    </button>
+                  )}
                   <span className={css.branchChip} data-merge-chip
-                    data-tone={data.integration === undefined
-                      ? 'queued'
-                      : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
-                    {data.integration === undefined
-                      ? '队列中'
-                      : data.integration.kind === 'integrated' ? '已集成' : '待集成'}
+                    data-tone={integrating
+                      ? 'running'
+                      : data.integration === undefined
+                        ? 'queued'
+                        : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
+                    {integrating
+                      ? '集成中'
+                      : data.integration === undefined
+                        ? '队列中'
+                        : data.integration.kind === 'integrated' ? '已集成' : '待集成'}
                   </span>
                 </div>
               </div>

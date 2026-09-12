@@ -1481,6 +1481,8 @@ export function apply(ctx: Context, config: Config): void {
                     properties: {
                       pendingBranches: { type: 'array', items: { type: 'string' } },
                       integrated: { type: 'boolean' },
+                      // 集成者子会话 id（编排卡「进入会话」按钮用；合并成功时才有）。
+                      childSessionId: { type: 'string' },
                     },
                   },
                 },
@@ -1490,7 +1492,8 @@ export function apply(ctx: Context, config: Config): void {
                   mode: string
                   results?: Array<{ index: number; label?: string; ok: boolean; aborted?: boolean; output?: string; error?: string }>
                   script?: { name: string; agentsStarted: number; value?: unknown }
-                  integration?: { pendingBranches: string[]; integrated: boolean }
+                  /** `childSessionId` = 集成者子会话（合并成功时才有；卡片「进入会话」按钮用）。 */
+                  integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string }
                 }
                 const parts: string[] = []
                 if (out.mode === 'script' && out.script !== undefined) {
@@ -1502,7 +1505,7 @@ export function apply(ctx: Context, config: Config): void {
                 }
                 if (out.integration !== undefined) {
                   parts.push(out.integration.integrated
-                    ? '[corum integration] merged + committed into the main tree'
+                    ? `[corum integration] merged + committed into the main tree${out.integration.childSessionId === undefined ? '' : ` · child ${out.integration.childSessionId}`}`
                     : `[corum integration] ${out.integration.pendingBranches.length} branch(es) pending: ${out.integration.pendingBranches.join(', ')} — call \`subagent\` with integrate: true to merge, or discard them yourself`)
                 }
                 return [{ type: 'text', text: parts.filter(p => p !== '').join('\n\n') }]
@@ -1559,7 +1562,7 @@ export function apply(ctx: Context, config: Config): void {
                 throw new Error('orchestrate tool requires a calling agent (exec.agent was undefined)')
               }
               /** 合并台账里待集成的隔离分支（声明 merge 时由机制调用）。 */
-              const runIntegrate = async (merge: { verify?: string } | undefined): Promise<{ pendingBranches: string[]; integrated: boolean }> => {
+              const runIntegrate = async (merge: { verify?: string } | undefined): Promise<{ pendingBranches: string[]; integrated: boolean; childSessionId?: string }> => {
                 const pending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
                 if (pending.length === 0) return { pendingBranches: [], integrated: false }
                 const branches = pending.map(entry => entry.branch)
@@ -1585,7 +1588,10 @@ export function apply(ctx: Context, config: Config): void {
                 if (integrateOutcome.kind !== 'foreground') {
                   throw new Error(`integrate ran in ${integrateOutcome.kind} mode; integrate must settle in the foreground`)
                 }
-                return { pendingBranches: branches, integrated: true }
+                // fork（corum）：把集成者子会话 id 带进结果——编排卡的「进入会话」按钮要它。
+                // 运行期由 `corum/subagent/child` 帧（label 'integrate'）给出，但**推送帧不重放**
+                // （刷新/重启后丢失）；写进工具结果 = durable，刷新后按钮仍在。
+                return { pendingBranches: branches, integrated: true, childSessionId: String(integrateOutcome.runId) }
               }
 
               // fork（corum）：SCRIPTED 模式（2026-09-10 用户定调「把 workflow 的设计语义

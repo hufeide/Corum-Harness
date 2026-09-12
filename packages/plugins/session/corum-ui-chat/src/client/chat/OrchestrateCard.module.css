@@ -374,6 +374,14 @@
 .branchChip[data-tone='idle'] { color: var(--orch-idle); }
 
 /* goto 按钮（设计稿 brX goto：22×22 r6 + arrow-right）。 */
+/* 集成中：图标旋转（原来是静态 GitMerge，看不出「正在跑」）。 */
+.spin { animation: orch-spin 1.1s linear infinite; }
+@keyframes orch-spin { to { transform: rotate(360deg); } }
+
+/* 集成者节点的「进入会话」按钮：与分支行的 goto 同款几何（22×22 r6），
+   因为它在 mergeCard 里排在 chip 前面，故不给 margin-left:auto。 */
+.mergeCard .gotoBtn { margin-left: auto; }
+
 .gotoBtn {
   flex: none;
   display: inline-flex;

@@ -46,7 +46,15 @@ export type OrchestrateTaskOutcome =
 /** 集成（fan-in）阶段状态。 */
 export type OrchestrateIntegration =
   /** 声明了 `merge` → 机制在所有任务 settle 后跑集成者（merge + verify + commit）。 */
-  | { readonly kind: 'integrated' }
+  | {
+      readonly kind: 'integrated'
+      /**
+       * 集成者子会话 id（宿主写进结果正文 `· child <id>`，durable）。
+       * 编排卡的「进入会话」按钮用它——运行期另有 `corum/subagent/child` 帧
+       * （label `integrate`），但推送帧不重放，刷新后只有这里能给出入口。
+       */
+      readonly childSessionId?: string
+    }
   /** 集成者未跑（有任务失败而中止；或本次调用未声明 `merge`——那要主 Agent 自己 `subagent { integrate: true }`）。 */
   | { readonly kind: 'pending'; readonly reason: string; readonly branches: readonly string[] }
 
@@ -162,7 +170,11 @@ export function parseIntegration(text: string): OrchestrateIntegration | undefin
     const matched = INTEGRATION_LINE.exec(rawLine.trim())
     if (matched === null) continue
     const body = matched[1]
-    if (body.startsWith('merged + committed')) return { kind: 'integrated' }
+    if (body.startsWith('merged + committed')) {
+      // `… into the main tree · child <sessionId>`（宿主 2026-09-12 起带上）。
+      const child = /·\s*child\s+(\S+)/u.exec(body)
+      return child === null ? { kind: 'integrated' } : { kind: 'integrated', childSessionId: child[1] }
+    }
     // `N branch(es) pending: a, b, c — call ...`
     const pending = /^(\d+) branch\(es\) pending: ([^—]*)/u.exec(body)
     const branches = pending === null
