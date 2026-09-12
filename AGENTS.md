@@ -42,6 +42,10 @@
 
 ## Key Documents (read as needed)
 
+- **`corum-dev-conventions` 技能** — 本文件与 `docs/dev-conventions.md` 的**可执行投影**
+  （红线 / 改动工作流 / 已付学费的坑 / 证据标准 / 协作纪律），源码在本仓
+  `skills/corum-dev-conventions/SKILL.md`，装进 corum 技能库并绑定给「Corum 开发」。
+  改规范时**先改 docs，再同步这份技能**（docs 是规则的唯一家）。
 - `docs/dev-conventions.md` — **the single home for rules** (must/never, decision
   trees, code do/don't, evidence index; §4a = subagent dual-instance discipline,
   §8 = event bus, §9 = mounting, §10 = agent/LLM mechanism, §11 = documentation
