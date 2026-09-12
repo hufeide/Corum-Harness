@@ -1,14 +1,14 @@
 /**
  * SkillManagerService — corum Skill 管理服务。
  *
- * 管理全局 skill 目录（~/.dsh/skills/）下的 skill 生命周期：
+ * 管理全局 skill 目录（<CORUM_HOME>/skills/）下的 skill 生命周期：
  *   - 导入（从目录路径或粘贴文本）
  *   - 删除
  *   - 版本管理（日期+序号，文件系统快照，配置文件记录）
  *   - 版本锁定（返回 SkillBinding 供 Agent 引用）
  *
  * 版本管理方案（不依赖 git）：
- *   ~/.dsh/skills/<name>/
+ *   <CORUM_HOME>/skills/<name>/
  *     SKILL.md               ← 当前版本的 SKILL.md
  *     skill-versions.json    ← 版本配置文件
  *     .versions/             ← 历史版本快照

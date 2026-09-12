@@ -1017,7 +1017,7 @@ export class CorumAgentService extends TypertRemoteService {
    * Skill 采用引用绑定 + 版本 pinning：
    *   agent.json 的 skills 字段记录 SkillBinding[] {name, commitHash}。
    *   Agent mount 前把 skill checkout 到 pinned commit。
-   *   Skill 全局统一管理在 ~/.dsh/skills/（由 dev-skill-manager 管理导入）。
+   *   Skill 全局统一管理在 <CORUM_HOME>/skills/（由 dev-skill-manager 管理导入）。
    */
   @Remote('saveProfile')
   saveProfileRemote(input: SaveProfileInput): { profile: ProfileSummary } {
@@ -2168,9 +2168,9 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 扫描全局 skill 目录（~/.dsh/skills/）发现可用 skills。
+   * 扫描全局 skill 目录（<CORUM_HOME>/skills/）发现可用 skills。
    *
-   * Skill 全局统一管理在 ~/.dsh/skills/，每个 skill 是一个含 SKILL.md
+   * Skill 全局统一管理在 <CORUM_HOME>/skills/，每个 skill 是一个含 SKILL.md
    * 的子目录。Agent 只引用 name 不复制文件——skill 更新即时生效。
    *
    * 返回的列表包含 git 版本信息（commit hash + 是否有未提交修改），

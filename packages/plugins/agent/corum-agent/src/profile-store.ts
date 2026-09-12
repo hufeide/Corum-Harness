@@ -7,8 +7,9 @@
  *   preset.yml           — preset 元数据
  *
  * Skill 采用引用绑定：agent.json 只记录 skill name 列表，不复制文件。
- * Skill 全局统一管理在 ~/.dsh/skills/，Agent mount 时 skill-filesystem
- * 从该目录发现 skill。
+ * Skill 全局统一管理在 `<CORUM_HOME>/skills/`（CORUM_HOME > DSH_HOME > ~/.corum，
+ * 见 ./home.ts 的 corumHome()），Agent mount 时 skill-filesystem 只从
+ * `<CORUM_HOME>/skills/<绑定名>` 发现被授权的 skill（compile.ts 的覆盖行）。
  *
  * 兼容旧路径：`~/.corum/agent-profiles/<id>.json` 会被自动迁移。
  * @module @corum/corum-agent/profile-store

@@ -8,7 +8,7 @@
 
 /**
  * UI 投影的可用 skill 摘要。
- * Skill 全局统一管理在 ~/.dsh/skills/，Agent 只引用 name 不复制文件。
+ * Skill 全局统一管理在 `<CORUM_HOME>/skills/`，Agent 只引用 name 不复制文件。
  */
 export interface SkillEntry {
   name: string

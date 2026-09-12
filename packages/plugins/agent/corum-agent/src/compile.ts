@@ -10,7 +10,9 @@
  *   prompt        → persona 行（text，替换官方模板）
  *   model         → 不进 preset（创建 Agent 时的 agentOptions）
  *   skills        → skill-filesystem 覆盖行（includeDefaultRoots:false +
- *                   customSkillDirs 指向 Agent 自身 skills/ 目录）
+ *                   customSkillDirs = 集中技能库里该 Agent 被授权的目录，
+ *                   即 `<CORUM_HOME>/skills/<绑定名>`；技能实体由 corum
+ *                   统一管理，Agent 只按 name 引用，不复制文件）
  *   mcpServers    → dsh-mcp-client 追加行（每 server 一行）
  *   terminal      → persistent-shell 组覆盖一次性 tool-bash/tool-pwsh（sandbox
  *                   由 host 层提供）

@@ -4,7 +4,7 @@
  * 纯 host 侧插件。SkillManagerService 继承 TypertRemoteService，通过 @Remote
  * 装饰器暴露 /api/skillManager/* 端点供浏览器半（dev-agent-shell）调用。
  *
- * 管理全局 skill 目录（~/.dsh/skills/）的完整生命周期：
+ * 管理全局 skill 目录（<CORUM_HOME>/skills/）的完整生命周期：
  * 导入（文件 / 文本）、删除、git 版本追踪、版本锁定。
  * @module @corum/corum-skill-manager
  */

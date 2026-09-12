@@ -14,7 +14,7 @@
  * Skill 采用引用绑定 + 版本 pinning：
  *   agent.json 的 skills 字段记录 SkillBinding[]（name + versionId），
  *   Agent mount 前把对应版本的 SKILL.md 复制为当前 SKILL.md。
- *   Skill 全局统一管理在 ~/.dsh/skills/。
+ *   Skill 全局统一管理在 <CORUM_HOME>/skills/。
  * @module @corum/corum-agent/profile
  */
 
@@ -47,12 +47,12 @@ export interface ProfileMemoryPolicy {
 
 /**
  * Skill 绑定：Agent 引用全局 skill 的一个固定版本。
- * - name：skill 名称（对应 ~/.dsh/skills/<name>/）
+ * - name：skill 名称（对应 <CORUM_HOME>/skills/<name>/）
  * - versionId：pin 的版本 ID（日期+序号，如 2026-08-22-01）
  *   Agent 创建前把对应版本的 SKILL.md 复制为当前 SKILL.md。
  */
 export interface SkillBinding {
-  /** skill name（全局目录 ~/.dsh/skills/<name>/ 下的子目录名）。 */
+  /** skill name（全局目录 <CORUM_HOME>/skills/<name>/ 下的子目录名）。 */
   name: string
   /** pin 的版本 ID（日期+序号）。Agent 对 skill 版本不可见，始终用此版本。 */
   versionId: string
