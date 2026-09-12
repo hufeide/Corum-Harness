@@ -91,11 +91,20 @@
 
 # The skill REGISTRY lives in the host composition and is layered per scope:
 # these rows register into THIS preset's layer of it, so they need no realm.
-# `skill-filesystem` contributes local-root discovery for agents on this preset, and
 # `tool-skill` gives them the catalog and loader; the merged catalog also
 # carries whatever the deployment registered globally (repository plugins).
+# fork（corum）：技能全局统一管理在 $CORUM_HOME/skills——与 corum Agent 同源
+# （见 corum-agent/compile.ts 的 skill-filesystem 覆盖行）。因此 `skill-filesystem`
+# 关掉默认根（项目 .dsh/skills、.agents/skills、$DSH_HOME/skills、~/.agents/skills、
+# 打包内置根），只暴露集中管理的那一个根；home 解析与 host 同规则
+# （CORUM_HOME > DSH_HOME > ~/.corum，见 host/home.ts）。该目录不存在时
+# skill-filesystem 把缺失根按 absent 处理，静默返回空表，不报错。
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    includeDefaultRoots: false
+    customSkillDirs:
+      - !!js "process.getBuiltinModule('node:path').join(process.env.CORUM_HOME || process.env.DSH_HOME || (process.getBuiltinModule('node:os').homedir() + '/.corum'), 'skills')"
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
