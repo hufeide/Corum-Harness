@@ -346,7 +346,20 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
     && (Math.max(summary.done, Math.min(liveCompleted.size, summary.total))
       + Math.max(summary.aborted, liveAborted.size)
       + Math.max(summary.failed, liveFailed.size)) >= summary.total
-  const integrating = data.integration === undefined && branchesAllTerminal
+  /**
+   * 集成结果已到但**没有可解析的集成行** —— 两种情况，都不能再显示「集成中」：
+   *   ① 工具报错（典型 = 机制真值门禁失败：「integrate did not persist into the main tree」，
+   *      分支被保留、主 Agent 要自己处理）→ 集成失败；
+   *   ② 工具正常返回却没带 `[corum integration]` 行 → 未集成（见任务结果）。
+   *
+   * 2026-09-12 用户实测踩到过的坑：那次真值门禁失败后卡片**永远停在「集成中」**
+   * （`integration` 缺省 && 分支都有终态 → 判据恒真），用户看到的就是「集成未返回，
+   * 主 Agent 已经在迫不及待的验证了」——其实工具 2 分钟前就返回了错误，主 Agent 是在
+   * 排查这次失败。故 integrating 必须加 `!data.settled`。
+   */
+  const integrationSettledWithoutLine = data.settled && data.integration === undefined
+  const integrationFailed = integrationSettledWithoutLine && data.errored
+  const integrating = data.integration === undefined && !data.settled && branchesAllTerminal
   // 集成者子会话（运行期靠 spawn 广播 label 'integrate'；刷新后靠结果里的 id）。
   const integratorChild = useIntegratorChild(data.callId, data.integration?.kind === 'integrated' ? data.integration.childSessionId : undefined)
   const doneCount = Math.max(summary.done, Math.min(liveCompleted.size, summary.total))
@@ -448,9 +461,13 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                 <div className={css.mergeCard} data-integrator
                   data-state={integrating
                     ? 'integrating'
-                    : data.integration === undefined
-                      ? 'queued'
-                      : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
+                    : integrationFailed
+                      ? 'failed'
+                      : integrationSettledWithoutLine
+                        ? 'pending'
+                        : data.integration === undefined
+                          ? 'queued'
+                          : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
                   <span className={css.mergeIcon}>
                     {integrating ? <Loader size={16} className={css.spin} /> : <GitMerge size={16} />}
                   </span>
@@ -459,11 +476,15 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                     <span className={css.branchSub}>
                       {integrating
                         ? '集成中 · 正在合并分支、跑验证并提交'
-                        : data.integration === undefined
-                          ? '队列中 · 全部并行任务完成后自动合并'
-                          : data.integration.kind === 'integrated'
-                            ? '已串行完成合并与提交'
-                            : data.integration.reason}
+                        : integrationFailed
+                          ? '集成失败 · 分支已保留，见工具结果（需主 Agent 处理）'
+                          : integrationSettledWithoutLine
+                            ? '未集成 · 结果里没有集成信息，见任务结果'
+                            : data.integration === undefined
+                              ? '队列中 · 全部并行任务完成后自动合并'
+                              : data.integration.kind === 'integrated'
+                                ? '已串行完成合并与提交'
+                                : data.integration.reason}
                     </span>
                   </span>
                   {/* 进入集成者子会话看详情（新增 2026-09-12）：集成者就是一次普通子会话，
@@ -482,14 +503,22 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                   <span className={css.branchChip} data-merge-chip
                     data-tone={integrating
                       ? 'running'
-                      : data.integration === undefined
-                        ? 'queued'
-                        : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
+                      : integrationFailed
+                        ? 'failed'
+                        : integrationSettledWithoutLine
+                          ? 'pending'
+                          : data.integration === undefined
+                            ? 'queued'
+                            : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
                     {integrating
                       ? '集成中'
-                      : data.integration === undefined
-                        ? '队列中'
-                        : data.integration.kind === 'integrated' ? '已集成' : '待集成'}
+                      : integrationFailed
+                        ? '集成失败'
+                        : integrationSettledWithoutLine
+                          ? '未集成'
+                          : data.integration === undefined
+                            ? '队列中'
+                            : data.integration.kind === 'integrated' ? '已集成' : '待集成'}
                   </span>
                 </div>
               </div>

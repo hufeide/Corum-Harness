@@ -85,6 +85,11 @@ interface SessionListState {
     projectionValues?: unknown
     /** 该会话此刻是否在跑。 */
     running?: boolean
+    /**
+     * 会话的工作目录（官方 summary 自带；**判「是否隔离」的 durable 依据**——
+     * 隔离子会话的 cwd 就是 `<repo>/.corum-worktrees/<slug>`）。结构窄化只声明用到的字段。
+     */
+    cwd?: string
   } | undefined>
   /**
    * 官方「直接子会话目录」（durable catalog，key = 父会话 id）。**子 Agent 花名册的
@@ -461,6 +466,15 @@ function useSubagentRoster(
     return sessionId === undefined ? undefined : state.subagentsByParent?.[sessionId]?.entries
   })
   /**
+   * 子会话 id → cwd（官方 session summary 自带，**durable**）。
+   *
+   * 用它判「是否隔离」：隔离子会话的工作目录就是 worktree 根下的
+   * `<repo>/.corum-worktrees/<slug>`。为什么不能只靠 `corum/subagent/child` 帧里的
+   * `isolated`：帧**不重放**——刷新/重启后整个「隔离」分类会消失（2026-09-12 用户实测
+   * 「下拉的悬浮窗中无法看到隔离任务的分类了」）。cwd 是会话自己的持久事实，随时可查。
+   */
+  const childCwds = useSessions((state: SessionListState) => state.byId)
+  /**
    * 打开目录订阅（官方机制）：
    * `refresh` 补一次立即拉取；`setCatalogOpen(true)` 让官方在**成员变更帧**到达时
    * 防抖重拉——这是「新派出的子 Agent 无需刷新页面就出现在胶囊里」的唯一正路
@@ -501,6 +515,8 @@ function useSubagentRoster(
   const [seededStopReason, setSeededStopReason] = useState<ReadonlyMap<string, SubagentStopReason>>(new Map())
   /** 冷启动补来的委派角色（见下方种子的说明；推送帧不重放）。 */
   const [seededRole, setSeededRole] = useState<ReadonlyMap<string, 'worker' | 'research' | 'fork'>>(new Map())
+  /** 冷启动补来的「是否隔离」（同上：帧不重放，用宿主 durable 判据）。 */
+  const [seededIsolated, setSeededIsolated] = useState<ReadonlyMap<string, boolean>>(new Map())
   const seededRef = useRef<Set<string>>(new Set())
   // 已结束的子会话 id 列表（只在成员变化时变，不受 step 等增量字段影响）。
   const finishedIds = useMemo(
@@ -512,6 +528,7 @@ function useSubagentRoster(
     seededRef.current = new Set()
     setSeededStopReason(new Map())
     setSeededRole(new Map())
+    setSeededIsolated(new Map())
     if (connection === undefined || sessionId === undefined) return undefined
     let cancelled = false
     for (const id of finishedIds) {
@@ -526,7 +543,18 @@ function useSubagentRoster(
           if (cancelled || !result.ok || result.value === undefined) return
           const value = result.value as {
             role?: 'worker' | 'research' | 'fork'
+            isolated?: boolean
             progress?: { stopReason?: string }
+          }
+          // 隔离徽标：推送帧不重放，靠宿主的 durable 判据（子会话 cwd 在 .corum-worktrees 下）
+          // 补标——否则刷新/重启后「隔离」整列消失（2026-09-12 用户实测）。
+          if (value.isolated !== undefined) {
+            setSeededIsolated(prev => {
+              if (prev.get(id) === value.isolated) return prev
+              const next = new Map(prev)
+              next.set(id, value.isolated === true)
+              return next
+            })
           }
           // 角色：与 stopReason 同一条冷启动路（推送帧不重放，不补就只有「本页之后新建的
           // 子 Agent」才带角色）。只认白名单里的三个值，别的一律不挂小标。
@@ -603,6 +631,16 @@ function useSubagentRoster(
   return useMemo(() => {
     const merged = new Map<string, SubagentRosterEntry>()
     for (const entry of baseline) merged.set(entry.childSessionId, entry)
+    /** cwd → 是否隔离（worktree 路径约定；取不到 cwd 则不猜）。 */
+    const isolatedOf = (id: string): boolean | undefined => {
+      const cwd = childCwds[id]?.cwd
+      return cwd === undefined ? undefined : /(^|[\\/])\.corum-worktrees([\\/]|$)/.test(cwd)
+    }
+    for (const [id, entry] of [...merged]) {
+      if (entry.isolated !== undefined) continue
+      const isolated = isolatedOf(id)
+      if (isolated !== undefined) merged.set(id, { ...entry, isolated })
+    }
     // 冷启动种子填补 stopReason（仅当推送帧未给时；推送帧的值更权威）。
     for (const [id, sr] of seededStopReason) {
       const entry = merged.get(id)
@@ -615,6 +653,13 @@ function useSubagentRoster(
       const entry = merged.get(id)
       if (entry !== undefined && entry.role === undefined) {
         merged.set(id, { ...entry, role })
+      }
+    }
+    // 冷启动种子填补 isolated（仅当推送帧没给时）。
+    for (const [id, isolated] of seededIsolated) {
+      const entry = merged.get(id)
+      if (entry !== undefined && entry.isolated === undefined) {
+        merged.set(id, { ...entry, isolated })
       }
     }
     // 冷启动种子填补 model（仅当基线 / 推送帧都没给时；推送帧的值更权威）。
@@ -637,10 +682,12 @@ function useSubagentRoster(
         ...(entry.model === undefined && prior?.model !== undefined ? { model: prior.model } : {}),
         // role 只来自 child 帧 / 冷启动种子：progress 帧不带它，别把已知角色抹掉。
         ...(entry.role === undefined && prior?.role !== undefined ? { role: prior.role } : {}),
+        // isolated 同理：progress 帧不带它，别把已知值抹掉。
+        ...(entry.isolated === undefined && prior?.isolated !== undefined ? { isolated: prior.isolated } : {}),
       })
     }
     return [...merged.values()]
-  }, [baseline, live, seededStopReason, seededModel, seededRole])
+  }, [baseline, live, seededStopReason, seededModel, seededRole, seededIsolated, childCwds])
 }
 
 /** 推送帧累积（历史上的唯一来源；现在只作基线之上的增量）。 */

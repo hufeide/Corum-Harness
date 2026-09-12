@@ -2041,6 +2041,44 @@ export class CorumAgentService extends TypertRemoteService {
     }
   }
 
+  /**
+   * fork（corum）：该子会话是否跑在隔离 worktree 里（durable 判据）。
+   *
+   * 为什么不用推送帧：`corum/subagent/child` 带 `isolated`，但**帧不重放**——刷新/重启
+   * 后花名册的「隔离」徽标整体消失（2026-09-12 用户实测）。子会话自己的 `header.cwd`
+   * 就是 durable 事实：隔离时它是 `<repo>/.corum-worktrees/<slug>`（台账/机制建的 worktree
+   * 根名固定为 `.corum-worktrees`，见 CorumWorktreeChildOptions.worktreeRoot 默认值）。
+   *
+   * @param sessionId - 子会话 id。
+   * @returns true/false；取不到会话时 undefined（不猜）。
+   */
+  private async childWorktreeIsolation(sessionId: string): Promise<boolean | undefined> {
+    /** 隔离子会话的工作目录就是 worktree 根下的 `<repo>/.corum-worktrees/<slug>`。 */
+    const ofCwd = (cwd: string | undefined): boolean | undefined =>
+      cwd === undefined ? undefined : /(^|[\\/])\.corum-worktrees([\\/]|$)/.test(cwd)
+    // ① 已加载的 agent（内存 header，最快）。
+    type AgentsFace = { list?: Iterable<{ session: { id: string; header?: { cwd?: string } } }> }
+    const agents = this.ctx.get('agents') as AgentsFace | undefined
+    for (const agent of agents?.list ?? []) {
+      if (String(agent.session.id) !== sessionId) continue
+      const memory = ofCwd(agent.session.header?.cwd)
+      if (memory !== undefined) return memory
+      break
+    }
+    // ② 持久化 header——**一次性子会话跑完就被 dispose，不在 agents.list 里**，这时只能读盘。
+    //    `SessionHandle.header` 是不变元数据（含 cwd），读它不需要把会话载回来。
+    try {
+      const handle = await this.ctx.sessionPersistence.open(SessionId(sessionId), 'read')
+      try {
+        return ofCwd(handle.header.cwd)
+      } finally {
+        await handle.close()
+      }
+    } catch {
+      return undefined
+    }
+  }
+
   @Remote('getChildSessionProgress')
   async getChildSessionProgressRemote(sessionId: string): Promise<{
     /**
@@ -2048,6 +2086,13 @@ export class CorumAgentService extends TypertRemoteService {
      * 来自父侧工具名）。花名册冷启动时用它补角色小标；本进程没记过该子会话则缺省。
      */
     role?: 'worker' | 'research' | 'fork'
+    /**
+     * 是否隔离到 worktree。**由子会话自己的 cwd 判定**（隔离子会话的工作目录就是
+     * `<repo>/.corum-worktrees/<slug>`），而不是靠 `corum/subagent/child` 推送帧——
+     * 推送帧不重放，刷新/重启后花名册的「隔离」徽标会整体消失（2026-09-12 用户实测：
+     * 「下拉的悬浮窗中无法看到隔离任务的分类了」）。cwd 是会话自身的 durable 事实。
+     */
+    isolated?: boolean
     progress?: {
       turn: number
       step: number
@@ -2058,14 +2103,23 @@ export class CorumAgentService extends TypertRemoteService {
       todos?: readonly SubagentTodoItem[]
     }
   }> {
+    // role/isolated 与「子会话事件窗口」无关（角色来自父侧工具名、隔离来自子会话 cwd），
+    // 故先算好、所有返回路径都带上——否则事件读不到时（返回 {}）花名册的角色/隔离徽标会
+    // 一起消失（2026-09-12 用户实测：「下拉的悬浮窗中无法看到隔离任务的分类了」）。
+    const role = this.subagentRoles.get(sessionId)
+    const isolated = await this.childWorktreeIsolation(sessionId)
+    const identity: { role?: 'worker' | 'research' | 'fork'; isolated?: boolean } = {
+      ...role === undefined ? {} : { role },
+      ...isolated === undefined ? {} : { isolated },
+    }
     let stored: readonly SessionEvent[]
     try {
       const events = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)
       stored = events
     } catch {
-      return {}
+      return identity
     }
-    if (stored.length === 0) return {}
+    if (stored.length === 0) return identity
     let turn = 0
     let step = 0
     let done = false
@@ -2112,9 +2166,8 @@ export class CorumAgentService extends TypertRemoteService {
       }
     }
     const lastActive = stored[stored.length - 1].time
-    const role = this.subagentRoles.get(sessionId)
     return {
-      ...role === undefined ? {} : { role },
+      ...identity,
       progress: {
         turn,
         step,
