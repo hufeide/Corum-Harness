@@ -25,6 +25,7 @@ import {
   corumMarkSettled,
   corumNarrowDenyFilter,
   corumPendingIntegration,
+  corumMutationToolsForPlatform,
   corumResearchToolFilter,
   corumShouldIsolate,
   corumWriteToolsForPlatform,
@@ -480,21 +481,27 @@ describe('corumResearchToolFilter — fork（corum）research 只读硬约束', 
     expect(corumResearchToolFilter({ deny: ['bash'] }, false)).toBeUndefined()
   })
 
-  it('research=true + 无 toolFilter → 补 deny 全部写工具', () => {
+  // fork（corum）2026-09-12 用户定调：research **开放 shell**（调研必须能跑命令），
+  // 只读性改由子会话沙箱（readonlySandbox → read-only）保证——工具面只 deny 变异工具。
+  it('research=true + 无 toolFilter → deny 变异工具，但**保留 shell**', () => {
     const filter = corumResearchToolFilter(undefined, true)
-    expect(filter?.deny).toEqual(expect.arrayContaining(corumWriteToolsForPlatform()))
-  })
-
-  it('research=true + 部分 deny → 补全缺失的写工具', () => {
-    const filter = corumResearchToolFilter({ deny: ['bash'] }, true)
-    for (const tool of corumWriteToolsForPlatform()) {
+    for (const tool of corumMutationToolsForPlatform()) {
       expect(filter?.deny).toContain(tool)
     }
-    expect(filter?.deny).toContain('bash')
+    expect(filter?.deny).not.toContain('bash')
+    expect(filter?.deny).not.toContain('pwsh')
+  })
+
+  it('research=true + 部分 deny → 补全缺失的变异工具（不动 shell）', () => {
+    const filter = corumResearchToolFilter({ deny: ['write'] }, true)
+    for (const tool of corumMutationToolsForPlatform()) {
+      expect(filter?.deny).toContain(tool)
+    }
+    expect(filter?.deny).not.toContain('bash')
   })
 
   it('research=true + 已全 deny → 返回 undefined（幂等，不重复）', () => {
-    const allDeny = { deny: [...corumWriteToolsForPlatform()] }
+    const allDeny = { deny: [...corumMutationToolsForPlatform()] }
     expect(corumResearchToolFilter(allDeny, true)).toBeUndefined()
   })
 

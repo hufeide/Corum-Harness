@@ -114,7 +114,9 @@ export const corumOrchestrationDomainSpec = defineDomain({
 // ── 纯函数（无状态；单测直接测，语义与 fork #10 逐字一致）──────────────────
 
 /** fork（corum）：写工具清单——按工具面判定写任务（§2 逐字核实）。 */
-const CORUM_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh']
+const CORUM_MUTATION_TOOLS = ['str_replace_editor', 'write', 'edit']
+const CORUM_SHELL_TOOLS = ['bash', 'pwsh']
+const CORUM_WRITE_TOOLS = [...CORUM_MUTATION_TOOLS, ...CORUM_SHELL_TOOLS]
 
 /**
  * fork（corum）：平台实际存在的写工具（deny 名单只能包含已注册工具——
@@ -136,6 +138,22 @@ export function corumWriteToolsForPlatform(): readonly string[] {
   return process.platform === 'win32'
     ? CORUM_WRITE_TOOLS
     : CORUM_WRITE_TOOLS.filter(tool => tool !== 'pwsh')
+}
+
+/**
+ * fork（corum）：只读研究子 Agent 要 deny 的**变异**工具（2026-09-12 用户定调）。
+ *
+ * 为什么与 {@link corumWriteToolsForPlatform} 分开：用户要求「research 需要开放 shell
+ * 来执行命令完成调研」——调研常常必须跑命令（`git log`、读 PID 文件、跑 verify 脚本的
+ * status）。此前 research 与写子 Agent 共用同一份 deny 名单（含 bash），于是研究子
+ * Agent 连 `git status` 都跑不了，只能靠磁盘证据推断（实机报告原文：「本会话无
+ * bash/write 工具」）。现在 research **允许 shell、只 deny 变异工具**，只读性由
+ * **子会话沙箱钉成 `read-only`** 保证（见 corum-subagent 的 `readonlySandbox`）——
+ * 工具面与文件效果两层分工：工具面禁写文件，沙箱层禁写文件系统。
+ * @returns 本平台上的变异工具名（research 的 deny 名单）。
+ */
+export function corumMutationToolsForPlatform(): readonly string[] {
+  return process.platform === 'win32' ? CORUM_MUTATION_TOOLS : CORUM_MUTATION_TOOLS
 }
 
 /** fork（corum）：git 命令同步执行（父会话 header.cwd 下）。 */
@@ -258,10 +276,10 @@ export function corumResearchToolFilter(
   readonlyResearch: boolean,
 ): { allow?: string[]; deny?: string[] } | undefined {
   if (!readonlyResearch) return undefined
-  if (corumWriteToolsForPlatform().every(t => toolFilter?.deny?.includes(t) === true)) return undefined
+  if (corumMutationToolsForPlatform().every(t => toolFilter?.deny?.includes(t) === true)) return undefined
   return {
     ...toolFilter?.allow !== undefined ? { allow: toolFilter.allow } : {},
-    deny: [...new Set([...(toolFilter?.deny ?? []), ...corumWriteToolsForPlatform()])],
+    deny: [...new Set([...(toolFilter?.deny ?? []), ...corumMutationToolsForPlatform()])],
   }
 }
 

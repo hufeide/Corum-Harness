@@ -71,6 +71,7 @@ import {
   corumMarkSettled,
   corumNarrowDenyFilter,
   corumPartialIntegrationNotice,
+  corumMutationToolsForPlatform,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
@@ -591,6 +592,7 @@ export {
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
+  corumMutationToolsForPlatform,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
@@ -829,6 +831,10 @@ export function apply(ctx: Context, config: Config): void {
               : {},
           }
       const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
+      // fork（corum）：研究标志提前解析（任务级覆盖优先）——request 构造要用它把子会话
+      // 沙箱钉成 read-only（2026-09-12 用户定调：research 开放 shell 以后，只读性由
+      // 沙箱层保证，而不是靠 deny 掉 bash）。
+      const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
       const request: {
         label: string
         prompt: ContentBlock[]
@@ -839,6 +845,7 @@ export function apply(ctx: Context, config: Config): void {
         maxDepth?: number
         cwd?: string
         outputSchema?: ObjectJsonSchema
+        readonlySandbox?: boolean
       } = {
         label: args.label,
         prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
@@ -849,6 +856,9 @@ export function apply(ctx: Context, config: Config): void {
         ...maxDepth !== undefined ? { maxDepth } : {},
         // fork（corum）：结构化子结果（orchestrate 任务级 schema，吸收 workflow 语义）。
         ...args.taskSchema !== undefined ? { outputSchema: args.taskSchema } : {},
+        // fork（corum）：只读研究子 Agent 的沙箱钉成 read-only（工具面禁变异工具 + 沙箱层
+        // 禁文件写入，两层分工保证「调研能跑命令，但改不了仓库」）。
+        ...effReadonlyResearch ? { readonlySandbox: true } : {},
       }
       if (corumLockedOptions === undefined) {
         const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
@@ -926,7 +936,7 @@ export function apply(ctx: Context, config: Config): void {
 
       // fork（corum）：写工具判定与隔离触发（纯函数，单测覆盖）。
       // 任务级覆盖（orchestrate 的 tasks[i].isolation/research）优先于实例配置终值。
-      const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
+      // `effReadonlyResearch` 已在上方 request 构造处解析（供只读沙箱钉使用）。
       const effIsolationMode = args.taskIsolation ?? corumIsolationMode
       const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, corumDenyDirectFs)
       // fork（corum）：并发感知（2026-09-09 用户实机反馈「只派遣一个 TASK 时还是走了
@@ -936,7 +946,15 @@ export function apply(ctx: Context, config: Config): void {
       //   ② 本次委托走后台/continuable（父 Agent 继续干活，随时可能再发一个）；
       //   ③ 该会话台账仍有 active 条目（已隔离的写子 Agent 还在跑）；
       //   ④ 该会话有在跑的非隔离开写子 Agent（同一条消息里的并发前台调用）。
-      const corumRunSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
+      // fork（corum）：**只读研究恒前台**（2026-09-12 用户定调）——「前台等报告」对任何
+      // 调研场景都适用；调研留在后台时，前台主 Agent 拿不到结论，容易做出错误判断或
+      // 重复调研（实测：4 次 research 里 2 次被父 Agent 提前 abort，报告为空）。
+      const corumRunSpec = effReadonlyResearch
+        ? { runInBackground: false }
+        : resolveDelegationRun(args, { backgroundEnabled, continuable })
+      if (effReadonlyResearch && args.run_in_background === true) {
+        throw new Error('run_in_background is not supported for read-only research: the report IS the deliverable, so a research child always runs in the foreground and its report returns in this tool result.')
+      }
       const corumSessionId = parent.session.id
       const corumConcurrent = (args.fanoutCount ?? 1) > 1
         || corumRunSpec.runInBackground
@@ -977,8 +995,9 @@ export function apply(ctx: Context, config: Config): void {
       }
 
       // fork（corum）：任务级 research 的只读硬约束——orchestrate 的 tasks[i].research
-      // 名实相符：research=true 的任务预 deny 全部写工具（与 subagent_research 只读
-      // 实例同款口径），不因「实例 config 未显式 deny」而带写工具直接写主工作区。
+      // 名实相符：research=true 的任务 deny **变异**工具（write/edit/str_replace_editor）
+      // 且沙箱钉 read-only；shell 保留（调研要跑命令），只读性由沙箱层保证
+      // （2026-09-12 用户定调：research 开放 shell，但改不了仓库）。
       const researchFilter = corumResearchToolFilter(config.toolFilter, effReadonlyResearch)
       if (researchFilter !== undefined) corumSetMechanismFilter(researchFilter)
 
@@ -1656,7 +1675,11 @@ export function apply(ctx: Context, config: Config): void {
         order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
         text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
           ? ''
-          : `${corumPtcPrefix(context.scope)}Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
+          // fork（corum）2026-09-12 用户定调：只读研究实例的措辞改成「恒前台、报告就在
+          // 工具结果里、沙箱只读但有 shell」；worker / fork 实例保持官方后台默认措辞。
+          : corumReadonlyResearch
+            ? `${corumPtcPrefix(context.scope)}This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass \`run_in_background: true\` (it is rejected) — a backgrounded investigation leaves you guessing or repeating work. It has a shell for read-only commands (\`git log\`, \`ls\`, reading PID/log files, a verify script's \`status\`) but its sandbox is pinned to \`read-only\` and write/edit are denied, so it can never modify the repo. Fan out several research calls in ONE message when you need answers from different angles.`
+            : `${corumPtcPrefix(context.scope)}Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
       })
     }
 
@@ -1690,7 +1713,7 @@ export function apply(ctx: Context, config: Config): void {
             '- ONE focused, self-contained subtask (an implementation, a scoped analysis) → call `subagent`.',
           ]
           if (hasResearch) {
-            lines.push('- ANY read-only work — searching the codebase, reading files, tracing a call path, summarizing a module, gathering facts, answering "how does X work" → call `subagent_research`. This read-only child is pre-denied every write tool, so it can never modify the repo: delegate exploration to it freely instead of spending your own context, and fan out several such searches when you need answers from different angles.')
+            lines.push('- ANY read-only work — searching the codebase, reading files, tracing a call path, summarizing a module, gathering facts, answering "how does X work", or running read-only commands (`git log`, `ls`, a verify script\'s `status`) → call `subagent_research`. It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you get the findings inline instead of waiting for a notice — never try to background it (`run_in_background: true` is rejected). It has a shell but its sandbox is pinned to `read-only` and the mutating tools (write/edit/str_replace_editor) are denied, so it can investigate freely and can never modify the repo. Fan out several such searches in ONE message when you need answers from different angles.')
           }
           if (hasFork) {
             lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → call `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')

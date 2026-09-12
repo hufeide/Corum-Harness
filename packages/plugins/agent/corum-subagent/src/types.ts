@@ -99,6 +99,14 @@ export interface SubagentCapabilities {
  * {@link SubagentProvider.start}.
  */
 export interface SubagentStartRequest {
+  /**
+   * fork（corum）：把子会话的沙箱钉成 `read-only`（2026-09-12 用户定调）。
+   *
+   * 只读研究子 Agent 现在允许 shell（调研要跑命令），「不能改仓库」这条保证因此从
+   * 工具面下移到**文件效果层**：工具面禁掉变异工具，沙箱层禁掉文件写入。缺省
+   * `undefined` = 沿用父会话的沙箱覆盖（既有行为不变）。
+   */
+  readonly readonlySandbox?: boolean
   /** Optional short display label persisted with a session-backed child. */
   readonly label?: string
   /** Content delivered as the child's user message. */

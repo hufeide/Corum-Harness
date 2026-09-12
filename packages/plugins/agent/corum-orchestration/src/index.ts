@@ -49,6 +49,7 @@ export {
   corumGitHead,
   corumGitStatusPorcelain,
   corumIntegrationFailure,
+  corumMutationToolsForPlatform,
   corumIntegrationTruth,
   corumPartialIntegrationNotice,
   corumIntegratorPersona,

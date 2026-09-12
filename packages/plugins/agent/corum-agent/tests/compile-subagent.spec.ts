@@ -30,6 +30,9 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
 /** 与 fork #10（corum-tool-subagent/src/index.ts）常量逐字一致——改任一侧需同步。 */
 const FORK10_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh']
 
+/** fork（corum）：research 实例要 deny 的变异工具（shell 保留，2026-09-12）。 */
+const FORK10_MUTATION_TOOLS = ['str_replace_editor', 'write', 'edit']
+
 function dualRows(yml: string): { worker: string; research: string } {
   // 双实例行在 delegation 组的 config 里（缩进 `    - id: `），按行首 id 切分。
   const rows = yml.split(/\n {4}- id: /)
@@ -50,14 +53,15 @@ describe('compilePreset — fork #10 双实例行', () => {
     expect(research).toContain('readonlyResearch: true')
   })
 
-  it('research 预 deny 全部写工具（与 fork #10 清单对账；pwsh 仅 win32）', () => {
+  // fork（corum）2026-09-12 用户定调：research **开放 shell**（调研要跑命令），
+  // 只读性改由子会话沙箱 read-only 保证（见 corum-subagent 的 readonlySandbox）——
+  // 因此科研实例只 deny 变异工具（write/edit/str_replace_editor），**不再 deny bash**。
+  it('research 预 deny 变异工具、保留 shell（与 fork #10 清单对账）', () => {
     const { research } = dualRows(compilePreset(profile()).cordisYml)
-    const expected = process.platform === 'win32'
-      ? FORK10_WRITE_TOOLS
-      : FORK10_WRITE_TOOLS.filter(t => t !== 'pwsh')
-    for (const tool of expected) {
+    for (const tool of FORK10_MUTATION_TOOLS) {
       expect(research).toContain(`"${tool}"`)
     }
+    expect(research).not.toContain('"bash"')
     if (process.platform !== 'win32') {
       // 非 win32 不 deny 未装载的 pwsh（tools.restrict 未知名 fail loud）。
       expect(research).not.toContain('"pwsh"')

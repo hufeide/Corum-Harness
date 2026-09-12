@@ -33,6 +33,7 @@ export {
   corumMarkSettled,
   corumNarrowDenyFilter,
   corumPartialIntegrationNotice,
+  corumMutationToolsForPlatform,
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,

@@ -115,9 +115,10 @@ function corumSubagentConfig(
     }
   }
   if (role === 'research') {
-    // 只读研究实例：预 deny 全部写工具 + 已授权 MCP 工具前缀；不可移除（恒输出）。
+    // 只读研究实例：deny **变异**工具（write/edit/str_replace_editor）+ 已授权 MCP 前缀，
+    // **保留 shell**（调研要跑命令）；只读性由子会话沙箱 read-only 保证（2026-09-12 用户定调）。
     config.readonlyResearch = true
-    config.toolFilter = { deny: [...corumWriteToolsForPlatform(), ...mcpDenyNames] }
+    config.toolFilter = { deny: [...corumMutationToolsForPlatform(), ...mcpDenyNames] }
     return config
   }
   // worker 实例：isolation 策略（只写显式键）。
@@ -136,6 +137,22 @@ function corumSubagentConfig(
 
 /** fork #10：写工具清单（research 实例预 deny；与 fork #10 常量对账，见单测）。 */
 const CORUM_WRITE_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh']
+
+/**
+ * fork（corum）：只读研究实例要 deny 的**变异**工具（2026-09-12 用户定调）。
+ *
+ * 用户要求「research 需要开放 shell 来执行命令完成调研」——调研常要跑命令（`git log`、
+ * 读 PID 文件、verify 脚本的 `status`）。只读性因此分两层：**工具面 deny 变异工具** +
+ * **子会话沙箱钉 `read-only`**（见 corum-subagent 的 `readonlySandbox`）。与
+ * `@corum/corum-orchestration` 的 `corumMutationToolsForPlatform` 逐字对账
+ * （dev-conventions §4a 的两处对账纪律）。
+ */
+const CORUM_MUTATION_TOOLS = ['str_replace_editor', 'write', 'edit']
+
+/** 本平台的变异工具名（research 的 deny 名单）。 */
+function corumMutationToolsForPlatform(): readonly string[] {
+  return CORUM_MUTATION_TOOLS
+}
 
 /**
  * 平台实际存在的写工具（deny 名单只能包含已注册工具——tools.restrict 对未知名

@@ -351,9 +351,14 @@ export interface DelegatedPolicyOverrides {
  * @param parent - the delegating parent agent.
  * @returns the sandbox override (or `undefined` without one) and the approval pin.
  */
-export function captureDelegatedPolicyOverrides(parent: Agent): DelegatedPolicyOverrides {
+export function captureDelegatedPolicyOverrides(
+  parent: Agent,
+  options: { readonly pinReadOnly?: boolean } = {},
+): DelegatedPolicyOverrides {
   return {
-    sandboxMode: parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session),
+    sandboxMode: options.pinReadOnly === true
+      ? 'read-only'
+      : parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session),
     approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never',
   }
 }
