@@ -1,0 +1,217 @@
+/* fork（corum）：子 Agent 改动区——SubagentCard 展开区的一个 section，
+   与 .detail（任务详情）同级。复用 ReviewCard 的文件行排版与色票。 */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.headIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+}
+
+.headTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+}
+
+/* 隔离 worktree 行：slug + 已提交/已集成 chip。 */
+.worktreeRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.worktreeIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.worktreeText {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.committedChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+.integratedChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-success-primary);
+  white-space: nowrap;
+}
+
+/* 无改动行。 */
+.empty {
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 4px 2px;
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  scrollbar-gutter: stable;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 3px 2px;
+}
+
+.fileRowFallback {
+  display: flex;
+  align-items: center;
+  padding: 3px 2px;
+}
+
+.filePath {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.filePathButton {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.filePathButton:hover {
+  color: var(--dsw-alias-label-primary);
+  text-decoration: underline;
+}
+
+.fileDiff {
+  display: inline-flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.added {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.removed {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.fileActions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  padding-left: 8px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.fileRow:hover .fileActions,
+.fileRow:focus-within .fileActions {
+  opacity: 1;
+}
+
+.fileActionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 8px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 6px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fileActionButton:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+  background: var(--corum-glass-3, rgba(55, 32, 80, 0.8));
+}
+
+.fileActionButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.actionIconSpin {
+  animation: subagentChangesSpin 1s linear infinite;
+}
+
+@keyframes subagentChangesSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (hover: none) {
+  .fileActions { opacity: 1; }
+}

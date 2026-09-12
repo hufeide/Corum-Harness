@@ -24,6 +24,7 @@ import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
 import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe } from '../chat-runtime.ts'
 import css from './SubagentCard.module.css'
+import { SubagentChanges } from './SubagentChanges.tsx'
 
 /** 子会话进度 RPC 返回形（与 host getChildSessionProgress 对齐）。 */
 interface ChildProgressValue {
@@ -406,6 +407,17 @@ function SubagentRow({
             {detailPrompt ?? delegationPrompt ?? t('subagent.working')}
           </div>
         </div>
+      )}
+      {/* ④ 改动（展开区）：子会话终态时列出改动文件 ±N + diff + 撤销。
+          数据源 = host 终态帧 corum/subagent/progress.changeSummary
+          （corumReview.snapshot(childSessionId) + 台账状态）。子 Agent 还在跑
+          时 changeSummary 缺省 → 组件返回 null，不占展开区空间。 */}
+      {expanded && (
+        <SubagentChanges
+          childSessionId={childSessionId}
+          worktree={worktree}
+          t={t}
+        />
       )}
     </div>
   )

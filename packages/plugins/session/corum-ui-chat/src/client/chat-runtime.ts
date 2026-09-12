@@ -52,6 +52,15 @@ export interface ChatRuntimeService {
   readonly remote: ClientRemote | undefined
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
   openSession(id: string): void
+  /**
+   * 在内置编辑器打开「改动前后」diff tab（与 apply.ts ReviewDock 的 openDiff 同款，
+   * 经 corumEditor cordis 服务直调）。SubagentChanges 用它打开子会话的文件改动对比。
+   */
+  openContentDiff?: (input: {
+    absolutePath: string
+    originalContent: string
+    note?: string | undefined
+  }) => Promise<{ ok: boolean; error?: string }>
 }
 
 /** 内部可变状态 + 监听器集（服务实现的私有后端）。 */
@@ -104,6 +113,18 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   /** apply 挂载时注入跳子会话桥（幂等）。 */
   setOpenSession(fn: (id: string) => void): void {
     this.#openSessionFn = fn
+  }
+
+  /** openContentDiff 桥（SubagentChanges 用；apply 注入，幂等）。 */
+  #openContentDiff: ((input: { absolutePath: string; originalContent: string; note?: string }) => Promise<{ ok: boolean; error?: string }>) | undefined
+  /** apply 挂载时注入 openContentDiff 桥（SubagentChanges 用；幂等）。 */
+  setOpenContentDiff(fn: (input: { absolutePath: string; originalContent: string; note?: string }) => Promise<{ ok: boolean; error?: string }>): void {
+    this.#openContentDiff = fn
+  }
+  /** SubagentChanges 经此桥打开 diff tab（apply 已注入 corumEditor 直调）。 */
+  openContentDiff(input: { absolutePath: string; originalContent: string; note?: string }): Promise<{ ok: boolean; error?: string }> {
+    if (this.#openContentDiff === undefined) return Promise.resolve({ ok: false, error: '编辑器服务未就绪' })
+    return this.#openContentDiff(input)
   }
 }
 
