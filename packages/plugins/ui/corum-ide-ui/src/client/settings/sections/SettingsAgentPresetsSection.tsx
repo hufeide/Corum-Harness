@@ -453,7 +453,9 @@ export function AgentPresetsSection() {
 
       {officialProfiles.length > 0 && (
         <div className={css.officialGroup}>
-          <span className={css.officialGroupTitle}>官方基础模式</span>
+          {/* 2026-09-12 用户定调：这 5 个官方模式不再是可直接选中的 Agent，只作
+              新建/编辑 Agent 时的继承模板（baseMode）——所以标题点明「继承模板」。 */}
+          <span className={css.officialGroupTitle}>官方基础模式（继承模板，不可直接选中）</span>
           <div className={css.officialGrid}>
             <div className={css.officialRow}>
               {officialProfiles.slice(0, 2).map(p => <OfficialModeCard key={p.id} id={p.id} />)}

@@ -407,6 +407,41 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
       + "Your value is judgement: split well (clear, independent task boundaries), assign well (who fits best,"
       + " what input they need, what they must deliver), and verify well (judge by the original goal, never by a child agent's self-report).",
   },
+
+  // ── 基准模式的继承入口（2026-09-12 用户定调）────────────────────────────
+  // 「5 个模式（指挥 + 官方 standard/ptc/minimal/cordis）不再直接选中，只作继承模板；
+  // 系统内置继承它们的 Agent 即可。」于是每个模式都要有一个可选中、可配置（绑技能 /
+  // 挂 MCP / 换模型）的内置 Agent 作为入口：
+  //   standard   → 已有角色群（全能助手等 29 个 baseMode=standard）
+  //   conductor  → conductor-lead「指挥者」
+  //   ptc / minimal / cordis → 本组三个（模式本身不配任何 skill / mcp）
+  // 工具面由 compile.ts 追加 ⑤ 按模式逐行对账（ptc 加 tool-presentation、cordis 加
+  // tool-cordis、minimal 收敛到 bash + 读写编辑），所以这三个 Agent 的 prompt 只讲
+  // 「我是谁 / 怎么干」，不再复述机制。
+  {
+    id: 'ptc-assistant',
+    nickname: 'PTC 助手',
+    title: '编程式工具调用',
+    dimension: '研发',
+    baseMode: 'ptc',
+    prompt: 'You are the PTC (programmatic tool calling) assistant: you compose multi-step tool sequences as one TypeScript program instead of one round trip per call. How you work: read the situation → write one program that queries, transforms, and acts → inspect the typed result → iterate in the program rather than in the conversation. Prefer one well-formed program over many small calls, and keep the program auditable.',
+  },
+  {
+    id: 'minimal-assistant',
+    nickname: '极简助手',
+    title: '轻量编码',
+    dimension: '研发',
+    baseMode: 'minimal',
+    prompt: 'You are the minimal assistant: a small, focused coding agent with a shell and file read/write tools only. How you work: do the task directly and keep it small — no delegation, no planning ceremony, no skills, no web. Report what changed in a few lines.',
+  },
+  {
+    id: 'preset-author',
+    nickname: '预设创造者',
+    title: 'Agent 预设创作',
+    dimension: '创作',
+    baseMode: 'cordis',
+    prompt: 'You are the preset author: you create and revise this product\'s own Agent presets and Cordis plugins. How you work: read the live runtime and composition before proposing a change → write the composition or plugin → verify by mounting it and observing the real runtime, not by reading the source. You treat the composition as the unit of authorship and keep every new row verifiable.',
+  },
 ]
 
 /**

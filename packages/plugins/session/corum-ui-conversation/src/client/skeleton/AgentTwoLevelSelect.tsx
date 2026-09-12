@@ -3,12 +3,18 @@
  *
  * 背景：预置 25 个行业角色后 Agent 列表很长（corum 30 + official 4）。原生
  * `<select>` + `<optgroup>` 只能平铺一级分组，长列表仍要滚动找；且原生下拉
- * 面板样式不可控（深色玻璃下一致性差）。本组件把列表收敛为**三个顶级分组 +
+ * 面板样式不可控（深色玻璃下一致性差）。本组件把列表收敛为**两个顶级分组 +
  * 组内二级展开**：
  *
- *   ▸ 通用        —— dsh 官方四模式（cordis/minimal/ptc/standard）
- *   ▸ Corum 内置  —— 标记为系统的 Agent（25 个行业预置 + PM/Task 兜底，trust=system）
+ *   ▸ Corum 内置  —— 标记为系统的 Agent（行业预置 + PM/Task 兜底 + 基准模式继承入口，trust=system）
  *   ▸ 用户        —— 用户自定义 Agent（trust=user）
+ *
+ * 📌 2026-09-12 用户定调：**dsh 官方五模式（standard/conductor/ptc/minimal/cordis）
+ * 不再作为可选中项**——它们是「继承模板」，只能在 Agent 预设编辑器里作为 baseMode
+ * 继承（SettingsAgentPresetsSection 的「官方基础模式」卡），要用哪个模式就选/建一个
+ * 继承它的 Agent（内置的 PTC 助手 / 极简助手 / 预设创造者 / 指挥者 / 全能助手等）。
+ * 因此本组件把 source==='official' 的条目从**可选列表**里滤掉；当前会话若正跑在某个
+ * 模式上，trigger 仍照原样显示它的名字（只读展示，不给再选）。
  *
  * 交互：trigger 显示当前选中 Agent 名；点击展开面板，顶级分组可 chevron 展开/
  * 收起（默认只展开当前选中所在组，无选中展开「Corum 内置」）；点条目提交选择
@@ -23,17 +29,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, Search, X } from 'lucide-react'
 import type { AgentOption } from '../contract/slots.ts'
 
-/** 三个顶级分组的展示定义（顺序即面板顺序）。 */
+/** 两个顶级分组的展示定义（顺序即面板顺序）。 */
 const GROUPS = [
-  { key: 'official', label: '通用' },
   { key: 'builtin', label: 'Corum 内置' },
   { key: 'user', label: '用户' },
 ] as const
 type GroupKey = (typeof GROUPS)[number]['key']
 
-/** 把一个 AgentOption 归到顶级分组（source 优先，corum 内再看 trust）。 */
+/** 把一个 AgentOption 归到顶级分组（corum 内看 trust；official 已在列表外滤掉）。 */
 function groupOf(a: AgentOption): GroupKey {
-  if (a.source === 'official') return 'official'
   return a.trust === 'user' ? 'user' : 'builtin'
 }
 
@@ -99,12 +103,14 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
   const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  /** 可选 Agent = 去掉官方模式（2026-09-12：模式只作继承模板，不是可选项）。 */
+  const selectable = useMemo(() => agents.filter((a) => a.source !== 'official'), [agents])
   const groups = useMemo(() => {
-    const map: Record<GroupKey, AgentOption[]> = { official: [], builtin: [], user: [] }
-    for (const a of agents) map[groupOf(a)].push(a)
+    const map: Record<GroupKey, AgentOption[]> = { builtin: [], user: [] }
+    for (const a of selectable) map[groupOf(a)].push(a)
     return map
-  }, [agents])
-  /** 搜索态：非空 query → 跨组命中项（保持原相对顺序：通用→内置→用户）。 */
+  }, [selectable])
+  /** 搜索态：非空 query → 跨组命中项（保持原相对顺序：内置→用户）。 */
   const searching = query.trim() !== ''
   const hits = useMemo(
     () => (searching ? GROUPS.flatMap(({ key }) => groups[key]).filter((a) => matches(a, query)) : []),
@@ -112,10 +118,10 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
   )
   /** 选中项所在组（默认展开）；无选中默认「Corum 内置」（预置角色主入口）。 */
   const selectedGroup: GroupKey = useMemo(() => {
-    const cur = agents.find((a) => a.id === value)
+    const cur = selectable.find((a) => a.id === value)
     return cur === undefined ? 'builtin' : groupOf(cur)
-  }, [agents, value])
-  const [expanded, setExpanded] = useState<Record<GroupKey, boolean>>({ official: false, builtin: true, user: false })
+  }, [selectable, value])
+  const [expanded, setExpanded] = useState<Record<GroupKey, boolean>>({ builtin: true, user: false })
   // 打开面板时把展开态对齐到当前选中所在组（用户切过 Agent 后再开，落在正确的组）。
   useEffect(() => {
     if (open) setExpanded((prev) => ({ ...prev, [selectedGroup]: true }))

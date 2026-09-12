@@ -90,13 +90,37 @@ build_ui_pkg() {
   run_step "$1" node scripts/inline-css.mjs
 }
 
+# 其余插件包（host 半 lib/index.js + client 半 lib/client.js）的通用构建。
+# 为什么必须建：这些包的 package.json `exports` 指向自己的 lib/*，**运行时按包名
+# 加载的就是这份产物**（不是 src，也不是 desktop 的 bundle）。原先 dev-ide.sh 只建
+# 5 个 ui-* 包 → 改了 host 插件后 `tsc` 通过、应用重启后行为没变
+# （2026-09-12 实测踩到：corum-agent 的 baseMode 工具面与内置 Agent 播种都改了，
+# lib/index.js 却停在旧时间戳，新 Agent 一个都没出现）。
+build_plugin_pkg() {
+  [ -f "$1/tsdown.config.ts" ] || return 0
+  run_step "$1" ./node_modules/.bin/tsc -b --pretty false
+  run_step "$1" ./node_modules/.bin/tsdown
+  if [ -f "$1/scripts/inline-css.mjs" ]; then
+    run_step "$1" node scripts/inline-css.mjs
+  fi
+}
+
 build_all() {
   # 直调各包 .bin，避开 pnpm run 的 verify-deps 自动 install（见 docs/TODO.md 工程约束）。
+  # UI 包按依赖顺序显式列出（corum-ui-base 是其余 UI 包的依赖，必须最先建）。
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ui-base"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-sidebar-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-explorer-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-panel-bottom-ui"
+
+  for pkg in "$ROOT"/packages/plugins/*/*; do
+    [ -f "$pkg/package.json" ] && [ -d "$pkg/src" ] && [ -d "$pkg/lib" ] || continue
+    case "$pkg" in
+      */ui/corum-ui-base|*/ui/corum-ide-ui|*/ui/corum-ide-sidebar-ui|*/ui/corum-ide-explorer-ui|*/ui/corum-ide-panel-bottom-ui) continue ;;
+    esac
+    build_plugin_pkg "$pkg"
+  done
 
   run_step "$DESKTOP" ./node_modules/.bin/tsc -b tsconfig.host.json --pretty false
   run_step "$DESKTOP" ./node_modules/.bin/tsc -b tsconfig.client.json --pretty false

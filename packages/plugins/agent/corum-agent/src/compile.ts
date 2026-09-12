@@ -587,6 +587,33 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     })
   }
 
+  // corum 追加 ⑤：基准模式的**工具面差异**（2026-09-12 用户定调「5 个模式不再直接选中、
+  // 只作继承模板，系统内置 5 个继承它们的 Agent」）。在此之前 corum Agent 一律编译成
+  // standard 全量行（compile.ts 头部 §8 的 2026-09-02 定调），`baseMode` 只影响人格——
+  // 那样「极简助手」其实拿着标准模式的全部工具，继承就是假的。此处按官方四模式的
+  // preset 逐行对账补上差异（对账源：shipped-presets/official/*/agent.cordis.yml）：
+  //   ptc     → 官方 ptc 相对 standard 只多 tool-presentation（mode: ptc）；
+  //   cordis  → 官方 cordis 相对 standard 只多 tool-cordis（运行时自省/插件实验）；
+  //   minimal → 官方 minimal 只有 persona + persistent-shell + filesystem 三行，即
+  //             「bash + str_replace_editor」双工具面。corum 2026-09-11 已让
+  //             str_replace_editor 退场（写面 = 官方 fs 的 write/edit），故 corum 的
+  //             极简面 = persona + persistent-shell + filesystem + tool-fs：bash +
+  //             读写编辑，无 skills / 子 Agent / 目标 / 网页 / 计划 / 待办 / MCP。
+  //   standard/conductor → 全量面（conductor 的「主 Agent 裁执行工具」仍走运行时
+  //             tools.restrict，不能在编译期裁行——见 §472-477 的实机教训）。
+  if (profile.baseMode === 'ptc') {
+    rows.push({
+      id: 'tool-presentation',
+      name: '@deepseek-ai/dsh-agent-tool-presentation',
+      config: { mode: 'ptc' },
+    })
+  } else if (profile.baseMode === 'cordis') {
+    rows.push({ id: 'tool-cordis', name: '@deepseek-ai/dsh-tool-cordis' })
+  } else if (profile.baseMode === 'minimal') {
+    const minimalRowIds = new Set(['persona', 'persistent-shell', 'filesystem', 'tool-fs'])
+    rows.splice(0, rows.length, ...rows.filter(row => minimalRowIds.has(row.id)))
+  }
+
   return {
     cordisYml: renderRows(rows),
     presetYml: `name: ${profile.id}\ndescription: ${profile.prompt.split('\n')[0] ?? ''}\n`,

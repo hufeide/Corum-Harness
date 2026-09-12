@@ -40,7 +40,9 @@ describe('compile orchestrator 模式 — preset 恒全量（路线 B：裁剪�
     expect(yml).toContain('id: persistent-shell')
     expect(yml).toContain('id: filesystem')
     expect(yml).toContain('id: tool-fs\n')
-    expect(yml).toContain('dsh-tool-str-replace-editor')
+    // 2026-09-11 用户定调：str_replace_editor 退场（写面收敛到官方 fs 的 write/edit）。
+    // 原断言是退役前的遗留、一直红着（2026-09-12 修），改为反向断言。
+    expect(yml).not.toContain('str-replace-editor')
     expect(yml).toContain('dsh-fs-local')
   })
 
