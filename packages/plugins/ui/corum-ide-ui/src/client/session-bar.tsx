@@ -874,6 +874,22 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
   // 曲线读数：latest = 最近一步速度（无序列时退回整段平均，避免空态显示「—」）；峰值 = 样本最大。
   const nowTps = speedSeries.length > 0 ? (speedSeries[speedSeries.length - 1]?.tps ?? avgTps) : avgTps
   const peakTps = speedSeries.length > 0 ? Math.max(...speedSeries.map(s => s.tps)) : 0
+  // BUG-26：终态子 Agent / 已结工作区折叠。运行中条目**永不折叠**——
+  // outcome === undefined 的条目始终逐条渲染，不受折叠开关影响。
+  const [terminalFoldOpen, setTerminalFoldOpen] = useState(false)
+  const [worktreeFoldOpen, setWorktreeFoldOpen] = useState(false)
+  // 子 Agent：终态 = completed/aborted/failed；运行中（undefined）始终单独渲染。
+  const rankedRoster = rankRoster(roster)
+  const terminalEntries = rankedRoster.filter(e => subagentOutcomeOf(e.stopReason) !== undefined)
+  const runningEntries = rankedRoster.filter(e => subagentOutcomeOf(e.stopReason) === undefined)
+  const terminalCompleted = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'completed').length
+  const terminalAborted = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'aborted').length
+  const terminalFailed = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'failed').length
+  // 工作区：integrated/discarded 折叠；active/settled 始终单独渲染。
+  const worktreeTerminal = worktrees.filter(e => e.status === 'integrated' || e.status === 'discarded')
+  const worktreeActive = worktrees.filter(e => e.status === 'active' || e.status === 'settled')
+  const worktreeIntegrated = worktreeTerminal.filter(e => e.status === 'integrated').length
+  const worktreeDiscarded = worktreeTerminal.filter(e => e.status === 'discarded').length
   // 曲线：本条会话的真实逐步速度；空序列时弧长/顶点都退化，交给 SpeedChart 画基线。
   // 3 列指标格（设计稿 ④）：key 上 / value 下，两行共 6 项。
   const metrics: ReadonlyArray<readonly [string, string]> = [
@@ -972,20 +988,23 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
       </div>
       <div className={css.statusDetailDivider} />
       {/* 子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息，与统计同卡统一）。
-          运行中在前、已结束在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标，
-          点击进入该子会话（官方 lineage 下拉已按「顶栏只保留一个下拉」屏蔽）。 */}
+           运行中在前、已结束在后；每行 = 状态点 + 标签 + Step + 前后台/隔离徽标，
+           点击进入该子会话（官方 lineage 下拉已按「顶栏只保留一个下拉」屏蔽）。
+           BUG-26：终态条目（completed/aborted/failed）默认折叠为一行摘要，
+           点击展开；运行中（outcome === undefined）条目始终逐条渲染，永不折叠。 */}
       {roster.length > 0 && (
         <div className={css.statusDetailAgents}>
           <div className={css.statusDetailAgentsHead}>
             <span className={css.statusDetailAgentsTitle}>子 Agent</span>
             <span className={css.statusDetailAgentsCount}>
-              {roster.filter(e => subagentOutcomeOf(e.stopReason) === undefined).length} 运行中{' · '}
-              {roster.filter(e => subagentOutcomeOf(e.stopReason) === 'completed').length} 已完成
-              {roster.some(e => subagentOutcomeOf(e.stopReason) === 'aborted') && ` · ${roster.filter(e => subagentOutcomeOf(e.stopReason) === 'aborted').length} 手动终止`}
-              {roster.some(e => subagentOutcomeOf(e.stopReason) === 'failed') && ` · ${roster.filter(e => subagentOutcomeOf(e.stopReason) === 'failed').length} 失败`}
+              {runningEntries.length} 运行中{' · '}
+              {terminalCompleted} 已完成
+              {terminalAborted > 0 && ` · ${terminalAborted} 已终止`}
+              {terminalFailed > 0 && ` · ${terminalFailed} 失败`}
             </span>
           </div>
-          {rankRoster(roster).map((entry) => {
+          {/* 运行中条目：始终逐条渲染（BUG-26 不变式）。 */}
+          {runningEntries.map((entry) => {
             const outcome = subagentOutcomeOf(entry.stopReason)
             return (
             <button
@@ -1016,22 +1035,75 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
             </button>
             )
           })}
+          {/* 终态条目折叠摘要行（有终态条目时才出现）。 */}
+          {terminalEntries.length > 0 && (
+            <>
+              <button
+                type="button"
+                className={css.statusDetailFoldRow}
+                aria-expanded={terminalFoldOpen}
+                aria-label={`已完成 ${terminalCompleted}·已终止 ${terminalAborted + terminalFailed}，${terminalFoldOpen ? '折叠' : '展开'}`}
+                onClick={() => { setTerminalFoldOpen(v => !v) }}
+              >
+                <span className={css.statusDetailFoldChevron} aria-hidden="true">▸</span>
+                已完成 {terminalCompleted}{' · '}已终止 {terminalAborted + terminalFailed}
+              </button>
+              {terminalFoldOpen && (
+                <div className={css.statusDetailFoldList}>
+                  {terminalEntries.map((entry) => {
+                    const outcome = subagentOutcomeOf(entry.stopReason)
+                    return (
+                    <button
+                      key={entry.childSessionId}
+                      type="button"
+                      className={css.statusDetailAgentRow}
+                      data-done={outcome !== undefined || entry.done || undefined}
+                      data-outcome={outcome ?? undefined}
+                      title={`进入子会话 ${entry.childSessionId}`}
+                      aria-label={`进入子会话 ${entry.label}`}
+                      onClick={() => { openSession?.(entry.childSessionId) }}
+                    >
+                      <span className={css.statusDetailAgentDot} data-outcome={outcome ?? (entry.done ? 'completed' : undefined)} />
+                      <span className={css.statusDetailAgentLabel}>{entry.label}</span>
+                      <span className={css.statusDetailAgentStep}>
+                        {outcome === 'aborted' ? '手动终止'
+                          : outcome === 'failed' ? '失败'
+                          : outcome === 'completed' ? '已完成'
+                          : entry.done ? '已完成'
+                          : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
+                      </span>
+                      <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
+                        {entry.model?.model ?? '未记录'}
+                      </span>
+                      {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
+                      {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
+                      <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
+                    </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
       {/* 并行工作区（隔离 worktree 台账）。用户 2026-09-10：P8 逐次成节点后卡内
-          chip 会重复 N 份，故搬到本浮层——一个会话一处。数据源 = 宿主
-          'corum/worktree-ledger' 转发帧（按父会话过滤）。 */}
+           chip 会重复 N 份，故搬到本浮层——一个会话一处。数据源 = 宿主
+           'corum/worktree-ledger' 转发帧（按父会话过滤）。
+           BUG-26：integrated/discarded 条目默认折叠为一行摘要，点击展开；
+           active/settled 条目始终逐条渲染，永不折叠。本区工作区行元素不改（另一任务管）。 */}
       {worktrees.length > 0 && (
         <div className={css.statusDetailAgents}>
           <div className={css.statusDetailAgentsHead}>
             <span className={css.statusDetailAgentsTitle}>并行工作区</span>
             <span className={css.statusDetailAgentsCount}>
-              {worktrees.filter(entry => entry.status === 'active' || entry.status === 'settled').length} 待集成
+              {worktreeActive.length} 待集成
               {' · '}
               {worktrees.length} 个隔离工作区
             </span>
           </div>
-          {worktrees.map(entry => (
+          {/* active/settled 条目：始终逐条渲染（BUG-26 不变式）。 */}
+          {worktreeActive.map(entry => (
             <div key={entry.slug} className={css.statusDetailAgentRow} data-worktree>
               <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
               <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
@@ -1044,6 +1116,38 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               </span>
             </div>
           ))}
+          {/* integrated/discarded 折叠摘要行（有终态条目时才出现）。 */}
+          {worktreeTerminal.length > 0 && (
+            <>
+              <button
+                type="button"
+                className={css.statusDetailFoldRow}
+                aria-expanded={worktreeFoldOpen}
+                aria-label={`已集成 ${worktreeIntegrated}·已丢弃 ${worktreeDiscarded}，${worktreeFoldOpen ? '折叠' : '展开'}`}
+                onClick={() => { setWorktreeFoldOpen(v => !v) }}
+              >
+                <span className={css.statusDetailFoldChevron} aria-hidden="true">▸</span>
+                已集成 {worktreeIntegrated}{' · '}已丢弃 {worktreeDiscarded}
+              </button>
+              {worktreeFoldOpen && (
+                <div className={css.statusDetailFoldList}>
+                  {worktreeTerminal.map(entry => (
+                    <div key={entry.slug} className={css.statusDetailAgentRow} data-worktree>
+                      <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
+                      <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
+                      <span className={css.statusDetailAgentStep}>{entry.slug}</span>
+                      <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
+                        {entry.model?.model ?? '未记录'}
+                      </span>
+                      <span className={css.statusDetailAgentBadge} data-status={entry.status}>
+                        {WORKTREE_STATUS_LABEL[entry.status] ?? entry.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
