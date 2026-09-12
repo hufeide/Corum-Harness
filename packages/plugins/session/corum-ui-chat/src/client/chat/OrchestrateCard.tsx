@@ -1,12 +1,19 @@
 // fork（corum）：orchestrate 编排卡——主 Agent 调 `orchestrate` fan-out 多个子
 // Agent 时，在消息瀑布中流出的**流程图卡**（设计稿 `orchestrate-flow-card`，fNng3）。
 //
-// 对齐设计稿结构：
+// 对齐设计稿结构（节点坐标实测）：
 //   head  = avatar(layers) + meta(标题「编排工作流 · N 任务并行」/ 副标题
 //           「fan-out 并发 → fan-in 汇合」) + 状态 chip(计数) + 折叠按钮
-//   flow  = 起始节点 → 虚线主干 → 汇合节点 → 逐分支(横线 + 节点 + 分支卡) →
-//           集成者卡（声明了 merge 时）
+//   flow  = 导轨列(node-start x=4 / trunk x=14 竖虚线 / node-merge x=4) +
+//           分支列(逐 brX: line x=16 + node x=34 + card x=64) +
+//           合并汇总阶段(card-merge x=64 整行宽、无 brX-line，声明 merge 时)
+//
 //   分支卡 = label / 副行(isolation · worktree 或 research · 只读) + 状态 chip + goto
+//
+//   合并阶段是一个**串行汇总**，与并行分支列表分层渲染：
+//   node-merge 落在导轨列(x=4，与 node-start 同列)，trunk 从 start 一路延伸到 merge
+//   承担「N 条并行 → 1 个汇总」的汇聚连接线；card-merge 整行宽(x=64)、底色更弱、
+//   无 brX-line —— 视觉上明确区别于并行分支行。
 //
 // 状态色（设计稿两态实测）：
 //   running #FFB45C（warn）· done #3EE6B0（success）· failed #FF5C7A（error）
@@ -345,44 +352,56 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
       </div>
       {expanded && (
         <div className={css.flow}>
-          {/* 起始节点（设计稿 node-start：双环 + 实心点）。 */}
+          {/* 导轨列（设计稿 x=4）：node-start + trunk 虚线主干向下延伸，
+              有 merge 时主干一路汇到 node-merge（承担「N→1」的汇聚连接线），
+              无 merge 时主干只在分支区间。 */}
           <div className={css.rail}>
             <span className={css.startNode}><span className={css.startDot} /></span>
-            <span className={css.trunk} />
-          </div>
-          <div className={css.branches}>
-            {data.tasks.length === 0 && (
-              <div className={css.branchRow}>
-                <span className={css.branchLine} data-tone="running" />
-                <span className={css.branchNode} data-tone="running"><Loader size={9} /></span>
-                <div className={css.branchCard}>
-                  <span className={css.branchTx}>
-                    <span className={css.branchLabel}>{data.scriptName ?? '脚本编排'}</span>
-                    <span className={css.branchSub}>scripted · 逐阶段推进</span>
-                  </span>
-                </div>
-              </div>
-            )}
-            {data.tasks.map(task => (
-              <BranchRow
-                key={task.index}
-                callId={data.callId}
-                task={task}
-                data={data}
-                onLiveSettled={markLiveSettled}
-                worktrees={worktrees}
-                fallbackChildId={data.childSessionIds?.[task.index]}
-                slugFallback={data.worktreeSlugs?.get(task.index)}
-                t={t}
-              />
-            ))}
+            <span className={css.trunk} data-extend={data.hasMerge || undefined} data-merge-converge={data.hasMerge || undefined} />
             {data.hasMerge && (
-              <div className={css.branchRow} data-state={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
-                <span className={css.branchLine} data-tone={data.integration?.kind === 'integrated' ? 'done' : 'idle'} />
-                <span className={css.branchNode} data-tone={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
-                  <GitMerge size={9} />
-                </span>
-                <div className={css.branchCard} data-integrator>
+              <span className={css.mergeNode} data-state={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
+                <GitMerge size={10} />
+              </span>
+            )}
+          </div>
+          {/* 分支列 + 合并汇总阶段，共用一列纵向叠放，保证整行宽度对齐。 */}
+          <div className={css.flowBody}>
+            <div className={css.branches}>
+              {data.tasks.length === 0 && (
+                <div className={css.branchRow}>
+                  <span className={css.branchLine} data-tone="running" />
+                  <span className={css.branchNode} data-tone="running"><Loader size={9} /></span>
+                  <div className={css.branchCard}>
+                    <span className={css.branchTx}>
+                      <span className={css.branchLabel}>{data.scriptName ?? '脚本编排'}</span>
+                      <span className={css.branchSub}>scripted · 逐阶段推进</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+              {data.tasks.map(task => (
+                <BranchRow
+                  key={task.index}
+                  callId={data.callId}
+                  task={task}
+                  data={data}
+                  onLiveSettled={markLiveSettled}
+                  worktrees={worktrees}
+                  fallbackChildId={data.childSessionIds?.[task.index]}
+                  slugFallback={data.worktreeSlugs?.get(task.index)}
+                  t={t}
+                />
+              ))}
+            </div>
+            {data.hasMerge && (
+              // 合并汇总阶段——独立于并行分支列表（设计稿 card-merge x=64 整行宽、
+              // 无 brX-line、底色更弱）。node-merge 在导轨列(x=4)由 trunk 汇聚，
+              // 此处不画横虚线。
+              <div className={css.mergeStage} data-merge-stage>
+                <span className={css.mergeStageTitle}>串行汇总</span>
+                <div className={css.mergeCard} data-integrator
+                  data-state={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
+                  <span className={css.mergeIcon}><GitMerge size={16} /></span>
                   <span className={css.branchTx}>
                     <span className={css.branchLabel}>集成者 · 合并 + 验证 + 提交</span>
                     <span className={css.branchSub}>
@@ -393,7 +412,8 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                           : data.integration.reason}
                     </span>
                   </span>
-                  <span className={css.branchChip} data-tone={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
+                  <span className={css.branchChip} data-merge-chip
+                    data-tone={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
                     {data.integration?.kind === 'integrated' ? '已集成' : '未启动'}
                   </span>
                 </div>

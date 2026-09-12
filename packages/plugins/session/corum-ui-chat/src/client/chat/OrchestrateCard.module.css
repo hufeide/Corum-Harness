@@ -150,7 +150,9 @@
   background: var(--dsw-alias-brand-primary, #01CDFE);
 }
 
-/* 虚线主干（设计稿 trunk：2px 宽，段间距 2px 的 dash 堆叠）。 */
+/* 虚线主干（设计稿 trunk：2px 宽，段间距 2px 的 dash 堆叠）。
+   有 merge 时主干从 node-start 一路延伸到 node-merge（x=4 导轨列汇聚），
+   承担「N 条并行 → 1 个汇总」的连接线；无 merge 时只在分支区间。 */
 .trunk {
   flex: 1;
   width: 2px;
@@ -164,12 +166,39 @@
   opacity: 0.55;
 }
 
-.branches {
+/* 合并节点（设计稿 node-merge x=4 导轨列：10×10 圆角方框 + git-merge 图标，
+   与 node-start 同列 = 主干在此汇聚）。 */
+.mergeNode {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  color: var(--orch-idle);
+}
+
+.mergeNode[data-state='done'] { color: var(--orch-done); border-color: var(--orch-done); }
+.mergeNode[data-state='idle'] { color: var(--orch-idle); }
+
+/* 分支列 + 合并汇总阶段共用一列纵向叠放（card-merge x=64 与 brX-card 同列，
+   整行宽度对齐 = 从整个分支列表汇聚过来的一条）。 */
+.flowBody {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.branches {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
 }
 
 .branchRow {
@@ -229,10 +258,53 @@
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.4));
 }
 
-/* 集成者卡（设计稿 card-merge：更弱的底 + 描边，表示「汇合」语义）。 */
-.branchCard[data-integrator] {
+/* 合并汇总阶段（设计稿 card-merge x=64 整行宽、无 brX-line、fill #2A184033
+   比 brX-card #2A184066 更弱 + stroke #55486F 1px）。作为独立串行分组渲染，
+   与并行分支行在视觉层级上区分。 */
+.mergeStage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 汇总小标题——比分支 label 弱、字号更小，一眼读出「这不是并行分支」。 */
+.mergeStageTitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.7;
+}
+
+/* 合并卡整行宽，无横虚线。 */
+.mergeCard {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
   background: rgba(42, 24, 64, 0.2);
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+}
+
+.mergeCard[data-state='done'] {
+  border-color: var(--orch-done);
+}
+
+.mergeCard[data-state='idle'] {
+  border-color: var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+}
+
+/* card-merge 里的 git-merge 图标 16×16（设计稿 dQ5k7 同名 lucide 图标）。 */
+.mergeIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mergeCard[data-state='done'] .mergeIcon {
+  color: var(--orch-done);
 }
 
 .branchTx {
