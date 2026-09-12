@@ -287,6 +287,17 @@
   border-radius: 18px; /* GpfJh cornerRadius 18 */
   backdrop-filter: blur(20px) saturate(140%);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  /* BUG-26：内容超出时卡内滚动。max-height 用 calc(100vh - 96px) —— top:48px
+     之上 + 底部 48px 余量。position:fixed 的 100vh 解析为**当前窗口视口**，
+     浮动会话窗（.floatingBody，overflow:hidden、更矮视口）也天然受此约束，
+     故无需再加 100% 收窄（fixed 的百分比含块 = 视口，与 100vh 同源）。 */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  /* 滚动条拇指取 l2 抬升 token（BUG-19 约定：表面自己声明拇指色，向后代继承；
+     与 ReviewCard.fileList 同一套）。 */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  scrollbar-gutter: stable;
 }
 
 .statusDetailHead {
@@ -1329,4 +1340,38 @@
   font-size: 11px;
   line-height: 1;
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* BUG-26：终态条目折叠摘要行（已完成/已终止 的子 Agent、已集成/已丢弃 的工作区）。
+   复用 statusDetailAgentRow 的行布局，但用 button 语义 + aria-expanded。 */
+.statusDetailFoldRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.statusDetailFoldRow:hover { background: var(--corum-glass-2); }
+.statusDetailFoldChevron {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s ease;
+}
+.statusDetailFoldRow[aria-expanded='true'] .statusDetailFoldChevron {
+  transform: rotate(90deg);
+}
+/* 折叠展开后的条目列表（直接渲染被折叠的行，不再额外加容器边框）。 */
+.statusDetailFoldList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
