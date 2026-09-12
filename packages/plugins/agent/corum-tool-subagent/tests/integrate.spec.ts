@@ -21,10 +21,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   corumBranchIntegrated,
   corumBranchMerged,
+  corumBranchTip,
   corumCleanupLedgerEntries,
   corumCleanupWorktree,
   corumGit,
+  corumGitHead,
+  corumMergedBranches,
   corumAutoIntegrate,
+  corumReconcileIntegrated,
   corumIntegrationFailure,
   corumIntegrationTruth,
   corumIntegratorPersona,
@@ -274,5 +278,44 @@ describe('corumAutoIntegrate — 声明即执行（2026-09-12 用户定调：去
   })
   it('不传 merge → 分支留给调用方，收尾走显式 subagent { integrate: true }', () => {
     expect(corumAutoIntegrate(undefined)).toBe(false)
+  })
+})
+
+describe('corumReconcileIntegrated — 台账认账「外包出去的合并」（2026-09-12 用户实测）', () => {
+  it('分支已被合并进 HEAD（机制没参与）→ 条目翻成 integrated', () => {
+    const { repo, worktree, branch, entry } = makeRepoWithWorktree()
+    commitInWorktree(worktree, 'ORCH-INT-1.txt')
+    // 主 Agent 派子 Agent 直接用 git 合并（机制不知道）
+    corumGit(repo, ['-c', 'user.name=child', '-c', 'user.email=child@corum.local', 'merge', '--no-ff', '-m', 'merge(wt)', branch])
+    const before = corumIntegrationTruth(repo, [entry])
+    expect(before.unmerged).toEqual([]) // git 真相：已落地
+    const reconciled = corumReconcileIntegrated(repo, [{ ...entry, status: 'settled' }])
+    expect(reconciled.flipped).toEqual([entry.slug])
+    expect(reconciled.entries[0]?.status).toBe('integrated')
+  })
+
+  it('分支未合并 → 不动（保持 settled）', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree()
+    commitInWorktree(worktree, 'ORCH-INT-2.txt')
+    const reconciled = corumReconcileIntegrated(repo, [{ ...entry, status: 'settled' }])
+    expect(reconciled.flipped).toEqual([])
+    expect(reconciled.entries[0]?.status).toBe('settled')
+  })
+
+  it('纯空分支（tip === HEAD）→ 不翻：`--merged` 会把「什么都没干」的分支也列进来', () => {
+    const { repo, branch, entry } = makeRepoWithWorktree()
+    // 只建分支不提交：git branch --merged HEAD 照样列出它（fixture 的形态）
+    expect(corumBranchTip(repo, branch)).toBe(corumGitHead(repo))
+    expect(corumMergedBranches(repo).has(branch)).toBe(true)
+    const reconciled = corumReconcileIntegrated(repo, [{ ...entry, status: 'settled' }])
+    expect(reconciled.flipped).toEqual([])
+    expect(reconciled.entries[0]?.status).toBe('settled')
+  })
+
+  it('分支不存在 → corumBranchTip undefined 且不翻（对账退化为不动）', () => {
+    const { repo, entry } = makeRepoWithWorktree()
+    expect(corumBranchTip(repo, 'wt/wt-nope')).toBeUndefined()
+    const reconciled = corumReconcileIntegrated(repo, [{ ...entry, status: 'settled' }])
+    expect(reconciled.flipped).toEqual([])
   })
 })

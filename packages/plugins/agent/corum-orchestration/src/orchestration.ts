@@ -252,6 +252,90 @@ export function corumWorktreeHasUncommitted(worktreePath: string): boolean {
 }
 
 /**
+ * fork（corum）：一次性读出「已并入 HEAD 的分支名」集合（单条 git 命令）。
+ * @param cwd - 主树工作目录。
+ * @returns 分支短名集合；git 不可用/失败时返回空集合（对账退化为「什么都不翻」）。
+ */
+export function corumMergedBranches(cwd: string): Set<string> {
+  try {
+    const out = execFileSync('git', ['branch', '--merged', 'HEAD', '--format=%(refname:short)'], {
+      cwd,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    })
+    return new Set(out.split('\n').map(line => line.trim()).filter(line => line !== ''))
+  } catch {
+    return new Set()
+  }
+}
+
+/**
+ * fork（corum）：分支 tip（sha；分支不存在/git 不可用 → undefined）。
+ *
+ * 用途只有一个：把「分支 tip 就是 HEAD」的**空分支**挡在对账之外。空分支（worktree
+ * 建好后子 Agent 一个提交都没做）在 `git branch --merged HEAD` 里与「真合并过的分支」
+ * 长得一模一样——只看 `--merged` 会把什么都没干的分支翻成 `integrated`
+ * （单测 `settleFromEnd 精确翻转` 就是这么红的：fixture 的 `git branch wt/wt-s1` 是纯空分支）。
+ *
+ * @param cwd - 主树工作目录。
+ * @param branch - 分支短名（`wt/wt-xxxxxx`）。
+ * @returns tip sha；`undefined` = 分支不存在或 git 调用失败。
+ */
+export function corumBranchTip(cwd: string, branch: string): string | undefined {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+      cwd,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    })
+    const tip = out.trim()
+    return tip === '' ? undefined : tip
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * fork（corum）：**台账与 git 实况对账**——把「分支其实已经并入 HEAD」的待集成条目翻成
+ * `integrated`（2026-09-12 用户实测后补）。
+ *
+ * 为什么必须有：集成不只有机制那条路。主 Agent 完全可以（而且实测就是）**派一个子 Agent
+ * 用 git 把分支合并掉**——机制对此一无所知：台账里 4 条仍是 `settled`，卡片照旧显示
+ * 「集成者 · 未启动 · 4 个分支待集成」，而 git 里 4 个分支**早就都在 main 上**。后果是
+ * 连环的：卡片说谎、pending 通知对着已合并的分支报「未合并」、worktree 永不回收
+ * （BUG-26「条目越堆越多」的根就在这）。
+ *
+ * 判据只用 git 真相（`git branch --merged HEAD`），不看任何自述；翻状态不改动 git 现场。
+ * **空分支不翻**：`tip === HEAD` 说明这条分支从没往前走（纯空分支，或 fast-forward 到
+ * 与 HEAD 重合），翻成 integrated 等于替一条什么都没干的分支签收——这类条目该走的是
+ * 回收，不是认账（代价：真被 ff 合并的分支会退化成旧的「留待手动集成」，安全侧失败）。
+ *
+ * @param cwd - 主树工作目录。
+ * @param entries - 该会话的台账条目。
+ * @returns 对账后的条目 + 本次翻成 integrated 的 slug 列表（供持久化/发帧判断）。
+ */
+export function corumReconcileIntegrated(
+  cwd: string,
+  entries: readonly CorumWorktreeEntry[],
+): { entries: CorumWorktreeEntry[]; flipped: string[] } {
+  const hasPending = entries.some(entry => entry.status === 'active' || entry.status === 'settled')
+  if (!hasPending) return { entries: [...entries], flipped: [] }
+  const merged = corumMergedBranches(cwd)
+  if (merged.size === 0) return { entries: [...entries], flipped: [] }
+  const head = corumGitHead(cwd)
+  const flipped: string[] = []
+  const next = entries.map(entry => {
+    if (entry.status !== 'active' && entry.status !== 'settled') return entry
+    if (!merged.has(entry.branch)) return entry
+    const tip = corumBranchTip(cwd, entry.branch)
+    if (tip === undefined || tip === head) return entry
+    flipped.push(entry.slug)
+    return { ...entry, status: 'integrated' as const }
+  })
+  return { entries: next, flipped }
+}
+
+/**
  * fork（corum）：台账条目是否已**彻底失效**——worktree 目录与分支都不存在。
  *
  * 这类条目既不能集成（无分支可并）也不能再跑，却会在 `maxParallelChildren` 里永久
@@ -811,21 +895,62 @@ export class CorumOrchestration extends Service {
   }
 
   /**
+   * 认账「已并入 HEAD 的分支」并**顺带安全回收其现场**（不发帧、不落盘、**不剔除死条目**
+   * ——死条目的清除时机仍是 `entriesOf` 的懒清除，有单测钉住）。
+   *
+   * 两个入口都必须走这里：`entriesOf`（工具层查询）与 `emitFrame`（UI 帧）。只在
+   * `entriesOf` 里对账的话，帧由 `addActiveEntry`/`markSettled` 等事件直接发射，照旧把
+   * 已被子 Agent 合并掉的分支显示成「待集成」（2026-09-12 用户实测的卡片说谎）。
+   * 顺带挡住一个反向坑：新建 worktree 的分支 tip === HEAD，若不设防就会在
+   * `addActiveEntry` 那一刻被 `--merged` 误判成已集成。
+   *
+   * 回收（用户实测的第二半：分支早就在 main 上，worktree 却永远留着）只针对**翻之前
+   * 就已 settle** 的条目——active 的子 Agent 可能还在那个目录里干活，拔掉目录会让它
+   * 后续每次工具调用都失败。且一律走**安全清理**（`force:false`）：worktree 有未提交
+   * 改动就保留目录（那是唯一留存），分支未并入 HEAD 就保留分支。状态保持 `integrated`
+   * （工作确已进 main），不标 `discarded`（那在 UI 上显示成「已丢弃」，是谎）。
+   *
+   * @param sessionId - 父会话 id（台账键）。
+   * @param entries - 台账条目（可能已剔除死条目；**不得就地修改**）。
+   * @returns 对账后的条目 + 是否发生翻转（未翻转时原样返回入参引用）。
+   */
+  private reconcileAndReclaim(
+    sessionId: string,
+    entries: readonly CorumWorktreeEntry[],
+  ): { entries: readonly CorumWorktreeEntry[]; flipped: boolean } {
+    const cwd = this.ledgerCwds.get(sessionId)
+    if (cwd === undefined || entries.length === 0) return { entries, flipped: false }
+    const wasSettled = new Set(entries.filter(e => e.status === 'settled').map(e => e.slug))
+    const reconciled = corumReconcileIntegrated(cwd, entries)
+    if (reconciled.flipped.length === 0) return { entries, flipped: false }
+    for (const entry of reconciled.entries) {
+      if (entry.status !== 'integrated' || !wasSettled.has(entry.slug)) continue
+      corumCleanupWorktree(cwd, entry, { force: false })
+    }
+    return { entries: reconciled.entries, flipped: true }
+  }
+
+  /**
    * 读某会话台账条目（不存在返回空数组，不自动建）。
    *
    * 2026-09-09：顺带剔除**彻底失效**的条目（worktree 与分支都不存在）——旧强删清理
    * 遗留的 active 条目会永久占用 `maxParallelChildren` 额度（实证：本仓
    * `corum-task-7cebf463` 的 3 条死条目使后续 spawn 只剩 1 个名额）。剔除后落盘。
+   * 2026-09-12：再叠加 git 实况对账（`corumReconcileIntegrated`）——分支可能已被
+   * **主 Agent 派子 Agent 合并掉**，机制必须认账。
    */
   entriesOf(sessionId: string): CorumWorktreeEntry[] {
     const entries = this.ledger.get(sessionId) ?? []
     const cwd = this.ledgerCwds.get(sessionId)
     if (cwd === undefined || entries.length === 0) return entries
     const alive = entries.filter(entry => !corumEntryDead(cwd, entry))
-    if (alive.length === entries.length) return entries
-    this.ledger.set(sessionId, alive)
+    const reconciled = this.reconcileAndReclaim(sessionId, alive)
+    if (alive.length === entries.length && !reconciled.flipped) return entries
+    const next = [...reconciled.entries]
+    this.ledger.set(sessionId, next)
     this.persist(sessionId)
-    return alive
+    if (reconciled.flipped) this.emitFrame(sessionId)
+    return next
   }
 
   /** 登记一条 active 条目并记录父 cwd（worktree 创建成功后调用）。 */
@@ -875,8 +1000,14 @@ export class CorumOrchestration extends Service {
     return { slug, branch, path: worktreePath }
   }
 
-  /** 台账变更后发射快照帧（renderer chip 订阅源）。 */
+  /** 台账变更后发射快照帧（renderer chip 订阅源）。发帧前先对账 git 实况。 */
   emitFrame(sessionId: string): void {
+    const current = this.ledger.get(sessionId) ?? []
+    const reconciled = this.reconcileAndReclaim(sessionId, current)
+    if (reconciled.flipped) {
+      this.ledger.set(sessionId, [...reconciled.entries])
+      this.persist(sessionId)
+    }
     const entries = this.ledger.get(sessionId) ?? []
     const pending = entries.filter(e => e.status === 'active' || e.status === 'settled').length
     this.ctx.emit('corum/worktree-ledger', {

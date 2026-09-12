@@ -333,6 +333,102 @@ describe('corumEntryDead / entriesOf 死条目剔除（2026-09-09）', () => {
   })
 })
 
+describe('entriesOf/emitFrame — 认账「主 Agent 派子 Agent 合并掉的分支」并回收现场（2026-09-12）', () => {
+  /** 真 git 仓库 + 一条已 commit 的隔离 worktree，条目已 settle。 */
+  function settledWorktreeEntry(name: string, slug: string): { repo: string; worktree: string; branch: string } {
+    const repo = join(scratch, name)
+    rmSync(repo, { recursive: true, force: true })
+    execFileSync('git', ['init', '-q', '-b', 'main', repo], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 'test@corum.local'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'corum-test'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init'], { stdio: 'pipe' })
+    const branch = `wt/${slug}`
+    const worktree = join(repo, '.corum-worktrees', slug)
+    corumGit(repo, ['worktree', 'add', '-q', worktree, '-b', branch])
+    writeFileSync(join(worktree, `${slug}.txt`), 'child payload')
+    corumGit(worktree, ['add', '-A'])
+    execFileSync('git', ['-C', worktree, '-c', 'user.name=c', '-c', 'user.email=c@corum.local', 'commit', '-q', '-m', `add ${slug}`], { stdio: 'pipe' })
+    return { repo, worktree, branch }
+  }
+
+  it('settle 后分支被外部合并 → entriesOf 认账 integrated 且 worktree 现场被安全回收', () => {
+    const { repo, worktree, branch } = settledWorktreeEntry('recon-repo-1', 'wt-r1')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-recon-1'
+    orchestration.addActiveEntry(sessionId, repo, { slug: 'wt-r1', branch, path: worktree })
+    orchestration.bindRunId(sessionId, 'wt-r1', 'run-r1')
+    orchestration.settleFromEnd({ runId: 'run-r1', id: 'child-r1' } as never, { session: { id: sessionId } } as never)
+    expect(orchestration.entriesOf(sessionId)[0].status).toBe('settled')
+    // 主 Agent 派子 Agent 直接用 git 合并（机制全程不知情）
+    corumGit(repo, ['-c', 'user.name=child', '-c', 'user.email=child@corum.local', 'merge', '--no-ff', '-m', 'merge(wt-r1)', branch])
+    const entries = orchestration.entriesOf(sessionId)
+    expect(entries[0].status).toBe('integrated')
+    expect(existsSync(worktree)).toBe(false) // 现场已回收
+    // 回收干净 = 目录与分支都没了 → 下一条 lifeline 走既有的死条目剔除（不再占位）。
+    // 与机制自身的 markIntegrated(cleanup:true) 路径同款（那会把条目留成 discarded，
+    // 下一次 entriesOf 同样被剔掉）。
+    expect(orchestration.entriesOf(sessionId)).toEqual([])
+  })
+
+  it('settle 的 worktree 有未提交改动 → 认账 integrated 但保留现场（安全清理）', () => {
+    const { repo, worktree, branch } = settledWorktreeEntry('recon-repo-2', 'wt-r2')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-recon-2'
+    orchestration.addActiveEntry(sessionId, repo, { slug: 'wt-r2', branch, path: worktree })
+    orchestration.bindRunId(sessionId, 'wt-r2', 'run-r2')
+    orchestration.settleFromEnd({ runId: 'run-r2', id: 'child-r2' } as never, { session: { id: sessionId } } as never)
+    corumGit(repo, ['-c', 'user.name=child', '-c', 'user.email=child@corum.local', 'merge', '--no-ff', '-m', 'merge(wt-r2)', branch])
+    writeFileSync(join(worktree, 'uncommitted.txt'), '写在工作区、从未提交')
+    expect(orchestration.entriesOf(sessionId)[0].status).toBe('integrated')
+    expect(existsSync(worktree)).toBe(true)
+    expect(existsSync(join(worktree, 'uncommitted.txt'))).toBe(true)
+  })
+
+  it('active 条目被外部合并 → 认账 integrated 但不回收（子 Agent 可能还在该目录里干活）', () => {
+    const { repo, worktree, branch } = settledWorktreeEntry('recon-repo-3', 'wt-r3')
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-recon-3'
+    orchestration.addActiveEntry(sessionId, repo, { slug: 'wt-r3', branch, path: worktree })
+    corumGit(repo, ['-c', 'user.name=child', '-c', 'user.email=child@corum.local', 'merge', '--no-ff', '-m', 'merge(wt-r3)', branch])
+    expect(orchestration.entriesOf(sessionId)[0].status).toBe('integrated')
+    expect(existsSync(worktree)).toBe(true)
+  })
+
+  it('emitFrame 发帧前也对账（帧不得把已合并分支显示成待集成）', () => {
+    const { repo, worktree, branch } = settledWorktreeEntry('recon-repo-4', 'wt-r4')
+    const ctx = new Context()
+    const frames: Array<{ pending: number; statuses: string[] }> = []
+    ctx.on('corum/worktree-ledger', frame => {
+      frames.push({ pending: frame.pending, statuses: frame.entries.map(e => e.status) })
+    })
+    const orchestration = new CorumOrchestration(ctx)
+    const sessionId = 'spec-recon-4'
+    orchestration.addActiveEntry(sessionId, repo, { slug: 'wt-r4', branch, path: worktree })
+    orchestration.bindRunId(sessionId, 'wt-r4', 'run-r4')
+    orchestration.settleFromEnd({ runId: 'run-r4', id: 'child-r4' } as never, { session: { id: sessionId } } as never)
+    corumGit(repo, ['-c', 'user.name=child', '-c', 'user.email=child@corum.local', 'merge', '--no-ff', '-m', 'merge(wt-r4)', branch])
+    orchestration.emitFrame(sessionId)
+    const last = frames.at(-1)
+    expect(last?.statuses).toEqual(['integrated'])
+    expect(last?.pending).toBe(0)
+  })
+
+  it('新建 worktree（空分支 tip === HEAD）不会被误认账成 integrated', () => {
+    const repo = join(scratch, 'recon-repo-5')
+    rmSync(repo, { recursive: true, force: true })
+    execFileSync('git', ['init', '-q', '-b', 'main', repo], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 'test@corum.local'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'corum-test'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init'], { stdio: 'pipe' })
+    const orchestration = new CorumOrchestration(new Context())
+    const sessionId = 'spec-recon-5'
+    const child = orchestration.createWorktreeChild(sessionId, repo)
+    expect(orchestration.entriesOf(sessionId)[0].status).toBe('active')
+    expect(existsSync(child.path)).toBe(true)
+    expect(execFileSync('git', ['-C', repo, 'branch', '--list', child.branch], { encoding: 'utf8' }).trim()).not.toBe('')
+  })
+})
+
 describe('git 判据是运行时探测，不是产品开关', () => {
   it('产品代码里已不存在 `autoInitGit` 开关（2026-09-11 用户定调：打开工作区固定「探测，没有就初始化」）', async () => {
     const fs = await import('node:fs')
