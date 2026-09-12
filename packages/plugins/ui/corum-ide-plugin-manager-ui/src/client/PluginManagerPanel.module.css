@@ -1,10 +1,12 @@
 /*
- * 「设置中心 › 扩展 › 插件管理」content 区样式。
+ * 插件中心浮层（插件市场）样式。
  *
- * 1:1 复刻 doc/UXDesign/design.pen 帧 zOmcc（设置 · 扩展面板-已装插件 · 深色）
- * 的 w8h6DG content：header 56（xQFRJ）→ 1px 分隔线（nv3HC）→ body（Gyvyc，
- * gap 14、padding [20,24,24,24]）＝ tabs（h5Hckf）→ filter（Z6xac）→ 卡片网格
- * （Jkd7G / ouhlt / card-row-3，一排两张卡 gap 10）。
+ * 1:1 复刻 doc/UXDesign/design.pen 帧 ZHBVi（插件中心 · 插件市场 · 深色）
+ * › IuLqM FloatingLayer › S8Fm0「插件中心面板」：header AaHbb（padding
+ * [18,20,14,24]）→ 1px 分隔线 p6xJs → body kLHt3（gap 14、padding
+ * [16,24,20,24]）＝ searchRow HFfPH（searchBox d4WRKA + sort yFEtD）→ cats
+ * FQRAU（chip gEjOt/k0uLXt…）→ featured QElrj（本周精选）→ marketGrid raKOG
+ * （uxN7L 卡片，一排两张 gap 14）。
  *
  * ── token 层（本包专属 --pm-*）────────────────────────────────────────────
  * 取值 = design.pen `variables` 的深/浅双值（与壳 theme.css 的 --corum-* 同源、
@@ -12,11 +14,10 @@
  * 裸 hex：--pm-* 是唯一取色入口，浅/深翻转只改这一层。
  *
  * 例外（design.pen 变量表里没有、但帧里写死的原始 fill）：
- *   --pm-accent-discover = #3B5CFF（帧 ocVbQ btn-discover 的裸 fill）
- *   --pm-on-accent       = #FFFFFF（帧 ocVbQ label 的裸 fill）
- *   --pm-mask            = #00000059（帧 g4DPDv FloatingLayer 的裸 fill）
- *   --pm-shadow          = #00000040（帧 QVU22 的外阴影色）
- * 这四条不冒充 design.pen 变量，集中在本块声明，便于后续设计定色时一处替换。
+ *   --pm-on-accent = #FFFFFF（帧 iYM1T/U0Xlod label 的裸 fill）
+ *   --pm-mask      = #00000059（帧 g4DPDv FloatingLayer 的裸 fill）
+ *   --pm-shadow    = #00000040（帧 S8Fm0 的外阴影色）
+ * 这三条不冒充 design.pen 变量，集中在本块声明，便于后续设计定色时一处替换。
  */
 
 /* ── token：浅色（默认）────────────────────────────────────────────────── */
@@ -38,11 +39,11 @@
   --pm-state-error: #e0245e;
   --pm-state-warn: #e07a00;
   /* 帧内裸 fill（非 design.pen 变量，见文件头说明） */
-  --pm-accent-discover: #3b5cff;
   --pm-on-accent: #ffffff;
   --pm-mask: #00000059;
   --pm-shadow: #00000040;
   --pm-font: 'Inter', -apple-system, 'PingFang SC', 'SF Pro Text', system-ui, sans-serif;
+  --pm-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* ── token：深色（design.pen dark 值，逐条对应 variables 表）────────────── */
@@ -79,12 +80,12 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-mask);
 }
 
-/* ── 面板（content 区本体：帧 w8h6DG 840×820）────────────────────────── */
+/* ── 面板（帧 S8Fm0：960 宽 / r24 / $glass-1 / blur16 / 0 16 48 阴影）─── */
 
 .panel {
   display: flex;
   flex-direction: column;
-  width: 840px;
+  width: 960px;
   height: min(820px, calc(100vh - 48px));
   max-width: calc(100vw - 48px);
   box-sizing: border-box;
@@ -98,15 +99,14 @@ body[data-ds-dark-theme] .panel {
   color: var(--pm-label-primary);
 }
 
-/* ── header xQFRJ：高 56，padding [0,16,0,24]，space-between ─────────── */
+/* ── header AaHbb：padding [18,20,14,24]，space-between，align center ── */
 
 .header {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
-  padding: 0 16px 0 24px;
+  padding: 18px 20px 14px 24px;
   box-sizing: border-box;
 }
 
@@ -116,49 +116,22 @@ body[data-ds-dark-theme] .panel {
   color: var(--pm-label-primary);
 }
 
-/* hd-right T2JpYz：gap 12 / align center */
+/* hd-right CSomI：gap 12 / align center */
 .headerRight {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-/* scope-switch U9AfS4：容器 glass-2 / r10 / glass-border / p2 / gap2 */
-.scope {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  box-sizing: border-box;
-  border: 1px solid var(--pm-glass-border);
-  border-radius: 10px;
-  background: var(--pm-glass-2);
-}
-
-.scopeSeg {
-  padding: 4px 12px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--pm-label-secondary);
-  font-family: inherit;
-  font-size: 12px;
+/* installed-count iobGY：11px label-tertiary */
+.installedCount {
+  font-size: 11px;
   font-weight: 400;
-  line-height: 20px;
-  cursor: pointer;
+  color: var(--pm-label-tertiary);
+  white-space: nowrap;
 }
 
-.scopeSeg:hover {
-  color: var(--pm-label-primary);
-}
-
-.scopeSeg[data-active] {
-  background: var(--pm-brand-primary);
-  color: var(--pm-label-on-brand);
-  font-weight: 600;
-}
-
-/* close HEPcG：18×18 居中，glyph 20px label-primary */
+/* close pEJYP：18×18 居中，glyph 20px label-primary */
 .closeBtn {
   display: flex;
   align-items: center;
@@ -176,28 +149,7 @@ body[data-ds-dark-theme] .panel {
   color: var(--pm-brand-text);
 }
 
-/* btn-discover ocVbQ：裸 fill #3B5CFF / r8 / p[5,10] / gap4 / 11px 500 白字 */
-.discoverBtn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border: none;
-  border-radius: 8px;
-  background: var(--pm-accent-discover);
-  color: var(--pm-on-accent);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.discoverBtn:hover {
-  opacity: 0.9;
-}
-
-/* hd-div nv3HC：1px glass-border */
+/* hd-div p6xJs：1px glass-border */
 .divider {
   flex: none;
   width: 100%;
@@ -205,7 +157,7 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-glass-border);
 }
 
-/* ── body Gyvyc：gap 14，padding [20,24,24,24] ───────────────────────── */
+/* ── body kLHt3：gap 14，padding [16,24,20,24] ───────────────────────── */
 
 .body {
   flex: 1;
@@ -213,98 +165,36 @@ body[data-ds-dark-theme] .panel {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 20px 24px 24px;
+  padding: 16px 24px 20px;
   box-sizing: border-box;
   overflow-y: auto;
 }
 
-/* ── tabs h5Hckf：glass-2 / r10 / glass-border / p3 / gap4 ───────────── */
+/* ── searchRow HFfPH：gap 10 / align center ──────────────────────────── */
 
-.tabs {
+.searchRow {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 3px;
-  box-sizing: border-box;
-  border: 1px solid var(--pm-glass-border);
-  border-radius: 10px;
-  background: var(--pm-glass-2);
-}
-
-/* tab：p[5,14] / r8 / 12px（active：glass-1 + glass-border-active + 600） */
-.tab {
-  padding: 5px 14px;
-  box-sizing: border-box;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--pm-label-secondary);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-  cursor: pointer;
-}
-
-.tab:hover {
-  color: var(--pm-label-primary);
-}
-
-.tabActive {
-  background: var(--pm-glass-1);
-  border-color: var(--pm-glass-border-active);
-  color: var(--pm-label-primary);
-  font-weight: 600;
-}
-
-/* ── filter Z6xac：space-between / align center ──────────────────────── */
-
-.filter {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   width: 100%;
 }
 
-/* search s7lJgl：宽 220 / glass-2 / r13 / glass-border / p[10,14] / 12px */
-.searchField {
-  width: 220px;
-  padding: 10px 14px;
-  box-sizing: border-box;
-  border: 1px solid var(--pm-glass-border);
-  border-radius: 13px;
-  background: var(--pm-glass-2);
-  color: var(--pm-label-primary);
-  font-family: inherit;
-  font-size: 12px;
-  outline: none;
-}
-
-.searchField::placeholder {
-  color: var(--pm-label-secondary);
-}
-
-.searchField:focus {
-  border-color: var(--pm-glass-border-active);
-}
-
-/* 插件市场的检索框（同一 search 视觉，另带放大镜 glyph） */
-.searchWrap {
+/* searchBox d4WRKA：flex 1 / glass-2 / r9 / glass-border / p[8,12] / gap 6 */
+.searchBox {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 220px;
-  padding: 10px 14px;
+  gap: 6px;
+  padding: 8px 12px;
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
-  border-radius: 13px;
+  border-radius: 9px;
   background: var(--pm-glass-2);
 }
 
-.searchWrap:focus-within {
+.searchBox:focus-within {
   border-color: var(--pm-glass-border-active);
 }
 
@@ -326,44 +216,44 @@ body[data-ds-dark-theme] .panel {
 }
 
 .searchInput::placeholder {
-  color: var(--pm-label-secondary);
+  color: var(--pm-label-dimmed);
 }
 
-/* flt 下拉（select-field Bf3cS，实例宽 140）：glass-2 / r10 / glass-border / p[7,10] / gap8 */
-.select {
+/* sort yFEtD：glass-2 / r9 / glass-border / p[8,12] / gap 6（下拉，点外关闭） */
+.sort {
   position: relative;
-  width: 140px;
+  flex: none;
 }
 
-.selectBtn {
+.sortBtn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
+  gap: 6px;
+  padding: 8px 12px;
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--pm-glass-2);
-  color: var(--pm-label-primary);
+  color: var(--pm-label-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 
-.selectValue {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.sortBtn:hover {
+  color: var(--pm-label-primary);
 }
 
-.selectChevron {
+.sortValue {
+  white-space: nowrap;
+}
+
+.sortChevron {
   flex: none;
   color: var(--pm-label-tertiary);
 }
 
-.selectMenu {
+.sortMenu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -371,38 +261,366 @@ body[data-ds-dark-theme] .panel {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 140px;
+  min-width: 100%;
   padding: 3px;
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--pm-glass-2);
   box-shadow: 0 12px 32px var(--pm-shadow);
 }
 
-.selectOption {
+.sortOption {
   padding: 5px 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: var(--pm-label-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.selectOption:hover {
+.sortOption:hover {
   color: var(--pm-label-primary);
 }
 
-.selectOption[data-active] {
+.sortOption[data-active] {
   background: var(--pm-glass-1);
   color: var(--pm-label-primary);
   font-weight: 600;
 }
 
-/* ── 卡片网格（card-row-1/2/3：一排两张，gap 10）─────────────────────── */
+/* ── cats FQRAU：gap 8 / align center（可换行）───────────────────────── */
+
+.chips {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+/* chip：r7 / p[4,10] / 10px 600（active：glass-1 + glass-border-active） */
+.chip {
+  padding: 4px 10px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--pm-glass-2);
+  color: var(--pm-label-secondary);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--pm-label-primary);
+}
+
+.chip[data-active] {
+  background: var(--pm-glass-1);
+  border-color: var(--pm-glass-border-active);
+  color: var(--pm-label-primary);
+}
+
+/* ── featured QElrj：glass-2 / r16 / glass-border-active / p14 / gap 14 ── */
+
+.featured {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--pm-glass-border-active);
+  border-radius: 16px;
+  background: var(--pm-glass-2);
+}
+
+/* icon-box qj5cj：44×44 / glass-1 / r11 / 居中（glyph 22px brand-text） */
+.featuredIcon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: var(--pm-glass-1);
+  color: var(--pm-brand-text);
+}
+
+/* col MJDSN：fill_container / 纵向 / gap 3 */
+.featuredCol {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* r0 k9P8pH：gap 6 / align center */
+.featuredTagRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.featuredStar {
+  flex: none;
+  color: var(--pm-brand-text);
+}
+
+.featuredTag {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pm-brand-text);
+}
+
+.featuredName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pm-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.featuredDesc {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--pm-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* meta LDTmd：gap 6 / align center */
+.featuredMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* btn-install iYM1T：brand-primary / r10 / p[7,16] / 12px 600 on-brand */
+.installBtnLg {
+  flex: none;
+  padding: 7px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--pm-brand-primary);
+  color: var(--pm-label-on-brand);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.installBtnLg:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* 已安装：glass-2 底 + label-tertiary（禁用态，与卡片按钮同语义） */
+.installBtnLg[data-installed] {
+  background: var(--pm-glass-2);
+  color: var(--pm-label-tertiary);
+  opacity: 1;
+}
+
+.installBtnLg:disabled {
+  cursor: default;
+}
+
+/* ── marketGrid raKOG：两列卡片 gap 14 ───────────────────────────────── */
+
+.marketGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+/* 卡片 uxN7L：glass-1 / r16 / glass-border / p14 / 纵向 gap 8 */
+.mktCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--pm-glass-border);
+  border-radius: 16px;
+  background: var(--pm-glass-1);
+}
+
+/* head M4ggc：space-between / align center */
+.mktCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+/* left HodOt：gap 10 / align center */
+.mktCardLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* icon-box qHoTr：34×34 / glass-2 / r9 / glyph 17px brand-text */
+.mktIconBox {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--pm-glass-2);
+  color: var(--pm-brand-text);
+}
+
+.mktName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pm-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mktDesc {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--pm-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* stats iVGTl：gap 8 / align center */
+.mktStats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statStar {
+  flex: none;
+  color: var(--pm-brand-text);
+}
+
+.statDlIcon {
+  flex: none;
+  color: var(--pm-label-tertiary);
+}
+
+.mktScore {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--pm-label-secondary);
+}
+
+.mktDl {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--pm-label-tertiary);
+}
+
+/* meta BbKQj：gap 6 / align center */
+.mktMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 版本号：JetBrains Mono 10px label-tertiary */
+.monoVer {
+  font-family: var(--pm-font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--pm-label-tertiary);
+}
+
+.metaSep {
+  font-size: 10px;
+  color: var(--pm-label-dimmed);
+}
+
+.metaDim {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--pm-label-dimmed);
+}
+
+/* 卡片安装按钮：brand-primary / r8 / p[5,12] / 11px 600 on-brand */
+.installBtn {
+  flex: none;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--pm-brand-primary);
+  color: var(--pm-label-on-brand);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.installBtn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* 已安装：glass-2 底 + label-tertiary 禁用态 */
+.installBtn[data-installed] {
+  background: var(--pm-glass-2);
+  color: var(--pm-label-tertiary);
+  opacity: 1;
+}
+
+.installBtn:disabled {
+  cursor: default;
+}
+
+/* ── 视图管理（浮层次级入口：网格区域显隐）───────────────────────────── */
+
+/* 入口行：body 最底部一行 */
+.viewsRow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+/* 小按钮：ghost（无底 / label-secondary 11px，hover 变 primary） */
+.viewsEntry {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pm-label-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.viewsEntry:hover {
+  color: var(--pm-brand-text);
+}
+
+/* ── 视图管理内容（区域显隐卡片网格，沿用旧卡片/开关样式）────────────── */
 
 .grid {
   display: grid;
@@ -411,7 +629,7 @@ body[data-ds-dark-theme] .panel {
   width: 100%;
 }
 
-/* 卡片：glass-1 / r16 / glass-border / p14 / gap12 / align center */
+/* 区域卡片：glass-1 / r16 / glass-border / p14 / gap12 / align center */
 .card {
   display: flex;
   align-items: center;
@@ -423,19 +641,6 @@ body[data-ds-dark-theme] .panel {
   border: 1px solid var(--pm-glass-border);
   border-radius: 16px;
   background: var(--pm-glass-1);
-}
-
-/* icon-box：34×34 / glass-2 / r9 / glyph 17px brand-text */
-.cardIcon {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: var(--pm-glass-2);
-  color: var(--pm-brand-text);
 }
 
 /* meta：fill_container / 纵向 / gap 2 */
@@ -470,27 +675,6 @@ body[data-ds-dark-theme] .panel {
   font-weight: 400;
   color: var(--pm-label-tertiary);
   white-space: nowrap;
-}
-
-/* badge：brand-primary / r8 / p[2,7] / on-brand 10px 600 */
-.cardBadge {
-  flex: none;
-  padding: 2px 7px;
-  border-radius: 8px;
-  background: var(--pm-brand-primary);
-  color: var(--pm-label-on-brand);
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.cardDesc {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--pm-label-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ops：gap 10 / align center */
@@ -542,70 +726,6 @@ body[data-ds-dark-theme] .panel {
   transform: translateX(-16px);
 }
 
-/* btn-set「设置」：glass-2 / r13 / glass-border / p[9,16] / 12px */
-.setBtn {
-  padding: 9px 16px;
-  box-sizing: border-box;
-  border: 1px solid var(--pm-glass-border);
-  border-radius: 13px;
-  background: var(--pm-glass-2);
-  color: var(--pm-label-primary);
-  font-family: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.setBtn:hover:not(:disabled) {
-  border-color: var(--pm-glass-border-active);
-}
-
-.setBtn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* 安装按钮（插件市场）：brand-primary / r8 / p[5,12] / 11px 600 */
-.installBtn {
-  padding: 5px 12px;
-  border: none;
-  border-radius: 8px;
-  background: var(--pm-brand-primary);
-  color: var(--pm-label-on-brand);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.installBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* btn-del：16×16 居中，glyph 20px label-primary，无底 */
-.delBtn {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--pm-label-primary);
-  cursor: pointer;
-}
-
-.delBtn:hover:not(:disabled) {
-  color: var(--pm-state-error);
-}
-
-.delBtn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
 /* ── 提示 / 空态 ─────────────────────────────────────────────────────── */
 
 .hintText {
@@ -621,7 +741,7 @@ body[data-ds-dark-theme] .panel {
   overflow-wrap: anywhere;
 }
 
-/* 操作反馈条：面板级 footer（body 的三段结构之外），仅在有提示时出现 */
+/* 操作反馈条：面板级 footer（body 之外），仅在有提示时出现 */
 .notice {
   flex: none;
   display: flex;
@@ -667,7 +787,7 @@ body[data-ds-dark-theme] .panel {
   cursor: pointer;
 }
 
-/* ── 返回行（详情 / 插件市场）───────────────────────────────────────── */
+/* ── 返回行（视图管理 → 插件市场）────────────────────────────────────── */
 
 .backRow {
   flex: none;
@@ -688,58 +808,6 @@ body[data-ds-dark-theme] .panel {
 .backRow:hover {
   color: var(--pm-label-primary);
   background: var(--pm-glass-2);
-}
-
-/* ── 详情视图 ────────────────────────────────────────────────────────── */
-
-.detail {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.detailGrid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 16px;
-  box-sizing: border-box;
-  border: 1px solid var(--pm-glass-border);
-  border-radius: 16px;
-  background: var(--pm-glass-2);
-}
-
-.detailField {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.detailLabel {
-  flex: none;
-  width: 56px;
-  font-size: 12px;
-  color: var(--pm-label-tertiary);
-}
-
-.detailValue {
-  font-size: 12px;
-  color: var(--pm-label-primary);
-  overflow-wrap: anywhere;
-}
-
-.detailLink {
-  color: var(--pm-brand-text);
-  text-decoration: none;
-}
-
-.detailLink:hover {
-  text-decoration: underline;
-}
-
-.detailActions {
-  display: flex;
-  gap: 10px;
 }
 
 /* ── 动效降级 ────────────────────────────────────────────────────────── */
