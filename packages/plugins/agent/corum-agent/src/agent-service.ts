@@ -781,16 +781,19 @@ export class CorumAgentService extends TypertRemoteService {
       if (orchestration !== undefined) {
         // 台账按父会话 id 查；子会话的父由 session.header.parentSession 给出。
         // 此处用 agents 服务反查父会话（与 settleFromEnd 的兜底同路）。
+        // ⚠️ 同 childWorktreeIsolation：`agents.list` 是**方法**，按属性迭代会抛
+        // `function is not iterable`（此处被外层 try/catch 吞掉 → integrated 标记长期静默失效）。
+        type ParentAgentLike = { session: { id: string; header?: { parentSession?: string } } }
         const agents = this.ctx.get('agents') as
-          | { list?: Iterable<{ session: { id: string; header?: { parentSession?: string } } }> }
+          | { list?: Iterable<ParentAgentLike> | (() => Iterable<ParentAgentLike>) }
           | undefined
         let parentSessionId: string | undefined
-        if (agents?.list !== undefined) {
-          for (const agent of agents.list) {
-            if (String(agent.session.id) === childSessionId) {
-              parentSessionId = agent.session.header?.parentSession
-              break
-            }
+        const rawList = agents?.list
+        const parentCandidates: Iterable<ParentAgentLike> = typeof rawList === 'function' ? rawList() : rawList ?? []
+        for (const agent of parentCandidates) {
+          if (String(agent.session.id) === childSessionId) {
+            parentSessionId = agent.session.header?.parentSession
+            break
           }
         }
         if (parentSessionId !== undefined) {
@@ -2042,6 +2045,41 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * fork（corum）：该会话此刻**是否正在跑一个 turn**（用于识别「被杀掉/半途失去运行」）。
+   *
+   * 用途：判断「被进程退出杀掉的子会话」——它的 log 里只有 `turn/start`、没有
+   * `turn/end`，事件投影永远推不出终态（卡片会一直 Running，2026-09-12 实测）。
+   * 判据用官方 `agent.status`（running/idle）而非「在不在 registry 里」：常驻
+   * （continuable）子会话跑完不 dispose，仍在 registry 里但 status=idle。
+   * @param sessionId - 会话 id。
+   * @returns 是否活着；取不到 agents 服务时 undefined（不猜）。
+   */
+  private agentRunning(sessionId: string): boolean | undefined {
+    // `agent.status` 是官方终值：'running'（正在跑一个 turn）/ 'idle'（空闲，可续接）。
+    // 关键差别（2026-09-12 实测）：**continuable/resident 子会话跑完不会被 dispose**，
+    // 所以「在 registry 里」不等于「在跑」——研究子 Agent 就是常驻的，被杀掉之后
+    // 仍留在 registry 里、status 为 idle。用它才能把「空闲的常驻子会话」与
+    // 「真的在跑」分开。
+    type AgentLike = { session: { id: string }; status?: string }
+    try {
+      const agents = this.ctx.get('agents') as
+        | { list?: Iterable<AgentLike> | (() => Iterable<AgentLike>) }
+        | undefined
+      const raw = agents?.list
+      if (raw === undefined) return undefined
+      const list: Iterable<AgentLike> = typeof raw === 'function' ? raw() : raw
+      for (const agent of list) {
+        if (String(agent.session.id) !== sessionId) continue
+        return agent.status === 'running'
+      }
+      // 不在 registry 里（一次性子会话跑完已 dispose）→ 没在跑。
+      return false
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * fork（corum）：该子会话是否跑在隔离 worktree 里（durable 判据）。
    *
    * 为什么不用推送帧：`corum/subagent/child` 带 `isolated`，但**帧不重放**——刷新/重启
@@ -2057,13 +2095,28 @@ export class CorumAgentService extends TypertRemoteService {
     const ofCwd = (cwd: string | undefined): boolean | undefined =>
       cwd === undefined ? undefined : /(^|[\\/])\.corum-worktrees([\\/]|$)/.test(cwd)
     // ① 已加载的 agent（内存 header，最快）。
-    type AgentsFace = { list?: Iterable<{ session: { id: string; header?: { cwd?: string } } }> }
-    const agents = this.ctx.get('agents') as AgentsFace | undefined
-    for (const agent of agents?.list ?? []) {
-      if (String(agent.session.id) !== sessionId) continue
-      const memory = ofCwd(agent.session.header?.cwd)
-      if (memory !== undefined) return memory
-      break
+    //
+    // ⚠️ `agents.list` 是**方法**（`list(): Agent[]`，dsh 的 agent registry），不是可迭代
+    // 属性——按属性 `for...of` 会抛 `function is not iterable`。2026-09-12 实测教训：
+    // 这个 throw 直接把 `getChildSessionProgress` 整个打挂，而 renderer 的
+    // `useChildProgress` 正是靠它补冷启动进度 → **所有子 Agent 卡片永远停在 Running**。
+    // 故这里 (a) 兼容「方法 / 可迭代属性」两种形态，(b) 整段 try/catch 兜住——
+    // 可见性增强的辅助信息绝不能把主 RPC 打挂。
+    try {
+      type AgentLike = { session: { id: string; header?: { cwd?: string } } }
+      const agents = this.ctx.get('agents') as
+        | { list?: Iterable<AgentLike> | (() => Iterable<AgentLike>) }
+        | undefined
+      const raw = agents?.list
+      const list: Iterable<AgentLike> = typeof raw === 'function' ? raw() : raw ?? []
+      for (const agent of list) {
+        if (String(agent.session.id) !== sessionId) continue
+        const memory = ofCwd(agent.session.header?.cwd)
+        if (memory !== undefined) return memory
+        break
+      }
+    } catch {
+      // 取不到就落到 ②（持久化 header）；两者都取不到 → undefined（不猜）。
     }
     // ② 持久化 header——**一次性子会话跑完就被 dispose，不在 agents.list 里**，这时只能读盘。
     //    `SessionHandle.header` 是不变元数据（含 cwd），读它不需要把会话载回来。
@@ -2099,6 +2152,8 @@ export class CorumAgentService extends TypertRemoteService {
       currentAction?: string
       done: boolean
       stopReason?: SubagentStopReason
+      /** 运行中途失去运行（进程退出/被丢弃）——没有权威 stopReason 时的诚实补标。 */
+      interrupted?: boolean
       lastActive: number
       todos?: readonly SubagentTodoItem[]
     }
@@ -2166,14 +2221,31 @@ export class CorumAgentService extends TypertRemoteService {
       }
     }
     const lastActive = stored[stored.length - 1].time
+    /**
+     * 被进程退出杀掉 / 中途失去运行的子会话：log 里有 `turn/start` 却没有 `turn/end`，
+     * 事件投影推不出终态 → 卡片永远停在 Running（2026-09-12 用户实测「search agent
+     * 结束后卡片仍是 running」的一类残余）。宿主能判「它已经不在跑」（不在 agents
+     * registry 里）→ 补一个**诚实**的终态：`done: true` + `interrupted: true`。
+     * 不伪造 stopReason：既不是正常完成，也不是用户手动终止，UI 另有「已中断」文案。
+     */
+    //
+    // 两个判据取或（缺一不可覆盖全部情况）：
+    //   ① `agentRunning` 说它没在跑（已 dispose 的一次性子会话，或 registry 里 status=idle）；
+    //   ② 它的最后一个事件**发生在本进程启动之前** —— 那个未闭合的 turn 不可能还在本进程
+    //      里跑（app 重启会把**常驻**子会话的半途 turn 留在 log 里：只有 turn/start、
+    //      没有 turn/end；常驻子会话不会被 dispose，故 ① 对它判不出来）。2026-09-12 实测。
+    const lastActiveBeforeBoot = lastActive < Date.now() - process.uptime() * 1000
+    const interrupted = !done && stopReason === undefined
+      && (this.agentRunning(sessionId) === false || lastActiveBeforeBoot)
     return {
       ...identity,
       progress: {
         turn,
         step,
         ...currentAction === undefined ? {} : { currentAction },
-        done,
+        done: done || interrupted,
         ...stopReason === undefined ? {} : { stopReason },
+        ...interrupted ? { interrupted: true } : {},
         lastActive,
         ...todos === undefined ? {} : { todos },
       },

@@ -18,6 +18,8 @@ export const zh = {
   'subagent.worktreeTitle': '隔离工作区（worktree）',
   'subagent.done': 'Done',
   'subagent.stopped': '手动终止',
+  // 中途失去运行（进程退出/被丢弃）——既非完成也非用户手动终止，单独一档（2026-09-12）。
+  'subagent.interrupted': '已中断',
   'subagent.failed': '失败',
   'subagent.working': '正在执行子任务…',
   'subagent.step': 'Step {n}',
@@ -173,6 +175,7 @@ export const en = {
   'subagent.worktreeTitle': 'Isolated worktree',
   'subagent.done': 'Done',
   'subagent.stopped': 'Stopped',
+  'subagent.interrupted': 'Interrupted',
   'subagent.failed': 'Failed',
   'subagent.working': 'Working on subtask…',
   'subagent.step': 'Step {n}',

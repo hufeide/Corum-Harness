@@ -53,6 +53,8 @@ interface ChildProgressValue {
     currentAction?: string
     done: boolean
     stopReason?: string
+    /** 中途失去运行（进程退出/被丢弃）——宿主补的诚实终态标记（2026-09-12）。 */
+    interrupted?: boolean
     lastActive: number
     todos?: readonly SubagentTodoItem[]
   }
@@ -170,6 +172,9 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
               ...p.currentAction === undefined ? {} : { currentAction: p.currentAction },
               done: p.done,
               ...sr === undefined ? {} : { stopReason: sr },
+              // ⚠️ 这里是**逐字段重建**——新增字段必须显式搬运，否则会被静默丢掉
+              //（2026-09-12 实测：宿主已返回 interrupted，卡片却仍停在 Running）。
+              ...p.interrupted === true ? { interrupted: true } : {},
               ...p.todos === undefined ? {} : { todos: p.todos },
             })
           }
@@ -193,6 +198,7 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
         ...frame.currentAction === undefined ? {} : { currentAction: frame.currentAction },
         done: frame.done,
         ...sr === undefined ? {} : { stopReason: sr },
+        ...(frame as { interrupted?: boolean }).interrupted === true ? { interrupted: true } : {},
         ...frame.todos === undefined ? {} : { todos: frame.todos },
       })
     })
@@ -327,8 +333,14 @@ function SubagentRow({
   const [expanded, setExpanded] = useState(false)
   const detailPrompt = useSubagentPrompt(childSessionId, expanded)
   const outcome = subagentOutcomeOf(progress?.stopReason)
-  const running = outcome === undefined
-  const chipTone = subagentOutcomeChipTone(outcome)
+  /**
+   * 中途失去运行的子会话（进程退出 / 被丢弃）：宿主在进度投影里补 `interrupted`
+   * （没有权威 stopReason 可给）。不认它的话卡片会永远 Running——2026-09-12 用户实测
+   * 「search agent 结束后卡片仍然是 running」。
+   */
+  const interrupted = progress?.interrupted === true
+  const running = outcome === undefined && !interrupted
+  const chipTone = interrupted ? 'aborted' : subagentOutcomeChipTone(outcome)
 
   const openChild = () => {
     if (childSessionId === undefined) return
@@ -385,11 +397,13 @@ function SubagentRow({
         >
           {chipTone === 'running'
             ? <><span className={css.runDot} />{t('subagent.running')}</>
-            : chipTone === 'done'
-              ? <><Check size={12} strokeWidth={2.5} />{t('subagent.done')}</>
-              : chipTone === 'aborted'
-                ? <><Ban size={12} strokeWidth={2.5} />{t('subagent.stopped')}</>
-                : <><X size={12} strokeWidth={2.5} />{t('subagent.failed')}</>}
+            : interrupted
+              ? <><Ban size={12} strokeWidth={2.5} />{t('subagent.interrupted')}</>
+              : chipTone === 'done'
+                ? <><Check size={12} strokeWidth={2.5} />{t('subagent.done')}</>
+                : chipTone === 'aborted'
+                  ? <><Ban size={12} strokeWidth={2.5} />{t('subagent.stopped')}</>
+                  : <><X size={12} strokeWidth={2.5} />{t('subagent.failed')}</>}
         </span>
         <button
           type="button"

@@ -19,6 +19,12 @@ export interface SubagentProgressSnapshot {
   readonly stopReason?: SubagentStopReason
   /** 子 Agent 的当前计划列表（todo/write 折叠；无计划时缺省）。 */
   readonly todos?: readonly SubagentTodoItem[]
+  /**
+   * 运行**中途失去运行**（进程退出 / 被丢弃）：宿主在进度投影里补的诚实终态标记
+   * ——这种子会话的 log 里没有 `turn/end`，没有任何权威 stopReason 可给，但也不能
+   * 让卡片永远停在 Running（2026-09-12 用户实测「search agent 结束后卡片仍是 running」）。
+   */
+  readonly interrupted?: boolean
 }
 
 /** Static identity of one delegated subagent invocation, folded from the parent log. */
