@@ -311,6 +311,18 @@ export function apply(ctx: Context): void {
             // 子会话不可寻址（origin=subagent 或被过滤）时静默——卡片仍可展示进度。
           }
         })
+        // fork（corum）：子 Agent 改动区（SubagentChanges）打开 diff 的桥——
+        // 经 corumEditor cordis 服务直调（与 ReviewDock 的 openDiff 同款收窄）。
+        chatRuntime.setOpenContentDiff(async (input) => {
+          const editor = ctx.corumEditor as unknown as ContentDiffCapable
+          if (typeof editor.openContentDiff !== 'function') {
+            notifyUser('无法打开改动对比', '当前编辑器不支持 diff 视图')
+            return { ok: false, error: 'corumEditor service missing openContentDiff face' }
+          }
+          const opened = await editor.openContentDiff(input)
+          if (!opened.ok) notifyUser('无法打开改动对比', opened.error)
+          return opened
+        })
         return {
           hooks: { transcriptView: transcriptView.mode },
           keyedHooks: {

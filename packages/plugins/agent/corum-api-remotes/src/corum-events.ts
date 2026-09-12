@@ -303,6 +303,38 @@ export function subagentOutcomeChipTone(outcome: SubagentOutcome | undefined): '
 }
 
 /**
+ * 子 Agent 终态时的改动摘要（corum fork 增量）。
+ *
+ * 数据源 = host `corumReview.snapshot(childSessionId)`（子会话轮次的影子 git
+ * 快照）+ worktree 台账状态（隔离时按 slug 相关）。仅终态帧携带（terminal
+ * backfill），运行中帧缺省——卡片在子 Agent 完成后才展示「改动」区。
+ * 所有字段可选：host 不带 corumReview 或取不到时整段缺省，卡片降级为「无改动」。
+ */
+export interface SubagentChangeSummary {
+  /** 改动文件数。 */
+  readonly filesChanged: number
+  /** 逐文件改动行数（±N）；可能缺省（host 取不到 diff 时只给 count）。 */
+  readonly files?: readonly {
+    /** 相对路径（子会话 cwd 下）。 */
+    readonly path: string
+    /** 新增行数。 */
+    readonly added: number
+    /** 删除行数。 */
+    readonly removed: number
+  }[]
+  /** 隔离 worktree slug（隔离时携带，非隔离缺省）。 */
+  readonly worktreeSlug?: string
+  /** 隔离 worktree 分支名（隔离时携带）。 */
+  readonly worktreeBranch?: string
+  /** 隔离 worktree 完整路径（供 diff 打开时拼绝对路径；隔离时携带）。 */
+  readonly worktreePath?: string
+  /** 是否已在 worktree 分支内提交（committed）。 */
+  readonly committed?: boolean
+  /** 是否已集成回主工作区（台账 status='integrated'）。 */
+  readonly integrated?: boolean
+}
+
+/**
  * ⚠️ UI 口径规矩（硬要求）：UI 里禁止用 `done` 布尔表达「结束了」。
  * `done` 只表示「最新 turn 已闭合」，中断同样闭合 turn。任何终态判定必须走
  * `subagentOutcomeOf(stopReason)`。
@@ -338,10 +370,20 @@ export interface SubagentProgressEvent {
   /** 触发本帧的源事件时间（ms epoch）。 */
   readonly lastActive: number
   /**
-   * 子 Agent 的当前计划列表（`todo/write` 折叠；`turn/start` 时重置为空）。
-   * 缺省表示无计划（子 Agent 未用 todo 工具）——消费者应隐藏计划区。
-   */
+   /**
+    * 子 Agent 的当前计划列表（`todo/write` 折叠；`turn/start` 时重置为空）。
+    * 缺省表示无计划（子 Agent 未用 todo 工具）——消费者应隐藏计划区。
+    */
   readonly todos?: readonly SubagentTodoItem[]
+  /**
+    * 终态改动摘要（corum fork 增量）。
+    *
+    * 仅在终态帧（`done=true`）的 terminal backfill 路径填充——host 从
+    * `corumReview.snapshot(childSessionId)` 取改动文件列表 ±N，从 worktree
+    * 台账取 committed/integrated 状态。运行中帧缺省；卡片据此决定是否渲染
+    * 「改动」区。所有子字段可选：取不到时卡片降级。
+    */
+  readonly changeSummary?: SubagentChangeSummary
 }
 
 /**
