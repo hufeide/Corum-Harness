@@ -1000,6 +1000,37 @@ export function corumIntegratorPersona(
       : 'Report the integration outcome (merge result, verification output, and anything that looks off) so the delegating agent can make the final acceptance call against the original goal.')
 }
 
+/**
+ * fork（corum）：**隔离边界说明行**——给**父 Agent** 看的一行事实（用户 2026-09-13 定调「先做可见性」）。
+ *
+ * 由来：`subagent` 工具没有按次 isolation 开关，缺省策略（write-tasks）下**单发前台写任务
+ * 直接在主工作区改**（无 worktree、无分支）。这件事此前只写在**给子 Agent 的提示词**里
+ * （{@link corumDirectWriteNotice}），父 Agent 拿到结果时看不出边界——2026-09-12 的探针
+ * 就是这么被骗的：用户要求「派一个前台隔离子 Agent」，机制按口径没隔离，而父侧从结果里
+ * 读不出「其实没隔离」。
+ *
+ * 本函数只产出**一句事实**，不改任何机制语义（隔离判据仍在 `corumShouldIsolate`）。
+ * 纯函数，可单测；渲染方按平台无关的英文写（本仓提示词/工具结果纪律）。
+ *
+ * @param boundary - 本次委派的隔离落点：`worktree`（隔离，带分支）/ `parent-tree`
+ *   （缺省策略下在主工作区执行）/ `skipped-non-git`（非 git 工作区导致隔离被跳过）。
+ * @param branch - `worktree` 时的分支名（缺省时只报「已隔离」）。
+ * @returns 一行说明；`worktree` 且带分支时也返回（供调用方决定是否显示），
+ *   调用方对 `worktree` 可选择性省略。
+ */
+export function corumIsolationBoundaryNotice(
+  boundary: 'worktree' | 'parent-tree' | 'skipped-non-git',
+  branch?: string,
+): string {
+  if (boundary === 'worktree') {
+    return `[corum isolation] this delegation ran in an ISOLATED worktree${branch === undefined || branch === '' ? '' : ` (branch ${branch})`} — its edits are on that branch and only reach your tree through integrate.`
+  }
+  if (boundary === 'skipped-non-git') {
+    return '[corum isolation] this delegation ran in the PARENT working tree (not isolated): the workspace is not a git repository, so isolation was skipped — its edits are ALREADY in your tree and nothing will merge them.'
+  }
+  return '[corum isolation] this delegation ran in the PARENT working tree (not isolated: a lone foreground write delegation works in place) — no worktree, no branch; its edits are ALREADY in your tree and nothing will merge them.'
+}
+
 // ── 编排器 service（台账状态下沉；红线 1 合规）──────────────────────────────
 
 /**

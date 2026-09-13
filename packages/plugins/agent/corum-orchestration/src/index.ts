@@ -64,6 +64,7 @@ export {
   corumIntegratorPersona,
   corumDirectWriteNotice,
   corumIsGitRepo,
+  corumIsolationBoundaryNotice,
   corumIsolationNotice,
   corumIsWriteTask,
   corumMarkSettled,

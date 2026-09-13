@@ -67,6 +67,7 @@ import {
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumIsGitRepo,
+  corumIsolationBoundaryNotice,
   corumIsolationNotice,
   corumIsWriteTask,
   corumMarkSettled,
@@ -403,6 +404,12 @@ type ForegroundToolResult = {
   readonly kind: 'foreground'
   readonly runId: SubagentRun['id']
   readonly output: JsonValue[]
+  /**
+   * fork（corum）：本次委派的隔离落点——**只在没隔离时**由 `spawnOne` 附上
+   * （`parent-tree` / `skipped-non-git`），由工具的 render 渲染成一行给父 Agent 的
+   * 事实说明（见 `corumIsolationBoundaryNotice`）。2026-09-13 用户定调「先做可见性」。
+   */
+  readonly isolationBoundary?: 'parent-tree' | 'skipped-non-git'
 }
 
 /**
@@ -652,6 +659,7 @@ export {
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumIsGitRepo,
+  corumIsolationBoundaryNotice,
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
@@ -1052,6 +1060,23 @@ export function apply(ctx: Context, config: Config): void {
           corumIsolationSkipped = true
         }
       }
+      /**
+       * fork（corum）：**父 Agent 可见的隔离边界**（2026-09-13 用户定调「先做可见性」）。
+       *
+       * 只有**写委派**才有意义（只读调研不落盘，边界对父 Agent 无所谓）：它回答
+       * 「这次改动落在哪」——隔离 worktree（要 integrate 才进主树）还是**已经在你的
+       * 主工作区里了**。此前这件事只写在给子 Agent 的提示词里，父侧从结果读不出来，
+       * 于是 2026-09-12 的探针把「没隔离」当成了「隔离了」。
+       *
+       * `worktree` 不发给父侧（那是常规路径、无需提醒；集成结果另有报告），只报两种
+       * 「没隔离」的落点。
+       */
+      const corumIsolationBoundary: 'parent-tree' | 'skipped-non-git' | undefined =
+        !corumIsWrite || effReadonlyResearch
+          ? undefined
+          : corumIsolate
+            ? undefined
+            : corumIsolationSkipped ? 'skipped-non-git' : 'parent-tree'
 
       // fork（corum）：机制追加的 deny 必须收敛到「本 preset 真正注册的工具名」——
       // `tools.restrict()` 对未知名 fail-loud，而 corum 的写工具名单是平台硬编码
@@ -1272,7 +1297,11 @@ export function apply(ctx: Context, config: Config): void {
         if (args.notifyParent !== false) {
           corumNotifyForegroundResult(parent, String(run.id), args.label, outcome, runtimeCtx.logger)
         }
-        return outcome
+        // fork（corum）：把「这次改动落在哪」附在**工具结果**上（用户 2026-09-13 定调）。
+        // 只在没隔离时附（worktree 是常规路径，报告由 integrate 负责）。
+        return corumIsolationBoundary === undefined
+          ? outcome
+          : { ...outcome, isolationBoundary: corumIsolationBoundary }
       } finally {
         if (corumTrackWrite) orchestration.endWriteChild(corumSessionId)
       }
@@ -1285,7 +1314,7 @@ export function apply(ctx: Context, config: Config): void {
       const disposeTool = runtimeCtx.tools.register(defineTool({
         name: toolName,
         // fork（corum）：描述头追加隔离语义（英文，接在官方 wording 前）。
-        description: 'Delegates run in isolated git worktrees when this instance has isolation configured and the delegation can run concurrently with another write child; a lone write delegation edits the parent working tree directly (no worktree, no branch). ' 
+        description: 'Delegates run in isolated git worktrees when this instance has isolation configured and the delegation can run concurrently with another write child; a lone write delegation edits the parent working tree directly (no worktree, no branch). The result states which of the two happened, so you never have to guess whether a branch carries the work. ' 
           + wording.description + (backgroundEnabled
           // The completion notice is the continuation service's own behavior, not
           // a separately installed capability, so this promise holds whenever the
@@ -1353,6 +1382,12 @@ export function apply(ctx: Context, config: Config): void {
                   kind: { type: 'string', required: true, const: 'foreground' },
                   runId: { type: 'string', required: true },
                   output: { type: 'array', required: true, items: { type: 'json' } },
+                  /**
+                   * fork（corum）：本次委派的隔离落点（只在**没隔离**时出现，见
+                   * `corumIsolationBoundaryNotice`）。父 Agent 据此知道改动已经在自己的
+                   * 主工作区里、没有分支代管。
+                   */
+                  isolationBoundary: { type: 'string', enum: ['parent-tree', 'skipped-non-git'] },
                 },
               },
             ],
@@ -1363,7 +1398,9 @@ export function apply(ctx: Context, config: Config): void {
               ? `started background subagent job ${value.jobId}`
               : value.kind === 'continuable'
                 ? `started subagent ${value.subagentId}`
-                : outputValueText(value.output),
+                : `${outputValueText(value.output)}${value.isolationBoundary === undefined
+                  ? ''
+                  : `\n\n${corumIsolationBoundaryNotice(value.isolationBoundary)}`}`,
           }],
         },
         // Children never mutate the parent session; the one parent-owned write
@@ -1492,6 +1529,19 @@ export function apply(ctx: Context, config: Config): void {
                       childSessionId: { type: 'string' },
                     },
                   },
+                  /**
+                   * fork（corum）：跑在**父主工作区**（没隔离）的任务序号 + 判据
+                   * （2026-09-13 用户定调「先做可见性」，见 `corumIsolationBoundaryNotice`）。
+                   * 只有存在这种任务时才出现。
+                   */
+                  parentTreeTasks: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      indexes: { type: 'array', items: { type: 'integer' } },
+                      boundary: { type: 'string', enum: ['parent-tree', 'skipped-non-git'] },
+                    },
+                  },
                 },
               },
               render: (_args, value) => {
@@ -1501,6 +1551,8 @@ export function apply(ctx: Context, config: Config): void {
                   script?: { name: string; agentsStarted: number; value?: unknown }
                   /** `childSessionId` = 集成者子会话（合并成功时才有；卡片「进入会话」按钮用）。 */
                   integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string }
+                  /** 跑在父主工作区（没隔离）的任务序号与判据（见上）。 */
+                  parentTreeTasks?: { indexes: number[]; boundary: 'parent-tree' | 'skipped-non-git' }
                 }
                 const parts: string[] = []
                 if (out.mode === 'script' && out.script !== undefined) {
@@ -1514,6 +1566,12 @@ export function apply(ctx: Context, config: Config): void {
                   parts.push(out.integration.integrated
                     ? `[corum integration] merged + committed into the main tree${out.integration.childSessionId === undefined ? '' : ` · child ${out.integration.childSessionId}`}`
                     : `[corum integration] ${out.integration.pendingBranches.length} branch(es) pending: ${out.integration.pendingBranches.join(', ')} — call \`subagent\` with integrate: true to merge, or discard them yourself`)
+                }
+                // fork（corum）：没隔离的任务其改动**已经在父主工作区里**（无分支、不会被
+                // merge）——单独一行告知，别让父 Agent 以为还有分支等着集成。
+                if (out.parentTreeTasks !== undefined && out.parentTreeTasks.indexes.length > 0) {
+                  const { indexes, boundary } = out.parentTreeTasks
+                  parts.push(`[corum isolation] ${indexes.length} of ${out.results?.length ?? indexes.length} task(s) ran in the PARENT working tree (not isolated${boundary === 'skipped-non-git' ? ': the workspace is not a git repository' : ': a lone foreground write task works in place'}): ${indexes.map(i => `#${i}`).join(', ')} — their edits are ALREADY in your tree and no branch carries them.`)
                 }
                 return [{ type: 'text', text: parts.filter(p => p !== '').join('\n\n') }]
               },
@@ -1671,6 +1729,13 @@ export function apply(ctx: Context, config: Config): void {
                 schema?: ObjectJsonSchema
               }>
               if (tasks === undefined || tasks.length === 0) throw new Error('orchestrate requires either `tasks` (1 or more) or `script`')
+              /**
+               * fork（corum）：**哪些任务跑在父主工作区里**（没隔离）——2026-09-13 用户
+               * 定调「先做可见性」。收集成一张表，汇总时另起一行报给父 Agent；**不动**
+               * 每任务行（`[task N · label] done|aborted|failed`）的格式——那个格式被
+               * `corum-ui-chat` 的编排卡正则消费，改它会让卡片静默退化（见审查报告 F-02）。
+               */
+              const parentTreeTasks: Array<{ index: number; boundary: 'parent-tree' | 'skipped-non-git' }> = []
               const run = (index: number): Promise<{ index: number; ok: boolean; aborted?: boolean; output?: string; error?: string; label?: string }> => {
                 const task = tasks[index]
                 const base = { index, ...task.label !== undefined ? { label: task.label } : {} }
@@ -1692,6 +1757,9 @@ export function apply(ctx: Context, config: Config): void {
                   notifyParent: false,
                 }, subagentProvider).then((outcome) => {
                   if (outcome.kind === 'foreground') {
+                    if (outcome.isolationBoundary !== undefined) {
+                      parentTreeTasks.push({ index, boundary: outcome.isolationBoundary })
+                    }
                     return { ...base, ok: true, output: outputValueText(outcome.output) }
                   }
                   // 后台/continuable：本阶段 orchestrate 汇合要求前台（fan-in 语义）。
@@ -1718,6 +1786,12 @@ export function apply(ctx: Context, config: Config): void {
                 mode: 'tasks' as const,
                 results,
                 ...integration.pendingBranches.length > 0 || integration.integrated ? { integration } : {},
+                ...parentTreeTasks.length === 0 ? {} : {
+                  parentTreeTasks: {
+                    indexes: parentTreeTasks.map(t => t.index),
+                    boundary: parentTreeTasks.every(t => t.boundary === 'skipped-non-git') ? 'skipped-non-git' as const : 'parent-tree' as const,
+                  },
+                },
               }
             },
           }))

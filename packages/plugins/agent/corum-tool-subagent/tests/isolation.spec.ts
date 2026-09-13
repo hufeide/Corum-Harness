@@ -21,6 +21,7 @@ import {
   corumEffectiveToolFilter,
   corumGit,
   corumIsGitRepo,
+  corumIsolationBoundaryNotice,
   corumIsWriteTask,
   corumMarkSettled,
   corumNarrowDenyFilter,
@@ -728,5 +729,53 @@ describe('CorumOrchestration.discardEntry — fork（corum）spawn 失败回滚�
   it('未知 slug 静默 no-op（无隔离的 spawn 失败路径）', () => {
     const orchestration = new CorumOrchestration(new Context())
     expect(() => orchestration.discardEntry('spec-discard-3', 'wt-none')).not.toThrow()
+  })
+})
+
+/**
+ * 隔离边界的**可见性**（2026-09-13 用户定调：先做 C——把事实说清，不改机制语义）。
+ *
+ * 由来：`subagent` 缺省策略下**单发前台写任务直接在主工作区改**（无 worktree、无分支），
+ * 而这件事此前只写在给**子 Agent** 的提示词里，父 Agent 从工具结果读不出来 —— 2026-09-12
+ * 的探针就是这么被骗的（用户要求「派前台隔离子 Agent」，机制按口径没隔离，父侧却以为隔离了）。
+ * 现在父侧拿到的那行说明由本函数产出，并由工具 render 附在结果末尾。
+ */
+describe('corumIsolationBoundaryNotice — 父 Agent 可见的隔离边界', () => {
+  it('parent-tree：明说在主工作区、没隔离、没有分支代管', () => {
+    const text = corumIsolationBoundaryNotice('parent-tree')
+    expect(text).toContain('PARENT working tree')
+    expect(text).toContain('not isolated')
+    expect(text).toContain('lone foreground write delegation')
+    expect(text).toContain('ALREADY in your tree')
+    expect(text).toContain('nothing will merge')
+  })
+
+  it('skipped-non-git：明说隔离因「不是 git 仓库」被跳过', () => {
+    const text = corumIsolationBoundaryNotice('skipped-non-git')
+    expect(text).toContain('not a git repository')
+    expect(text).toContain('ALREADY in your tree')
+  })
+
+  it('worktree：报已隔离 + 分支，且说明要经 integrate 才进主树', () => {
+    const text = corumIsolationBoundaryNotice('worktree', 'wt/abc123')
+    expect(text).toContain('ISOLATED worktree')
+    expect(text).toContain('wt/abc123')
+    expect(text).toContain('integrate')
+  })
+
+  it('三种落点互不混淆（父 Agent 不能把「没隔离」读成「隔离了」）', () => {
+    const parent = corumIsolationBoundaryNotice('parent-tree')
+    const skipped = corumIsolationBoundaryNotice('skipped-non-git')
+    const worktree = corumIsolationBoundaryNotice('worktree', 'wt/x')
+    expect(parent).not.toBe(skipped)
+    expect(parent).not.toContain('ISOLATED')
+    expect(skipped).not.toContain('ISOLATED')
+    expect(worktree).not.toContain('ALREADY in your tree')
+  })
+
+  it('语言纪律：工具结果里的说明用英文（与 prompt-language.spec.ts 同口径）', () => {
+    for (const boundary of ['parent-tree', 'skipped-non-git', 'worktree'] as const) {
+      expect(/[\u4e00-\u9fff]/.test(corumIsolationBoundaryNotice(boundary, 'wt/x'))).toBe(false)
+    }
   })
 })

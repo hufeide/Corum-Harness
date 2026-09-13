@@ -21,6 +21,7 @@ export {
   corumEffectiveToolFilter,
   corumDirectWriteNotice,
   corumEntryDead,
+  corumIsolationBoundaryNotice,
   corumIsolationNotice,
   corumGit,
   corumGitHead,
