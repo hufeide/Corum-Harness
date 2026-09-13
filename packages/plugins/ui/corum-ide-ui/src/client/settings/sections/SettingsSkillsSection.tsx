@@ -8,7 +8,7 @@ import { ArrowLeft, ChevronDown, Star, Trash2, X } from 'lucide-react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { ConfirmDialog } from '../ConfirmDialog.tsx'
 import { GlassButton, useCorumRpc } from '../shared.tsx'
-import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentBind } from '../types.ts'
+import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentBind, BuiltinSkillImportResult } from '../types.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from '../SettingsSections.module.css'
 
@@ -16,6 +16,19 @@ import css from '../SettingsSections.module.css'
 
 
 type SkillsView = { kind: 'list' } | { kind: 'detail'; name: string }
+
+/**
+ * 把「导入内置技能」的三桶摘要压成一行读得懂的结果。
+ * 空桶不出现；三桶全空说明内置技能都已就位，给一句明确结论而不是空白。
+ */
+function formatBuiltinSummary(r: BuiltinSkillImportResult): string {
+  const parts: string[] = []
+  if (r.installed.length > 0) parts.push(`新装 ${r.installed.length} 个（${r.installed.join('、')}）`)
+  if (r.skipped.length > 0) parts.push(`跳过 ${r.skipped.length} 个已有同名的，未覆盖（${r.skipped.join('、')}）`)
+  if (r.tombstoned.length > 0) parts.push(`不复活 ${r.tombstoned.length} 个你删除过的（${r.tombstoned.join('、')}）`)
+  if (parts.length === 0) return '内置技能都已在库，没有需要变更的。'
+  return parts.join('；')
+}
 
 export function SkillsSection() {
   const rpc = useCorumRpc()
@@ -25,6 +38,8 @@ export function SkillsSection() {
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<SkillInfo | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [builtinBusy, setBuiltinBusy] = useState(false)
+  const [builtinResult, setBuiltinResult] = useState<BuiltinSkillImportResult | null>(null)
 
   const reload = async () => {
     if (!rpc) return
@@ -42,6 +57,26 @@ export function SkillsSection() {
   }
 
   useEffect(() => { void reload() }, [rpc])
+
+  /**
+   * 「导入内置技能」：把随包分发的官方技能集装进技能库。
+   * 幂等且不破坏——已有同名一律不覆盖、用户删过的不复活（host 侧策略），
+   * 这里只负责发起 + 把三桶结果如实摊给用户看。
+   */
+  const importBuiltin = async () => {
+    if (!rpc) return
+    setBuiltinBusy(true)
+    setBuiltinResult(null)
+    try {
+      const r = await rpc<BuiltinSkillImportResult>('skillManager', 'importBuiltinSkills', {})
+      setBuiltinResult(r)
+      if (r.ok) await reload()
+    } catch (e) {
+      setBuiltinResult({ ok: false, error: e instanceof Error ? e.message : String(e), installed: [], skipped: [], tombstoned: [] })
+    } finally {
+      setBuiltinBusy(false)
+    }
+  }
 
   /** 计算某 skill 被多少个 Agent 绑定。 */
   const bindCount = (name: string) =>
@@ -91,9 +126,17 @@ export function SkillsSection() {
         ))}
         <div className={css.actionsRow}>
           <GlassButton onClick={() => setImportOpen(true)}>导入技能</GlassButton>
+          <GlassButton onClick={() => void importBuiltin()} disabled={builtinBusy}>
+            {builtinBusy ? '导入中…' : '导入内置技能'}
+          </GlassButton>
         </div>
+        {builtinResult !== null && (
+          builtinResult.ok
+            ? <p className={css.hintText}>内置技能：{formatBuiltinSummary(builtinResult)}</p>
+            : <p className={css.confirmWarn}>导入内置技能失败：{builtinResult.error ?? '未知错误'}</p>
+        )}
       </SettingGroup>
-      <p className={css.hintText}>技能是可复用的指令与资源包，可在 Agent 预设中按版本绑定。点击条目查看详情。</p>
+      <p className={css.hintText}>技能是可复用的指令与资源包，可在 Agent 预设中按版本绑定。点击条目查看详情。「导入内置技能」装入随产品的官方技能集：已有同名的保留你的版本不覆盖，你删除过的不再装回。</p>
       {deleting && (
         <DeleteSkillDialog
           skill={deleting}

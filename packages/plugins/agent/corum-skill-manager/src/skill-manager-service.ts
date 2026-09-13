@@ -18,6 +18,10 @@
  * 导入时创建初始版本；Agent 绑定时指定 versionId，
  * Agent 创建前把对应版本的 SKILL.md 复制为当前 SKILL.md。
  *
+ * 另有「内置技能」入口（importBuiltinSkills）：把随包分发的官方技能集
+ * （packages/desktop/shipped-skills/，见 shipped-skills.ts）装进技能库，
+ * 不覆盖用户改过的、不复活用户删过的。
+ *
  * @module @corum/corum-skill-manager/skill-manager-service
  */
 
@@ -27,6 +31,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { SkillBinding, SkillInfo, SkillVersion, SkillVersionsConfig, ImportResult, ScannedSkill, ScanDirectoryResult, ImportDirectoryResult } from './types.ts'
+import { parseSkillFrontmatter, isValidSkillName } from './skill-format.ts'
+import { TOMBSTONE_FILE_NAME, clearTombstone, importShippedSkills, resolveShippedSkillsRoot, scanShippedSkills, writeTombstone } from './shipped-skills.ts'
+import type { BuiltinSkillImportResult } from './shipped-skills.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -73,6 +80,8 @@ export class SkillManagerService extends TypertRemoteService {
     cpSync(sourcePath, targetDir, { recursive: true })
     // 创建初始版本
     createVersion(targetDir, '初始导入')
+    // 用户显式导入同名内置技能 = 撤回「拒收」，否则该名字会被 tombstone 永久挡死。
+    clearTombstone(tombstoneFilePath(), skillName)
 
     return { ok: true, skill: readSkillInfo(skillName) }
   }
@@ -98,6 +107,8 @@ export class SkillManagerService extends TypertRemoteService {
     mkdirSync(targetDir, { recursive: true })
     writeFileSync(join(targetDir, 'SKILL.md'), content, 'utf8')
     createVersion(targetDir, '初始导入')
+    // 同 importFromFile：显式导入撤回 tombstone，给「拒收后又想要」留出口。
+    clearTombstone(tombstoneFilePath(), skillName)
 
     return { ok: true, skill: readSkillInfo(skillName) }
   }
@@ -108,6 +119,9 @@ export class SkillManagerService extends TypertRemoteService {
     const dir = skillDirPath(name)
     if (!existsSync(dir)) return { ok: false, error: `skill "${name}" does not exist` }
     rmSync(dir, { recursive: true, force: true })
+    // 删的是随包内置技能 → 记 tombstone，之后「导入内置技能」不再复活它。
+    // 只对内置技能记账：用户自建技能被删后，同名内置技能将来上线仍应能装进来。
+    if (isShippedSkillName(name)) writeTombstone(tombstoneFilePath(), name)
     return { ok: true }
   }
 
@@ -239,10 +253,48 @@ export class SkillManagerService extends TypertRemoteService {
         mkdirSync(targetDir, { recursive: true })
         cpSync(sk.sourcePath, targetDir, { recursive: true })
         createVersion(targetDir, '目录导入')
+        // 同 importFromFile：显式导入撤回 tombstone。
+        clearTombstone(tombstoneFilePath(), sk.name)
         result.imported += 1
       } catch (error) {
         result.failed.push({ name: sk.name, error: error instanceof Error ? error.message : String(error) })
       }
+    }
+    return result
+  }
+
+  // ── 内置技能（随包分发）────────────────────────────────────────────
+
+  /**
+   * 把随包分发的内置技能集（官方技能）装进技能库。
+   *
+   * 幂等且不破坏，三条互斥规则见 shipped-skills.ts：
+   *   - 已有同名技能 → 原样保留（`skipped`），绝不覆盖用户可能改过的内容；
+   *   - 该名字被用户删过（tombstone）→ 不复活（`tombstoned`）；
+   *   - 其余 → 安装并补一个初始版本（`installed`）。
+   *
+   * @returns 结构化摘要 `{ installed, skipped, tombstoned }`（失败时 `ok:false` + `error`）。
+   */
+  @Remote('importBuiltinSkills')
+  importBuiltinSkills(): BuiltinSkillImportResult {
+    const shippedRoot = resolveShippedSkillsRoot()
+    if (shippedRoot === undefined) {
+      return {
+        ok: false,
+        error: '未找到内置技能目录（packages/desktop/shipped-skills）。打包版应位于 host 运行时旁的 shipped-skills/；可用 CORUM_SHIPPED_SKILLS_DIR 显式指定。',
+        installed: [],
+        skipped: [],
+        tombstoned: [],
+      }
+    }
+    const result = importShippedSkills({
+      shippedRoot,
+      skillsRoot: skillsRootPath(),
+      tombstoneFile: tombstoneFilePath(),
+    })
+    // 与手动导入形态对齐：每个装上的内置技能落一个初始版本快照。
+    for (const name of result.installed) {
+      createVersion(skillDirPath(name), '内置技能导入')
     }
     return result
   }
@@ -276,11 +328,21 @@ function skillDirPath(name: string): string {
   return join(skillsRootPath(), name)
 }
 
-function isValidSkillName(name: string): boolean {
-  if (!name || name.length === 0) return false
-  if (name.startsWith('.')) return false
-  if (name.includes('/') || name.includes('\\')) return false
-  return true
+/** tombstone 台账路径：放 CORUM_HOME 根而非 skills/ 内，避免给官方 skill 加载器制造意外条目。 */
+function tombstoneFilePath(): string {
+  return join(corumHome(), TOMBSTONE_FILE_NAME)
+}
+
+/**
+ * 这个名字是不是随包内置技能。
+ * 用名字集合判定（而非「是不是从内置装来的」）——我们只需要回答
+ * 「删掉它之后，将来的内置导入有没有可能把它装回来」，名字相同就够了。
+ * 随包目录不可解析时返回 false：宁可少记一条 tombstone，也不要凭空造台账。
+ */
+function isShippedSkillName(name: string): boolean {
+  const shippedRoot = resolveShippedSkillsRoot()
+  if (shippedRoot === undefined) return false
+  return scanShippedSkills(shippedRoot).some(s => s.name === name)
 }
 
 function isDirectory(path: string): boolean {
@@ -289,21 +351,6 @@ function isDirectory(path: string): boolean {
   } catch {
     return false
   }
-}
-
-function parseSkillFrontmatter(content: string): { name: string; description: string } | undefined {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
-  if (fmMatch === null) return undefined
-  const fm = fmMatch[1]
-  const fields = new Map<string, string>()
-  for (const line of fm.split('\n')) {
-    const m = line.match(/^(\w[\w-]*)\s*:\s*(.*)$/)
-    if (m !== null) fields.set(m[1], m[2].trim())
-  }
-  const name = fields.get('name')
-  const description = fields.get('description')
-  if (name === undefined || description === undefined) return undefined
-  return { name, description }
 }
 
 const VERSIONS_FILE = 'skill-versions.json'

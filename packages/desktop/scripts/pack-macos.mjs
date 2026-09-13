@@ -45,6 +45,10 @@ const CORUM_PRESETS = join(root, '.agent-presets')
 const OFFICIAL_PRESETS = join(DESKTOP_ROOT, 'shipped-presets', 'official')
 /** host 运行时里 shipped-presets 的 staging 目标。 */
 const SHIPPED_PRESETS_DIR = join(HOST_DIR, 'shipped-presets')
+/** 随包分发的官方技能集（仓库内实体；开发态由插件按源码布局直接解析）。 */
+const SHIPPED_SKILLS = join(DESKTOP_ROOT, 'shipped-skills')
+/** host 运行时里 shipped-skills 的 staging 目标（与 shipped-presets 同级，锚点同款）。 */
+const SHIPPED_SKILLS_DIR = join(HOST_DIR, 'shipped-skills')
 
 async function run(label, command, args) {
   console.log(`[pack-macos] ${label}`)
@@ -203,6 +207,18 @@ async function copyDesktopArtifacts() {
   }
   if (existsSync(OFFICIAL_PRESETS)) {
     await cp(OFFICIAL_PRESETS, join(SHIPPED_PRESETS_DIR, 'official'), { recursive: true, dereference: true })
+  }
+  // Shipped official skill set: staged beside the host runtime so
+  // `@corum/corum-skill-manager`'s resolveShippedSkillsRoot() finds
+  // `<runtime>/shipped-skills/` by the same up-walk anchor in the app, and the
+  // repo layout `packages/desktop/shipped-skills/` in a source checkout.
+  await rm(SHIPPED_SKILLS_DIR, { recursive: true, force: true })
+  if (existsSync(SHIPPED_SKILLS)) {
+    await cp(SHIPPED_SKILLS, SHIPPED_SKILLS_DIR, { recursive: true, dereference: true })
+  } else {
+    // 缺了它，「设置 → 技能 → 导入内置技能」会在真机上退化成
+    // ok:false「未找到内置技能目录」——打包期就报出来，不要留给用户发现。
+    throw new Error(`pack-macos: shipped-skills missing at ${SHIPPED_SKILLS}`)
   }
   // 前端 dist 独立 staging（electron-builder extraResources 用），不进 host。
   await rm(DIST_DIR, { recursive: true, force: true })
