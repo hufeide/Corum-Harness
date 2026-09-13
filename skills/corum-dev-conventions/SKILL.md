@@ -7,6 +7,8 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
 
 本技能是 `AGENTS.md`（红线 + 入口）与 `docs/dev-conventions.md`（**规则的唯一家**）的**可执行投影**：它讲「动手时按什么顺序做、什么绝对不能做、做完拿什么证明」。规则全文不在这里复制——细节以 `docs/dev-conventions.md` 为准，两者冲突时以文档为准并回来修本技能。它是 guidance，不是脚本。
 
+> `.dbg/` 已随提交 `e74a5b44` 移出工作树：本文中的 `.dbg/...` 路径是历史证据锚点，取回方式与逐文件索引见 [docs/DBG-ARCHIVE-INDEX.md](../../docs/DBG-ARCHIVE-INDEX.md)。
+
 ## 0. 一句话
 
 **先证明你要改的那个面是谁在渲染 / 谁拥有，再动手；改完必须拿出真实运行的证据；「编译通过」不是完成。**
@@ -63,3 +65,13 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
 - **占位符是未来工作**，不能因为「暂时没人用」就删；只有确实要移除的才移除。
 - **破坏性动作先问**：删内置角色 / 删目录 / 动用户 home 与凭据 / 重启用户正在用的实例。
 - **不要碰用户的实例与数据**：主实例 `:9222`、`~/.corum`、`~/.agents`；验证用自己 `:9333` 的实例与 `.corum-verify-home`。
+- **先读技能再动手**（2026-09-13 立规）：任务匹配某个技能的描述（实机验证 / CDP / ESP32…）时，**先加载技能**——
+  你已经踩过的坑大概率写在它的「常见坑」表里（实例：`$VAR（中文` 那条，技能里早有，却仍现场踩了一次）。
+- **装置起不来就别 debug 环境**（2026-09-13 立规）：按装置打印的可执行下一步做**一次**（cd 主 checkout / 设 `CORUM_REPO` /
+  等 Electron 就绪后重跑），仍失败就**停下来报 blocked**并贴原始输出。禁止 `lsof`/`pgrep`/`kill -0` 连环试探、
+  换端口另起实例、写一次性探针绕过、手改 PID 文件（实测代价：一个子 Agent 烧几十步，最后驱动了别人的实例）。
+- **动手前先证明「改的是那一处」**（2026-09-13 立规）：给出证据（设置分区注册表行 / 真机 DOM 类名前缀 / 数据来源）再改；
+  验收分两问——先验「改的是不是那一处」，再验「改得对不对」。
+- **状态清单由脚本生成，不手维护**（2026-09-13 立规）：交接/BUG 状态/待办队列一律从 `docs/tasks/log.jsonl` 渲染
+  （`node scripts/tasklog-open.mjs`，同 key 后者胜、`supersedes` 裁决演进、`--check` 有冲突即非零退出）。
+  手维护的清单必然过期（实测：写「领先 6 个提交」而实况 9，且漏两条待拍板条目）。

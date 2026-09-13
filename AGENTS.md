@@ -7,6 +7,8 @@
 > `docs/dev-conventions.md` (read it in full before touching cross-bundle state
 > or adding a plugin).
 
+> `.dbg/` was moved out of the working tree in commit `e74a5b44`: the `.dbg/...` paths in this document are historical evidence anchors — retrieval instructions and the per-file index are in [docs/DBG-ARCHIVE-INDEX.md](docs/DBG-ARCHIVE-INDEX.md).
+
 ## Red Lines (know these first)
 
 1. **Cross-bundle shared state: always a cordis service, never a window global
