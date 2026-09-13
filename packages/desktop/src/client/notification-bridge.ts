@@ -87,6 +87,20 @@ interface SubagentChildFrame {
   mode?: 'foreground' | 'background'
 }
 
+/**
+ * 「子 Agent 半途失去运行」帧（`corum/subagent/interrupted`）。
+ *
+ * 与 progress 帧的区别：它**不是事件驱动**的，而是宿主在读取进度时判出事实后补发的
+ * 一次性广播（见 corum-api-remotes 的 `SubagentInterruptedEvent` 注释）。
+ */
+interface SubagentInterruptedFrame {
+  sessionId?: string
+  parentSessionId?: string
+  reason?: 'not-running' | 'pre-boot'
+  turn?: number
+  step?: number
+}
+
 /** 隔离台账帧（`corum/worktree-ledger`）。 */
 interface WorktreeLedgerFrame {
   sessionId?: string
@@ -397,6 +411,31 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
       label: frame.label === undefined || frame.label === '' ? '子 Agent' : frame.label,
       ...frame.parentSessionId === undefined ? {} : { parentSessionId: frame.parentSessionId },
     })
+  })
+
+  // 「子 Agent 半途失去运行」：宿主在**发现点**（读进度时判出）补发的一次性广播。
+  // 用户 2026-09-13 定调：这种情况要提示，不能静默——它意味着那一轮工作没有产出，
+  // 而推送帧永远不会带这条事实（它是对「上个进程生命周期留下的未闭合 turn」的判定，
+  // 不是事件）。色调取 warn，与「手动终止」同档：都不是成功。
+  //
+  // **按父会话合并成一条**（选型原则①：同一批不刷屏）：一次重启会留下 N 个被中断的
+  // 子 Agent（本机实测 9 个），逐条提示就是连刷 9 个 toast。故 key 按父会话复用
+  // ——`publish` 对同 key 是「替换」语义，于是同一条通知的文案随计数更新。
+  const interruptedCounts = new Map<string, number>()
+  on<SubagentInterruptedFrame>('corum/subagent/interrupted', (frame) => {
+    const child = frame.sessionId
+    if (child === undefined || child === '') return
+    const known = childLabels.get(child)
+    childLabels.delete(child)
+    const parent = known?.parentSessionId ?? frame.parentSessionId
+    const key = `subagent:interrupted:${parent ?? child}`
+    const seen = (interruptedCounts.get(key) ?? 0) + 1
+    interruptedCounts.set(key, seen)
+    publish(store, key, {
+      tone: 'warn',
+      title: '子 Agent 已中断',
+      message: clip(seen > 1 ? `${seen} 个子 Agent · 上次运行未正常结束` : `${known?.label ?? '子 Agent'} · 上次运行未正常结束`),
+    }, subagentOpener(parent, child))
   })
 
   on<SubagentProgressFrame>('corum/subagent/progress', (frame) => {

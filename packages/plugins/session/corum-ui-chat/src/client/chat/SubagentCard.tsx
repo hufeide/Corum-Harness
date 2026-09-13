@@ -18,7 +18,7 @@
 // chatRuntimeRef 拿服务实例，见 ../chat-runtime.ts）。
 import { memo, useEffect, useState } from 'react'
 import { ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, GitFork, Loader, Search, Wrench, X } from 'lucide-react'
-import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
+import { subagentProgressStateOf, subagentStateChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentChangeSummary, SubagentDelegationRole, SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 
@@ -254,7 +254,8 @@ function useSubagentPrompt(childSessionId: string | undefined, expanded: boolean
 
 /** 进度条填充比例：以 step 步数为最小步进（无总步数，单调爬升渐近 100%）。 */
 function progressRatio(progress: SubagentProgressSnapshot): number {
-  if (subagentOutcomeOf(progress.stopReason) !== undefined) return 1
+  // 终态（含 interrupted）直接满格——判据同源，别在这里再写一遍 done/stopReason 的组合。
+  if (subagentProgressStateOf(progress) !== 'running') return 1
   return Math.min(0.1 + progress.step * 0.18, 0.9)
 }
 
@@ -332,15 +333,17 @@ function SubagentRow({
   const model = useChildModel(childSessionId)
   const [expanded, setExpanded] = useState(false)
   const detailPrompt = useSubagentPrompt(childSessionId, expanded)
-  const outcome = subagentOutcomeOf(progress?.stopReason)
   /**
-   * 中途失去运行的子会话（进程退出 / 被丢弃）：宿主在进度投影里补 `interrupted`
-   * （没有权威 stopReason 可给）。不认它的话卡片会永远 Running——2026-09-12 用户实测
-   * 「search agent 结束后卡片仍然是 running」。
+   * 展示态走**唯一判据家**（`subagentProgressStateOf`，2026-09-13 收口）：
+   * 中途失去运行的子会话（进程退出 / 被丢弃）由宿主在进度投影里补 `interrupted`
+   * ——它不是完成、也不是手动终止；拿不到原因但已终局的条目按「已完成」兜底。
+   * 不认 `interrupted` 卡片会永远 Running（2026-09-12 用户实测「search agent 结束后
+   * 卡片仍然是 running」）；而在卡片一处自判、会话条另判一次，就是「同一终态两处
+   * 不同源」（花名册把「已中断」算成「已完成」正是这么来的）。
    */
-  const interrupted = progress?.interrupted === true
-  const running = outcome === undefined && !interrupted
-  const chipTone = interrupted ? 'aborted' : subagentOutcomeChipTone(outcome)
+  const state = subagentProgressStateOf(progress ?? {})
+  const running = state === 'running'
+  const chipTone = subagentStateChipTone(state)
 
   const openChild = () => {
     if (childSessionId === undefined) return
@@ -393,11 +396,11 @@ function SubagentRow({
         )}
         <span
           className={chipTone === 'running' ? css.runChip : chipTone === 'done' ? css.doneChip : chipTone === 'aborted' ? css.stopChip : css.failChip}
-          data-outcome={outcome ?? 'running'}
+          data-outcome={state}
         >
-          {chipTone === 'running'
+          {running
             ? <><span className={css.runDot} />{t('subagent.running')}</>
-            : interrupted
+            : state === 'interrupted'
               ? <><Ban size={12} strokeWidth={2.5} />{t('subagent.interrupted')}</>
               : chipTone === 'done'
                 ? <><Check size={12} strokeWidth={2.5} />{t('subagent.done')}</>

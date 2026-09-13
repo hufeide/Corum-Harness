@@ -22,6 +22,7 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // fork（corum）：官方 installModelSelection 会用安装时的选择覆盖用户显式换的模型，
 // 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
 import { installTaskModelSelection } from './task-model-selection.ts'
+import { childRunInterruptOf } from './child-progress.ts'
 import { CHILD_WORKER_ROLE, TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
 import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
@@ -575,8 +576,14 @@ export class CorumAgentService extends TypertRemoteService {
      */
     ctx.on('corum/subagent/child' as never, ((info: {
       readonly childSessionId?: string
+      readonly parentSessionId?: string
       readonly role?: 'worker' | 'research' | 'fork'
     }) => {
+      // 父会话归属与角色分开记：角色可能缺省（取不到工具名的路径），但父会话 id 一直有——
+      // 中断广播要靠它给出通知的跳转目标（2026-09-13）。
+      if (info.childSessionId !== undefined && info.parentSessionId !== undefined) {
+        this.subagentParents.set(info.childSessionId, info.parentSessionId)
+      }
       if (info.childSessionId === undefined || info.role === undefined) return
       this.subagentRoles.set(info.childSessionId, info.role)
     }) as never, { global: true })
@@ -628,6 +635,14 @@ export class CorumAgentService extends TypertRemoteService {
    * `getChildSessionProgress` 的冷启动补标拿到（与 stopReason 的种子同一条路）。
    */
   private readonly subagentRoles = new Map<string, 'worker' | 'research' | 'fork'>()
+  /** childSessionId → 父会话 id（中断广播的通知跳转目标；来自 `corum/subagent/child` 帧）。 */
+  private readonly subagentParents = new Map<string, string>()
+  /**
+   * 已广播过「半途失去运行」的子会话（进程内去重）。
+   * 判定发生在**读取**路径上，同一子会话会被反复拉取（花名册种子 + 卡片），
+   * 不去重就会每拉一次刷一条通知。
+   */
+  private readonly notifiedInterrupted = new Set<string>()
 
   private readonly subagentProgress = new Map<string, {
     turn: number
@@ -2224,19 +2239,24 @@ export class CorumAgentService extends TypertRemoteService {
     /**
      * 被进程退出杀掉 / 中途失去运行的子会话：log 里有 `turn/start` 却没有 `turn/end`，
      * 事件投影推不出终态 → 卡片永远停在 Running（2026-09-12 用户实测「search agent
-     * 结束后卡片仍是 running」的一类残余）。宿主能判「它已经不在跑」（不在 agents
-     * registry 里）→ 补一个**诚实**的终态：`done: true` + `interrupted: true`。
-     * 不伪造 stopReason：既不是正常完成，也不是用户手动终止，UI 另有「已中断」文案。
+     * 结束后卡片仍是 running」的一类残余）。宿主能判「它已经不在跑」→ 补一个**诚实**
+     * 的终态：`done: true` + `interrupted: true`。
+     * 判据本体在 `child-progress.ts`（纯函数 + 单测）；这里只负责查 registry 与时钟。
      */
-    //
-    // 两个判据取或（缺一不可覆盖全部情况）：
-    //   ① `agentRunning` 说它没在跑（已 dispose 的一次性子会话，或 registry 里 status=idle）；
-    //   ② 它的最后一个事件**发生在本进程启动之前** —— 那个未闭合的 turn 不可能还在本进程
-    //      里跑（app 重启会把**常驻**子会话的半途 turn 留在 log 里：只有 turn/start、
-    //      没有 turn/end；常驻子会话不会被 dispose，故 ① 对它判不出来）。2026-09-12 实测。
-    const lastActiveBeforeBoot = lastActive < Date.now() - process.uptime() * 1000
-    const interrupted = !done && stopReason === undefined
-      && (this.agentRunning(sessionId) === false || lastActiveBeforeBoot)
+    const bootAt = Date.now() - process.uptime() * 1000
+    const interruptReason = childRunInterruptOf({
+      done,
+      stopReason,
+      agentRunning: () => this.agentRunning(sessionId),
+      lastActive,
+      bootAt,
+    })
+    const interrupted = interruptReason !== undefined
+    // 「中断」不是事件（它是读取时的判定），而通知桥只消费推送帧 → 在**发现点**补一次
+    // 广播（进程内按子会话去重）。用户 2026-09-13 定调：这种情况要有通知，不能静默。
+    if (interruptReason !== undefined) {
+      await this.broadcastInterrupted(sessionId, { reason: interruptReason, turn, step, lastActive })
+    }
     return {
       ...identity,
       progress: {
@@ -2249,6 +2269,60 @@ export class CorumAgentService extends TypertRemoteService {
         lastActive,
         ...todos === undefined ? {} : { todos },
       },
+    }
+  }
+
+  /**
+   * 「半途失去运行」的一次性广播（进程内按子会话去重）。
+   *
+   * 为什么在读取路径上发：这条事实**不是事件**——它是宿主对「上一个进程生命周期留下的
+   * 未闭合 turn」的判定，只能在读持久化事件时得出。通知桥只订阅推送帧，所以此前这种
+   * 子 Agent 完全静默（2026-09-12 实测：8 张卡里 1 张「已中断」，通知栏一条都没有）。
+   * 广播失败绝不影响进度读取——辅助信息不得打挂主 RPC（2026-09-12 的教训）。
+   */
+  /**
+   * 子会话的父会话 id（通知的跳转目标，也是「同一批合并成一条」的键）。
+   *
+   * 先查本进程记的 `corum/subagent/child` 帧；**帧不重放**（重启后一条都没有），
+   * 于是退回**持久化 header** 的 `parentSession` —— 那是会话自身 durable 的事实，
+   * 重启/刷新后依然在（2026-09-13 实测：只靠帧的话 9 个被中断的子 Agent 会各成一条
+   * 通知，因为它们都没有父会话可归并）。
+   */
+  private async childParentSession(sessionId: string): Promise<string | undefined> {
+    const known = this.subagentParents.get(sessionId)
+    if (known !== undefined) return known
+    try {
+      const handle = await this.ctx.sessionPersistence.open(SessionId(sessionId), 'read')
+      try {
+        const parent = handle.header.parentSession
+        if (parent === undefined) return undefined
+        const id = String(parent)
+        this.subagentParents.set(sessionId, id)
+        return id
+      } finally {
+        await handle.close()
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  private async broadcastInterrupted(
+    sessionId: string,
+    info: { readonly reason: 'not-running' | 'pre-boot'; readonly turn: number; readonly step: number; readonly lastActive: number },
+  ): Promise<void> {
+    if (this.notifiedInterrupted.has(sessionId)) return
+    // 先占位再 await：并发两次拉同一条进度时也只广播一次。
+    this.notifiedInterrupted.add(sessionId)
+    const parentSessionId = await this.childParentSession(sessionId)
+    try {
+      this.ctx.emit('corum/subagent/interrupted', {
+        sessionId,
+        ...parentSessionId === undefined ? {} : { parentSessionId },
+        ...info,
+      })
+    } catch {
+      // 广播失败不影响读取（同上）。
     }
   }
 

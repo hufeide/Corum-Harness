@@ -18,7 +18,12 @@ import type {
 } from '@deepseek-ai/dsh-api-gateway'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import { describe, expect, it } from 'vitest'
-import { subagentDelegationRoleOf } from '../src/corum-events.ts'
+import {
+  subagentDelegationRoleOf,
+  subagentProgressStateOf,
+  subagentStateChipTone,
+  subagentTerminalTone,
+} from '../src/corum-events.ts'
 import { apply, inject } from '../src/index.ts'
 import { API_REMOTE_FORWARDED_EVENTS } from '../src/remote-events.ts'
 
@@ -250,8 +255,8 @@ describe('corum 事件转发（P2-4 运行时守护）', () => {
     .map(entry => entry.event)
     .filter(event => event.startsWith('corum/'))
 
-  it('allowlist 含全部 20 个 corum 事件（新增事件必须同步登记）', () => {
-    expect(CORUM_EVENTS.length).toBe(20)
+  it('allowlist 含全部 21 个 corum 事件（新增事件必须同步登记）', () => {
+    expect(CORUM_EVENTS.length).toBe(21)
     expect(new Set(CORUM_EVENTS).size).toBe(CORUM_EVENTS.length)
   })
 
@@ -310,6 +315,77 @@ describe('corum 事件转发（P2-4 运行时守护）', () => {
 
     abort.abort()
     await ctx.fiber.dispose()
+  })
+})
+
+describe('subagentProgressStateOf — 子 Agent 展示态的单一判据家（2026-09-13）', () => {
+  it('优先级：权威 stopReason > interrupted > done 兜底', () => {
+    // 宿主只在拿不到 stopReason 时才置 interrupted，故两者同时出现时以权威原因记账。
+    expect(subagentProgressStateOf({ interrupted: true, done: true, stopReason: 'aborted' })).toBe('aborted')
+    expect(subagentProgressStateOf({ interrupted: true, done: true })).toBe('interrupted')
+    // 兜底最弱：有原因/有 interrupted 都不会走到它。
+    expect(subagentProgressStateOf({ interrupted: true, done: true })).not.toBe('completed')
+  })
+
+  it('stopReason → 三态', () => {
+    expect(subagentProgressStateOf({ stopReason: 'completed', done: true })).toBe('completed')
+    expect(subagentProgressStateOf({ stopReason: 'aborted', done: true })).toBe('aborted')
+    for (const reason of ['error', 'max-tokens', 'refusal'] as const) {
+      expect(subagentProgressStateOf({ stopReason: reason, done: true })).toBe('failed')
+    }
+  })
+
+  it('拿不到原因的终局按「已完成」兜底，不永远算运行中（BUG-31 的判据同源）', () => {
+    expect(subagentProgressStateOf({ done: true })).toBe('completed')
+  })
+
+  it('未结束 = running', () => {
+    expect(subagentProgressStateOf({})).toBe('running')
+    expect(subagentProgressStateOf({ done: false })).toBe('running')
+  })
+
+  it('色调：interrupted 与 aborted 同档 warn；只有 completed 是 success', () => {
+    expect(subagentTerminalTone('completed')).toBe('success')
+    expect(subagentTerminalTone('aborted')).toBe('warn')
+    expect(subagentTerminalTone('interrupted')).toBe('warn')
+    expect(subagentTerminalTone('failed')).toBe('error')
+  })
+
+  it('chip 色调：不扩词表——interrupted 复用 aborted 档', () => {
+    expect(subagentStateChipTone('running')).toBe('running')
+    expect(subagentStateChipTone('completed')).toBe('done')
+    expect(subagentStateChipTone('aborted')).toBe('aborted')
+    expect(subagentStateChipTone('interrupted')).toBe('aborted')
+    expect(subagentStateChipTone('failed')).toBe('failed')
+  })
+
+  it('会话条花名册的镜像判据与这里逐条一致（红线 3：本包不 import，靠本用例钉住）', async () => {
+    // 会话条（corum-ide-ui）刻意**不** import 本包（跨 bundle 用本地能力接口收窄），
+    // 它自带一份 `subagentStateOf`。判据分叉过一次（「已中断」只落了卡片、花名册仍算
+    // 「已完成」），所以这里把镜像的**规则原文**钉住：镜像改了这里就红，改哪边都得同步。
+    const fs = await import('node:fs')
+    const src = fs.readFileSync(
+      new URL('../../../ui/corum-ide-ui/src/client/session-bar.tsx', import.meta.url), 'utf8',
+    )
+    expect(src).toContain('function subagentStateOf(')
+    // 规则顺序必须同序：outcome → interrupted → done 兜底（顺序错了就不是同语义）。
+    const outcomeAt = src.indexOf('const outcome = subagentOutcomeOf(e.stopReason)')
+    const interruptedAt = src.indexOf("if (e.interrupted === true) return 'interrupted'")
+    const doneFallbackAt = src.indexOf("return e.done === true ? 'completed' : 'running'")
+    expect(outcomeAt).toBeGreaterThan(-1)
+    expect(interruptedAt).toBeGreaterThan(outcomeAt)
+    expect(doneFallbackAt).toBeGreaterThan(interruptedAt)
+    // 规则 3：镜像表必须覆盖同一组五态。
+    expect(src).toContain("type SubagentState = 'running' | 'completed' | 'aborted' | 'failed' | 'interrupted'")
+  })
+
+  it('卡片（corum-ui-chat）也走同一个分类函数，不自己判 done 布尔', async () => {
+    const fs = await import('node:fs')
+    const src = fs.readFileSync(
+      new URL('../../../session/corum-ui-chat/src/client/chat/SubagentCard.tsx', import.meta.url), 'utf8',
+    )
+    expect(src).toContain('subagentProgressStateOf')
+    expect(src).toContain('subagentStateChipTone')
   })
 })
 

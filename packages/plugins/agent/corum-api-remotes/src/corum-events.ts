@@ -326,6 +326,62 @@ export function subagentOutcomeChipTone(outcome: SubagentOutcome | undefined): '
 }
 
 /**
+ * 子 Agent 展示态（**五态**：含运行中，与「半途失去运行」的 interrupted）。
+ *
+ * 2026-09-13 收口（用户实测「卡片停在 Running」修复的尾巴）：`interrupted` 此前只在
+ * 卡片一处落地，会话条花名册/胶囊仍把它算成「已完成」——**同一个终态在两处不同源**。
+ * 这类「判据与展示不同源」是 BUG-31 的同族病（见 LESSONS §6.25），故把分类提成
+ * 唯一函数，卡片、花名册、通知桥都走它。
+ */
+export type SubagentProgressState = 'running' | 'completed' | 'aborted' | 'failed' | 'interrupted'
+
+/** 已结束的展示态（通知/色调只对它们有意义）。 */
+export type SubagentTerminalState = Exclude<SubagentProgressState, 'running'>
+
+/**
+ * 进度投影 → 展示态（**唯一判据家**）。输入即宿主投影的三个字段，**优先级从高到低**：
+ * 1. `stopReason`：`turn/end.reason.kind` 推出的**权威**终局原因——有它就以它记账；
+ * 2. `interrupted`：宿主判定「这个子会话半途失去运行」（进程被杀/重启把未闭合的
+ *    `turn/start` 留在 log 里；见 `corum-agent/src/agent-service.ts` 的判据注释）。
+ *    宿主**只在拿不到 `stopReason` 时**才置它，故它是「没有原因时的诚实补标」，
+ *    而不是用来覆盖权威原因的；它也优先于下面的 done 兜底（这类条目 done 也是 true）。
+ * 3. `done`：turn 已闭合/宿主已判终局、但拿不到原因（历史条目、冷恢复）→ 按「已完成」
+ *    兜底（与 BUG-31 的折叠判据同源：不能因为拿不到原因就永远算运行中）。
+ */
+export function subagentProgressStateOf(progress: {
+  readonly stopReason?: SubagentStopReason
+  readonly done?: boolean
+  readonly interrupted?: boolean
+}): SubagentProgressState {
+  const outcome = subagentOutcomeOf(progress.stopReason)
+  if (outcome !== undefined) return outcome
+  if (progress.interrupted === true) return 'interrupted'
+  return progress.done === true ? 'completed' : 'running'
+}
+
+/** 已结束态 → 通知色调；interrupted 与 aborted 同档（warn）——都不是成功。 */
+export function subagentTerminalTone(state: SubagentTerminalState): 'success' | 'warn' | 'error' {
+  switch (state) {
+    case 'completed':
+      return 'success'
+    case 'aborted':
+    case 'interrupted':
+      return 'warn'
+    case 'failed':
+      return 'error'
+  }
+}
+
+/**
+ * 展示态 → chip 色调词表。**不扩词表**：interrupted 复用 aborted 档
+ * （都不是成功；点色/底色的 CSS 词表只有 running/done/aborted/failed 四档）。
+ */
+export function subagentStateChipTone(state: SubagentProgressState): 'running' | 'done' | 'aborted' | 'failed' {
+  if (state === 'interrupted') return 'aborted'
+  return subagentOutcomeChipTone(state === 'running' ? undefined : state)
+}
+
+/**
  * 子 Agent 终态时的改动摘要（corum fork 增量）。
  *
  * 数据源 = host `corumReview.snapshot(childSessionId)`（子会话轮次的影子 git
@@ -420,6 +476,33 @@ export interface SubagentProgressEvent {
  * 就知道 `run.id`（= 子会话 id），按父侧 tool/call id 精确广播即可让卡片在
  * 第一帧就能跳转与订阅进度。
  */
+/**
+ * `corum/subagent/interrupted` 帧（corum fork 增量，2026-09-13 用户定调「要发通知」）。
+ *
+ * 为什么需要它：`interrupted`（半途失去运行）**不是事件**——它是宿主对「上一个进程
+ * 生命周期留下的未闭合 turn」的判定，只能在**读取**（`corumAgent/getChildSessionProgress`）
+ * 时得出。而通知桥只消费推送帧，于是这种子 Agent 此前完全静默（用户 2026-09-12
+ * 实测：8 张卡里 1 张「已中断」，通知栏一条都没有）。
+ *
+ * 故宿主在**发现点**（RPC 里第一次判出 interrupted）补发这一帧，进程内按子会话去重
+ * （同一子会话只广播一次，见 agent-service 的 `notifiedInterrupted`）。语义上这是
+ * 「事实被知晓」的一次性广播，不是状态轮询——消费者只需把它翻成一条通知。
+ */
+export interface SubagentInterruptedEvent {
+  /** 被中断的子会话 id（origin='subagent'）。 */
+  readonly sessionId: string
+  /** 父会话 id（通知的跳转目标；宿主认不出归属时缺省）。 */
+  readonly parentSessionId?: string
+  /** 宿主判定依据：`not-running`（registry 说它没在跑）/ `pre-boot`（最后事件早于本进程启动）。 */
+  readonly reason: 'not-running' | 'pre-boot'
+  /** 未闭合 turn 的序号（0 = 连 turn 都没开全）。 */
+  readonly turn: number
+  /** 该 turn 已闭合的 step 数。 */
+  readonly step: number
+  /** 最后一条事件的时间（ms epoch）。 */
+  readonly lastActive: number
+}
+
 export interface SubagentChildEvent {
   /** 父会话 id（卡片按当前会话过滤）。 */
   readonly parentSessionId: string
@@ -547,6 +630,8 @@ declare module '@deepseek-ai/cordis' {
     'corum/subagent/progress'(data: SubagentProgressEvent): void
     /** corum/subagent/child：宿主 spawn 子 Agent 的精确父子映射（卡片运行中即可跳子会话）。 */
     'corum/subagent/child'(data: SubagentChildEvent): void
+    /** corum/subagent/interrupted：宿主在**发现点**判定某子会话半途失去运行的一次性广播（通知栏承载）。 */
+    'corum/subagent/interrupted'(data: SubagentInterruptedEvent): void
     /** corum/worktree-ledger：子 Agent 隔离台账快照（fork #10 发射；「并行工作区」chip 订阅源）。 */
     'corum/worktree-ledger'(data: CorumWorktreeLedgerFrameEvent): void
     /** corum/artgen/download-progress：文生图引擎/模型下载进度（P2-7）。 */
@@ -592,6 +677,7 @@ export type CorumForwardedEvent =
   | 'corum/file/changed'
   | 'corum/subagent/progress'
   | 'corum/subagent/child'
+  | 'corum/subagent/interrupted'
   | 'corum/worktree-ledger'
   | 'corum/artgen/download-progress'
   | 'corum/ollama/download-progress'

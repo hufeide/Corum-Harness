@@ -135,6 +135,12 @@ for ev in $declared; do
         && pass "${ev}：corum-orchestration 有 emit" \
         || fail "${ev}：corum-orchestration 无 emit"
       ;;
+    corum/subagent/interrupted)
+      # 「半途失去运行」在**发现点**（读进度 RPC 时判出）补发的一次性广播（2026-09-13）。
+      grep -rqF "'$ev'" "$REPO_ROOT/packages/plugins/agent/corum-agent/src" 2>/dev/null \
+        && pass "${ev}：corum-agent 有 emit" \
+        || fail "${ev}：corum-agent 无 emit"
+      ;;
     corum/artgen/*)
       grep -rqF "'$ev'" "$REPO_ROOT/packages/plugins/agent/corum-artgen/src" 2>/dev/null \
         && pass "${ev}：corum-artgen 有 emit" \

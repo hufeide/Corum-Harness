@@ -379,6 +379,31 @@ function subagentOutcomeOf(stopReason: SubagentStopReason | undefined): 'complet
   }
 }
 
+/**
+ * 五态展示态（本包不 import `@corum/corum-api-remotes`——红线 3：跨 bundle 用本地
+ * 能力接口收窄）。语义与那边的 `subagentProgressStateOf` **逐条一致**，由
+ * `corum-api-remotes/tests/remote-events.host.spec.ts` 的镜像对账单测钉住。
+ *
+ * 优先级（与那边同序，改一处就得改另一处）：
+ * 1. `stopReason`：权威终局原因，有它就以它记账；
+ * 2. `interrupted`：宿主判定的「半途失去运行」（进程被杀/重启把未闭合的 `turn/start`
+ *    留在 log 里）——宿主只在**拿不到原因时**才置它；它优先于下面的 done 兜底
+ *    （这类条目 `done` 也是 true，但既不是完成也不是手动终止）。2026-09-13 之前它只
+ *    落在子 Agent 卡片上，花名册把它算成「已完成」，同一个终态两处不同源（BUG-31 同族病）；
+ * 3. `done`：拿不到原因的终局（历史条目/冷恢复）按「已完成」兜底，不永远算运行中。
+ */
+type SubagentState = 'running' | 'completed' | 'aborted' | 'failed' | 'interrupted'
+function subagentStateOf(e: {
+  readonly stopReason?: SubagentStopReason
+  readonly done?: boolean
+  readonly interrupted?: boolean
+}): SubagentState {
+  const outcome = subagentOutcomeOf(e.stopReason)
+  if (outcome !== undefined) return outcome
+  if (e.interrupted === true) return 'interrupted'
+  return e.done === true ? 'completed' : 'running'
+}
+
 /** 子 Agent 花名册条目（会话顶栏常驻胶囊 + 详情浮层的子 Agent 区数据源）。 */
 interface SubagentRosterEntry {
   readonly childSessionId: string
@@ -403,7 +428,59 @@ interface SubagentRosterEntry {
   readonly done: boolean
   /** 终局原因；仅在该 turn 闭合时给出（undefined = 运行中/未结束）。 */
   readonly stopReason?: SubagentStopReason
+  /** 宿主判定的「半途失去运行」（进程被杀/重启留下的未闭合 turn）——冷启动 RPC 补。 */
+  readonly interrupted?: boolean
   readonly lastActive: number
+}
+
+/**
+ * 花名册一行（**运行中区与终态折叠区共用**）。
+ *
+ * 2026-09-13 抽出的原因：两处此前各写一遍同样的 JSX，标签逻辑一旦分叉就是
+ * 「同一终态两处不同源」——「已中断」只落到卡片、花名册却仍写「已完成」正是这个
+ * 结构的产物（BUG-31 同族病）。共用之后，终态文案只有一处可改。
+ */
+function RosterRow({ entry, openSession }: {
+  readonly entry: SubagentRosterEntry
+  // exactOptionalPropertyTypes：调用方会把 `openSession`（可能 undefined）原样传进来。
+  readonly openSession?: ((sessionId: string) => void) | undefined
+}) {
+  const state = subagentStateOf(entry)
+  // chip 色调档只有四档（running/done/aborted/failed）：interrupted 复用 aborted，
+  // 与卡片 `subagentStateChipTone` 同一口径。
+  const tone = state === 'running' ? undefined : state === 'interrupted' ? 'aborted' : state
+  const statusText = state === 'interrupted' ? '已中断'
+    : state === 'aborted' ? '手动终止'
+      : state === 'failed' ? '失败'
+        : state === 'completed' ? '已完成'
+          : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`
+  return (
+    <button
+      type="button"
+      className={css.statusDetailAgentRow}
+      data-done={state === 'running' ? undefined : true}
+      data-outcome={tone}
+      data-state={state}
+      title={`进入子会话 ${entry.childSessionId}`}
+      aria-label={`进入子会话 ${entry.label}`}
+      onClick={() => { openSession?.(entry.childSessionId) }}
+    >
+      <span className={css.statusDetailAgentDot} data-outcome={tone} />
+      <span className={css.statusDetailAgentLabel}>{entry.label}</span>
+      <span className={css.statusDetailAgentStep}>{statusText}</span>
+      <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
+        {entry.model?.model ?? '未记录'}
+      </span>
+      {entry.role !== undefined && (
+        <span className={css.statusDetailAgentRole} data-role={entry.role}>
+          {SUBAGENT_ROLE_BADGE[entry.role]}
+        </span>
+      )}
+      {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
+      {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
+      <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
+    </button>
+  )
 }
 
 /** 花名册内帧形（corum/subagent/child 与 corum/subagent/progress 的并集窄化）。 */
@@ -513,6 +590,9 @@ function useSubagentRoster(
    *  故对已结束的子会话一次性 RPC 拉 stopReason，只填补、不覆盖推送帧的权威值。
    *  会话切走/换 sessionId 时重置已拉记录。 */
   const [seededStopReason, setSeededStopReason] = useState<ReadonlyMap<string, SubagentStopReason>>(new Map())
+  /** 冷启动补来的「半途失去运行」（同一条 RPC；帧不重放也不会带它——它是宿主对
+   *  「上个进程生命周期留下的未闭合 turn」的判定，不是事件）。 */
+  const [seededInterrupted, setSeededInterrupted] = useState<ReadonlySet<string>>(new Set())
   /** 冷启动补来的委派角色（见下方种子的说明；推送帧不重放）。 */
   const [seededRole, setSeededRole] = useState<ReadonlyMap<string, 'worker' | 'research' | 'fork'>>(new Map())
   /** 冷启动补来的「是否隔离」（同上：帧不重放，用宿主 durable 判据）。 */
@@ -527,6 +607,7 @@ function useSubagentRoster(
     // 会话切换时清空种子与已拉记录，避免跨会话串数据。
     seededRef.current = new Set()
     setSeededStopReason(new Map())
+    setSeededInterrupted(new Set())
     setSeededRole(new Map())
     setSeededIsolated(new Map())
     if (connection === undefined || sessionId === undefined) return undefined
@@ -544,7 +625,7 @@ function useSubagentRoster(
           const value = result.value as {
             role?: 'worker' | 'research' | 'fork'
             isolated?: boolean
-            progress?: { stopReason?: string }
+            progress?: { stopReason?: string; interrupted?: boolean }
           }
           // 隔离徽标：推送帧不重放，靠宿主的 durable 判据（子会话 cwd 在 .corum-worktrees 下）
           // 补标——否则刷新/重启后「隔离」整列消失（2026-09-12 用户实测）。
@@ -566,6 +647,17 @@ function useSubagentRoster(
               if (prev.get(id) === seeded) return prev
               const next = new Map(prev)
               next.set(id, seeded)
+              return next
+            })
+          }
+          // 「半途失去运行」：宿主唯一能判它的人（见 agent-service 的判据注释）。
+          // **必须放在下面 stopReason 的早退之前**——interrupted 条目恰恰没有
+          // stopReason，写在后面就永远填不上（2026-09-13 收口时踩到过一次）。
+          if (value.progress?.interrupted === true) {
+            setSeededInterrupted(prev => {
+              if (prev.has(id)) return prev
+              const next = new Set(prev)
+              next.add(id)
               return next
             })
           }
@@ -648,6 +740,14 @@ function useSubagentRoster(
         merged.set(id, { ...entry, stopReason: sr })
       }
     }
+    // 冷启动种子填补 interrupted（帧永远不带它——它是宿主对「上个进程生命周期的
+    // 未闭合 turn」的判定，不是事件；不填就只剩卡片知道、花名册仍算「已完成」）。
+    for (const id of seededInterrupted) {
+      const entry = merged.get(id)
+      if (entry !== undefined && entry.interrupted !== true) {
+        merged.set(id, { ...entry, interrupted: true })
+      }
+    }
     // 冷启动种子填补 role（仅当推送帧没给时）。
     for (const [id, role] of seededRole) {
       const entry = merged.get(id)
@@ -684,10 +784,12 @@ function useSubagentRoster(
         ...(entry.role === undefined && prior?.role !== undefined ? { role: prior.role } : {}),
         // isolated 同理：progress 帧不带它，别把已知值抹掉。
         ...(entry.isolated === undefined && prior?.isolated !== undefined ? { isolated: prior.isolated } : {}),
+        // interrupted 同理：只有冷启动种子会给，progress 帧不带。
+        ...(entry.interrupted === undefined && prior?.interrupted !== undefined ? { interrupted: prior.interrupted } : {}),
       })
     }
     return [...merged.values()]
-  }, [baseline, live, seededStopReason, seededModel, seededRole, seededIsolated, childCwds])
+  }, [baseline, live, seededStopReason, seededInterrupted, seededModel, seededRole, seededIsolated, childCwds])
 }
 
 /** 推送帧累积（历史上的唯一来源；现在只作基线之上的增量）。 */
@@ -919,8 +1021,8 @@ function useWorktreeLedger(
 /** 运行中（无终态）在前、已结束在后，最近活动倒序（胶囊取第一个当「当前子 Agent」）。 */
 function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentRosterEntry[] {
   return [...entries].sort((a, b) => {
-    const aEnded = subagentOutcomeOf(a.stopReason) !== undefined
-    const bEnded = subagentOutcomeOf(b.stopReason) !== undefined
+    const aEnded = subagentStateOf(a) !== 'running'
+    const bEnded = subagentStateOf(b) !== 'running'
     return (Number(aEnded) - Number(bEnded)) || (b.lastActive - a.lastActive)
   })
 }
@@ -1012,14 +1114,16 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
   // 2026-09-12 真机实测（重启杀掉的 2 个子 Agent）浮层里就有 2 行这样的僵尸条目，
   // BUG-26 的「条目越多越看不全」在它们身上依旧复现。
   const rankedRoster = rankRoster(roster)
-  const isTerminalEntry = (e: SubagentRosterEntry): boolean =>
-    subagentOutcomeOf(e.stopReason) !== undefined || e.done
+  const isTerminalEntry = (e: SubagentRosterEntry): boolean => subagentStateOf(e) !== 'running'
   const terminalEntries = rankedRoster.filter(isTerminalEntry)
   const runningEntries = rankedRoster.filter(e => !isTerminalEntry(e))
-  const terminalCompleted = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) !== 'aborted'
-    && subagentOutcomeOf(e.stopReason) !== 'failed').length
-  const terminalAborted = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'aborted').length
-  const terminalFailed = terminalEntries.filter(e => subagentOutcomeOf(e.stopReason) === 'failed').length
+  // 四档计数都走**同一个 subagentStateOf**（2026-09-13 收口）：此前「完成」档用「不是
+  // aborted 也不是 failed」反推，于是「已中断」被静静算进「已完成」——同一个终态在两处
+  // 不同源，正是 BUG-31 的同族病。
+  const terminalCompleted = terminalEntries.filter(e => subagentStateOf(e) === 'completed').length
+  const terminalAborted = terminalEntries.filter(e => subagentStateOf(e) === 'aborted').length
+  const terminalFailed = terminalEntries.filter(e => subagentStateOf(e) === 'failed').length
+  const terminalInterrupted = terminalEntries.filter(e => subagentStateOf(e) === 'interrupted').length
   // 工作区：integrated/discarded 折叠；active/settled 始终单独渲染。
   const worktreeTerminal = worktrees.filter(e => e.status === 'integrated' || e.status === 'discarded')
   const worktreeActive = worktrees.filter(e => e.status === 'active' || e.status === 'settled')
@@ -1135,46 +1239,14 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               {runningEntries.length} 运行中{' · '}
               {terminalCompleted} 已完成
               {terminalAborted > 0 && ` · ${terminalAborted} 已终止`}
+              {terminalInterrupted > 0 && ` · ${terminalInterrupted} 已中断`}
               {terminalFailed > 0 && ` · ${terminalFailed} 失败`}
             </span>
           </div>
           {/* 运行中条目：始终逐条渲染（BUG-26 不变式）。 */}
-          {runningEntries.map((entry) => {
-            const outcome = subagentOutcomeOf(entry.stopReason)
-            return (
-            <button
-              key={entry.childSessionId}
-              type="button"
-              className={css.statusDetailAgentRow}
-              data-done={outcome !== undefined || entry.done || undefined}
-              data-outcome={outcome ?? undefined}
-              title={`进入子会话 ${entry.childSessionId}`}
-              aria-label={`进入子会话 ${entry.label}`}
-              onClick={() => { openSession?.(entry.childSessionId) }}
-            >
-              <span className={css.statusDetailAgentDot} data-outcome={outcome ?? (entry.done ? 'completed' : undefined)} />
-              <span className={css.statusDetailAgentLabel}>{entry.label}</span>
-              <span className={css.statusDetailAgentStep}>
-                {outcome === 'aborted' ? '手动终止'
-                  : outcome === 'failed' ? '失败'
-                  : outcome === 'completed' ? '已完成'
-                  : entry.done ? '已完成'
-                  : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
-              </span>
-              <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
-                {entry.model?.model ?? '未记录'}
-              </span>
-              {entry.role !== undefined && (
-                <span className={css.statusDetailAgentRole} data-role={entry.role}>
-                  {SUBAGENT_ROLE_BADGE[entry.role]}
-                </span>
-              )}
-              {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
-              {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
-              <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
-            </button>
-            )
-          })}
+          {runningEntries.map(entry => (
+            <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} />
+          ))}
           {/* 终态条目折叠摘要行（有终态条目时才出现）。 */}
           {terminalEntries.length > 0 && (
             <>
@@ -1182,50 +1254,18 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                 type="button"
                 className={css.statusDetailFoldRow}
                 aria-expanded={terminalFoldOpen}
-                aria-label={`已完成 ${terminalCompleted}·已终止 ${terminalAborted + terminalFailed}，${terminalFoldOpen ? '折叠' : '展开'}`}
+                aria-label={`已完成 ${terminalCompleted}·已终止 ${terminalAborted + terminalFailed}·已中断 ${terminalInterrupted}，${terminalFoldOpen ? '折叠' : '展开'}`}
                 onClick={() => { setTerminalFoldOpen(v => !v) }}
               >
                 <span className={css.statusDetailFoldChevron} aria-hidden="true">▸</span>
                 已完成 {terminalCompleted}{' · '}已终止 {terminalAborted + terminalFailed}
+                {terminalInterrupted > 0 && ` · 已中断 ${terminalInterrupted}`}
               </button>
               {terminalFoldOpen && (
                 <div className={css.statusDetailFoldList}>
-                  {terminalEntries.map((entry) => {
-                    const outcome = subagentOutcomeOf(entry.stopReason)
-                    return (
-                    <button
-                      key={entry.childSessionId}
-                      type="button"
-                      className={css.statusDetailAgentRow}
-                      data-done={outcome !== undefined || entry.done || undefined}
-                      data-outcome={outcome ?? undefined}
-                      title={`进入子会话 ${entry.childSessionId}`}
-                      aria-label={`进入子会话 ${entry.label}`}
-                      onClick={() => { openSession?.(entry.childSessionId) }}
-                    >
-                      <span className={css.statusDetailAgentDot} data-outcome={outcome ?? (entry.done ? 'completed' : undefined)} />
-                      <span className={css.statusDetailAgentLabel}>{entry.label}</span>
-                      <span className={css.statusDetailAgentStep}>
-                        {outcome === 'aborted' ? '手动终止'
-                          : outcome === 'failed' ? '失败'
-                          : outcome === 'completed' ? '已完成'
-                          : entry.done ? '已完成'
-                          : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`}
-                      </span>
-                      <span className={css.statusDetailAgentBadge} data-model={entry.model?.model ?? '未记录'} title={entry.model !== undefined ? `模型提供方 ${entry.model.provider}` : '模型未记录'}>
-                        {entry.model?.model ?? '未记录'}
-                      </span>
-                      {entry.role !== undefined && (
-                        <span className={css.statusDetailAgentRole} data-role={entry.role}>
-                          {SUBAGENT_ROLE_BADGE[entry.role]}
-                        </span>
-                      )}
-                      {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
-                      {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
-                      <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
-                    </button>
-                    )
-                  })}
+                  {terminalEntries.map(entry => (
+                    <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} />
+                  ))}
                 </div>
               )}
             </>
@@ -1426,12 +1466,21 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
   const title = useSessions((s: SessionListState) => s.byId[sessionId]?.displayTitle) ?? '会话'
   // 子 Agent 花名册（2026-09-10 用户定调：胶囊与状态展示合并到同一 pill）。
   const roster = rankRoster(useSubagentRoster(remote, sessionId, useSessions, catalog, connection))
-  // 终态分组（按 stopReason 派生；done 布尔仅作无推送帧时的兜底——见基线注释）。
-  const running = roster.filter(e => subagentOutcomeOf(e.stopReason) === undefined)
-  const completed = roster.filter(e => subagentOutcomeOf(e.stopReason) === 'completed' || (e.done && e.stopReason === undefined))
-  const aborted = roster.filter(e => subagentOutcomeOf(e.stopReason) === 'aborted')
+  // 终态分组（四档全部走同一个 subagentStateOf；见 subagentStateOf 的优先级注释）。
+  const running = roster.filter(e => subagentStateOf(e) === 'running')
+  const completed = roster.filter(e => subagentStateOf(e) === 'completed')
+  const aborted = roster.filter(e => subagentStateOf(e) === 'aborted')
+  // 与浮层同源的一档（同一个 subagentStateOf）——胶囊不再把「已中断」算进「已完成」。
+  const interruptedCount = roster.filter(e => subagentStateOf(e) === 'interrupted').length
   // 领跑者 = 运行中的第一个；全已结束时为 undefined（胶囊改显示终态计数）。
   const lead = running[0]
+  // 全已结束时的胶囊主文案：取**真实占多数的那一档**，不写死「已完成 N」——
+  // 全部被中断（已完成 0）时说「已完成 0」是假话（2026-09-13 收口）。
+  const terminalHeadline = completed.length > 0
+    ? `已完成 ${completed.length}`
+    : aborted.length > 0
+      ? `已终止 ${aborted.length}`
+      : `已中断 ${interruptedCount}`
   // 生成速度序列（chart-speed 实时曲线）：来自轨迹快照的逐步真实速度。
   const speedSeries = useSpeedSeries(useTrajectory)
   // 隔离工作区台账（浮层「并行工作区」区；P8 后 chip 的新家）。
@@ -1521,7 +1570,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
                 <span className={css.agentCapsuleDivider} />
                 <span className={css.agentCapsuleDot} data-done={lead === undefined ? 'true' : undefined} />
                 <span className={css.agentCapsuleCount}>
-                  {lead === undefined ? `已完成 ${completed.length}` : `运行中 ${running.length}`}
+                  {lead === undefined ? terminalHeadline : `运行中 ${running.length}`}
                 </span>
                 {lead !== undefined
                   ? (
@@ -1532,6 +1581,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
                       {running.length > 1 && <span className={css.agentCapsuleMore}>+{running.length - 1}</span>}
                       {completed.length > 0 && <span className={css.agentCapsuleDone}>{completed.length} 已完成</span>}
                       {aborted.length > 0 && <span className={css.agentCapsuleAborted}>{aborted.length} 手动终止</span>}
+                      {interruptedCount > 0 && <span className={css.agentCapsuleAborted}>{interruptedCount} 已中断</span>}
                     </>
                   )
                   : (
@@ -1539,6 +1589,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
                       <span className={css.agentCapsuleLabel}>{roster[0]?.label}</span>
                       {roster.length > 1 && <span className={css.agentCapsuleMore}>+{roster.length - 1}</span>}
                       {aborted.length > 0 && <span className={css.agentCapsuleAborted}>{aborted.length} 手动终止</span>}
+                      {interruptedCount > 0 && <span className={css.agentCapsuleAborted}>{interruptedCount} 已中断</span>}
                     </>
                   )}
               </>
