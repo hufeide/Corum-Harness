@@ -391,7 +391,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     // 恒按 orchestrator 处理），人格为指挥者（compile.ts 的 MODE_CORE_IDENTITY.conductor）。
     // 子 Agent 模型锁到本地 deepseek（省费用）；隔离策略沿用并发感知默认。
     id: 'conductor-lead',
-    nickname: '指挥者',
+    nickname: '指挥模式',
     title: '编排指挥',
     dimension: '研发',
     baseMode: 'conductor',
@@ -408,19 +408,33 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
       + " what input they need, what they must deliver), and verify well (judge by the original goal, never by a child agent's self-report).",
   },
 
-  // ── 基准模式的继承入口（2026-09-12 用户定调）────────────────────────────
+  // ── 基准模式的继承入口（2026-09-12 骨架 / 2026-09-13 命名定稿）──────────────
   // 「5 个模式（指挥 + 官方 standard/ptc/minimal/cordis）不再直接选中，只作继承模板；
   // 系统内置继承它们的 Agent 即可。」于是每个模式都要有一个可选中、可配置（绑技能 /
-  // 挂 MCP / 换模型）的内置 Agent 作为入口：
-  //   standard   → 已有角色群（全能助手等 29 个 baseMode=standard）
-  //   conductor  → conductor-lead「指挥者」
-  //   ptc / minimal / cordis → 本组三个（模式本身不配任何 skill / mcp）
+  // 挂 MCP / 换模型）的内置 Agent 作为入口，**命名由用户 2026-09-13 定稿**：
+  //   standard   → standard-mode「标准模式」（本组第一个，全能助手等 29 个角色仍各自可选）
+  //   conductor  → conductor-lead「指挥模式」
+  //   ptc        → ptc-assistant「PTC 模式」
+  //   minimal    → minimal-assistant「极简模式」
+  //   cordis     → preset-author「创造模式」
   // 工具面由 compile.ts 追加 ⑤ 按模式逐行对账（ptc 加 tool-presentation、cordis 加
-  // tool-cordis、minimal 收敛到 bash + 读写编辑），所以这三个 Agent 的 prompt 只讲
+  // tool-cordis、minimal 收敛到 bash + 读写编辑），所以这几个 Agent 的 prompt 只讲
   // 「我是谁 / 怎么干」，不再复述机制。
   {
+    // 2026-09-13 新增：五档里 standard 此前只有「角色群」没有**模式入口**（其余四档都
+    // 有各自入口），故补齐一个可选中、可配置的标准模式入口。它不等于「全能助手」
+    // （那是 2026-09-10 用户要的通用岗位角色，保留不动）；差别在人格定位：这里是
+    // 「默认平衡档」的入口，工具面 = 官方 standard。
+    id: 'standard-mode',
+    nickname: '标准模式',
+    title: '默认平衡档',
+    dimension: '通用',
+    baseMode: 'standard',
+    prompt: 'You are the standard agent: the balanced default. You take the task end to end with the full standard tool set — shell, file read/write/edit, project search, delegation and skills — and you choose the cheapest tool that finishes the job. How you work: understand the goal and the constraints → gather what you need → do the work in the fewest clean steps → verify against the goal before you report. Delegate only when a subtask is genuinely independent, and say plainly what you did not do or could not verify.',
+  },
+  {
     id: 'ptc-assistant',
-    nickname: 'PTC 助手',
+    nickname: 'PTC 模式',
     title: '编程式工具调用',
     dimension: '研发',
     baseMode: 'ptc',
@@ -428,7 +442,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'minimal-assistant',
-    nickname: '极简助手',
+    nickname: '极简模式',
     title: '轻量编码',
     dimension: '研发',
     baseMode: 'minimal',
@@ -436,7 +450,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
   },
   {
     id: 'preset-author',
-    nickname: '预设创造者',
+    nickname: '创造模式',
     title: 'Agent 预设创作',
     dimension: '创作',
     baseMode: 'cordis',
@@ -453,7 +467,8 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
 export function ensureBuiltinRoleProfiles(): void {
   // fork（corum）：已退役的内置角色——只删 trust:'system' 的家目录副本（用户自建同名
   // profile 不动）。2026-09-10 用户拍板：删除「Deepseek 编排者」（deepseek-orchestrator），
-  // 其能力由基准模式「指挥模式」+ 内置角色「指挥者」继承（docs/fork-delta.md §10.8）。
+  // 其能力由基准模式「指挥模式」+ 内置角色「指挥模式」（`conductor-lead`）继承
+  // （docs/fork-delta.md §10.8；角色昵称 2026-09-13 由「指挥者」改为「指挥模式」）。
   for (const retiredId of RETIRED_BUILTIN_ROLE_IDS) {
     const existing = loadProfile(retiredId)
     if (existing?.trust === 'system') deleteProfile(retiredId)
@@ -461,11 +476,20 @@ export function ensureBuiltinRoleProfiles(): void {
   for (const spec of BUILTIN_ROLES) {
     const existing = loadProfile(spec.id)
     if (existing !== undefined) {
-      // system profile：prompt/名片字段随版本演进幂等刷新（保留模型/能力配置）。
-      // fork（corum）：编排专用 Agent 的新字段（executionTools/模型锁/parallelWork）
-      // 也随版本幂等刷新——system profile 的这些机制字段以 spec 为事实源。
+      // system profile：prompt / **名片字段**（昵称、标题、维度）/ baseMode / 机制字段
+      // 都随版本演进幂等刷新（模型与能力配置保留用户改动）。
+      //
+      // 2026-09-13 修正：旧实现的触发条件只比对 prompt 与机制字段，**名片字段改了不进
+      // 刷新分支** → 「指挥者→指挥模式」这类纯改名对既有安装**静默不生效**（只有全新
+      // home 才拿到新名）。注释一直写着「名片字段随版本幂等刷新」，代码却没查它们——
+      // 典型的「注释与实现不一致导致的静默失效」。现在把昵称/标题/维度/baseMode 一并
+      // 纳入判据。
       if (existing.trust === 'system' && (
-        existing.prompt !== spec.prompt
+        existing.nickname !== spec.nickname
+        || existing.title !== spec.title
+        || existing.dimension !== spec.dimension
+        || existing.baseMode !== spec.baseMode
+        || existing.prompt !== spec.prompt
         || existing.executionTools !== spec.executionTools
         || existing.subagentModel?.model !== spec.subagentModel?.model
         || existing.researchModel?.model !== spec.researchModel?.model

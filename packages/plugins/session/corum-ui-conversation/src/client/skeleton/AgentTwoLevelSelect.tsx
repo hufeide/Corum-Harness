@@ -12,7 +12,9 @@
  * 📌 2026-09-12 用户定调：**dsh 官方五模式（standard/conductor/ptc/minimal/cordis）
  * 不再作为可选中项**——它们是「继承模板」，只能在 Agent 预设编辑器里作为 baseMode
  * 继承（SettingsAgentPresetsSection 的「官方基础模式」卡），要用哪个模式就选/建一个
- * 继承它的 Agent（内置的 PTC 助手 / 极简助手 / 预设创造者 / 指挥者 / 全能助手等）。
+ * 继承它的 Agent——**内置的五个模式入口**（2026-09-13 用户定稿命名）：
+ * 「标准模式」`standard-mode` / 「指挥模式」`conductor-lead` / 「PTC 模式」`ptc-assistant`
+ * / 「极简模式」`minimal-assistant` / 「创造模式」`preset-author`（另有各行业角色可选）。
  * 因此本组件把 source==='official' 的条目从**可选列表**里滤掉；当前会话若正跑在某个
  * 模式上，trigger 仍照原样显示它的名字（只读展示，不给再选）。
  *
