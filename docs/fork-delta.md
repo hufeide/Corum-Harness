@@ -1829,3 +1829,70 @@ Agent 被 `cancel({ kind: 'user' })`、通知注入但 `followup` 只调用过�
 
 **守卫/单测**：`resolveEffectiveMode` 4 例（非 git → track / git → always / track·off 不变 /
 降级路径不触碰 git）、`corumIsGitRepo` 负缓存 1 例（非 git → false，`git init` 后同进程 → true）。
+
+---
+
+## 16. 第 14 个 fork 包：`@corum/corum-fs-local`（2026-09-13，literal edit 失败的定位提示）
+
+| 项 | 值 |
+|---|---|
+| 官方对照包 | `@deepseek-ai/dsh-fs-local` |
+| 官方基线 | 0.1.3-alpha.1（源码基线 = dsh 检出 `packages/fs/fs-local`） |
+| 文件数 | 3 官方文件（src）+ 1 corum 新增模块（`src/edit-candidates.ts`）+ 官方 tests 全量复制 |
+| 逐字节相同 | `src/index.ts`、`src/win32.ts`（**守卫 §15b 断言**——增量不许扩散到这两个文件） |
+| 实质修改 | `src/fsio.ts`（仅 `applyLiteralEdit` 的两条 throw + 1 行 import；其余逐字节同官方） |
+| corum 新增 | `src/edit-candidates.ts`（候选定位纯函数 + 文案，含 4 个上限常量） |
+| rebase 风险 | **低**（增量集中在一个函数的两条 throw + 一个独立模块；官方改 `applyLiteralEdit` 时按 §5 第 3 步三方合并） |
+
+**动机（用户 2026-09-13 拍板「那就 fork 吧」）**：`old_string` 对不上时官方只回
+`old_string was not found in "<path>"`，模型拿不到「差在哪」→ 原地重试同一条锚点（BUG-28）。
+2026-09-13 的离线统计（367 会话 / 9128 次工具调用）确认判据成立：工具策略段上线后
+**策略类失败 11 → 0，而匹配类占 edit 失败 55.6%** —— 靶子已从边角变成头号类型。
+（同时纠偏：BUG-28 原始取证的「同一锚点被消费」机制描述不成立，真实形态是「锚点一开始就
+对不上、连撞两次」，所以「最相近候选 + 行号」才是能救它的那一半；缩进/CRLF 自动重试
+全语料 0 命中，不做。）
+
+**增量**：`applyLiteralEdit` 的两条失败分支——
+① `FS_EDIT_NOT_FOUND` 追加「最相近的 ≤3 处 + 行号」，并把「同一段文本、只是缩进/首尾空白不同」
+单独标注（最常见的差法），文案里明写 *nothing has been changed*（**只提示、不改写**：绝不替模型
+模糊应用，那是已明确不做的 B2「影子 fs 提供者」范畴）；
+② `FS_AMBIGUOUS_EDIT` 追加「命中在哪几行」，模型可直接挑一处加长锚点。
+输出有界（候选 ≤3、单行 ≤200 字符、整段 ≤1200 字符、扫描上限 20000 行），避免撑爆工具结果。
+
+**装配（本 fork 的关键，与 §15 的「禁行 + insert」不同）**：桌面 base 组装里 `ctx.fs` 由
+**官方 `@deepseek-ai/dsh-fs-sandbox`** 提供，而它是 `dsh-fs-local` 的**子类**
+（`SandboxedFileSystem extends LocalFileSystem`，`fs-sandbox/src/index.ts:30`）——它是**库消费者**，
+不是可 swap 的行。所以 fork 靠**解析面**生效：
+
+```yaml
+# pnpm-workspace.yaml（overrides）
+'@deepseek-ai/dsh-fs-local': 'link:packages/plugins/agent/corum-fs-local'
+```
+
+一箭双雕：官方 `fs-sandbox`（桌面 base）与 `minimal` preset 里那条直接 `fs-local` 行**同时**用上
+fork。pnpm 会为 `fs-sandbox` 生成一个**新的 peer 变体**（`.pnpm/...dsh-fs-sandbox@..._<新哈希>`），
+其 `dsh-fs-local` 指向 fork——这一点是「fork 到底有没有生效」的判据（旧变体仍在磁盘上但不再被引用）。
+另：`packages/desktop/desktop-host/package.json` 显式登记 fork（与其余 13 个 fork 同款），
+`pnpm deploy` 才会把它物化成闭包里的真实目录。
+
+**失败会静默**（本 fork 最该守的地方）：override 被改回版本钉 / fork 没构建 / 闭包丢包，
+三者都不会让编译或构建报错，只是「edit 失败提示悄悄退回官方一句话」。
+
+**验证**：
+- 单测 159 项（官方 144 继承 + 15 新增：候选定位、提示文案有界、行号、失败仍抛原错误码、
+  成功路径不变）；`src/index.ts`、`src/win32.ts` 与官方逐字节一致。
+- **常驻守卫 `packages/desktop/scripts/check-fork-fs-local.mjs`**（三层证明）：
+  ① 从**挂载方** `dsh-base` 的解析面看 `dsh-fs-local` 落在 fork；
+  ② `Object.getPrototypeOf(SandboxedFileSystem) === fork.LocalFileSystem`（**同一份类**，不是同名两份）；
+  ③ 真实 `editText` 失败 → 错误信息含 `Closest places` / `line 2:` / `different indentation` /
+  `nothing has been changed`。**不需要模型即可跑**（直接驱动 fs 服务，无需 LLM）。
+- 打包闭包：`pnpm --filter corum-desktop-host deploy --legacy --prod …` 实测闭包里
+  `@deepseek-ai/dsh-fs-local → packages/plugins/agent/corum-fs-local`；`pack-macos.mjs` 新增
+  **fail-loud 断言**（闭包里那份必须是 fork，缺了或退回官方即打包失败）。
+- `scripts/verify-fork-drift.sh` §15b 守护：两个官方文件逐字节一致 / fsio 两条分支接提示 /
+  override 行在位 / desktop-host 登记 / pack 断言在位。
+
+**给未来升级的一句话**：官方 `fs-local` 升级时，`src/index.ts`、`src/win32.ts` 可直接整文件覆盖；
+`src/fsio.ts` **只合并 `applyLiteralEdit` 的两条 throw**（其余部分保持官方原样）；`edit-candidates.ts`
+是 corum 自有模块，不受影响。Revert 顺序：先删 override 行 → 再退 fork（否则应用加载期会拿着
+「fork 名、官方内容」的错配跑）。

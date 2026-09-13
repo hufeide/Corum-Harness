@@ -16,7 +16,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 
@@ -198,6 +198,21 @@ async function copyDesktopArtifacts() {
   // (loadOverlayPatches throws on a missing file). Ship it beside the desktop patch.
   await cp(join(DESKTOP_ROOT, 'cordis.ide.patch.yml'), join(HOST_DIR, 'cordis.ide.patch.yml'), { dereference: true })
   await writeHostManifest()
+  // fork #14（@corum/corum-fs-local）在闭包里必须带上：官方 `dsh-fs-sandbox`（桌面 base
+  // 真正的 ctx.fs provider）是它的子类，靠 pnpm-workspace.yaml 的
+  // `'@deepseek-ai/dsh-fs-local': link:...` 生效。deploy 产物里那条是**指向工作区的软链**，
+  // 由上面的 cp(dereference) 实体化 —— 但若工作区里 fork 没构建（lib 缺）或那条 override
+  // 被改回版本钉，闭包会静默少掉它，用户那侧表现为 edit 失败提示退化（甚至 provider 加载失败）。
+  // 打包期报出来，别留给用户发现。
+  const stagedFsLocal = join(HOST_DIR, 'node_modules', '@deepseek-ai', 'dsh-fs-local')
+  const forkIndex = join(stagedFsLocal, 'lib', 'index.js')
+  if (!existsSync(forkIndex)) {
+    throw new Error(`pack-macos: @deepseek-ai/dsh-fs-local missing from the host closure at ${forkIndex} — build @corum/corum-fs-local and keep the pnpm-workspace.yaml link: override`)
+  }
+  const forkSource = readFileSync(forkIndex, 'utf8')
+  if (!forkSource.includes('Closest places in the file')) {
+    throw new Error('pack-macos: the host closure resolved dsh-fs-local to the OFFICIAL package, not @corum/corum-fs-local — check pnpm-workspace.yaml overrides (link:) and rebuild the fork')
+  }
   // Shipped agent-presets: stage both roots beside the host runtime so the
   // boot-time resolver finds them by the same relative anchors in the app.
   await rm(SHIPPED_PRESETS_DIR, { recursive: true, force: true })

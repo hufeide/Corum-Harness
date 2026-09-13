@@ -513,6 +513,53 @@ else
   fail "desktop-host/package.json 缺 @corum/corum-sandbox-local——正式包 host 闭包会缺包（本轮教训：新插件必须同时进 desktop 与 desktop-host 依赖）"
 fi
 
+# ── 15b. fork #14（@corum/corum-fs-local）：edit 失败定位提示 + 解析面 ──────────
+# 用户 2026-09-13 拍板「fork 吧」：官方 applyLiteralEdit 只回一句 `old_string was not found`，
+# 模型不差在哪就原地重试（BUG-28）。增量落在 fsio.ts 的失败分支 + 独立 edit-candidates 模块。
+# 本节的**关键**是「解析面」：桌面 base 的 ctx.fs 由官方 dsh-fs-sandbox 提供，而它是
+# LocalFileSystem 的子类 —— fork 必须通过 pnpm-workspace.yaml 的 link: override 生效，
+# 否则 fork 编好、测试全绿、应用里却一行都没跑到（静默失效）。
+section "[15b] fork #14（@corum/corum-fs-local）：edit 定位提示 + 解析面 override"
+FS_LOCAL_FORK="$REPO_ROOT/packages/plugins/agent/corum-fs-local"
+OFFICIAL_FS_LOCAL="$DSH_CHECKOUT/packages/fs/fs-local"
+if [ -f "$OFFICIAL_FS_LOCAL/src/index.ts" ]; then
+  # 官方文件（index.ts / win32.ts）不得被改动：增量只在 fsio.ts + 新增模块。
+  for official_file in index.ts win32.ts; do
+    if cmp -s "$FS_LOCAL_FORK/src/$official_file" "$OFFICIAL_FS_LOCAL/src/$official_file"; then
+      pass "src/$official_file 与官方逐字节一致"
+    else
+      fail "src/$official_file 与官方有差异——增量必须只在 fsio.ts / edit-candidates.ts"
+    fi
+  done
+else
+  skip "官方检出缺 packages/fs/fs-local（跳过逐字节断言）"
+fi
+if grep -qF 'editNotFoundHint' "$FS_LOCAL_FORK/src/fsio.ts" && grep -qF 'matchLineNumbers' "$FS_LOCAL_FORK/src/fsio.ts"; then
+  pass "fsio.ts 的两条失败分支都接了定位提示"
+else
+  fail "fsio.ts 缺 editNotFoundHint / matchLineNumbers——edit 失败会退回官方的一句 not found"
+fi
+if grep -qF 'Closest places in the file' "$FS_LOCAL_FORK/src/edit-candidates.ts"; then
+  pass "edit-candidates.ts 含候选提示文案（打包闭包检查同款标记）"
+else
+  fail "edit-candidates.ts 缺候选提示文案"
+fi
+if grep -qE "^  '@deepseek-ai/dsh-fs-local': 'link:packages/plugins/agent/corum-fs-local'" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  pass "pnpm-workspace.yaml 把 dsh-fs-local 解析到 fork（fs-sandbox 是它的子类）"
+else
+  fail "pnpm-workspace.yaml 缺 dsh-fs-local 的 link: override——fork 不会在应用里生效（官方 fs-sandbox 仍加载官方包）"
+fi
+if grep -qF '"@corum/corum-fs-local"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+  pass "desktop-host 闭包登记 fork（deploy 物化为真实目录）"
+else
+  fail "desktop-host/package.json 缺 @corum/corum-fs-local——正式包闭包里它只会是软链"
+fi
+if grep -qF 'Closest places in the file' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos 会断言闭包里的 dsh-fs-local 是 fork（缺失/退回官方即打包失败）"
+else
+  fail "pack-macos.mjs 缺闭包断言——fork 没进闭包时会静默发行"
+fi
+
 # ── 16. fork #9（subagent seam）增量必须「opt-in」────────────────────────────
 # 用户 2026-09-09 提问：官方 preset（standard/ptc/cordis）仍挂官方 dsh-tool-subagent，
 # 而服务层已被 fork #9 取代——两者会不会行为不一致？答案取决于 fork #9 的增量是否

@@ -121,7 +121,13 @@ overrides:
   '@deepseek-ai/dsh-file-reference': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-file-reference-local': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-fs': '0.1.3-alpha.1'
-  '@deepseek-ai/dsh-fs-local': '0.1.3-alpha.1'
+  # fork #14（@corum/corum-fs-local）：官方 dsh-fs-local 的 corum 版。这里**不是**版本钉，
+  # 而是指向工作区里的 fork —— 桌面 base 组装的 `ctx.fs` 由官方 `dsh-fs-sandbox` 提供，而它是
+  # `LocalFileSystem` 的子类并 `import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'`
+  # （fs-sandbox/src/index.ts:30），所以要把官方包名解析到 fork，才能让 literal edit 失败时的
+  # 「最相近候选 + 行号」在真实链路上生效（fs-sandbox 与 minimal preset 的直接 fs-local 行同时覆盖）。
+  # 升级 runbook：官方 fs-local 升级时按 docs/fork-delta.md §5 第 3 步三方合并本 fork 的 fsio.ts。
+  '@deepseek-ai/dsh-fs-local': 'link:packages/plugins/agent/corum-fs-local'
   '@deepseek-ai/dsh-fs-observation-policy': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-fs-sandbox': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-goal': '0.1.3-alpha.1'
