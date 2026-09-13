@@ -29,6 +29,24 @@
  * 因此在本服务的 `session/event` 监听器里 `readFileSync` 目标文件，**必然早于写入**，
  * 无竞态、也不用去 hook 工具层。
  *
+ * ## bash 绕道（台账 corum/review/capture-bash-writes）
+ *
+ * 只认**文件工具**（`write` / `edit` / `str_replace_editor`）会漏掉一半改动：Agent 大量
+ * 用 shell 写文件（`cmd > f`、`>> f`、`tee f`、`sed -i s/a/b/ f`、`python - <<'EOF'` 里
+ * `open(...,'w')`），这些调用原先**完全不进影子仓库** —— 审查卡里看不见、也撤销不了。
+ * 现在两层接住：
+ *   1. `corum-bash-writes.ts` 的纯解析器从命令串里解析出确定的写目标（解析不出的一律
+ *      放弃并计数，见该模块头），仍在**命令执行前**（同一个同步 tool/call 路径）抓 pre-image；
+ *   2. **轮末并集兜底**：`closeRound` 用工作区实况（`git status --porcelain`）求并集，把
+ *      「本轮确实变了但没有任何工具捕获到」的路径补进本轮（`cp`/`mv`/`rm`/构建脚本等
+ *      解析器故意不碰的形态靠它兜）。判据是**路径自身的 mtime ≥ 本轮开始时刻**
+ *      （文件已不在时看父目录）—— 否则会把用户自己或历史遗留的脏文件当成本轮改动。
+ *      这类路径的「改前」只能取影子仓库 `main` 里**我们上次见到**的版本；取不到就记
+ *      `unavailable`（看得见、撤不了）—— **绝不猜 `absent`**，那会让一次撤销删掉用户的文件。
+ *
+ * 两层都在同一个 try/catch 里静默降级：审查捕获失败只留一行 warn，绝不影响工具执行
+ * （2026-09-12 的教训：审查链路的异常打挂过主流程）。
+ *
  * ## 轮次模型（Gerrit 风格 + 默认应用）
  *
  * 每轮产生**两个**提交，夹出该轮净变化：
@@ -42,15 +60,16 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { appendFile, readFile, rename, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-session'
+import { parseBashWriteTargets, parsePorcelainPaths, selectUnionCandidates } from './corum-bash-writes.ts'
 
 // ── corum-review settings namespace（保留天数）────────────────────────────────
 
@@ -86,8 +105,29 @@ const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 /** 识别为「文件写操作」的工具名（与旧 review-changes.ts 同一名单）。 */
 const FILE_WRITE_TOOL_NAMES: ReadonlySet<string> = new Set(['edit', 'write', 'str_replace_editor'])
 
+/**
+ * 识别为「shell」的工具名（dsh 注册的是 `bash`（tool-bash / tool-bash-persistent）与
+ * `pwsh`（tool-pwsh）；其余是保守别名）。这类调用要额外解析命令串里的写文件目标。
+ */
+const SHELL_TOOL_NAMES: ReadonlySet<string> = new Set(['bash', 'sh', 'shell', 'pwsh', 'powershell'])
+
 /** 单轮 pre-image 的内存上限（超出则放弃保留 pre-image，只记「不可回滚」）。 */
 const MAX_PREIMAGE_BYTES = 4 * 1024 * 1024
+
+/** 轮末并集的 mtime 判据宽容度（文件系统 mtime 精度可能只有 1s）。 */
+const UNION_MTIME_SLACK_MS = 1000
+
+/** 轮末并集一轮最多补多少条路径（工作区再脏也不能把一轮拖住）。 */
+const MAX_UNION_PATHS = 200
+
+/** 轮末并集里未跟踪目录展开的最大深度。 */
+const UNION_DIR_MAX_DEPTH = 3
+
+/** `git status` / `git rev-parse` 的超时（工作区可能很大；超时只放弃本轮兜底）。 */
+const WORKTREE_GIT_TIMEOUT_MS = 20000
+
+/** 快照路径上并集扫描的最小间隔（卡片刷新很密，工作区实况不必每次都读）。 */
+const UNION_SCAN_MIN_INTERVAL_MS = 2000
 
 /**
  * 一个文件「改动前」的状态。
@@ -114,6 +154,14 @@ interface LiveRound {
   workspace: string
   /** 轮次序号（用于 ref 名与展示）。 */
   index: number
+  /** 本轮开始时刻（轮末并集兜底的 mtime 判据）。 */
+  startedAt: number
+  /** 轮次已收尾（closeRound 已接手）：快照路径上排队的并集扫描要放弃。 */
+  closed?: boolean
+  /** 上一次快照触发的并集扫描时刻（节流）。 */
+  lastUnionScanAt?: number
+  /** 并集扫描在飞（同时只允许一次）。 */
+  unionScanInFlight?: boolean
   /** 相对路径 → 改动前状态。 */
   touched: Map<string, Preimage>
 }
@@ -182,9 +230,40 @@ function toGitPath(rel: string): string {
   return rel.split(sep).join('/')
 }
 
+/**
+ * 在**工作区**（而非影子仓库）里跑一个 git 子命令 —— 轮末并集兜底读工作区实况用。
+ *
+ * `--no-optional-locks`：观察者不该顺手改写用户的 `.git/index`（git status 默认会刷新
+ * 索引缓存）。超时/失败一律由调用方静默降级。
+ */
+function runGitIn(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+  return new Promise((resolvePromise) => {
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const finish = (code: number): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise({ stdout, stderr, code })
+    }
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL') } catch { /* 已经退出 */ }
+      finish(-1)
+    }, WORKTREE_GIT_TIMEOUT_MS)
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    child.on('error', (error) => { stderr += String(error); finish(-1) })
+    child.on('exit', (code) => finish(code ?? -1))
+  })
+}
+
 export class CorumReviewService extends TypertRemoteService {
   private readonly repos = new Map<string, RepoState>()
   private readonly rounds = new Map<string, LiveRound>()
+  /** 已经 warn 过的 key（`warnOnce`）：非 git 工作区之类的稳态失败不刷日志。 */
+  private readonly warnedOnce = new Set<string>()
   private retentionDays = DEFAULT_RETENTION_DAYS
 
   constructor(ctx: Context) {
@@ -245,6 +324,7 @@ export class CorumReviewService extends TypertRemoteService {
         sessionId,
         workspace: cwd,
         index: (previous?.index ?? 0) + 1,
+        startedAt: Date.now(),
         touched: new Map(),
       })
       return
@@ -253,7 +333,9 @@ export class CorumReviewService extends TypertRemoteService {
 
     const data = event.data as { name?: unknown; arguments?: unknown } | undefined
     const name = typeof data?.name === 'string' ? data.name : ''
-    if (!FILE_WRITE_TOOL_NAMES.has(name)) return
+    const isFileTool = FILE_WRITE_TOOL_NAMES.has(name)
+    const isShellTool = SHELL_TOOL_NAMES.has(name)
+    if (!isFileTool && !isShellTool) return
     const rawArgs = data?.arguments
     if (typeof rawArgs !== 'string') return
     let parsed: Record<string, unknown>
@@ -262,27 +344,73 @@ export class CorumReviewService extends TypertRemoteService {
       if (typeof value !== 'object' || value === null || Array.isArray(value)) return
       parsed = value as Record<string, unknown>
     } catch { return }
-    const filePath = typeof parsed.file_path === 'string'
-      ? parsed.file_path
-      : (typeof parsed.path === 'string' ? parsed.path : undefined)
-    if (filePath === undefined || filePath === '') return
+
+    // 目标路径 + 解析基准：文件工具是单路径；shell 是命令串里解析出的写目标，
+    // 基准 = bash 的 `workdir`（默认会话工作区）+ 命令里字面量 `cd` 链。
+    let targets: string[]
+    let base = cwd
+    if (isFileTool) {
+      const filePath = typeof parsed.file_path === 'string'
+        ? parsed.file_path
+        : (typeof parsed.path === 'string' ? parsed.path : undefined)
+      if (filePath === undefined || filePath === '') return
+      targets = [filePath]
+    } else {
+      const command = typeof parsed.command === 'string' ? parsed.command : ''
+      if (command === '') return
+      if (typeof parsed.workdir === 'string' && parsed.workdir !== '') base = resolve(cwd, parsed.workdir)
+      targets = this.shellWriteTargets(command, base)
+    }
+    if (targets.length === 0) return
 
     // 懒开轮：某些路径下（恢复的会话）可能先见到 tool/call 而没见到 turn/start。
     let round = this.rounds.get(sessionId)
     if (round === undefined) {
-      round = { sessionId, workspace: cwd, index: 1, touched: new Map() }
+      round = { sessionId, workspace: cwd, index: 1, startedAt: Date.now(), touched: new Map() }
       this.rounds.set(sessionId, round)
     }
     if (round.workspace !== cwd) return // 会话换了工作区：本轮不追（下一轮重建）
-    const rel = this.relativePath(round.workspace, filePath)
-    if (rel === null) return
-    if (round.touched.has(rel)) return // 本轮已抓过：pre-image 取「本轮开始时」的内容
-    // ★ 关键：此刻工具尚未执行，读到的就是「改动前」。
-    const pre = this.capturePreimage(resolve(round.workspace, rel))
-    round.touched.set(rel, pre)
-    // 立刻落库（异步，不阻塞会话）：内容进对象库 + 追加 journal 一行。
-    // 这样应用在「一轮进行中」被重启/崩溃后，这一轮的 pre-image 仍然可恢复（C6）。
-    void this.persistCapture(round, rel, pre)
+    for (const target of targets) {
+      const abs = isAbsolute(target) ? target : resolve(base, target)
+      const rel = this.relativePath(round.workspace, abs)
+      if (rel === null) continue // 工作区之外：影子仓库/回滚都只按工作区相对路径表达
+      if (round.touched.has(rel)) continue // 本轮已抓过：pre-image 取「本轮开始时」的内容
+      // ★ 关键：此刻工具尚未执行，读到的就是「改动前」。
+      const pre = this.capturePreimage(resolve(round.workspace, rel))
+      round.touched.set(rel, pre)
+      // 立刻落库（异步，不阻塞会话）：内容进对象库 + 追加 journal 一行。
+      // 这样应用在「一轮进行中」被重启/崩溃后，这一轮的 pre-image 仍然可恢复（C6）。
+      void this.persistCapture(round, rel, pre)
+    }
+  }
+
+  /**
+   * 从一条 shell 命令里解析出「写文件」的绝对目标路径。
+   *
+   * 解析器对不确定的路径一律放弃（变量/通配/算不出的 cd），只用计数 —— 这里把它落成
+   * 一行 warn 作为可观测性：漏掉的路径由轮末的工作区实况并集兜底（见 `closeRound`）。
+   * 任何失败都只返回空数组，绝不影响工具执行。
+   */
+  private shellWriteTargets(command: string, base: string): string[] {
+    try {
+      const scan = parseBashWriteTargets(command)
+      if (scan.unresolved > 0) {
+        const { variable, glob, cd, other } = scan.reasons
+        this.ctx.logger.warn(
+          `corum-review bash capture: ${scan.unresolved} write target(s) unresolved`
+          + ` (variable=${variable} glob=${glob} cd=${cd} other=${other})`,
+        )
+      }
+      if (scan.targets.length === 0) return []
+      // 字面量 `cd` 链：从 shell 的初始 cwd（bash 的 workdir）依次 resolve。
+      const origin = scan.cwdSteps === null
+        ? base
+        : scan.cwdSteps.reduce((acc, step) => resolve(acc, step), base)
+      return scan.targets.map((target) => (isAbsolute(target) ? target : resolve(origin, target)))
+    } catch (error) {
+      this.ctx.logger.warn(`corum-review bash capture failed: ${String(error)}`)
+      return []
+    }
   }
 
   /**
@@ -339,7 +467,9 @@ export class CorumReviewService extends TypertRemoteService {
           const roundKey = `${line.session}#${line.round}`
           let round = open.get(roundKey)
           if (round === undefined) {
-            round = { sessionId: line.session, workspace: line.workspace, index: line.round, touched: new Map() }
+            // 恢复出来的轮次：startedAt 只能取「恢复时刻」——用 0 会让轮末并集把上一轮
+            // 之前就脏着的文件全当成这一轮的改动（宁可少补，不可误报）。
+            round = { sessionId: line.session, workspace: line.workspace, index: line.round, startedAt: Date.now(), touched: new Map() }
             open.set(roundKey, round)
           }
           if (line.t === 'capture') round.touched.set(line.path, { kind: 'blob', hash: line.blob })
@@ -380,20 +510,31 @@ export class CorumReviewService extends TypertRemoteService {
     }
   }
 
-  /** 读「改动前」状态（不存在 / 内容 / 取不到，三态显式）。 */
+  /**
+   * 读「改动前」状态（不存在 / 内容 / 取不到，三态显式）。
+   *
+   * ⚠️ 二进制（含 NUL）在这里判 `unavailable`：`readFileSync(…, 'utf8')` 对非法 UTF-8
+   * **不抛错**，而是替换成 U+FFFD —— 那份「内容」是有损的，拿去撤销会把文件写坏。
+   * 本函数是**回滚用** pre-image 的唯一入口，所以在这里拒绝；读「当前内容」（提交进影子
+   * 仓库用）走 `readCurrent`，它不拒绝（库里存一份有损拷贝无害，只有回滚会毁文件）。
+   * 这条路由 bash 写文件放大：Agent 会用 `python -c "open(p,'wb')"` 之类直接写图片/产物
+   * （真机语料里就有 `test-pixel.png` 这类目标）。
+   */
   private capturePreimage(abs: string): Preimage {
+    const pre = this.readCurrent(abs)
+    if (pre.kind !== 'content') return pre
+    return pre.text.includes('\0') ? { kind: 'unavailable' } : pre
+  }
+
+  /** 读某路径**当前**内容：不存在 / 内容 / 取不到（供 closeRound 与 snapshot 用）。 */
+  private readCurrent(abs: string): Preimage {
     try {
       if (!existsSync(abs)) return { kind: 'absent' }
       if (statSync(abs).size > MAX_PREIMAGE_BYTES) return { kind: 'unavailable' }
       return { kind: 'content', text: readFileSync(abs, 'utf8') }
     } catch {
-      return { kind: 'unavailable' } // 二进制/权限
+      return { kind: 'unavailable' } // 二进制/权限/目录
     }
-  }
-
-  /** 读某路径**当前**内容：不存在 / 内容 / 取不到（供 closeRound 与 snapshot 用）。 */
-  private readCurrent(abs: string): Preimage {
-    return this.capturePreimage(abs)
   }
 
   /** 取 pre-image 的正文（内存里的直接用；blob 形态走 git cat-file）。 */
@@ -530,11 +671,18 @@ export class CorumReviewService extends TypertRemoteService {
    */
   private closeRound(round: LiveRound): void {
     this.rounds.delete(round.sessionId)
+    round.closed = true
     const touched = round.touched
-    if (touched.size === 0) return // 本轮没写文件：不留提交
     round.touched = new Map() // 立刻释放内存中的 pre-image
     void (async () => {
       try {
+        // ★ 轮末并集兜底：先只读工作区实况，真有候选才建影子仓库，
+        // 所以「没有任何改动的轮次」不会在用户目录里留下任何影子仓库目录。
+        const added = await this.applyWorktreeChanges(round, touched)
+        if (touched.size === 0) return // 本轮真没写文件：不留提交
+        if (added > 0) {
+          this.ctx.logger.info(`corum-review round ${round.index}: +${added} path(s) via worktree union`)
+        }
         const repo = await this.ensureRepo(round.workspace)
         await this.enqueue(repo, async () => {
           const base = await this.ensureBaseline(repo)
@@ -584,6 +732,165 @@ export class CorumReviewService extends TypertRemoteService {
     })()
   }
 
+  // ── 轮末并集兜底（bash 绕道的安全网）──────────────────────────────────────
+
+  /**
+   * 快照路径上的并集扫描（节流 + 不阻塞 + 同时只跑一次）。
+   *
+   * 为什么需要它：并集兜底若只在 `closeRound` 里做，那次扫描发生在**下一轮 turn/start**
+   * （那时本轮已从 `rounds` 摘掉），审查卡再也读不到它 —— 用户依然「看不见」。
+   * 卡片每次会话事件都会拉一次 `snapshot`，所以在快照路径上挂一个节流扫描，扫到的路径
+   * 会在**下一次**刷新出现在卡片里（本次调用立即返回手头的数据，绝不 await git）。
+   */
+  private scheduleUnionScan(round: LiveRound): void {
+    if (round.closed === true || round.unionScanInFlight === true) return
+    const now = Date.now()
+    if (now - (round.lastUnionScanAt ?? 0) < UNION_SCAN_MIN_INTERVAL_MS) return
+    round.lastUnionScanAt = now
+    round.unionScanInFlight = true
+    void (async () => {
+      try {
+        // 排队期间轮次可能已经收尾（closeRound 会自己再兜一次）：那就别写这张残表。
+        if (round.closed === true) return
+        const added = await this.applyWorktreeChanges(round, round.touched)
+        if (added > 0) {
+          this.ctx.logger.info(`corum-review round ${round.index}: +${added} path(s) via worktree union`)
+        }
+      } catch (error) {
+        this.ctx.logger.warn(`corum-review worktree union failed: ${String(error)}`)
+      } finally {
+        round.unionScanInFlight = false
+      }
+    })()
+  }
+
+  /**
+   * 求并在：把「本轮确实变了、但没有任何工具捕获到」的路径补进 `touched`。
+   *
+   * @param touched - 要写入的表（closeRound 传的是已经脱离 `rounds` 的那份）。
+   * @returns 补进来的条数。
+   */
+  private async applyWorktreeChanges(round: LiveRound, touched: Map<string, Preimage>): Promise<number> {
+    const candidates = await this.scanWorktreeChanges(round, touched)
+    if (candidates.length === 0) return 0
+    const repo = await this.ensureRepo(round.workspace)
+    let added = 0
+    for (const rel of candidates) {
+      // eslint-disable-next-line no-await-in-loop -- 量级 = 兜底路径条数（上限 200）
+      const pre = await this.unionPreimage(repo, round.workspace, rel)
+      if (pre === null) continue // 与我们上次见到的内容完全一致：本轮无关
+      if (touched.has(rel)) continue
+      touched.set(rel, pre)
+      added += 1
+      // 与文件工具同一条持久化路径：崩在一轮中间也能恢复（C6）。
+      // eslint-disable-next-line no-await-in-loop -- 同上
+      await this.persistCapture(round, rel, pre)
+    }
+    return added
+  }
+
+  /**
+   * 读工作区实况（`git status --porcelain -z`）挑出本轮兜底候选（工作区相对路径）。
+   *
+   * 三道筛子，顺序即「宁可漏，不可猜」：
+   *   1. 路径必须在工作区内（porcelain 的路径是**仓库根**相对，仓库根可能在工作区之上）；
+   *   2. 本轮没被任何工具捕获过；
+   *   3. **mtime ≥ 本轮开始时刻**（文件已不在时看父目录的 mtime）—— 否则用户自己或历史
+   *      遗留的脏文件会被当成本轮改动，审查卡变成噪音（这比漏报更糟：它误导审核）。
+   *
+   * 非 git 工作区（`git status` 退出非 0）只记一次 warn 后放弃本轮兜底 —— 命令捕获那条路
+   * 仍然有效。
+   */
+  private async scanWorktreeChanges(round: LiveRound, touched: ReadonlyMap<string, Preimage>): Promise<string[]> {
+    try {
+      const status = await runGitIn(round.workspace, [
+        '--no-optional-locks',
+        '-c', 'status.relativePaths=false',
+        'status', '--porcelain', '-z', '--no-renames',
+      ])
+      if (status.code !== 0) {
+        this.warnOnce(
+          `worktree:${round.workspace}`,
+          `corum-review worktree union skipped (git status ${status.code}): ${status.stderr.trim().split('\n')[0] ?? ''}`,
+        )
+        return []
+      }
+      const entries = parsePorcelainPaths(status.stdout)
+      if (entries.length === 0) return []
+      const top = await runGitIn(round.workspace, ['--no-optional-locks', 'rev-parse', '--show-toplevel'])
+      if (top.code !== 0) return []
+      // 两边都 realpath：porcelain 的路径挂在仓库根上，而会话 cwd 可能是软链接路径
+      // （macOS 的 /tmp → /private/tmp），不归一化就会把工作区内的路径判成「在外面」。
+      const root = this.realpathOr(top.stdout.trim())
+      const workspace = this.realpathOr(round.workspace)
+      const absList = selectUnionCandidates(entries, {
+        root,
+        floor: round.startedAt - UNION_MTIME_SLACK_MS,
+        maxPaths: MAX_UNION_PATHS,
+        maxDirDepth: UNION_DIR_MAX_DEPTH,
+        probe: {
+          fileMtime: (abs) => {
+            try {
+              const stat = statSync(abs)
+              return stat.isFile() || stat.isDirectory() ? stat.mtimeMs : null
+            } catch { return null }
+          },
+          parentMtime: (abs) => {
+            try { return statSync(dirname(abs)).mtimeMs } catch { return null }
+          },
+          children: (abs) => {
+            try {
+              return readdirSync(abs, { withFileTypes: true }).map((entry) => ({ name: entry.name, dir: entry.isDirectory() }))
+            } catch { return [] }
+          },
+        },
+      })
+      const out: string[] = []
+      for (const abs of absList) {
+        const rel = this.relativePath(workspace, abs)
+        if (rel === null || touched.has(rel) || out.includes(rel)) continue
+        out.push(rel)
+      }
+      return out
+    } catch (error) {
+      this.ctx.logger.warn(`corum-review scanWorktreeChanges failed: ${String(error)}`)
+      return []
+    }
+  }
+
+  /**
+   * 兜底路径的「改动前」内容：影子仓库 `main` 树里**我们上次见到**的那个版本。
+   *
+   * 为什么是 main：main 是本服务记录的「已接受状态」，某路径最后一次被本轮之前的某轮触碰
+   * 时的内容就在那里 —— 语义正是「自我们上次看到它以来的变化」。
+   *
+   * 取不到（从没被记录过）就如实记 `unavailable`：卡片里**看得见**这个文件变了，但撤销会
+   * 明确拒绝。**绝不猜 `absent`** —— 那会让一次撤销删掉用户的文件（见 Preimage 三态说明）。
+   *
+   * @returns `null` = 与当前内容一致（本轮无关，不必进卡片）。
+   */
+  private async unionPreimage(repo: RepoState, workspace: string, rel: string): Promise<Preimage | null> {
+    const current = this.readCurrent(resolve(workspace, rel))
+    const blob = await runGit(repo.gitDir, ['cat-file', 'blob', `refs/heads/main:${rel}`])
+    if (blob.code !== 0) return { kind: 'unavailable' }
+    // 二进制（含 NUL）：utf8 解码是有损的，回滚会把文件写坏 → 如实记「取不到」。
+    if (blob.stdout.includes('\0') || blob.stdout.length > MAX_PREIMAGE_BYTES) return { kind: 'unavailable' }
+    if (current.kind === 'content' && current.text === blob.stdout) return null
+    return { kind: 'content', text: blob.stdout }
+  }
+
+  /** realpath（失败时原样返回）—— porcelain 的路径与 cwd 可能一个软链一个不是。 */
+  private realpathOr(path: string): string {
+    try { return realpathSync(path) } catch { return path }
+  }
+
+  /** 同一个 key 只 warn 一次（非 git 工作区每轮都会走到这里，别刷日志）。 */
+  private warnOnce(key: string, message: string): void {
+    if (this.warnedOnce.has(key)) return
+    this.warnedOnce.add(key)
+    this.ctx.logger.warn(message)
+  }
+
   // ── 保留策略 ─────────────────────────────────────────────────────────────
 
   /**
@@ -630,6 +937,9 @@ export class CorumReviewService extends TypertRemoteService {
   async snapshot(sessionId: string): Promise<{ workspace: string | null; roundIndex: number; files: ReviewFileEntry[] }> {
     const round = this.rounds.get(sessionId)
     if (round === undefined) return { workspace: null, roundIndex: 0, files: [] }
+    // 顺手排一次（节流过的）工作区并集扫描：bash 绕道改的文件要在这里被补进来，用户才
+    // 真的看得见（见 scheduleUnionScan）。不 await：卡片拿手头数据先渲染。
+    this.scheduleUnionScan(round)
     if (round.touched.size === 0) return { workspace: round.workspace, roundIndex: round.index, files: [] }
     const repo = await this.ensureRepo(round.workspace)
     const files: ReviewFileEntry[] = []
