@@ -33,6 +33,7 @@ import {
   corumReapOrphanWorktrees,
   corumListIsolatedWorktrees,
   corumIntegrationFailure,
+  corumDirtyOwnershipLines,
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumPartialIntegrationNotice,
@@ -172,6 +173,64 @@ describe('corumIntegrationTruth — 机制真值门禁', () => {
     const truth = corumIntegrationTruth(repo, [entry], before)
     expect(truth.dirtyDelta.join(' ')).toContain('new-from-integrate.txt')
     expect(truth.dirtyDelta.join(' ')).not.toContain('unrelated.txt')
+  })
+
+  // 2026-09-13 收口（risk orchestration.integrator.dirty-main-tree）：主树脏时报告
+  // 必须说清两块 diff 的归属——「既存无关在制品」与「本轮新增」分开报，否则「主树
+  // 有未提交改动」会被读成本轮的锅（2026-09-12 事故里集成者正是这么判的）。
+  //
+  // 夹具注意：worktree 建在 repo 内的 `.corum-worktrees/`，所以主树 porcelain 天然
+  // 带一条 `?? .corum-worktrees/`；基线条数一律**从实况算**，不硬编码。
+  const porcelainLines = (raw: string): string[] => raw.split('\n').filter(line => line.trim() !== '')
+
+  it('dirtyBeforeCount 如实报「集成前主树就有」的未提交条数，且不影响判据', () => {
+    const { repo, entry } = makeRepoWithWorktree()
+    writeFileSync(join(repo, 'wip-a.txt'), 'my work in progress')
+    writeFileSync(join(repo, 'wip-b.txt'), 'more wip')
+    const before = execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })
+    const truth = corumIntegrationTruth(repo, [entry], before)
+    expect(truth.dirtyBeforeCount).toBe(porcelainLines(before).length)
+    expect(truth.dirtyDelta).toEqual([])
+    expect(truth.integrated).toBe(true) // 分支口径与主树脏不脏无关
+  })
+
+  it('归属行：既存在制品只算既存，不混进「本轮新增」', () => {
+    const { repo, entry } = makeRepoWithWorktree()
+    writeFileSync(join(repo, 'wip-a.txt'), 'my work in progress')
+    const before = execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })
+    const prior = porcelainLines(before).length
+    writeFileSync(join(repo, 'integrator-stray.txt'), 'written by integrator outside its worktree')
+    const truth = corumIntegrationTruth(repo, [entry], before)
+    const text = corumDirtyOwnershipLines(truth).join('\n')
+    expect(text).toContain(`ALREADY had ${prior} uncommitted path`)
+    expect(text).toContain('unrelated work-in-progress')
+    expect(text).toContain('gained 1 uncommitted path')
+    expect(text).toContain('integrator-stray.txt')
+    expect(text).not.toContain('wip-a.txt') // 既存的不进「本轮新增」清单
+  })
+
+  it('基线 == 当前实况（本轮没新增脏）→ 只说既存，不产生「新增」噪音', () => {
+    const { repo, entry } = makeRepoWithWorktree()
+    writeFileSync(join(repo, 'wip-a.txt'), 'my work in progress')
+    const before = execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })
+    const truth = corumIntegrationTruth(repo, [entry], before)
+    const text = corumDirtyOwnershipLines(truth).join('\n')
+    expect(truth.dirtyDelta).toEqual([])
+    expect(text).toContain('ALREADY had')
+    expect(text).not.toContain('gained')
+  })
+
+  it('失败报告里既存在制品先于「现场已保留」出现（先归属、后清单）', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree()
+    writeFileSync(join(repo, 'wip-a.txt'), 'my work in progress')
+    const before = execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })
+    commitInWorktree(worktree, 'ORCH-INT-1.txt') // 提交了但没合并 → 真未落地
+    const truth = corumIntegrationTruth(repo, [entry], before)
+    const report = corumIntegrationFailure(truth, 'deadbeefdeadbeef', [entry])
+    expect(truth.integrated).toBe(false)
+    expect(report).toContain('branches NOT integrated into HEAD')
+    expect(report).toContain('ALREADY had')
+    expect(report.indexOf('ALREADY had')).toBeLessThan(report.indexOf('PRESERVED'))
   })
 })
 

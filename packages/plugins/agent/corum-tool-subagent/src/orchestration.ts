@@ -26,6 +26,7 @@ export {
   corumGitHead,
   corumGitStatusPorcelain,
   corumIntegrationFailure,
+  corumDirtyOwnershipLines,
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumIsGitRepo,

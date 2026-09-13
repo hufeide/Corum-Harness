@@ -646,6 +646,7 @@ export {
   corumGit,
   corumGitHead,
   corumGitStatusPorcelain,
+  corumDirtyOwnershipLines,
   corumIntegrationFailure,
   corumPartialIntegrationNotice,
   corumIntegrationTruth,

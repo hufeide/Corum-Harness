@@ -779,6 +779,8 @@ export function corumMarkSettled(
  * - `unmerged`：分支的工作未进入 HEAD（集成者没合并/合并失败/只改了工作区没提交）；
  * - `uncommitted`：worktree 里残留未提交改动（子 Agent 写了没提交 = 未持久化）；
  * - `dirtyDelta`：主树新增的未提交改动（集成前后对比，仅供提示，不作失败判据）；
+ * - `dirtyBeforeCount`：**集成前主树就有**的未提交改动条数（无关在制品；见
+ *   `corumDirtyOwnershipLines` 的由来注释）——同样的「只作提示、不作判据」；
  * - `integrated`：`unmerged` 与 `uncommitted` 均空才算真集成。
  */
 export interface CorumIntegrationTruth {
@@ -786,6 +788,7 @@ export interface CorumIntegrationTruth {
   readonly unmerged: readonly string[]
   readonly uncommitted: readonly string[]
   readonly dirtyDelta: readonly string[]
+  readonly dirtyBeforeCount: number
   readonly head: string
 }
 
@@ -846,7 +849,8 @@ export function corumIntegrationTruth(
     if (!corumBranchIntegrated(cwd, entry.branch)) unmerged.push(entry.branch)
     else if (corumWorktreeHasUncommitted(entry.path)) uncommitted.push(`${entry.slug} (${entry.path})`)
   }
-  const before = new Set(dirtyBefore.split('\n').filter(line => line.trim() !== ''))
+  const beforeLines = dirtyBefore.split('\n').filter(line => line.trim() !== '')
+  const before = new Set(beforeLines)
   const dirtyDelta = corumGitStatusPorcelain(cwd)
     .split('\n')
     .filter(line => line.trim() !== '' && !before.has(line))
@@ -855,8 +859,37 @@ export function corumIntegrationTruth(
     unmerged,
     uncommitted,
     dirtyDelta,
+    // 主树**集成前就有的**未提交改动（与本次 fan-in 无关的在制品）。判据本身只看
+    // 「分支有没有进 HEAD」，与主树脏不脏无关；这个计数只有一个用途：让报告能说清
+    // 「本轮只对自己产出的 diff 负责」，而不是把既存脏读成「集成没落地」。
+    dirtyBeforeCount: beforeLines.length,
     head: corumGitHead(cwd),
   }
+}
+
+/**
+ * fork（corum）：主树既存未提交改动的提示行（集成报告共用；无则返回空数组）。
+ *
+ * 由来（2026-09-12 实机）：集成者把主树里**与本次无关的未提交在制品**当成了任务
+ * 子 Agent 的工作，据此判「集成没落地」→ 整轮报失败（用户看到「集成失败」）。
+ * 判据已改成「分支是否并入 HEAD」，但报告仍要说清两块 diff 的归属，否则同一个
+ * 困惑会以另一种形式回来（「主树这些改动是谁的？」）。
+ * @param truth - 集成真值（读 `dirtyBeforeCount` / `dirtyDelta`）。
+ * @returns 报告行数组（可能为空）。
+ */
+export function corumDirtyOwnershipLines(truth: CorumIntegrationTruth): string[] {
+  const lines: string[] = []
+  if (truth.dirtyBeforeCount > 0) {
+    lines.push(
+      `main tree ALREADY had ${truth.dirtyBeforeCount} uncommitted path(s) before this integrate — unrelated work-in-progress, neither produced nor claimed by this round. The verdict above is about the pending BRANCHES only.`,
+    )
+  }
+  if (truth.dirtyDelta.length > 0) {
+    lines.push(
+      `main tree ALSO gained ${truth.dirtyDelta.length} uncommitted path(s) during this round (e.g. ${truth.dirtyDelta.slice(0, 3).join(', ')}) — the integrator's own writes if it edited outside its worktree; they are NOT part of any branch commit unless committed.`,
+    )
+  }
+  return lines
 }
 
 /**
@@ -880,6 +913,7 @@ export function corumPartialIntegrationNotice(
   if (truth.dirtyDelta.length > 0) {
     lines.push(`main tree also has ${truth.dirtyDelta.length} uncommitted path(s) not present before integrate (e.g. ${truth.dirtyDelta.slice(0, 3).join(', ')})`)
   }
+  lines.push(...corumDirtyOwnershipLines(truth))
   lines.push('Next: commit (or discard) those leftovers in their worktrees, then call integrate again for them — or discard them explicitly.')
   return lines.join('\n')
 }
@@ -904,9 +938,9 @@ export function corumIntegrationFailure(
   if (truth.uncommitted.length > 0) {
     lines.push(`worktrees with UNCOMMITTED changes (written but never committed): ${truth.uncommitted.join(', ')}`)
   }
-  if (truth.dirtyDelta.length > 0) {
-    lines.push(`main tree now has ${truth.dirtyDelta.length} uncommitted path(s) not present before integrate (e.g. ${truth.dirtyDelta.slice(0, 3).join(', ')})`)
-  }
+  // 先把两块 diff 的归属说清，再给 delta——否则「主树有改动」会被读成本轮的锅
+  // （2026-09-12 我本人踩过：主树是在制品，机制却报了「集成没落地」）。
+  lines.push(...corumDirtyOwnershipLines(truth))
   lines.push('Worktrees and branches are PRESERVED — nothing was cleaned up. Merge them yourself (or re-run integrate) after fixing the failure.')
   lines.push(`Pending entries: ${entries.map(entry => `${entry.slug}@${entry.branch} -> ${entry.path}`).join('; ')}`)
   const trimmedClaim = claim.trim()

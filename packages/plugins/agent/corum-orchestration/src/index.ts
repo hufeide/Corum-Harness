@@ -48,6 +48,7 @@ export {
   corumGit,
   corumGitHead,
   corumGitStatusPorcelain,
+  corumDirtyOwnershipLines,
   corumIntegrationFailure,
   corumMutationToolsForPlatform,
   corumAutoIntegrate,
