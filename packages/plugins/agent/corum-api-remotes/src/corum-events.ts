@@ -400,6 +400,13 @@ export interface SubagentChangeSummary {
     readonly added: number
     /** 删除行数。 */
     readonly removed: number
+    /**
+     * 改前内容状态（2026-09-13 收口，问题 1-④⑤）。
+     * `unavailable` = 过大/二进制/影子仓库里没有改前版本——常见成因是轮末并集
+     * 兜底把「窗口内 mtime 变脏但非本 Agent 所写」的路径补进了本轮；UI 把这种
+     * 行置灰（不可点 diff、不可撤销，标注「无可撤销内容」）。
+     */
+    readonly status?: 'content' | 'absent' | 'unavailable' | 'missing'
   }[]
   /** 隔离 worktree slug（隔离时携带，非隔离缺省）。 */
   readonly worktreeSlug?: string

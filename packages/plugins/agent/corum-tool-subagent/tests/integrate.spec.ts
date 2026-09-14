@@ -14,7 +14,7 @@
  * 全部用真实临时 git 仓库驱动（无 mock），与 execute 层同一 git 命令面。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -37,6 +37,8 @@ import {
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumPartialIntegrationNotice,
+  corumPortBranchDiff,
+  corumPortPendingBranches,
   corumWorktreeHasUncommitted,
   type CorumWorktreeEntry,
 } from '../src/index.ts'
@@ -318,6 +320,95 @@ describe('corumIntegratorPersona — 破坏性 git 命令禁令', () => {
     expect(persona).toContain('git reset --hard')
     expect(persona).toContain('git clean -fd')
     expect(persona).toContain('independently verifies')
+  })
+})
+
+describe('corumPortBranchDiff — 脏主树/未提交场景的集成 diff 口（2026-09-14 B）', () => {
+  it('主树干净时把分支工作落成主树提交，且工作区不被动过', () => {
+    const { repo, worktree, branch, entry } = makeRepoWithWorktree('wt-port01')
+    commitInWorktree(worktree, 'PORT-1.txt', 'from child')
+    const base = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    const result = corumPortBranchDiff(repo, { ...entry, base }, 'port child work')
+    expect(result.applied).toBe(true)
+    expect(result.base).toBe(base)
+    expect(result.patchBytes).toBeGreaterThan(0)
+    // HEAD 前进、分支的工作真的进 HEAD（真值门禁判通过）。
+    expect(result.head).toBe(execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim())
+    expect(corumIntegrationTruth(repo, [entry]).integrated).toBe(true)
+    // 工作区与本分支一致：文件在位、内容正确（派生物同步，但不做全树 checkout）。
+    expect(existsSync(join(repo, 'PORT-1.txt'))).toBe(true)
+    expect(execFileSync('git', ['-C', repo, 'show', 'HEAD:PORT-1.txt'], { encoding: 'utf8' })).toBe('from child')
+    expect(execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', 'PORT-1.txt'], { encoding: 'utf8' })).toBe('')
+    expect(branch).toContain('wt/wt-port01')
+  })
+
+  it('主树有无关未提交在制品 → 照常落盘（那正是这条口的场景），在制品一字未动', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree('wt-port02')
+    commitInWorktree(worktree, 'PORT-2.txt', 'landed')
+    writeFileSync(join(repo, 'WIP-unrelated.txt'), 'mine, do not touch')
+    const result = corumPortBranchDiff(repo, entry)
+    expect(result.applied).toBe(true)
+    expect(corumIntegrationTruth(repo, [entry]).integrated).toBe(true)
+    expect(readFileSync(join(repo, 'WIP-unrelated.txt'), 'utf8')).toBe('mine, do not touch')
+    // 在制品仍是未提交（口子没有把它卷进提交）。
+    expect(execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', 'WIP-unrelated.txt'], { encoding: 'utf8' })).toContain('WIP-unrelated.txt')
+  })
+
+  it('分支要改的文件在主树里也有未提交改动 → 拒绝并点名（不猜谁覆盖谁）', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree('wt-port02b')
+    commitInWorktree(worktree, 'CLASH.txt', 'from child')
+    writeFileSync(join(repo, 'CLASH.txt'), 'my unsaved edit\n')
+    const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    const result = corumPortBranchDiff(repo, entry)
+    expect(result.applied).toBe(false)
+    expect(result.error).toContain('CLASH.txt')
+    expect(readFileSync(join(repo, 'CLASH.txt'), 'utf8')).toBe('my unsaved edit\n')
+    expect(execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(head)
+  })
+
+  it('缺失 base → 退化为与 HEAD 的分叉点（不报错、不误判）', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree('wt-port03')
+    commitInWorktree(worktree, 'PORT-3.txt')
+    const result = corumPortBranchDiff(repo, entry)
+    expect(result.applied).toBe(true)
+    expect(result.base).not.toBe('')
+  })
+
+  it('分支没有任何相对改动 → applied=false 且说明原因（不是错误，也不动主树）', () => {
+    const { repo, entry } = makeRepoWithWorktree('wt-port04')
+    const result = corumPortBranchDiff(repo, entry)
+    expect(result.applied).toBe(false)
+    expect(result.error).toContain('no diff')
+  })
+
+  it('三方冲突 → applied=false，工作区与 HEAD 都保持原样（临时 index 试合，不落半成品）', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree('wt-port05')
+    writeFileSync(join(worktree, 'CONFLICT.txt'), 'child version\n')
+    execFileSync('git', ['-C', worktree, 'add', '-A'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', worktree, 'commit', '-q', '-m', 'child conflict'], { stdio: 'pipe' })
+    const base = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    // 主树对同一文件写了一个互斥的版本并提交（制造真冲突）。
+    writeFileSync(join(repo, 'CONFLICT.txt'), 'main version\n')
+    execFileSync('git', ['-C', repo, 'add', '-A'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'main conflict'], { stdio: 'pipe' })
+    const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    const result = corumPortBranchDiff(repo, { ...entry, base })
+    expect(result.applied).toBe(false)
+    expect(result.error).toBeTruthy()
+    // 冲突文件保持主树版本、工作区干净、HEAD 未动——试合发生在临时 index 上。
+    expect(readFileSync(join(repo, 'CONFLICT.txt'), 'utf8')).toBe('main version\n')
+    expect(execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('')
+    expect(execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(head)
+  })
+
+  it('corumPortPendingBranches 逐条处理，顺序与入参一致', () => {
+    const a = makeRepoWithWorktree('wt-port06')
+    commitInWorktree(a.worktree, 'PORT-6a.txt')
+    const b = makeRepoWithWorktree('wt-port07')
+    const results = corumPortPendingBranches(a.repo, [a.entry, { ...b.entry, path: b.worktree }])
+    expect(results.map(r => r.branch)).toEqual([a.entry.branch, b.entry.branch])
+    expect(results[0].applied).toBe(true)
+    expect(results[1].applied).toBe(false)
   })
 })
 

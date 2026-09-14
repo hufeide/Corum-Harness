@@ -65,6 +65,7 @@ import {
   corumGitStatusPorcelain,
   corumIntegrationFailure,
   corumIntegrationTruth,
+  corumPortPendingBranches,
   corumIntegratorPersona,
   corumIsGitRepo,
   corumIsolationBoundaryNotice,
@@ -607,6 +608,54 @@ function providerWording(inheritsConversation: boolean): { description: string; 
   }
 }
 
+/**
+ * fork（corum）：bash / 委派效率纪律（机制段条目，**单一事实源**）。
+ *
+ * 抽成导出纯函数的原因（2026-09-14 委派正确性轮）：这段文本此前以字面量内联在
+ * `systemPrompt.section` 回调里，只有「实机重启后读工具描述」才能验证它是否还
+ * 与机制事实一致。抽出来后单测能直接断言内容与措辞纪律（`prompt-discipline.spec.ts`），
+ * 提示词漂移变成可执行断言。
+ *
+ * 措辞纪律（用户 2026-09-14 定调）：只写**通用规则 + 机制理由**，英文、祈使、
+ * 一句话说清「什么时候用、怎么用、什么时候不能用」；不写实测数字、不写具体
+ * 端口/脚本名/会话、不假设某种使用模式；量化只允许机制常量（默认超时、上限、
+ * 每次调用新 shell、stdin 忽略、后台句柄等）。
+ * @returns 机制段的效率纪律行（含前置空行）。
+ */
+export function corumEfficiencyDisciplineLines(): string[] {
+  return [
+    '',
+    'EFFICIENCY DISCIPLINE:',
+    '- MERGE SMALL QUERIES. Batch every `grep`/`sed`/`nl`/`awk`/`head` extraction you need into ONE `bash` call instead of one call per fact: every extra call costs a full model round-trip.',
+    '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 60s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
+    '- KEEP EACH COMMAND ON ONE LINE, statements joined with `;` or `&&`, so that a loosely delimited fragment cannot do something other than what you intended.',
+    '- EVERY CALL GETS A FRESH SHELL. No cwd, variable or function persists between calls, so never rely on a `cd` from an earlier call: chain `cd <dir> && <cmd>` inside one call, or pass `workdir`.',
+    '- PUT LONG-RUNNING OR NOT-YET-NEEDED COMMANDS IN THE BACKGROUND. A server, a watcher, a long build or a long test suite belongs behind `run_in_background: true`, so the call returns a handle at once and the conversation is not blocked; read that handle with `job_output` and stop it with `job_kill`. Never replace that handle with "wait a moment, then look again". Do not background a command whose result you need before the next step; do not background an operation that would stop or restart the runtime this session depends on; do not start a background process whose output cannot be retrieved.',
+    '- BUDGET YOUR OWN VERIFICATION. Self-checking your work means exactly three things: (1) read your own diff, (2) run the repo guard ONCE in full, (3) at most 3 targeted checks on the riskiest points you touched. That is the entire budget.',
+    '- DELEGATION IS NOT VERIFICATION. A child started from the same context reads the same code and cannot produce independent evidence, so re-running a check through another delegation buys no confidence. Spend the verification budget on your own diff and a few targeted checks.',
+    '- REPORT SCOPE. State how many steps and how many tool calls the run took, so the cost and the progress of the work are legible to whoever reads the result.',
+  ]
+}
+
+/**
+ * fork（corum）：沙箱拒绝 → 一次升级 → 由用户裁决（机制段条目，单一事实源）。
+ *
+ * 契约与官方 `tool-bash` 描述同源（被拒是预期内的事、同回合重试一次、审批弹窗即
+ * 用户同意、拒绝即终结），这里按通用规范口径复述，使「被拒 → 升级一次」成为
+ * 明确路径而不是临场发挥。措辞纪律同 {@link corumEfficiencyDisciplineLines}。
+ * @returns 机制段的沙箱升级行（含前置空行）。
+ */
+export function corumSandboxEscalationLines(): string[] {
+  return [
+    '',
+    'SANDBOX DENIALS AND ESCALATION:',
+    '- A blocked file operation reports a `[sandbox: file access denied under <mode> mode]` marker. That is a policy decision, not a failure of the command: read the marker instead of assuming the denial.',
+    '- When a wider mode would let the command succeed, retry the exact same command once, in the same turn, with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. The approval prompt raised by that retry is how the user consents — do not detour through chat to ask first.',
+    '- Escalate only from a real denial, never speculatively. If the session states that approval prompts are disabled, a denial is final: do not set `sandbox_permissions`.',
+    '- A rejected escalation is final for that command: stop and explain it instead of working around it. It does not forbid attempting or escalating other commands later.',
+  ]
+}
+
 interface DelegationRunRequest {
   readonly run_in_background?: boolean
   // fork（corum）：integrate 参数（parameters 已声明；官方类型未含）。
@@ -656,6 +705,9 @@ export {
   corumDirtyOwnershipLines,
   corumIntegrationFailure,
   corumPartialIntegrationNotice,
+  corumPortBranchDiff,
+  corumPortPendingBranches,
+  corumMergeBase,
   corumIntegrationTruth,
   corumIntegratorPersona,
   corumIsGitRepo,
@@ -894,16 +946,29 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：orchestrate 任务级结构化输出（对象根 JSON Schema）——子 Agent
         // 必须提交 schema 合法的结果，工作流式结构化子结果（2026-09-10 吸收 workflow 语义）。
         taskSchema?: ObjectJsonSchema
+        // fork（corum）：orchestrate 任务级模型锁（tasks[i].model，P0-4 真接线
+        // 2026-09-14）——调用方最具体的声明，优先级高于 preset config.model 与全局
+        // 默认；subagent 工具不传（它的模型面被 schema 剔除，锁死 preset 路由）。
+        taskModel?: { provider: string; model: string; reasoningEffort?: string }
       },
       subagentProvider: SubagentProvider,
     ): Promise<ForegroundToolResult | { kind: 'continuable'; subagentId: string } | { kind: 'background'; jobId: string }> => {
       const parent = exec.agent
+      // fork（corum）：官方模型自选请求面（provider/model/reasoning_effort 直挂
+      // args 顶层）——corum 的 subagent/orchestrate schema 已剔除这三个字段
+      // （模型锁），modelRequest 恒为空对象，仅保形供官方函数签名消费；
+      // tasks[i].model 走 taskModel 专线（上方锁分支），不混入此面。
       const modelRequest = args as DelegationModelRequest
       const parentOptions = parentAgentOptionsForDelegation(parent)
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
-      // fork（corum）：模型锁——preset config.model > 全局默认模型 > 跟随父。
+      // fork（corum）：模型锁优先级（P0-4 真接线 2026-09-14）——
+      //   任务级 tasks[i].model > preset config.model（角色锁，见
+      //   corum-agent/compile.ts：worker→profile.subagentModel，research→
+      //   profile.researchModel ?? subagentModel）> 全局默认 defaultModel/
+      //   defaultResearchModel > 跟随父。任务级是最具体的调用方声明；
+      //   subagent 工具的模型面被 schema 剔除，taskModel 只能来自 orchestrate。
       const corumGlobalModel = corumReadonlyResearch ? corumGlobal().defaultResearchModel : corumGlobal().defaultModel
-      const corumEffectiveModel = config.model ?? corumGlobalModel
+      const corumEffectiveModel = args.taskModel ?? config.model ?? corumGlobalModel
       const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
         ? undefined
         : {
@@ -980,6 +1045,36 @@ export function apply(ctx: Context, config: Config): void {
         exec.signal.throwIfAborted()
         if (requestedChildAgentOptions !== undefined) request.agentOptions = requestedChildAgentOptions
       } // fork（corum）：end 模型锁缺省分支（官方原逻辑）
+
+      // fork（corum）：任务级模型锁的校验（P0-4 真接线 2026-09-14）——tasks[i].model
+      // 声明的路由必须过两道门禁才允许生效：① settings 兜底（modelSelectionPolicy
+      // 的 routes 白名单，与官方模型自选同一权威；corum preset 未开
+      // modelSelectionSettings 时 policy=undefined，该层自动跳过）；② 真路由预检
+      // （llm.resolveCallConfig）——非法 provider/model 在 spawn 前报错，任务以
+      // 「[task N] failed」落汇合结果，而不是启一个半死的子会话。
+      if (args.taskModel !== undefined) {
+        assertAllowedModelSelection(
+          modelSelectionPolicy,
+          parentOptions,
+          request.agentOptions,
+          { provider: args.taskModel.provider, model: args.taskModel.model },
+        )
+        const llm = runtimeCtx.get('llm')
+        if (llm === undefined) {
+          throw new Error('cannot resolve the task-selected child LLM route because the `llm` service is unavailable')
+        }
+        await preflightChildLlmRoute(
+          llm,
+          parentOptions,
+          request.agentOptions,
+          exec.signal,
+          providerRouteDefaults === undefined,
+        )
+        if (runtimeCtx.subagents.getProvider(config.provider) !== subagentProvider) {
+          throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
+        }
+        exec.signal.throwIfAborted()
+      }
 
       // fork（corum）：提取本次 spawn 的真实生效模型路由，用于广播帧。
       // 取 request.agentOptions 的 provider/model/reasoningEffort——它是 890 行
@@ -1154,13 +1249,38 @@ export function apply(ctx: Context, config: Config): void {
         // + 台账保持 settled（PLAN 不变量「失败不 commit、保留现场」的机制化）。
         const corumTruth = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
         if (!corumTruth.integrated) {
-          orchestration.emitFrame(sessionId)
-          throw new Error(corumIntegrationFailure(
-            corumTruth,
-            corumHeadBefore,
-            pending,
-            outputValueText(outcome.output),
-          ))
+          // fork（corum）2026-09-14 用户同意 B：**脏主树/未提交场景的集成 diff 口**。
+          // 集成者按纪律不许动主树里与本轮无关的在制品（persona 明禁
+          // reset/checkout/clean/stash），于是脏树上的 merge 可能被拒得不明不白。
+          // 这里对「没进 HEAD 的分支」逐条走 `git diff <base>..<branch>` +
+          // `git apply --3way`：只落该分支自己的改动，主树既有改动参与三方合并、
+          // 不被覆盖。**门禁不放宽**——补完仍按 git 实况复判，没落地照旧走失败分支。
+          const unmergedEntries = pending.filter(entry => corumTruth.unmerged.includes(entry.branch))
+          if (unmergedEntries.length > 0) {
+            const ports = corumPortPendingBranches(parentCwd, unmergedEntries)
+            const landed = ports.filter(port => port.applied)
+            if (landed.length > 0) {
+              runtimeCtx.logger.info(
+                `integrate: applied ${landed.length}/${ports.length} unmerged branch diff(s) onto the dirty main tree (${landed.map(p => p.branch).join(', ')})`,
+              )
+            }
+            const failed = ports.filter(port => !port.applied)
+            if (failed.length > 0) {
+              runtimeCtx.logger.warn(
+                `integrate: branch diff port failed for ${failed.map(p => `${p.branch} (${p.error ?? 'no reason reported'})`).join('; ')}`,
+              )
+            }
+          }
+          const corumTruthAfterPort = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
+          if (!corumTruthAfterPort.integrated) {
+            orchestration.emitFrame(sessionId)
+            throw new Error(corumIntegrationFailure(
+              corumTruthAfterPort,
+              corumHeadBefore,
+              pending,
+              outputValueText(outcome.output),
+            ))
+          }
         }
         // fork（corum）2026-09-12：**部分集成**不再判死整次 fan-in。旧口径把
         // `uncommitted`（任何兄弟 worktree 的未提交残留）也算进 `integrated`，实测
@@ -1322,7 +1442,15 @@ export function apply(ctx: Context, config: Config): void {
           ? continuable
             ? ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child\'s nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result.'
             : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
-          : ' This call waits for the subagent and returns its result.'),
+          : ' This call waits for the subagent and returns its result.')
+          // fork（corum）：决策点分工（2026-09-14 委派正确性轮）——工具描述是模型
+          // 选工具时唯一**贴着选择点**读到的文本，因此分工必须写在这里，而不是只
+          // 写在机制段里。只读调研走 `subagent_research`（无修改 → 不召唤写能力
+          // 子 Agent，隔离/分支/集成对只读工作没有意义）。只读实例自身不注入这段
+          // （它没有别的委派工具可选）。
+          + (corumReadonlyResearch
+            ? ''
+            : ' For work that only READS — research, search, fact-finding, verification by inspection, summarization — call `subagent_research` instead: it is read-only (write/edit denied, sandbox pinned to `read-only`), so it needs no isolation and its report returns in the tool result. Call this write-capable tool when the subtask must create or modify files. A subtask that changes nothing must not be given a write-capable child: isolation, branches and merging all exist for changes.'),
         parameters: {
           description: {
             type: 'string',
@@ -1750,6 +1878,9 @@ export function apply(ctx: Context, config: Config): void {
                   ...task.isolation !== undefined ? { taskIsolation: task.isolation } : {},
                   ...task.research !== undefined ? { taskResearch: task.research } : {},
                   ...task.schema !== undefined ? { taskSchema: task.schema } : {},
+                  // fork（corum）：任务级模型锁真接线（P0-4 2026-09-14）——tasks[i].model
+                  // 落到该任务的模型选择；缺失时沿用 preset config.model > 全局默认 > 跟随父。
+                  ...task.model !== undefined ? { taskModel: task.model } : {},
                   // fork（corum）：并发感知隔离的两个入参——① 本次 fan-out 任务数
                   // （≥2 才需要 worktree）；② 不向父会话逐条注入 notice（结果由
                   // orchestrate 的汇总结果承载，避免 N 条重复通知）。
@@ -1880,7 +2011,9 @@ export function apply(ctx: Context, config: Config): void {
             `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
             '',
             'Choose the right delegation form by the shape of the work:',
-            '- ONE focused, self-contained subtask (an implementation, a scoped analysis) → call `subagent`.',
+            '- READ-ONLY work (research, search, fact-finding, verification by inspection, summarization) → call `subagent_research`.',
+            '- Work that CHANGES files → call `subagent`.',
+            '- ONE focused, self-contained subtask that must create or modify files (an implementation, a scoped fix) → call `subagent`.',
           ]
           if (hasResearch) {
             lines.push('- ANY read-only work — searching the codebase, reading files, tracing a call path, summarizing a module, gathering facts, answering "how does X work", or running read-only commands (`git log`, `ls`, a verify script\'s `status`) → call `subagent_research`. It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you get the findings inline instead of waiting for a notice — never try to background it (`run_in_background: true` is rejected). It has a shell but its sandbox is pinned to `read-only` and the mutating tools (write/edit/str_replace_editor) are denied, so it can investigate freely and can never modify the repo. Fan out several such searches in ONE message when you need answers from different angles.')
@@ -1894,7 +2027,8 @@ export function apply(ctx: Context, config: Config): void {
               '',
               'How the mechanism works (rely on it, do not re-implement):',
               '- Write-capable children get ISOLATED git worktrees (own branch; the parent working tree is write-denied to that child) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and leaves git to you. Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) — even a forced `isolation: "always"` is skipped rather than failing, and the child is told so. Nothing to do either way.',
-              '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
+              '- Isolation is a property of CHANGE, not of delegation: it exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
+              '- Model routing precedence: a per-task `model` on an `orchestrate` task wins for that task; otherwise the preset role lock (worker/research profile) wins over the global default, and with neither the child follows your route. Task-level routes are validated before spawn (settings allowlist when configured, plus a live route preflight) — an invalid provider/model fails that task. Never ask the user to pick a model; `subagent` has no model parameter at all.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Declaring `merge` at all means the mechanism finishes the job — it merges + commits the isolated branches once every task is done. Omitting `merge` keeps the branches for you; then finish them yourself with the explicit action `subagent { integrate: true }`, because an unmerged branch is invisible work.',
               '- INTEGRATION IS THE MECHANISM\'S when you declare `merge` (it merges + verifies + commits once every task is done — never a child\'s job). Without `merge`, YOU finish it with the explicit `subagent { integrate: true }`; a pending-integration notice is raised either way so branches cannot silently strand. NEVER delegate a main-tree write to an ISOLATED child and expect it to land: that child works in its own worktree, so its writes cannot reach the parent tree.',
               '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
@@ -1917,6 +2051,8 @@ export function apply(ctx: Context, config: Config): void {
             const engineTools = [hasWorkflow ? '`workflow`' : '', hasRalph ? '`ralph`' : ''].filter(Boolean).join(' and ')
             lines.push(`IMPORTANT: ${engineTools} children are created by their own engine${hasWorkflow && hasRalph ? 's' : ''} — they do NOT get isolated worktrees, ledger entries or settlement notices, and nothing merges their work. Use them for read-only audits or work that does not need merging; for parallel WRITES that need isolation + merge, use \`orchestrate\` instead.`)
           }
+          lines.push(...corumEfficiencyDisciplineLines())
+          lines.push(...corumSandboxEscalationLines())
           lines.push(
             '',
             'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.',

@@ -9,7 +9,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import { applyLiteralEdit } from '../src/fsio.ts'
-import { editNotFoundHint, findEditCandidates, matchLineNumbers } from '../src/edit-candidates.ts'
+import {
+  editNotFoundHint, findBlockCandidates, findEditCandidates, findFirstMismatch,
+  MARKER_PREFIX, matchLineNumbers, mergedLineCandidates,
+} from '../src/edit-candidates.ts'
 
 const FILE = [
   'export function total(items) {',
@@ -130,5 +133,130 @@ describe('applyLiteralEdit — 失败信息（模型可见面）', () => {
     let error: unknown
     try { applyLiteralEdit(FILE, '', 'x', false, 'src/x.ts') } catch (caught) { error = caught }
     expect((error as Error).message).toBe('old_string must be a non-empty string')
+  })
+})
+
+// ── 第二轮（2026-09-13）：三条提示质量修复 + 版本化标记行 ──────────────────
+
+describe('mergedLineCandidates — ③ 相同原文合并', () => {
+  const DUP = [
+    'function a() {',
+    '  return compute(input)', // line 2
+    '}',
+    'function b() {',
+    '  return compute(input)', // line 5（与 line 2 完全相同）
+    '}',
+  ].join('\n')
+
+  it('完全相同的两行合并为一行，另一行号进 duplicates', () => {
+    const candidates = mergedLineCandidates(DUP, 'return compute(input)')
+    const merged = candidates.find(c => c.text === '  return compute(input)')
+    expect(merged).toBeDefined()
+    expect(merged?.duplicates).toEqual([5])
+  })
+
+  it('提示文案：合并行列出全部行号并标注「彼此相同（重复代码）」', () => {
+    const hint = editNotFoundHint('src/dup.ts', DUP, 'return compute(inputs)')
+    expect(hint).toContain('lines 2, 5:')
+    expect(hint).toContain('identical to each other (duplicate code)')
+  })
+
+  it('payload 候选带 duplicates 行号数组', () => {
+    const hint = editNotFoundHint('src/dup.ts', DUP, 'return compute(inputs)')
+    const marker = hint.split('\n').find(line => line.startsWith(MARKER_PREFIX))
+    const payload = JSON.parse(marker!.slice(MARKER_PREFIX.length)) as {
+      candidates: { line: number; duplicates?: number[] }[]
+    }
+    expect(payload.candidates[0].line).toBe(2)
+    expect(payload.candidates[0].duplicates).toEqual([5])
+  })
+})
+
+describe('findBlockCandidates / findFirstMismatch — ① 块级候选 + ② 失配行', () => {
+  // 两个函数**不同名**（否则 beta 块只是 alpha 块的移位重复，均分并列时按行号先取到
+  // alpha——那就是另一个块得分同样高、并非失配行的目标场景）。
+  const BLOCK_FILE = [
+    'export function beta(input) {',
+    '  const total = compute(input)',
+    '  return total * 2',
+    '}',
+  ].join('\n')
+  // 锚点：beta 的 3 行，但第 3 行写错（return total 而非 return total * 2）。
+  const ANCHOR = [
+    'export function beta(input) {',
+    '  const total = compute(input)',
+    '  return total',
+  ].join('\n')
+
+  it('多行锚点给块级候选（起始行 + 跨度），不是单行候选', () => {
+    const blocks = findBlockCandidates(BLOCK_FILE, ANCHOR)
+    expect(blocks.length).toBeGreaterThan(0)
+    expect(blocks[0].span).toBe(3)
+    expect(blocks[0].line).toBe(1)
+  })
+
+  it('失配行：指出第一个不匹配的行（anchor 第 3 行 ↔ 文件第 3 行）', () => {
+    const mismatch = findFirstMismatch(BLOCK_FILE, ANCHOR, 1)
+    expect(mismatch?.anchorLine).toBe(3)
+    expect(mismatch?.fileLine).toBe(3)
+    expect(mismatch?.fileText).toBe('  return total * 2')
+  })
+
+  it('整块（trimmed）完全一致时无失配行', () => {
+    expect(findFirstMismatch(BLOCK_FILE, ANCHOR.replace('  return total', '  return total * 2'), 1)).toBeUndefined()
+  })
+
+  it('提示文案：块候选含跨度，失配行双方原文都给出，末句要求整块重试', () => {
+    const hint = editNotFoundHint('src/b.ts', BLOCK_FILE, ANCHOR)
+    expect(hint).toContain('Closest 3-line blocks')
+    expect(hint).toContain('lines 1-3 (3 lines):')
+    expect(hint).toContain('First mismatch')
+    expect(hint).toContain('anchor line 3:')
+    expect(hint).toContain('file line 3:   return total * 2')
+    expect(hint).toContain('whole 3-line block')
+  })
+
+  it('payload：块候选带 span，mismatch 双方行号与原文齐全', () => {
+    const hint = editNotFoundHint('src/b.ts', BLOCK_FILE, ANCHOR)
+    const marker = hint.split('\n').find(line => line.startsWith(MARKER_PREFIX))
+    const payload = JSON.parse(marker!.slice(MARKER_PREFIX.length)) as {
+      anchorLines: number
+      candidates: { line: number; span: number }[]
+      mismatch?: { anchorLine: number; fileLine: number; fileText: string }
+    }
+    expect(payload.anchorLines).toBe(3)
+    expect(payload.candidates[0]).toMatchObject({ line: 1, span: 3 })
+    expect(payload.mismatch).toMatchObject({ anchorLine: 3, fileLine: 3, fileText: '  return total * 2' })
+  })
+})
+
+describe('版本化标记行 — UI 数据契约', () => {
+  it('有候选：末尾单行标记，JSON 可解析且 version=1 / reason=anchor-miss', () => {
+    const hint = editNotFoundHint('src/x.ts', FILE, '  const sum = items.reduce((a, b) => a + b.price, 0)')
+    const marker = hint.split('\n').find(line => line.startsWith(MARKER_PREFIX))
+    expect(marker).toBeDefined()
+    // 标记只占一行（JSON 单行序列化）。
+    expect(marker).not.toContain('\n')
+    const payload = JSON.parse(marker!.slice(MARKER_PREFIX.length)) as {
+      version: number; reason: string; anchorLines: number; candidates: unknown[]
+    }
+    expect(payload.version).toBe(1)
+    expect(payload.reason).toBe('anchor-miss')
+    expect(payload.anchorLines).toBe(1)
+    expect(payload.candidates.length).toBeGreaterThan(0)
+  })
+
+  it('无候选：标记行也在（reason=insufficient-context，candidates 空数组）', () => {
+    const hint = editNotFoundHint('src/x.ts', FILE, 'nothing here matches anything in this file at all')
+    const marker = hint.split('\n').find(line => line.startsWith(MARKER_PREFIX))
+    const payload = JSON.parse(marker!.slice(MARKER_PREFIX.length)) as { reason: string; candidates: unknown[] }
+    expect(payload.reason).toBe('insufficient-context')
+    expect(payload.candidates).toEqual([])
+  })
+
+  it('输出有界仍成立（标记行计入总长）', () => {
+    const longLine = `const x = ${'a'.repeat(500)}`
+    const hint = editNotFoundHint('src/x.ts', `prefix\n${longLine}`, longLine.replace('a', 'b'))
+    expect(hint.length).toBeLessThanOrEqual(1201)
   })
 })

@@ -37,7 +37,7 @@ describe('compile orchestrator 模式 — preset 恒全量（路线 B：裁剪�
   const yml = compilePreset(profile({ executionTools: 'orchestrator' })).cordisYml
 
   it('preset 保留全部执行工具行（子 Agent join 后才能全功能执行）', () => {
-    expect(yml).toContain('id: persistent-shell')
+    expect(yml).toContain('id: tool-bash')
     expect(yml).toContain('id: filesystem')
     expect(yml).toContain('id: tool-fs\n')
     // 2026-09-11 用户定调：str_replace_editor 退场（写面收敛到官方 fs 的 write/edit）。
@@ -71,7 +71,7 @@ describe('compile orchestrator 模式 — preset 恒全量（路线 B：裁剪�
 describe('compile full / 缺省模式 — 无回归', () => {
   it("executionTools:'full' 全量 + 无 maxDepth 收紧", () => {
     const yml = compilePreset(profile({ executionTools: 'full' })).cordisYml
-    expect(yml).toContain('id: persistent-shell')
+    expect(yml).toContain('id: tool-bash')
     expect(yml).toContain('id: filesystem')
     const workerRow = yml.split(/\n {4}- id: /).find(r => r.startsWith('tool-subagent\n'))
     expect(workerRow).not.toContain('maxDepth')
@@ -79,7 +79,7 @@ describe('compile full / 缺省模式 — 无回归', () => {
 
   it('缺省 executionTools（undefined）= full 行为', () => {
     const yml = compilePreset(profile()).cordisYml
-    expect(yml).toContain('id: persistent-shell')
+    expect(yml).toContain('id: tool-bash')
     expect(yml).toContain('id: filesystem')
     const workerRow = yml.split(/\n {4}- id: /).find(r => r.startsWith('tool-subagent\n'))
     expect(workerRow).not.toContain('maxDepth')
@@ -91,7 +91,7 @@ describe("compile baseMode 'conductor' — 继承指挥模式（2026-09-10）", 
   const yml = compilePreset(profile({ baseMode: 'conductor' })).cordisYml
 
   it('preset 仍全量（工具面同标准模式，裁剪在运行时）', () => {
-    expect(yml).toContain('id: persistent-shell')
+    expect(yml).toContain('id: tool-bash')
     expect(yml).toContain('id: filesystem')
     expect(yml).toContain('id: tool-fs\n')
     expect(yml).toContain('id: tool-subagent\n')

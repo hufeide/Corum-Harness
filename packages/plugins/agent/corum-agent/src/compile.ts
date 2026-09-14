@@ -14,8 +14,8 @@
  *                   即 `<CORUM_HOME>/skills/<绑定名>`；技能实体由 corum
  *                   统一管理，Agent 只按 name 引用，不复制文件）
  *   mcpServers    → dsh-mcp-client 追加行（每 server 一行）
- *   terminal      → persistent-shell 组覆盖一次性 tool-bash/tool-pwsh（sandbox
- *                   由 host 层提供）
+ *   terminal      → **保持官方两行**（一次性 tool-bash/tool-pwsh，2026-09-14 撤销
+ *                   了 persistent-shell 持久终端组覆盖；sandbox 由 host 层提供）
  *   filesystem    → 追加 fs-local + str-replace-editor 组（与 standard 沙箱
  *                   tool-fs 并存）
  *   memoryPolicy  → 不进 preset（记忆由专属工具/服务注入，后续接入）
@@ -171,7 +171,7 @@ function standardRows(): CordisRow[] {
     // fs-local 同 realm）——它经 `ctx.get('fs')` 读 AGENTS.md，必须命中 realm 内
     // 的 fs-local（见下方 filesystem 组注释）。在此删除，避免重复注册。
 
-    // ── shell（一次性 bash/pwsh；corum 覆盖为 persistent-shell 持久终端）──
+    // ── shell（一次性 bash/pwsh，官方两行原样；corum 不再覆盖为持久终端）──
     { id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: '!!js process.platform === \'win32\'' },
     { id: 'tool-pwsh', name: '@deepseek-ai/dsh-tool-pwsh', disabled: '!!js process.platform !== \'win32\'' },
 
@@ -285,8 +285,8 @@ function standardRows(): CordisRow[] {
  * （standard 全量行）+ corum 覆盖/增量：
  * - `persona` 替换为 profile.prompt（不用官方模板，且不用 complete:true——让
  *   框架正常组装完整 system prompt，与官方 headless bundle 一致）；
- * - `tool-bash`/`tool-pwsh` 替换为 persistent-shell 持久终端组（corum 刻意取舍：
- *   跨调用保留 shell 状态，一次性的 tool-bash 不满足）；
+ * - `tool-bash`/`tool-pwsh` **保持官方两行不动**（2026-09-14 撤销了曾经的
+ *   persistent-shell 持久终端组覆盖；见下方「corum 覆盖 ⓪」段的撤销理由）；
  * - `skill-filesystem` 替换为 corum 定制（includeDefaultRoots:false + 按
  *   profile.skills 绑定的 customSkillDirs）；
  * - 追加 `filesystem` 组（fs-local 裸本地 FS + str-replace-editor，corum 基础
@@ -517,28 +517,46 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     )
   }
 
-  // corum 覆盖 ①：一次性 tool-bash/tool-pwsh → persistent-shell 持久终端组。
-  // sandbox 策略由 host 层提供；profile.terminal.mode 仅记录意图（host 级敏感
-  // 能力需人显式开启，护栏在创建 Agent 处校验）。
-  const persistentShell: CordisRow = {
-    id: 'persistent-shell',
-    name: 'cordis:group',
-    group: true,
-    isolate: { terminals: true },
-    children: [
-      { id: 'pty', name: '@deepseek-ai/dsh-terminal' },
-      { id: 'terminal-bash', name: '@deepseek-ai/dsh-terminal-bash', disabled: '!!js process.platform === \'win32\'', config: { timeoutMs: 300000 } },
-      { id: 'persistent-bash', name: '@deepseek-ai/dsh-tool-bash-persistent', disabled: '!!js process.platform === \'win32\'', config: { timeoutMs: 300000 } },
-      { id: 'terminal-pwsh', name: '@deepseek-ai/dsh-terminal-bash', disabled: '!!js process.platform !== \'win32\'', config: { shellDialect: 'pwsh', timeoutMs: 300000 } },
-      { id: 'persistent-pwsh', name: '@deepseek-ai/dsh-tool-pwsh-persistent', disabled: '!!js process.platform !== \'win32\'', config: { timeoutMs: 300000 } },
-    ],
-  }
-  const bashIdx = rows.findIndex(r => r.id === 'tool-bash')
-  const pwshIdx = rows.findIndex(r => r.id === 'tool-pwsh')
-  // tool-bash 与 tool-pwsh 相邻——在 tool-bash 位置插入 persistent-shell，删两行。
-  rows.splice(bashIdx, pwshIdx - bashIdx + 1, persistentShell)
+  // corum 覆盖 ⓪（2026-09-14 撤销）：**持久终端组已移除，回到官方 standard 口径的
+  // 一次性 tool-bash/tool-pwsh。**
+  //
+  // 历史：corum 曾在此处 splice 掉官方 standardRows 的
+  //   { id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: win32 }
+  //   { id: 'tool-pwsh', name: '@deepseek-ai/dsh-tool-pwsh', disabled: !win32 }
+  // 两行，换成 `cordis:group` persistent-shell（pty + terminal-bash +
+  // persistent-bash + terminal-pwsh + persistent-pwsh）。现整段删除 → 官方两行
+  // 原样保留（它们本来就是平台互斥 disable，无需 corum 再写一遍）。
+  //
+  // 为什么撤（三条实证，见本轮报告）：
+  //   1. 持久 PTY 的 stdin 永不 EOF：裸 `grep foo`（无文件参数）实测挂满整整
+  //      300000ms 才被 deadline 砍掉、并 reset 整个会话（丢掉 cwd/环境）。
+  //      实测时间戳 1789316451 → 1789316751 = 300s。
+  //   2. 一次性执行器的 spawn 用 stdio.stdin='ignore'
+  //      （@deepseek-ai/dsh-bash-local lib/index.js:190）→ 子进程拿到立即 EOF，
+  //      同一裸 `grep foo` 实测 **6ms** 返回 exit 1 而不是挂死。
+  //   3. 官方 2026-09-08 提交 1f1537914f 的动机自述是「minimal 服务的是同一批
+  //      trained against a one-shot bash tool 的模型」，官方只把持久 shell 的
+  //      **输出表面**对齐到一次性契约，超时/stdin/heredoc 语义没动 —— 即官方
+  //      自己把一次性 bash 当模型认知的基准契约。
+  //
+  // 影响面：模型可见的 shell 工具从 `bash`（参数只有 command，插件级 300000ms
+  // deadline）变成 `bash`（参数含 command/description/timeoutMs/workdir/
+  // run_in_background，per-call timeoutMs **真的能被兑现**，见下）。
+  // 落地后 shell 工具的面与超时全部由官方 base 行提供：
+  //   · ctx.shell 提供方 = 官方 base 的 bash-sandbox 行（darwin 启用，
+  //     config.timeoutMs: 60000，即**不传 per-call timeoutMs 时的默认 60s**）；
+  //   · 模型可见工具 = 官方 standard preset 的 tool-bash 行。
+  // 本文件不再为 shell 提供任何 config 或 description —— 也就不存在
+  // 「description 与真实参数面不一致」的漂移（这正是 2026-09-14 效率整改轮那条
+  // 回归的根因；现在该回归的**前提**已消失，见 tests/compile-base-modes.spec.ts）。
+  //
+  // 附带收益：bash-local 的 stdio.stdin='ignore' 让「缺终止符 heredoc」也变成
+  // 立即失败（实测 10ms，exit 0 且文件被正确写入），不再是静默挂 300s。
+  //
+  // 回滚方案：本段删除是单点改动、无跨包耦合，把上面那段注释描述的两行 splice
+  // 恢复即可（git revert 该 commit；CordisRow/rows 机制原样保留，未改任何机制）。
 
-  // corum 覆盖 ②：skill-filesystem 按 profile.skills 定制（全局统一管理、按
+  // corum 覆盖 ①：skill-filesystem 按 profile.skills 定制（全局统一管理、按
   // Agent 授权可见）。standard 只有 tool-skill，skill-filesystem 行在 tool-skill 前插入。
   const skillsRoot = join(corumHome(), 'skills')
   const customSkillDirs = profile.skills.map(b => join(skillsRoot, b.name))
@@ -611,11 +629,12 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   // preset 逐行对账补上差异（对账源：shipped-presets/official/*/agent.cordis.yml）：
   //   ptc     → 官方 ptc 相对 standard 只多 tool-presentation（mode: ptc）；
   //   cordis  → 官方 cordis 相对 standard 只多 tool-cordis（运行时自省/插件实验）；
-  //   minimal → 官方 minimal 只有 persona + persistent-shell + filesystem 三行，即
-  //             「bash + str_replace_editor」双工具面。corum 2026-09-11 已让
-  //             str_replace_editor 退场（写面 = 官方 fs 的 write/edit），故 corum 的
-  //             极简面 = persona + persistent-shell + filesystem + tool-fs：bash +
-  //             读写编辑，无 skills / 子 Agent / 目标 / 网页 / 计划 / 待办 / MCP。
+  //   minimal → 官方 minimal 用 persona + persistent-shell 组（pty/terminal-bash/
+  //             persistent-bash）+ filesystem，即「bash + str_replace_editor」双
+  //             工具面。**corum 已不挂持久组**（见「corum 覆盖 ⓪」），所以 corum
+  //             的 minimal 落成 persona + tool-bash + filesystem + tool-fs =
+  //             bash + 读写编辑，无 skills / 子 Agent / 目标 / 网页 / 计划 / 待办 / MCP。
+  //             （若日后要逐字节对齐官方 minimal，需另行给 minimal 单独挂持久组。）
   //   standard/conductor → 全量面（conductor 的「主 Agent 裁执行工具」仍走运行时
   //             tools.restrict，不能在编译期裁行——见 §472-477 的实机教训）。
   if (profile.baseMode === 'ptc') {
@@ -627,7 +646,7 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   } else if (profile.baseMode === 'cordis') {
     rows.push({ id: 'tool-cordis', name: '@deepseek-ai/dsh-tool-cordis' })
   } else if (profile.baseMode === 'minimal') {
-    const minimalRowIds = new Set(['persona', 'persistent-shell', 'filesystem', 'tool-fs'])
+    const minimalRowIds = new Set(['persona', 'tool-bash', 'filesystem', 'tool-fs'])
     rows.splice(0, rows.length, ...rows.filter(row => minimalRowIds.has(row.id)))
   }
 

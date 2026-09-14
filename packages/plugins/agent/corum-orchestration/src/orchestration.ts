@@ -22,7 +22,8 @@
 
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -210,6 +211,172 @@ export function corumIsGitRepo(cwd: string): boolean {
 }
 
 // ── git 实况探测（机制真值门禁的判定面）─────────────────────────────────────
+
+/**
+ * fork（corum）：脏主树/未提交场景的**集成 diff 口**（2026-09-14 用户同意 B 条）。
+ *
+ * 解决什么：主树可能有与本轮无关的未提交在制品，集成者按纪律**不许**动它
+ * （`corumIntegratorPersona` 明禁 reset/checkout/clean/stash），而 `git merge`
+ * 在一棵脏树上既可能被拒、又可能拒绝得不明不白。这条口把「分支带来的改动」直接
+ * 落到主树 HEAD 上，完全不碰主树工作区：**临时 index 上试三方**（不改工作区、
+ * 不建 git 状态），成功才真提交。
+ *
+ * 三步：
+ *   ① `GIT_INDEX_FILE=<tmp> git read-tree HEAD` + `git diff <base>..<branch> |
+ *      git apply --cached --3way` —— 在**临时 index** 上试三方；冲突以非零退出，
+ *      工作区与主 index 一个字节都没动（2026-09-14 实测：冲突时工作区文件的
+ *      `git status` 仍是干净的）。
+ *   ② 试合成功 → 由临时 index 写树、`commit-tree` 提交，`update-ref` 推进 HEAD。
+ *      **不 checkout**：主树工作区的在制品原样保留。
+ *   ③ 主树当前 HEAD 必须仍是本地记录的分支，且工作区无改动，否则拒绝（绝不在
+ *      未知状态上推 ref）。
+ *
+ * 仍然受「机制真值门禁」约束：本函数**只负责让分支的工作进 HEAD**，集成是否算
+ * 成功一律由 {@link corumIntegrationTruth} 按 git 实况判定，不放宽任何门禁——
+ * 落不了就是失败，现场保留，报告里给 git 实况。
+ *
+ * base 缺失时退化为分支与 HEAD 的分叉点。纯 git、无 cordis 依赖，可单测。
+ * @param cwd - 主树工作目录。
+ * @param entry - 待集成的隔离条目（读 `branch`；`base` 可选，作为 diff 起点）。
+ * @param message - 落地提交的信息（缺省时用分支名）。
+ * @returns 落盘结果——`applied` 为真表示分支的工作已在 HEAD 上。
+ */
+export function corumPortBranchDiff(
+  cwd: string,
+  entry: Pick<CorumWorktreeEntry, 'branch' | 'base'>,
+  message?: string,
+): { applied: boolean; base: string; patchBytes: number; head: string; error?: string } {
+  const fail = (error: string, base = '', patchBytes = 0): { applied: boolean; base: string; patchBytes: number; head: string; error: string } =>
+    ({ applied: false, base, patchBytes, head: corumGitHead(cwd), error })
+  const base = entry.base !== undefined && entry.base !== ''
+    ? entry.base
+    : corumMergeBase(cwd, entry.branch)
+  if (base === '') return fail(`cannot resolve a diff base for branch ${entry.branch}`)
+  let patch = ''
+  let touched: string[] = []
+  try {
+    // 只取该分支自己的改动；`--binary` 让二进制产物也能过。
+    patch = execFileSync('git', ['diff', '--binary', `${base}..${entry.branch}`], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    touched = execFileSync('git', ['diff', '--name-only', `${base}..${entry.branch}`], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).split('\n').map(line => line.trim()).filter(line => line !== '')
+  } catch (error: unknown) {
+    return fail(corumGitErrorText(error), base)
+  }
+  if (patch.trim() === '') {
+    // 分支相对 base 没有文本改动（例如只改了被忽略的产物）——不是错误。
+    return fail('branch adds no diff against its base', base)
+  }
+  // 落盘只动 HEAD（工作区一个字节都不碰），所以主树**有**未提交在制品本身不是
+  // 阻塞——那正是这条口存在的场景。唯一的真冲突是「分支要改的文件在主树里也有
+  // 未提交改动」：那时推进 HEAD 会留下一个说不清谁覆盖谁的现场。此时拒绝并点名。
+  const dirtyPaths = new Set(
+    corumGitStatusPorcelain(cwd).split('\n').map(line => line.trim()).filter(line => line !== '')
+      .map(line => line.replace(/^..\s+/, '').replace(/^.*\s->\s/, '').replace(/^"|"$/g, '')),
+  )
+  const clash = touched.filter(file => dirtyPaths.has(file))
+  if (clash.length > 0) {
+    return fail(
+      `main tree has uncommitted changes to file(s) this branch also changes: ${clash.slice(0, 5).join(', ')} — commit or stash them first, then port`,
+      base,
+      patch.length,
+    )
+  }
+  const indexPath = path.join(mkdtempSync(path.join(tmpdir(), 'corum-port-index-')), 'index')
+  try {
+    const withIndex = <T,>(args: string[], input?: string): string =>
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        input,
+        env: { ...process.env, GIT_INDEX_FILE: indexPath },
+        stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      })
+    withIndex(['read-tree', 'HEAD'])
+    withIndex(['apply', '--cached', '--3way', '--whitespace=nowarn', '-'], patch)
+    const tree = withIndex(['write-tree']).trim()
+    const parent = corumGitHead(cwd)
+    if (parent === '') return fail('cannot resolve the main tree HEAD', base, patch.length)
+    const summary = message !== undefined && message.trim() !== ''
+      ? message.trim()
+      : `port ${entry.branch}: ${touched.length} file(s)`
+    const commit = execFileSync('git', ['commit-tree', tree, '-p', parent, '-m', summary], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
+    // HEAD 在试合期间不能被别人推进（同一进程内的集成是串行的，这里只是防御）。
+    if (corumGitHead(cwd) !== parent) return fail('main tree HEAD moved while porting', base, patch.length)
+    corumGit(cwd, ['update-ref', 'HEAD', commit, parent])
+    // 只推 HEAD 不碰工作区，于是工作区现在「落后于 HEAD」：把**只有本次落盘新增的
+    // 路径**同步到工作区，否则主树看起来缺文件（集成者的 verify 会跑在缺文件的树上）。
+    // 只对「本来就在工作区、且是这次落盘产生的差异」动手，绝不做全树 checkout——
+    // 主树的无关在制品必须一字不动。
+    corumSyncPortedPathsToWorktree(cwd, parent, commit)
+    return { applied: true, base, patchBytes: patch.length, head: commit }
+  } catch (error: unknown) {
+    return fail(corumGitErrorText(error), base, patch.length)
+  } finally {
+    rmSync(path.dirname(indexPath), { recursive: true, force: true })
+  }
+}
+
+/**
+ * fork（corum）：把刚落盘提交带来的**文件集合变化**同步进工作区（`corumPortBranchDiff` 的内部收尾）。
+ *
+ * 为什么需要：口子只推 HEAD，工作区因此会停在旧内容上（新文件在 HEAD 里、不在磁盘；
+ * 上游改过的文件在工作区里是旧版本）。集成者随后的 verify 跑在这棵树上就会测错东西。
+ *
+ * 边界（不做全树 checkout 的原因）：只对「前一个 HEAD 与刚落盘 HEAD 的差异」做 checkout
+ * ——那恰好是本次落盘新增/修改的路径；主树里与它们无关的在制品不受影响。若某路径在
+ * 工作区里也有未提交改动，本函数按路径 checkout 会覆盖它，所以调用方已在上游用
+ * `touched ∩ dirty` 把这种情况挡掉（见 `clash`）。
+ * @param cwd - 主树工作目录。
+ * @param before - 落盘前的主树 HEAD。
+ * @param head - 刚落盘的提交。
+ */
+function corumSyncPortedPathsToWorktree(cwd: string, before: string, head: string): void {
+  let paths: string[] = []
+  try {
+    paths = execFileSync('git', ['diff', '--name-only', before, head], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).split('\n').map(line => line.trim()).filter(line => line !== '')
+  } catch {
+    return
+  }
+  for (const file of paths) {
+    try {
+      corumGit(cwd, ['checkout', head, '--', file])
+    } catch {
+      // 单文件同步失败不改变「工作已进 HEAD」这个事实：真值门禁按 HEAD 判定。
+    }
+  }
+}
+
+/** fork（corum）：分支与 HEAD 的分叉点（无共同祖先/git 失败返回空串）。 */
+export function corumMergeBase(cwd: string, branch: string): string {
+  try {
+    return execFileSync('git', ['merge-base', 'HEAD', branch], { cwd, encoding: 'utf8', stdio: 'pipe' }).trim()
+  } catch {
+    return ''
+  }
+}
+
+/** fork（corum）：把 execFileSync 的失败收成一行可读文本（stderr 优先，缺则 message）。 */
+function corumGitErrorText(error: unknown): string {
+  const stderr = (error as { stderr?: Buffer | string } | undefined)?.stderr
+  const text = stderr === undefined ? '' : String(stderr).trim()
+  if (text !== '') return text.split('\n').slice(0, 4).join(' | ')
+  return error instanceof Error ? error.message : String(error)
+}
 
 /** fork（corum）：主树 HEAD（集成前后推进/祖先判定用；git 不可用返回空串）。 */
 export function corumGitHead(cwd: string): string {
@@ -836,6 +1003,23 @@ export interface CorumIntegrationTruth {
  */
 export function corumAutoIntegrate(merge: { verify?: string } | undefined): boolean {
   return merge !== undefined
+}
+
+/**
+ * fork（corum）：集成成功的**补充口**——主树脏/未提交时的 diff 落盘。
+ *
+ * 用法（机制侧）：集成者跑完、`corumIntegrationTruth` 报「有分支没进 HEAD」时，
+ * 对每条未合并条目调一次本函数再复判一次真值。这是**补救路径**，不是放宽门禁：
+ * `applied === false` 时照样走失败分支（抛错 + 保留现场）。
+ * @param cwd - 主树工作目录。
+ * @param entries - 待集成条目（只处理 `applied` 需要的分支信息）。
+ * @returns 每条分支的落盘结果（顺序与入参一致，便于报告对照）。
+ */
+export function corumPortPendingBranches(
+  cwd: string,
+  entries: readonly CorumWorktreeEntry[],
+): { branch: string; applied: boolean; base: string; patchBytes: number; error?: string }[] {
+  return entries.map(entry => ({ branch: entry.branch, ...corumPortBranchDiff(cwd, entry) }))
 }
 
 export function corumIntegrationTruth(

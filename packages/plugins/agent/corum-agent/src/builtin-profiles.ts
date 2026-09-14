@@ -389,15 +389,24 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     // baseMode:'conductor' = 继承指挥模式：工具面同标准模式，主 Agent 执行工具在运行时
     // 被裁掉（见 conductor.ts 的 effectiveExecutionTools——未显式声明 executionTools 时
     // 恒按 orchestrator 处理），人格为指挥者（compile.ts 的 MODE_CORE_IDENTITY.conductor）。
-    // 子 Agent 模型锁到本地 deepseek（省费用）；隔离策略沿用并发感知默认。
+    // 子 Agent 模型锁到本地网关（省费用）；隔离策略沿用并发感知默认。
+    // 2026-09-13 用户定调（fork 成效验证轮）：主 Agent = localhost/Kimi-k3。
+    // 2026-09-14 用户改定（额度轮）：子 Agent（写 / 只读研究）**统一**
+    // localhost/glm-5.3-flash，思考等级 High —— 原话「使用 glm-5.3-flash 或者 localhost
+    // 的 GLM-5.2 作为子 Agent，思考都是 high，这些模型的额度足以支撑长期任务」；
+    // 取 5.3-flash、GLM-5.2 作后备，理由是 deepseek 额度不足以支撑长任务。
+    // **这里必须改 spec 而不是 agent.json**——system profile 的幂等刷新会把
+    // nickname/title/dimension/baseMode/prompt/executionTools/
+    // subagentModel.model/researchModel.model 按 spec 覆写（含 model），
+    // 改家目录副本在下次启动即被刷回（见 ensureBuiltinRoleProfiles）。
     id: 'conductor-lead',
     nickname: '指挥模式',
     title: '编排指挥',
     dimension: '研发',
     baseMode: 'conductor',
-    model: { provider: 'localhost', model: 'deepseek-v4-pro' },
-    subagentModel: { provider: 'localhost', model: 'deepseek-v4-flash' },
-    researchModel: { provider: 'localhost', model: 'deepseek-v4-flash' },
+    model: { provider: 'localhost', model: 'kimi-k3-1', reasoningEffort: 'high' },
+    subagentModel: { provider: 'localhost', model: 'glm-5.3-flash', reasoningEffort: 'high' },
+    researchModel: { provider: 'localhost', model: 'glm-5.3-flash', reasoningEffort: 'high' },
     parallelWork: { isolation: 'write-tasks' },
     // 人格只讲「我是谁 / 怎么干」，机制细节（隔离触发、模型锁、声明式验收、结果回传）
     // 一律交给机制段单一事实源（docs/PROMPT-INVENTORY.md §1 的写作纪律）。

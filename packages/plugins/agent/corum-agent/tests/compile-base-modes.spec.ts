@@ -6,7 +6,7 @@
  * （packages/desktop/shipped-presets/official/<mode>/agent.cordis.yml）：
  *   ptc     = standard + tool-presentation（mode: ptc）
  *   cordis  = standard + tool-cordis
- *   minimal = persona + persistent-shell + filesystem + tool-fs
+ *   minimal = persona + tool-bash + filesystem + tool-fs（corum 撤销持久组后）
  *             （官方 minimal 是 bash + str_replace_editor 双工具面；corum 2026-09-11
  *              让 str_replace_editor 退场，等价写面是官方 fs 的 write/edit，故取 tool-fs）
  * standard / conductor 仍是全量面（conductor 的裁剪在运行时 tools.restrict）。
@@ -38,7 +38,7 @@ const ymlOf = (baseMode: BaseMode): string => compilePreset(profile(baseMode)).c
 describe('基准模式工具面 — 继承哪个模式就真的是那个模式的面', () => {
   it('standard：全量面（bash + fs + 检索 + skills + 目标 + 编排 + 网页）', () => {
     const yml = ymlOf('standard')
-    for (const id of ['persistent-shell', 'filesystem', 'tool-fs', 'tool-fs-search', 'skill-filesystem', 'tool-skill', 'tool-subagent', 'tool-web']) {
+    for (const id of ['tool-bash', 'filesystem', 'tool-fs', 'tool-fs-search', 'skill-filesystem', 'tool-skill', 'tool-subagent', 'tool-web']) {
       expect(yml).toContain(`id: ${id}`)
     }
     expect(yml).not.toContain('id: tool-presentation')
@@ -47,7 +47,7 @@ describe('基准模式工具面 — 继承哪个模式就真的是那个模式�
 
   it('conductor：工具面同 standard（裁剪在运行时，不在编译期）', () => {
     const yml = ymlOf('conductor')
-    for (const id of ['persistent-shell', 'tool-fs', 'skill-filesystem', 'tool-subagent']) {
+    for (const id of ['tool-bash', 'tool-fs', 'skill-filesystem', 'tool-subagent']) {
       expect(yml).toContain(`id: ${id}`)
     }
   })
@@ -67,14 +67,41 @@ describe('基准模式工具面 — 继承哪个模式就真的是那个模式�
     expect(yml).toContain('id: tool-fs')
   })
 
-  it('minimal：只留 persona + persistent-shell + filesystem + tool-fs', () => {
+  it('minimal：只留 persona + tool-bash + filesystem + tool-fs', () => {
     const yml = ymlOf('minimal')
-    for (const id of ['persona', 'persistent-shell', 'filesystem', 'tool-fs']) {
+    for (const id of ['persona', 'tool-bash', 'filesystem', 'tool-fs']) {
       expect(yml).toContain(`id: ${id}`)
     }
     // 极简面之外的一律不出现（skills / 子 Agent / 目标 / 计划 / 网页 / 待办 / 后台任务 / MCP）
     for (const id of ['skill-filesystem', 'tool-skill', 'tool-subagent', 'tool-subagent-research', 'command-goal', 'tool-goal', 'planning', 'compaction', 'delegation', 'tool-web', 'tool-todo', 'tool-jobs', 'tool-ask-user', 'tool-fs-search']) {
       expect(yml).not.toContain(`id: ${id}`)
     }
+  })
+
+  /**
+   * 2026-09-14（B 收口轮）：持久 shell 组已撤销，回归一次性 tool-bash。
+   *
+   * 为什么整条换掉：2026-09-14「效率整改轮」那条回归的前提是「corum 把官方两行
+   * splice 成 persistent-shell 组，所以 description 必须自备」——现在持久组整个
+   * 不挂了，`config.description` 也无处可传，原断言（`no per-call timeout argument`、
+   * `never see EOF here`）**反向**成立了：一次性 tool-bash 恰恰**有** per-call
+   * timeoutMs、也**不会**因 stdin 挂住。断言随契约一起翻转，别让它变成一条
+   * 「绿着但描述的是已删行为」的假回归。
+   *
+   * 新契约（由官方 base + standard preset 提供，corum 零覆盖）：
+   *   · 不出现 persistent-shell 组、不出现 dsh-tool-bash-persistent；
+   *   · tool-bash / tool-pwsh 两行原样保留、平台互斥；
+   *   · 不再有 CORUM_PERSISTENT_BASH_DESCRIPTION 那段文本。
+   */
+  it('shell 工具面：回到官方一次性 tool-bash（无 persistent-shell 组）', () => {
+    const yml = ymlOf('standard')
+    expect(yml).toContain('id: tool-bash')
+    expect(yml).toContain('@deepseek-ai/dsh-tool-bash')
+    expect(yml).not.toContain('persistent-shell')
+    expect(yml).not.toContain('dsh-tool-bash-persistent')
+    expect(yml).not.toContain('dsh-terminal-bash')
+    // 撤销后的反例：旧的持久语义文案一个字都不该留在 preset 里
+    expect(yml).not.toContain('no per-call timeout argument')
+    expect(yml).not.toContain('never see EOF here')
   })
 })

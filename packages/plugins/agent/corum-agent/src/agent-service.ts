@@ -762,7 +762,7 @@ export class CorumAgentService extends TypertRemoteService {
    * 全部可选 + 防御：取不到 corumReview 或台账 → 返回 undefined（卡片降级）。
    */
   private async buildChangeSummary(childSessionId: string): Promise<SubagentChangeSummary | undefined> {
-    type ReviewSnapshotValue = { files: Array<{ path: string; added: number; removed: number }> }
+    type ReviewSnapshotValue = { files: Array<{ path: string; added: number; removed: number; status?: 'content' | 'absent' | 'unavailable' | 'missing' }> }
     type OrchestrationFace = {
       entriesOf(id: string): Array<{ slug: string; branch: string; path: string; status: string; runId?: string }>
     }
@@ -780,7 +780,14 @@ export class CorumAgentService extends TypertRemoteService {
       if (review !== undefined) {
         const snap = await review.snapshot(childSessionId)
         filesChanged = snap.files.length
-        files = snap.files.map(f => ({ path: f.path, added: f.added, removed: f.removed }))
+        // 问题 1-④⑤ 收口：透传每文件改前状态（unavailable 的行 UI 置灰并标注
+        // 「无可撤销内容」——常见于轮末并集兜底误算进来的非本 Agent 所写文件）。
+        files = snap.files.map(f => ({
+          path: f.path,
+          added: f.added,
+          removed: f.removed,
+          ...f.status === undefined ? {} : { status: f.status },
+        }))
       }
     } catch {
       // corumReview 缺席或取不到 → 改动摘要降级为只给 count（已知 0 或缺省）。

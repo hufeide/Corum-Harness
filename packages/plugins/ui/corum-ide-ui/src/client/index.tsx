@@ -439,6 +439,9 @@ export function apply(ctx: ClientContext): void {
         'settings.close': { kind: 'single', scope: 'root' },
         'settings.section': { kind: 'list', scope: 'root' },
         'settings.onboarding': { kind: 'list', scope: 'root' },
+        // P0-5：settings.general.item 的子槽声明放在 General section 条目上
+        // （见下方 disposeGeneral 注册），不在 sidebar.settings occupant 重复
+        // 声明——slots 运行时禁止同一槽被声明两次（"already declared"）。
       },
       inject: shellInjected,
     }, SettingsShell))
@@ -473,16 +476,26 @@ export function apply(ctx: ClientContext): void {
     // 组（新工作区始终初始化 git 开关，2026-09-09 用户需求）是 GeneralSection 里第一个
     // 真实持久化项，需要 settings 面；此前 GeneralSection 单独注册未包 Provider（纯静态
     // 占位），导致 WorkspaceGitGroup 的 useContext(CorumSettingsContext) 拿 null 降级隐藏。
+    // P0-5（2026-09-14）：General section 条目是 `settings.general.item` 的渲染点。
+    // 形态照官方 ui-settings-general 的 General entry：children 里声明该子槽，
+    // 组件本身（GeneralSection）收 PropsRenderSlots 并 renderSlot('settings.general.item')。
+    // 官方契约（dsh-client-ui-settings contract/slots.d.ts）：行内文案/控件/写路径
+    // 全部由注册方自带，owner props 为空标记（SettingsGeneralItemOwnerProps）。
+    // 真实行来源（均已核实注册进该槽）：官方 ui-theme（appearance 10/font-size 11）、
+    // dsh-client-locale（language 0）、ui-permission-presets（permission -20）、
+    // corum-ui-conversation fork（composer-enter 20）、corum-ui-chat fork
+    // （transcript-view 12）、corum-session-archive（session-archive-import）。
     const disposeGeneral = ctx.slots.inject('settings.section', () => ctx.slots.register({
       name: 'settings.section',
       id: 'general',
       order: 0,
       label: () => t('general.nav'),
       locale: NS,
-    }, () => (
+      children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
+    }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.general.item', owner: {}, opts?: { only?: string }) => ReactNode }) => (
       <CorumRpcContext.Provider value={corumRpc}>
         <CorumSettingsContext.Provider value={corumSettings}>
-          <GeneralSection />
+          <GeneralSection {...props} />
         </CorumSettingsContext.Provider>
       </CorumRpcContext.Provider>
     )))
