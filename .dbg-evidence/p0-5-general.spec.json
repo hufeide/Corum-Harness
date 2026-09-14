@@ -1,0 +1,81 @@
+{
+  "port": 9333,
+  "before": [
+    {
+      "wait": 4000
+    },
+    {
+      "eval": "(() => { const btns=[...document.querySelectorAll('button')]; const b=btns.find(x=>x.getAttribute('aria-haspopup')==='dialog'); if(b) b.click(); return b? 'clicked':'no-trigger'; })()"
+    },
+    {
+      "wait": 1500
+    },
+    {
+      "eval": "(() => { const cells=[...document.querySelectorAll('[role=dialog] button')]; const c=cells.find(x=>x.textContent.includes('通用')); if(c) c.click(); return c? 'nav-general':'no-nav'; })()"
+    },
+    {
+      "wait": 1500
+    }
+  ],
+  "assert": [
+    {
+      "label": "设置面板已打开",
+      "selector": "[role=dialog]",
+      "exists": true
+    },
+    {
+      "label": "①真行·忙碌时回车(composer-enter)可见",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('繁忙时 Enter')",
+      "expect": true
+    },
+    {
+      "label": "①真行·轨迹视图(transcript-view)可见",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('对话显示')",
+      "expect": true
+    },
+    {
+      "label": "④假行·写死『简体中文』语言行已删",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('界面显示语言，缺省跟随系统')",
+      "expect": false
+    },
+    {
+      "label": "④假行·写死『浅色/深色/跟随系统』主题行已删（由官方 AppearanceRow 提供）",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('浅色 / 深色 / 跟随系统')",
+      "expect": false
+    },
+    {
+      "label": "④假行·默认 Agent 预设行已删",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('新建会话默认挂载的预设')",
+      "expect": false
+    },
+    {
+      "label": "④假行·匿名使用统计行已删",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('帮助改进产品')",
+      "expect": false
+    },
+    {
+      "label": "④session-archive 导入行出现在 General 页内（不再自成空 section）",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('导入会话日志')",
+      "expect": true
+    },
+    {
+      "label": "④导航里没有 session-archive 独立 section",
+      "js": "[...document.querySelectorAll('[role=dialog] nav button')].map(b=>b.textContent.trim()).filter(t=>t.includes('导入')).length",
+      "expect": 0
+    },
+    {
+      "label": "真实现保留·改动审查保留天数",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('轮次历史保留天数')",
+      "expect": true
+    },
+    {
+      "label": "真实现保留·卡住自动恢复阈值",
+      "js": "document.querySelector('[role=dialog]').innerText.includes('卡住自动恢复阈值')",
+      "expect": true
+    },
+    {
+      "label": "通用页整页截图",
+      "screenshot": "p0-5-general-page"
+    }
+  ]
+}

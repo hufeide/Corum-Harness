@@ -38,3 +38,11 @@ packages/desktop/.corum-ide-home/
 
 # 编排器隔离 worktree（运行时产物；可能是**用户 app 里正在跑的任务**，勿提交勿清理）
 .corum-worktrees/
+
+# 监督/排障的临时产物（可再生成，不入库）。项目产物请直接落项目目录，勿走 /tmp。
+.corum-scratch/
+
+# 监督/委派取证产物：规格、探针与 md 入库；二进制证据不入库（可再生成）
+.dbg-evidence/**/*.png
+.dbg-evidence/**/*.jpg
+.dbg-evidence/**/*.jpeg

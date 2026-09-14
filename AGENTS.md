@@ -87,6 +87,15 @@
   `packages/desktop/package.json` deps + linked via `pnpm install`.
 - Build: `pnpm --filter <name> run build` (build dependency packages such as
   ui-base first). Typecheck uses the same package filter.
+- **Two checkouts — never confuse them**: this repo is the corum fork
+  (`/Users/kukucai/work/kkc-desktop`, the working tree you edit); the official
+  upstream checkout kept for comparison is `/Users/kukucai/dsh` (baseline
+  `d347e70390` = tag `dsh-v0.1.3-alpha.1`). Official package sources
+  (`packages/core`, `packages/api/*`, `packages/client/*`, `packages/subagent/*`)
+  exist **only** in the dsh checkout: under this repo such a path resolves to
+  nothing, so a repo-relative lookup like `packages/core` is a **path error, not
+  an empty result**. Fork sources live here under `packages/plugins/**`
+  (mapping ledger: `docs/fork-delta.md`).
 - Fork drift guard: `./scripts/verify-fork-drift.sh` (byte-identity of fork core
   files vs the dsh checkout, corum event declaration↔allowlist both ways,
   domain-event name alignment, host emit presence). Run it after any fork or

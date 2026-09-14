@@ -1,6 +1,6 @@
 # corum 会话域 fork 差异台账 + 升级 runbook
 
-> 架构整改 **C4** 交付物。本文档把会话域 6 个 fork 包（fork 自官方 `@deepseek-ai/dsh-client-ui-*`）相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。
+> 架构整改 **C4** 交付物。本文档把会话域 6 个 fork 包（fork 自官方 `@deepseek-ai/dsh-client-ui-*`）相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。**当前 fork 总数 15**（最新：§17 第 15 个 `@corum/corum-session-queue-revert`，2026-09-14）。
 >
 > - 生成方式：`diff -r packages/plugins/session/<pkg>/src /Users/kukucai/dsh/packages/client/<官方包>/src` + 逐文件 diff 分类（脚本统计，非印象）。
 > - 官方基线版本：`0.1.2-alpha.2`（`/Users/kukucai/dsh/packages/client/*/package.json` 的 `version`）。⚠️ corum 各 fork 的 `dependencies` 仍锁 `^0.1.2-alpha.1`——**源码对照的是 alpha.2、依赖锁 alpha.1，双向差一代**（审计 B 群 P1，见 §3.4）。
@@ -1896,3 +1896,82 @@ fork。pnpm 会为 `fs-sandbox` 生成一个**新的 peer 变体**（`.pnpm/...d
 `src/fsio.ts` **只合并 `applyLiteralEdit` 的两条 throw**（其余部分保持官方原样）；`edit-candidates.ts`
 是 corum 自有模块，不受影响。Revert 顺序：先删 override 行 → 再退 fork（否则应用加载期会拿着
 「fork 名、官方内容」的错配跑）。
+
+---
+
+## 17. 第 15 个 fork 包：`@corum/corum-session-queue-revert`（2026-09-14，插话撤回 → 退回队首）
+
+| 项 | 值 |
+|---|---|
+| 官方对照包 | `@deepseek-ai/dsh-api-session-controller` |
+| 官方基线 | 0.1.3-alpha.1（源码基线 = dsh 检出 `/Users/kukucai/dsh`，baseline `d347e70390` = tag `dsh-v0.1.3-alpha.1`） |
+| 形态 | **增量补丁**（不换服务）：cordis object-plugin `{apply, inject}`，官方 `session-controller` 行保持启用；fork 行挂 `packages/desktop/cordis.patch.yml` insert 段（id `corum-session-queue-revert`） |
+| 文件 | `src/index.ts`（补丁本体）+ `src/vendor/updateQueue-official.ts` + `src/vendor/agent-guards.ts`（两个 vendor 文件）+ 常规 build 配置 |
+| 增量 | QueueAction 新增 `{ kind: 'requeue' }`（host 侧 updateQueue 分支 + host/client 两侧 wire schema 放宽） |
+| rebase 风险 | **中**（vendor 两文件需随官方重拷 diff；私有面收窄三处，官方改版即构造期 fail-loud） |
+
+**动机**：插话（`agent/inbox/spliced target=next-step`）在被 step 认领（`agent/inbox/claimed`）前
+存在可撤回窗口，但官方 `inbox.remove` 是纯丢弃（splice 必带 `outcome:'canceled'` + discarded
+通知），没有「移回 next-turn」的动作 → 新增 requeue：守卫后
+`splice('next-step', i, 1, [])` + `prepend('next-turn', message)`，QueueDock 即刻可编辑/删除/再插话。
+
+**形态决策（为什么不是「禁官方行 + fork 整服务」）**：官方行的 client.js 是 client 侧 `sessions`
+服务的**唯一 provider**（`apply` 里 `reflect.provide("sessions", …)`）——禁官方行会让 20 个
+client 插件卡 `waiting for service: sessions`；复刻 client 半的尝试死于三点（closure-factory
+工件构建期 import 不到 apply；vendor 其 4000 行 client 源码又撞 tsdown 0.15 对 INLINE_SAFE 库
+的外部化漂移；client module table 只有 8 个平台种子，跨包 require 无解）。故官方行保留，fork
+只做运行时补丁（监督侧 2026-09-14 裁决）。
+
+**vendor 溯源与重拷纪律**（官方 npm 产物不带 `src/`，唯一源 = dsh 检出）：
+
+| vendor 文件 | 官方源 | 溯源 |
+|---|---|---|
+| `src/vendor/updateQueue-official.ts` | `packages/api/session-controller/src/commands.ts` | `SessionCommandController.updateQueue` 函数体（**:402-450**）逐字照抄，从类方法改写为以 commands 实例为 receiver 的自由函数；edit/remove/steer 三分支必须与官方逐字一致 |
+| `src/vendor/agent-guards.ts` | `packages/api/session-controller/src/agent.ts` | `hasApiSessionSubagentOwner`（**:80-90**）+ `apiSessionSubagentOwnershipError`（**:97-103**）逐字照抄，仅类型面收窄 |
+
+升级官方基线时：重拷这两处 → `git diff` 必须只见行号/注释变化；官方 `updateQueue` 函数体
+若有逻辑改动，先合并进 vendor 再谈别的。
+
+**私有面收窄清单**（红线 3 本地能力接口；任一变化即构造期 throw，不静默降级）：
+
+1. `SessionController` 实例的 `commands` 字段（TS-private 构造参数属性，运行时为普通可枚举属性）——
+   就地覆写其 `updateQueue` 方法（非 requeue 分支转 vendor 实现）。
+2. typert-registry 两处 descriptor 存储形状：host 侧 `ctx.typert.localStore.entries`（`{descriptor}` 包装）
+   与 client 侧 `ctx.typert.remotes.get()`（直达 descriptor）——gateway/client 的 strict codec 按
+   descriptor schema parse 请求，官方生成的 action union 只有 edit/remove/steer，requeue 会在
+   `gateway/input-invalid` 被拒（两侧各一份，漏一侧即失败）。
+3. 生成的 zod schema 的 shape：`schema._zod.def.shape['action']` —— requeue 分支必须并进
+   **action union**（`.or(z.object({kind: z.literal('requeue')}))`）；在 request 顶层 or 永远
+   不匹配（zod union 按整形状判臂）。client 侧是 schemastery 实例（不可加分支），换成
+   「requeue 形状放行、其余交原 schema」的组合校验器
+   （`corum-ui-chat/src/client/update-queue-wire.ts`，mount 后于 `apply` 执行，inject `'typert'`）。
+
+**fail-loud 点**（全部在 `src/index.ts` / `update-queue-wire.ts`）：`sessionController` 服务缺失、
+`commands` 字段不可达、typert descriptor 不可达、schema shape 缺 `action` union —— 构造期 throw，
+boot 报 `HARNESS Failed to load plugins` 明示，不会静默退回官方行为。
+
+**已知依赖（事件层与丢弃同形，2026-09-14 监督侧核验确立）**：公开 `inbox.splice()` 写死
+`mutate(..., discardRemoved=true)`（`dsh-agent/lib/types/inbox.js:116-118`）——requeue 的第一条
+splice **必然带 `outcome:'canceled'` 且必然广播 `agent/inbox/discarded`**，既有消费者按「被丢弃」
+解读：本仓 `corum-subagent/src/continuation.ts:1367-1369`（按 message.id 唤醒激活）、官方
+`dsh-goal-round-driver/lib/index.js:252-255`（按内容+source 同形匹配，目标轮 attempt 标
+cancelled）、`dsh-agent consumed-work.js:64-69`（`droppedUnrun` 置位）。消息本体仍在 next-turn
+会被正常消费；仅当撤回的消息同时是这些账本的跟踪对象（子 Agent 交付 / goal 轮消息）才有
+可观察影响，普通用户插话撤回无牵连。实现上**无法**经公开 API 避免（splice 无 discardRemoved
+参数）——若官方日后开出该参数或 requeue 原语，应迁回官方机制并删除本说明。
+
+**回滚步骤**：① 从 `packages/desktop/cordis.patch.yml` insert 段删除 `corum-session-queue-revert`
+行（同步删 `build/host/cordis.patch.yml` 副本）；② 去掉 chat 的 wire 补丁
+（`corum-ui-chat/src/client/apply.ts` 的 `patchUpdateQueueWire(ctx)` 调用 + inject `'typert'` +
+`update-queue-wire.ts` 文件）；③ 删 `packages/desktop/package.json`（+ `build/host/package.json`）
+里的 workspace dep 并 `pnpm install`。官方行零改动，UI 按钮（ChatView/MessageItem）留着只会
+在点击时收到 host 的 `session/queue-item-not-found` toast，如需一并回退 UI 再删
+`revertSteering` 注入链。
+
+**验证**：docs/analysis/queued-message-revert-2026-09-14.md §2.4（:9333 全链 5/5 PASS +
+① 回填 + 再发送；截图 `.dbg-evidence/qmr-*`）。
+
+**给未来升级的一句话**：官方 `dsh-api-session-controller` 升级时，先核 `commands.ts` 的
+`updateQueue`（vendor 重拷 diff）与 `agent.ts` 两个 guard，再核三处私有面是否仍可达
+（fail-loud 会在 boot 直接告诉你）；client 侧 wire 补丁随 chat 包走，不与官方 client 源码耦合。
+

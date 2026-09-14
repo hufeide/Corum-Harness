@@ -1,0 +1,10 @@
+{
+  "port": 9333,
+  "before": [ { "resize": { "width": 1100, "height": 560 } }, { "wait": 500 } ],
+  "assert": [
+    { "label": "小视口：菜单完整在视口内", "js": "(() => { const m=document.querySelector('[class*=allowMenu]'); if(!m) return 'NO_MENU'; const r=m.getBoundingClientRect(); return (r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth)?'IN_VIEWPORT':'OUT='+JSON.stringify({top:Math.round(r.top),bottom:Math.round(r.bottom),vh:innerHeight}); })()", "expect": "IN_VIEWPORT" },
+    { "label": "小视口：菜单与座位不相交", "js": "(() => { const m=document.querySelector('[class*=allowMenu]').getBoundingClientRect(); const s=document.querySelector('[data-composer-seat]').getBoundingClientRect(); return (m.bottom<=s.top||m.top>=s.bottom||m.right<=s.left||m.left>=s.right)?'DISJOINT':'OVERLAP'; })()", "expect": "DISJOINT" },
+    { "label": "小视口：卡片整体在视口内（限高+内滚生效）", "js": "(() => { const c=document.querySelector('[data-approval-key]').firstElementChild.getBoundingClientRect(); return (c.top>=0&&c.bottom<=innerHeight)?'CARD_IN_VIEWPORT':'OUT='+Math.round(c.top); })()", "expect": "CARD_IN_VIEWPORT" },
+    { "label": "小视口截图", "screenshot": "approval-after-fix-small-viewport" }
+  ]
+}

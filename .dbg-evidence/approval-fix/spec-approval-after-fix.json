@@ -1,0 +1,69 @@
+{
+  "port": 9333,
+  "before": [
+    {
+      "eval": "new Promise((res) => { const t0 = Date.now(); const tick = () => { const c = document.querySelector('[data-approval-key]'); if (c) { const btn = c.querySelector('button[aria-expanded]'); if (btn && btn.getAttribute('aria-expanded') !== 'true') btn.click(); setTimeout(() => res('ready'), 300); return; } if (Date.now() - t0 > 180000) { res('timeout'); return; } setTimeout(tick, 1000); }; tick(); })"
+    }
+  ],
+  "assert": [
+    {
+      "label": "审批卡真实出现（approval/asked 走到 DOM）",
+      "js": "document.querySelectorAll('[data-approval-key]').length",
+      "expect": 1
+    },
+    {
+      "label": "菜单已展开（▾ 触发器 aria-expanded=true）",
+      "js": "document.querySelector('[data-approval-key] button[aria-expanded]').getAttribute('aria-expanded')",
+      "expect": "true"
+    },
+    {
+      "label": "① 菜单展开且完整落在视口内（上/下/左/右四边）",
+      "js": "(() => { const m = document.querySelector('[class*=allowMenu]'); if (!m) return 'NO_MENU'; const r = m.getBoundingClientRect(); const ok = r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth; return ok ? 'IN_VIEWPORT' : JSON.stringify({top:Math.round(r.top),left:Math.round(r.left),bottom:Math.round(r.bottom),right:Math.round(r.right),vh:innerHeight,vw:innerWidth}); })()",
+      "expect": "IN_VIEWPORT"
+    },
+    {
+      "label": "① 菜单两个条目也都完整在视口内（可点）",
+      "js": "(() => { const items = Array.from(document.querySelectorAll('[class*=allowMenuItem]')); if (items.length !== 2) return 'ITEMS=' + items.length; const bad = items.filter(el => { const r = el.getBoundingClientRect(); return r.top < 0 || r.bottom > innerHeight || r.left < 0 || r.right > innerWidth; }); return bad.length === 0 ? 'ALL_ITEMS_IN_VIEWPORT' : 'OUT=' + bad.length; })()",
+      "expect": "ALL_ITEMS_IN_VIEWPORT"
+    },
+    {
+      "label": "① 菜单向上展开（菜单整体在卡片上方，背离 composer）",
+      "js": "(() => { const m = document.querySelector('[class*=allowMenu]').getBoundingClientRect(); const c = document.querySelector('[data-approval-key]').firstElementChild.getBoundingClientRect(); return m.bottom <= c.top ? 'MENU_ABOVE_CARD' : JSON.stringify({menuBottom:Math.round(m.bottom),cardTop:Math.round(c.top)}); })()",
+      "expect": "MENU_ABOVE_CARD"
+    },
+    {
+      "label": "② 菜单矩形与 composer seat 矩形不相交（不越座位向下外溢）",
+      "js": "(() => { const m = document.querySelector('[class*=allowMenu]').getBoundingClientRect(); const s = document.querySelector('[data-composer-seat]').getBoundingClientRect(); const noOverlap = m.bottom <= s.top || m.top >= s.bottom || m.right <= s.left || m.left >= s.right; return noOverlap ? 'MENU_DISJOINT_FROM_SEAT' : JSON.stringify({menuBottom:Math.round(m.bottom),seatTop:Math.round(s.top),seatBottom:Math.round(s.bottom)}); })()",
+      "expect": "MENU_DISJOINT_FROM_SEAT"
+    },
+    {
+      "label": "② 菜单底边不越过座位底边（无向下外溢）",
+      "js": "(() => { const m = document.querySelector('[class*=allowMenu]').getBoundingClientRect(); const s = document.querySelector('[data-composer-seat]').getBoundingClientRect(); return m.bottom <= s.bottom ? 'NO_DOWNWARD_BLEED' : 'BLEED=' + Math.round(m.bottom - s.bottom); })()",
+      "expect": "NO_DOWNWARD_BLEED"
+    },
+    {
+      "label": "③ 卡片矩形不越过座位底边（不遮输入行）",
+      "js": "(() => { const c = document.querySelector('[data-approval-key]').firstElementChild.getBoundingClientRect(); const s = document.querySelector('[data-composer-seat]').getBoundingClientRect(); return c.bottom <= s.bottom ? 'CARD_WITHIN_SEAT' : 'CARD_BLEED=' + Math.round(c.bottom - s.bottom); })()",
+      "expect": "CARD_WITHIN_SEAT"
+    },
+    {
+      "label": "③ 卡片整体在视口内",
+      "js": "(() => { const r = document.querySelector('[data-approval-key]').firstElementChild.getBoundingClientRect(); return (r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth) ? 'CARD_IN_VIEWPORT' : JSON.stringify({top:Math.round(r.top),bottom:Math.round(r.bottom)}); })()",
+      "expect": "CARD_IN_VIEWPORT"
+    },
+    {
+      "label": "④ 字号 = 设计稿（who 14 / tag 13 / headline 14 / 按钮 15 / command 13）",
+      "js": "(() => { const g = (s) => { const e = document.querySelector(s); return e ? parseFloat(getComputedStyle(e).fontSize) : null; }; const got = { who: g('[class*=who]'), tag: g('[class*=tag]'), headline: g('[class*=headline]'), command: g('[class*=command]'), allowMain: g('[class*=allowMain]'), reject: g('[class*=reject]'), allowMenuItem: g('[class*=allowMenuItem]') }; const want = { who: 14, tag: 13, headline: 14, command: 13, allowMain: 15, reject: 15, allowMenuItem: 15 }; const bad = Object.keys(want).filter(k => got[k] !== want[k]).map(k => k + ': want ' + want[k] + ' got ' + got[k]); return bad.length === 0 ? 'FONTS_MATCH_DESIGN' : bad.join('; '); })()",
+      "expect": "FONTS_MATCH_DESIGN"
+    },
+    {
+      "label": "④ 设计稿口径解析为设计值（delta 默认档为 0）",
+      "js": "(() => { const d = getComputedStyle(document.body).getPropertyValue('--dsh-content-font-delta').trim(); const p = document.createElement('div'); p.style.fontSize = 'calc(14px + var(--dsh-content-font-delta, 0px))'; document.body.appendChild(p); const v = getComputedStyle(p).fontSize; p.remove(); return 'delta=' + d + ' -> calc14=' + v; })()",
+      "expect": "delta=calc(14px - 14px) -> calc14=14px"
+    },
+    {
+      "label": "菜单展开态截图",
+      "screenshot": "approval-after-fix-menu-open"
+    }
+  ]
+}

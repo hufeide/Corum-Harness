@@ -93,6 +93,28 @@ kill_own_tree() {
   kill "$pid" 2>/dev/null || true
 }
 
+# 端口占用者（LISTEN 态）的 PID。macOS 上没有 /proc，`ps` 在 Agent 沙箱里会被拒
+# （实测 `/bin/ps: Operation not permitted`），lsof 是稳的那条路。
+port_holder_pids() {
+  lsof -nP -iTCP:"$CORUM_DEBUG_PORT" -sTCP:LISTEN -t 2>/dev/null || true
+}
+
+# 该 pid 是否属于**本验证实例**（即「可以杀」）。
+# 2026-09-14 实测的两条判据（缺一不可，否则会假阴性 → stop 误拒）：
+#   ① **dev 态主进程**的 cmdline 里是 `…/packages/desktop/lib/main.js --combo=…`，
+#      **不带端口 token**（端口只在 helper/renderer 的 `--user-data-dir=…-ud-<mode>-<port>` 里）；
+#   ② helper/renderer 带 userData token，含本端口。
+# 另外：**打包实例（用户主实例）永远不碰** —— cmdline 含 dist/mac-arm64/Corum.app 一律拒绝。
+is_own_process() {
+  local pid="$1" line
+  line="$(pgrep -fl "$ROOT/packages/desktop" 2>/dev/null | grep "^$pid " || true)"
+  [[ -n "$line" ]] || return 1
+  [[ "$line" == *"dist/mac-arm64/Corum.app"* ]] && return 1
+  [[ "$line" == *"$ROOT/packages/desktop/lib/main.js"* ]] && return 0
+  [[ "$line" == *"corum-desktop-ud-"*"-${CORUM_DEBUG_PORT}"* ]] && return 0
+  return 1
+}
+
 stop_own() {
   local pid
   if pid="$(recorded_pid)"; then
@@ -108,6 +130,27 @@ stop_own() {
     log "无 PID 记录（${PID_FILE}）"
   fi
   rm -f "$PID_FILE"
+
+  # 2026-09-14 修复（incident.verify-instance.stop-orphan）：**记录树之外**仍可能有进程
+  # 占着 CDP 端口 —— 实测真正监听 :9333 的 PID 23733 不在记录树 23688 里，旧实现只 warn
+  # 一句就继续 start，于是新实例 `bind() failed: Address already in use` + 单实例锁冲突，
+  # Agent 对着一个「活着但 CDP 不可达」的实例反复重试（白花约 3 分钟）。
+  # 现在：属于本实例的占用者一并停掉；**不属于**的只报告、绝不杀（隔离纪律）。
+  local holder
+  for holder in $(port_holder_pids); do
+    if is_own_process "$holder"; then
+      log "端口 ${CORUM_DEBUG_PORT} 仍被本实例的残留进程 ${holder} 占用 → 一并停止"
+      kill_own_tree "$holder" || true
+      sleep 1
+      kill -9 "$holder" 2>/dev/null || true
+    else
+      log "⚠️ 端口 ${CORUM_DEBUG_PORT} 被**非本实例**的进程 ${holder} 占用，拒绝杀它："
+      pgrep -fl "$ROOT/packages/desktop" 2>/dev/null | grep "^$holder " | sed 's/^/   /' || true
+      log "   处置：确认那是什么（另一个 dev 实例 / 打包实例 / 别的程序）再自行停止。"
+      return 1
+    fi
+  done
+  return 0
 }
 
 cdp_ok() {
@@ -116,21 +159,50 @@ cdp_ok() {
 
 # 等端口空闲：Electron 的实例锁在 userData 上，进程退出到锁释放之间有间隙；
 # 不等就立刻 start 会命中 `another instance already owns the lock; handing over and exiting`
-# （2026-09-12 实测把自己坑了一次）。最多等 15 秒。
+# （2026-09-12 实测把自己坑了一次）。最多等 15 秒；**超时即失败**（旧的「warn 后继续」
+# 会静默产出一个没有 CDP 的实例 —— 2026-09-14 事故，见 incident.verify-instance.stop-orphan）。
 wait_port_free() {
-  local i=0
+  local i=0 holder
   while [[ $i -lt 30 ]]; do
-    if ! curl -s --max-time 1 "http://127.0.0.1:$CORUM_DEBUG_PORT/json/version" >/dev/null 2>&1; then return 0; fi
+    if [[ -z "$(port_holder_pids)" ]] && ! curl -s --max-time 1 "http://127.0.0.1:$CORUM_DEBUG_PORT/json/version" >/dev/null 2>&1; then
+      return 0
+    fi
     sleep 0.5; i=$((i+1))
   done
-  log "警告：端口 $CORUM_DEBUG_PORT 仍被占用，继续尝试启动"
-  return 0
+  log "❌ 端口 $CORUM_DEBUG_PORT 在 15 秒内没有释放，**不启动**（避免产出无 CDP 的实例）："
+  for holder in $(port_holder_pids); do
+    log "   占用者 PID ${holder}："
+    pgrep -fl "$ROOT/packages/desktop" 2>/dev/null | grep "^$holder " | sed 's/^/      /' || true
+  done
+  log "   处置：先停掉上面这个占用者（若属于本实例可再跑一次 stop），或换端口（CORUM_VERIFY_PORT=…）。"
+  return 1
 }
 
 case "${1:-status}" in
   start)
     stop_own
     wait_port_free
+    # 2026-09-14 实测事故（效率轮 B-B 阻塞的真因）：**验证实例不能从沙箱内启动**。
+    # 若从 Agent 的 bash 沙箱里 restart，整个实例进程树继承该沙箱，
+    # 实例内**子 Agent 的 bash 会全部失败**：`sandbox mode "workspace-write" is requested
+    # but no sandbox backend is usable` / `sandbox-exec: sandbox_apply: Operation not permitted`
+    # （嵌套 sandbox-exec 不能应用 profile）。判定探针：沙箱外 rc=0，沙箱内 EPERM。
+    # 用户 2026-09-14 定调「**9333 一定要在沙箱外**」→ 默认**硬拒绝**，只留显式放行开关。
+    if ! sandbox-exec -p '(version 1)(allow default)' /usr/bin/true >/dev/null 2>&1; then
+      if [ "${CORUM_VERIFY_ALLOW_SANDBOXED:-0}" = "1" ]; then
+        log "⚠️ 检测到**沙箱内启动**，但已显式放行（CORUM_VERIFY_ALLOW_SANDBOXED=1）。"
+        log "   后果自负：实例内子 Agent 的 bash 会全部失败（sandbox_apply: Operation not permitted），"
+        log "   隔离/子 Agent 类断言必然假失败；只有纯 UI 断言可用。"
+      else
+        log "❌ 拒绝在**沙箱内**启动验证实例（sandbox-exec 探针失败）。"
+        log "   原因：实例进程树会继承当前沙箱 ⇒ 实例内**子 Agent 的 bash 全部失败**"
+        log "        （嵌套 sandbox-exec 无法应用 profile：sandbox_apply: Operation not permitted）。"
+        log "   处置：请在**沙箱外**执行（用户终端 / 监督侧会话）。"
+        log "        确需在沙箱内起（**仅**做 UI 断言）请显式加：CORUM_VERIFY_ALLOW_SANDBOXED=1"
+        log "   证据与判据：docs/tasks/log.jsonl → key tooling.sandbox.verify-instance-launch"
+        exit 3
+      fi
+    fi
     log "启动验证实例：CORUM_HOME=$CORUM_HOME CDP=:$CORUM_DEBUG_PORT"
     # 后台 + 三重 fd 重定向：与调用方（Agent 的 bash 工具）彻底脱钩，脚本秒回。
     (
@@ -152,13 +224,26 @@ case "${1:-status}" in
     "$0" start
     ;;
   status)
+    alive_ok=0
     if pid="$(recorded_pid)" && kill -0 "$pid" 2>/dev/null; then
       log "验证实例存活：PID ${pid}（CDP :${CORUM_DEBUG_PORT}）"
+      alive_ok=1
     else
       log "验证实例未运行"
     fi
-    if cdp_ok; then log "CDP 可达 → http://127.0.0.1:$CORUM_DEBUG_PORT"; else log "CDP 不可达"; fi
-    log "用 CDP_PORT=$CORUM_DEBUG_PORT node scripts/cdp.mjs … 驱动它"
+    # 「存活」与「可用」分开报（2026-09-14：旧输出先说存活、再说 CDP 不可达，最容易被
+    # 当成「实例在跑，只是还没起来」而反复重试 —— 实际是 bind 失败后的残骸）。
+    if cdp_ok; then
+      log "CDP 可达 → http://127.0.0.1:$CORUM_DEBUG_PORT"
+      log "✅ 可用：CDP_PORT=$CORUM_DEBUG_PORT node scripts/cdp.mjs … 驱动它"
+    else
+      if [[ $alive_ok -eq 1 ]]; then
+        log "❌ CDP 不可达（:${CORUM_DEBUG_PORT} 无监听）→ 该实例**不可用**（bind 失败或仍在启动）："
+        log "   处置：等 10 秒再 status 一次；仍不可达就 $0 restart。"
+      else
+        log "（无实例在跑；若端口有应答则说明有别的程序占着它：$(port_holder_pids | tr '\n' ' '))"
+      fi
+    fi
     ;;
   *)
     echo "用法: $0 start|stop|restart|status" >&2

@@ -1,0 +1,26 @@
+    · Add --only/--fast to fork-drift script :: You are working in the git repo at /Users/kukucai/work/kkc-desktop (a macOS project called "corum", a plugin distribution over the DeepSeek 
+    · edit observation-gate scope experiment :: You are working in the git repo at /Users/kukucai/work/kkc-desktop (a macOS Electron app called "corum", built on the DeepSeek Harness / dsh
+    · 修复挂载守卫假绿灯 :: 工作目录：/Users/kukucai/work/kkc-desktop（git 仓库，不要 git commit）。 # 背景（已核实，不需要重新排查） scripts/verify-fork-drift.sh 的 §8（约 288-292 行）用 `grep -qF "$pk
+    · Create probe file in docs :: You are working in the repository at /Users/kukucai/work/kkc-desktop (corum Agent OS / kkc-desktop). Task (single, self-contained, do exactl
+    · Create probe-a.txt :: You are working in the repository at /Users/kukucai/work/kkc-desktop (corum Agent OS / kkc-desktop). Task (single, self-contained, do exactl
+
+新失效形态（B 后每条命令新 shell）：
+  上一条 cd 过、本条相对路径且未给 workdir  11  （涉及 3 个会话）
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh status 2>&1 | tail -5
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh restart 2>&1 | tail -3; for i in $(seq 1 30); do curl -s http://127.0.0.1:9333/json/version
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh restart 2>&1 | tail -2; for i in $(seq 1 40); do curl -s http://127.0.0.1:9333/json/version
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh restart 2>&1 | tail -1; for i in $(seq 1 40); do curl -s http://127.0.0.1:9333/json/version
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh restart 2>&1 | tail -1; for i in $(seq 1 40); do curl -s http://127.0.0.1:9333/json/version
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh restart 2>&1 | tail -1; for i in $(seq 1 40); do curl -s http://127.0.0.1:9333/json/version
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh restart 2>&1 | tail -1; for i in $(seq 1 40); do curl -s http://127.0.0.1:9333/json/version
+    · corum-task-d8f72e77 :: ./scripts/verify-instance.sh restart 2>&1 | tail -1; for i in $(seq 1 40); do curl -s http://127.0.0.1:9333/json/version
+
+按日（bash 总数 / 其中后台）：
+  2026-09-07    18 / 0
+  2026-09-08     1 / 0
+  2026-09-09     1 / 0
+  2026-09-10   212 / 0
+  2026-09-11   130 / 0
+  2026-09-12  2189 / 0
+  2026-09-13  1264 / 0
+  2026-09-14   978 / 4
