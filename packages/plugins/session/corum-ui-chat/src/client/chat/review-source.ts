@@ -14,19 +14,20 @@
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionEventSource } from '@deepseek-ai/dsh-api-session-controller/client'
+import { subagentChildSubscribe } from '../chat-runtime.ts'
 import { emptyReviewChanges, type ReviewChanges } from './review-changes.ts'
 
 /** Review 卡对外面：当前聚合 + 动作 + 单文件原文（供看 diff）。 */
 export interface ReviewSource extends ObservableSnapshot<ReviewChanges> {
-  /** 「全部撤销」：把本轮所有改动回退到改前。 */
+  /** 「全部撤销」：把本轮所有改动回退到改前（含子会话归属的文件，按归属路由）。 */
   revertAll(): Promise<RevertAllResult>
   /** 「全部保留」：本轮改动就是工作区现状，不需要做什么 —— 清空「已看过」标记即可。 */
   keepAll(): void
   /** 「保留此文件」：标记为已看过（仅本轮），它随即从卡片消失。 */
   keepFile(path: string): void
-  /** 「撤销此文件」：只回退这一个文件。 */
+  /** 「撤销此文件」：只回退这一个文件（按归属会话路由：子会话文件撤销子会话轮次）。 */
   revertFile(path: string): Promise<RevertAllResult>
-  /** 取某文件「改动前」的内容，供编辑器开 diff。 */
+  /** 取某文件「改动前」的内容，供编辑器开 diff（按归属会话路由）。 */
   fileBefore(path: string): Promise<ReconstructResult>
 }
 
@@ -54,7 +55,23 @@ export interface ReconstructResult {
 interface SnapshotValue {
   workspace: string | null
   roundIndex: number
-  files: { path: string; added: number; removed: number; hash: string }[]
+  files: { path: string; added: number; removed: number; hash: string; status?: 'content' | 'absent' | 'unavailable' | 'missing' }[]
+}
+
+/**
+ * 聚合后的单文件条目（内部投影）：归属会话（= pre-image/撤销的 RPC 路由目标）
+ * 跟着文件走——子会话文件打开 diff 时用**子会话轮次**的 pre-image，否则会复现
+ * 「父轮次没抓过这个文件 → unavailable 死点」（问题 2 实现要点）。
+ */
+interface AggregatedFile {
+  path: string
+  added: number
+  removed: number
+  hash: string
+  /** 该条目来自的会话（父会话自身或某个子会话）。 */
+  owner: string
+  /** 子会话归属时的委托标签（卡片标注「子 Agent」用）。 */
+  ownerLabel?: string
 }
 
 /** 把 RPC 信封拆开；失败返回 null 并打印原因。 */
@@ -88,6 +105,20 @@ export function createReviewSource(
   const listeners = new Set<() => void>()
   let inFlight = false
   let again = false
+  /**
+   * 当前聚合里每个文件归属的会话（pre-image/撤销的 RPC 路由表，问题 2）。
+   * path → owner sessionId。refresh 每次重建；fileBefore/revertFile 按它路由到
+   * 子会话轮次，避免「父轮次没抓过这个文件 → unavailable 死点」。
+   */
+  let owners = new Map<string, string>()
+  /**
+   * 本父会话已观测到的子会话（childSessionId → 委托标签）。
+   * 数据源 = 'corum/subagent/child' 广播帧（host spawn 那一刻按父会话 id 发出，
+   * 帧带 parentSessionId，本模块按它过滤）。帧不重放——页面刷新后新建的
+   * ReviewSource 只能聚合「刷新之后 spawn 的子会话」，属已知边界（卡片生命周期
+   * 内 spawn 的子 Agent 都在）。
+   */
+  const childSessions = new Map<string, string>()
 
   const call = async <T,>(method: string, args: Record<string, unknown>): Promise<T | null> => {
     try {
@@ -100,7 +131,7 @@ export function createReviewSource(
     }
   }
 
-  /** 拉一次快照并转成卡片形状。 */
+  /** 拉一次快照并转成卡片形状（问题 2：父会话轮次 ∪ 所有子会话轮次去重并集）。 */
   const refresh = async (): Promise<void> => {
     if (inFlight) { again = true; return }
     inFlight = true
@@ -109,14 +140,48 @@ export function createReviewSource(
       if (value === null) return
       // 轮次变了 → 「已看过」标记作废（用户定调：仅本轮有效）。
       if (value.roundIndex !== roundIndex) { roundIndex = value.roundIndex; seen = new Map() }
-      const files = value.files
+      // 子会话快照（并集口径）：每个子会话一次 snapshot RPC；失败（会话已 dispose、
+      // 轮次已关）按空集降级，不阻断父侧。pre-image 归属跟文件走（owner = 子会话 id）。
+      const childSnaps = await Promise.all(
+        [...childSessions.entries()].map(async ([childId, label]) => ({
+          childId,
+          label,
+          snap: await call<SnapshotValue>('corumReview/snapshot', { sessionId: childId }),
+        })),
+      )
+      const byPath = new Map<string, AggregatedFile>()
+      for (const file of value.files) {
+        byPath.set(file.path, { path: file.path, added: file.added, removed: file.removed, hash: file.hash, owner: sessionId })
+      }
+      // 子会话条目**覆盖**同路径父侧条目：同一文件父子都碰过时，最新（子会话）的
+      // 改动行数与 pre-image 更贴近用户想审的那次改动（问题 2 口径）。
+      for (const { childId, label, snap } of childSnaps) {
+        if (snap === null) continue
+        for (const file of snap.files) {
+          byPath.set(file.path, {
+            path: file.path,
+            added: file.added,
+            removed: file.removed,
+            hash: file.hash,
+            owner: childId,
+            ownerLabel: label,
+          })
+        }
+      }
+      owners = new Map([...byPath.values()].map(f => [f.path, f.owner]))
+      const files = [...byPath.values()]
         .filter(file => seen.get(file.path) !== file.hash)
         .map(file => ({
           path: file.path,
           added: file.added,
           removed: file.removed,
+          // hash 必须带出来（keepAll/keepFile 依赖它做内容级「已看过」判定），
+          // 否则投影后的对象里 hash 恒为 undefined → seen 永远写不进 → 文件每次 refresh 重现。
+          hash: file.hash,
           // git 版不需要逐条 op（旧实现用它做反推与统计），留空数组保持形状兼容。
           ops: [],
+          // 子会话归属标注（ReviewCard 显示「子 Agent」chip 用）。
+          ...file.ownerLabel === undefined ? {} : { fromSubagent: file.ownerLabel },
         }))
       const next: ReviewChanges = {
         totalAdded: files.reduce((sum, f) => sum + f.added, 0),
@@ -130,7 +195,8 @@ export function createReviewSource(
         && next.files.length === current.files.length
         && next.files.every((f, i) => f.path === current.files[i]?.path
           && f.added === current.files[i]?.added
-          && f.removed === current.files[i]?.removed)
+          && f.removed === current.files[i]?.removed
+          && f.hash === current.files[i]?.hash)
       if (same) return
       current = next
       for (const listener of listeners) listener()
@@ -143,6 +209,14 @@ export function createReviewSource(
   // 事件窗每次发布都重拉（写入会推进 seq）。这里刻意**不做节流窗口**：写入频率
   // 受 inFlight+again 合并（并发去重 + 尾随一次），足够挡住密集写入。
   eventSource.subscribe(() => { void refresh() })
+  // 问题 2：子 Agent spawn 帧到达即记账并补拉一次（子会话首帧可能早于任何写入，
+  // 而它的改动要等终态才进影子仓库——帧驱动刷新保证卡片能及时聚合）。
+  subagentChildSubscribe((frame) => {
+    if (frame.parentSessionId !== sessionId) return
+    if (childSessions.get(frame.childSessionId) === frame.label) return
+    childSessions.set(frame.childSessionId, frame.label)
+    void refresh()
+  })
   void refresh()
 
   return {
@@ -152,17 +226,34 @@ export function createReviewSource(
       return () => { listeners.delete(listener) }
     },
     revertAll: async () => {
-      const value = await call<{ ok: boolean; restored: number; failed: number; message?: string }>(
-        'corumReview/rollback', { sessionId },
-      )
-      if (value === null) return { ok: false, reverted: 0, failed: 0, skipped: 0, message: 'RPC 失败' }
+      // 问题 2：聚合口径下按**归属会话**分组撤销——父侧文件撤父轮次，子会话文件
+      // 撤各自子会话轮次（整轮 rollback，不带 path）。逐会话调用后汇总。
+      const byOwner = new Map<string, string[]>()
+      for (const file of current.files) {
+        const owner = owners.get(file.path) ?? sessionId
+        const list = byOwner.get(owner) ?? []
+        list.push(file.path)
+        byOwner.set(owner, list)
+      }
+      let restored = 0
+      let failed = 0
+      const problems: string[] = []
+      await Promise.all([...byOwner.keys()].map(async (owner) => {
+        const value = await call<{ ok: boolean; restored: number; failed: number; message?: string }>(
+          'corumReview/rollback', { sessionId: owner },
+        )
+        if (value === null) { failed += byOwner.get(owner)?.length ?? 0; problems.push('RPC 失败'); return }
+        restored += value.restored
+        failed += value.failed
+        if (value.message !== undefined) problems.push(value.message)
+      }))
       await refresh()
       return {
-        ok: value.ok,
-        reverted: value.restored,
-        failed: value.failed,
+        ok: failed === 0,
+        reverted: restored,
+        failed,
         skipped: 0,
-        ...value.message === undefined ? {} : { message: value.message },
+        ...problems.length > 0 ? { message: problems.join('; ') } : {},
       }
     },
     keepAll: () => {
@@ -176,14 +267,14 @@ export function createReviewSource(
       // 过的文件会重新冒出来、卡片也不收起 —— 与按钮字面意思相反（用户报的
       // 「点全部保留不生效」就是它）。
       // 记下「当时的内容哈希」：文件之后再变，标记自动失效。
-      for (const file of current.files) { if (file.hash !== undefined) seen.set(file.path, file.hash) }
+      for (const file of current.files) { seen.set(file.path, file.hash) }
       current = emptyReviewChanges()
       for (const listener of listeners) listener()
     },
     keepFile: (path: string) => {
       const target = current.files.find(f => f.path === path)
       // 记内容哈希（C1）：该文件之后再被改动时标记自动失效。
-      if (target?.hash !== undefined) seen.set(path, target.hash)
+      if (target !== undefined) seen.set(path, target.hash)
       const files = current.files.filter(f => f.path !== path)
       current = {
         totalAdded: files.reduce((sum, f) => sum + f.added, 0),
@@ -194,8 +285,10 @@ export function createReviewSource(
       for (const listener of listeners) listener()
     },
     revertFile: async (path: string) => {
+      // 问题 2：按归属会话路由（子会话文件撤销子会话轮次）。
+      const owner = owners.get(path) ?? sessionId
       const value = await call<{ ok: boolean; restored: number; failed: number; message?: string }>(
-        'corumReview/rollback', { sessionId, path },
+        'corumReview/rollback', { sessionId: owner, path },
       )
       if (value === null) return { ok: false, reverted: 0, failed: 0, skipped: 0, message: 'RPC 失败' }
       await refresh()
@@ -208,11 +301,19 @@ export function createReviewSource(
       }
     },
     fileBefore: async (path: string) => {
-      const value = await call<{ exists: boolean; content: string; created: boolean }>(
-        'corumReview/fileBefore', { sessionId, path },
+      // 问题 2：按归属会话路由（子会话文件用子会话轮次的 pre-image，避免复现
+      // 「父轮次没抓过 → unavailable 死点」）。
+      const owner = owners.get(path) ?? sessionId
+      const value = await call<{ exists: boolean; content: string; created: boolean; status?: 'content' | 'absent' | 'unavailable' | 'missing' }>(
+        'corumReview/fileBefore', { sessionId: owner, path },
       )
       if (value === null || !value.exists) {
-        return { ok: false, content: '', complete: false, path, message: '该文件不在本轮改动里' }
+        // 问题 1-④ 收口：host 现在带 status 枚举——unavailable（过大/二进制取不到）
+        // 与 missing（不在本轮改动里）分开报，用户不再看到「改前为空」的假 diff。
+        const message = value?.status === 'unavailable'
+          ? '文件过大或非文本，没有保留改动前内容'
+          : '该文件不在本轮改动里'
+        return { ok: false, content: '', complete: false, path, message }
       }
       return {
         ok: true,
@@ -220,7 +321,7 @@ export function createReviewSource(
         complete: true,
         path,
         // 新建文件：左侧为空是**正确**的（改前确实不存在），不该当成「重建不完整」。
-        ...value.created ? { note: '该文件是本轮新建的，左侧为空' } : {},
+        ...(value.created || value.status === 'absent') ? { note: '该文件是本轮新建的，左侧为空' } : {},
       }
     },
   }

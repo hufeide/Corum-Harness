@@ -493,7 +493,10 @@ export class ConversationController extends Service implements IConversation {
   /** Apply one operation to a pending queue occurrence. */
   async updateQueue(itemId: QueueItemId, action: QueueAction): Promise<void> {
     const session = this.scopedSession('updateQueue')
-    const result = await session.updateQueue(itemId, action)
+    // fork（corum）：QueueAction 含 requeue 扩展（host 侧 corum-session-queue-revert
+    // 承接），官方 SessionFace 类型联合没有该分支——Remote 序列化无 schema
+    // 校验，按结构化形状直传。
+    const result = await session.updateQueue(itemId, action as Parameters<typeof session.updateQueue>[1])
     if (!result.ok) {
       if (
         action.kind === 'steer'

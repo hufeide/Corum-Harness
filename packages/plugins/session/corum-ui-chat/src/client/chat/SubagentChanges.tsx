@@ -23,6 +23,7 @@
 
 import { useEffect, useState } from 'react'
 import { FileDiff, GitBranch, GitMerge, Loader, RotateCcw } from 'lucide-react'
+import { resolveWorkspacePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { SubagentChangeSummary } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import { chatRuntimeRef, subagentProgressSubscribe, worktreeLedgerSubscribe } from '../chat-runtime.ts'
@@ -40,12 +41,43 @@ interface LedgerFrame {
   readonly entries: readonly { readonly slug: string; readonly status: string }[]
 }
 
-/** RPC fileBefore 返回形（与 review-source.ts 同款）。 */
+/**
+ * 当前（父）会话 cwd（diff 打开的路径解析基准，问题 1-③）。
+ *
+ * 数据源 = apply.ts 在会话日志会话 header 里挂出的 `sessionCwd`（dsh 会话 header
+ * 的 cwd 字段，host corumReview 轮次按它分工作区）。经 chatRuntime cordis 服务的
+ * cwd 桥取用——与 openContentDiff 同一条 apply 注入路径，不新拉依赖。
+ */
+function useSessionCwd(): string | undefined {
+  const [cwd, setCwd] = useState<string | undefined>(() => chatRuntimeRef.current?.sessionCwd())
+  useEffect(() => {
+    // apply 注入晚于首渲染时补一次（cwd 桥是同步读取，无订阅需求——会话切换
+    // 会重建整个 ChatView 树，组件随之一起重挂载）。
+    setCwd(chatRuntimeRef.current?.sessionCwd())
+  }, [])
+  return cwd
+}
+
+/**
+ * RPC fileBefore 返回形（与 review-source.ts 同款）。
+ *
+ * 2026-09-13 收口（问题 1-④）：host 内部 pre-image 本来就有 content/blob/absent/
+ * unavailable 四态，旧上线投影 `{exists, content, created}` 把 `unavailable` 与
+ * 「文件本来就是空的」压平成同形（`{exists:true, content:'', created:false}`），
+ * 调用方把「取不到改前内容」当成「改前为空」开出假 diff。现加 `status` 枚举
+ * （'content' | 'absent' | 'unavailable' | 'missing'），调用方按 status 分支；
+ * exists/content/created 三个旧字段保留作兼容投影（旧客户端行为不变）。
+ */
 interface FileBeforeResult {
   exists: boolean
   content: string
   created: boolean
+  /** 改前内容状态：content=有原文；absent=本轮新建（左侧应为空）；unavailable=过大/二进制取不到；missing=不在本轮改动里。 */
+  status?: 'content' | 'absent' | 'unavailable' | 'missing'
 }
+
+/** 单文件行的改前状态（snapshot/files 逐项带来；undefined = 未知，按旧行为可点）。 */
+type FileRowStatus = 'content' | 'absent' | 'unavailable' | 'missing' | undefined
 
 /** RPC rollback 返回形（与 review-source.ts 同款）。 */
 interface RollbackResult {
@@ -57,7 +89,13 @@ interface RollbackResult {
 
 /** RPC `corumReview/snapshot` 返回形（与 host corum-review.ts 同款；只取 files）。 */
 interface ReviewSnapshotResult {
-  readonly files?: readonly { readonly path: string; readonly added: number; readonly removed: number }[]
+  readonly files?: readonly {
+    readonly path: string
+    readonly added: number
+    readonly removed: number
+    /** 该文件的改前状态（2026-09-13 收口）；旧 host 缺省。 */
+    readonly status?: 'content' | 'absent' | 'unavailable' | 'missing'
+  }[]
 }
 
 /** `__corumNotify` 一次写只读桥（规范 §1 例外：CorumNotification 面）。 */
@@ -109,10 +147,19 @@ function useChangeSummary(childSessionId: string | undefined): SubagentChangeSum
         const files = result.value.files ?? []
         setSummary(prev => prev ?? {
           filesChanged: files.length,
-          files: files.map(f => ({ path: f.path, added: f.added, removed: f.removed })),
+          files: files.map(f => ({
+            path: f.path,
+            added: f.added,
+            removed: f.removed,
+            ...f.status === undefined ? {} : { status: f.status },
+          })),
         })
       } catch {
-        // 取不到快照 → 保持缺省（不渲染改动段），与旧行为一致。
+        // ⚠️ 此处是**故意**静默（2026-09-13 督办方核对确认）：快照基线拉取是
+        // 「终态帧可能错过」的补帧通道，取不到（子会话从未开过轮次 / RPC 未就绪）
+        // 属于常规情形，正确行为就是保持缺省、不渲染改动段——与旧行为一致。
+        // 不要照下面 openDiff/revertFile 那样 warn + notify：那会把「本来就没有
+        // 改动段可显示」误报成用户可见错误。
       }
     })()
     return () => { cancelled = true; sub.unsubscribe() }
@@ -162,6 +209,10 @@ export function SubagentChanges({
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
   const summary = useChangeSummary(childSessionId)
+  // 非隔离时 diff 打开的绝对路径解析基准：当前（父）会话 cwd，照 ReviewDock
+  // 的 apply.ts 写法（resolveWorkspacePath(cwd, path)）。旧实现直接把快照里的
+  // 相对路径当绝对路径传给 editor，必然报「路径不在当前工作区根下」（问题 1-③）。
+  const sessionCwd = useSessionCwd()
   // 台账 integrated 实时更新（终态帧快照值 + 推送帧增量）。
   // ⚠️ hooks 必须无条件调用（React #310）：slug 在 summary 到达前取 worktree 兜底。
   const slug = summary?.worktreeSlug ?? worktree?.slug
@@ -207,8 +258,10 @@ export function SubagentChanges({
               path={file.path}
               added={file.added}
               removed={file.removed}
+              status={(file as { status?: FileRowStatus }).status}
               childSessionId={childSessionId}
               worktreePath={summary.worktreePath}
+              sessionCwd={sessionCwd}
               t={t}
             />
           ))}
@@ -224,21 +277,31 @@ export function SubagentChanges({
   )
 }
 
-/** 单文件行：path + ±N + 打开 diff + 撤销。 */
+/**
+ * 单文件行：path + ±N + 打开 diff + 撤销。
+ *
+ * `status`（host snapshot/fileBefore 的改前状态枚举）驱动置灰（2026-09-13 收口，
+ * 问题 1-④⑤）：`unavailable`（过大/二进制取不到改前内容）或「无可撤销内容」的
+ * 行不可点、不可撤销——旧实现把它们当「改前为空」开出假 diff / 假撤销。
+ */
 function FileRow({
-  path, added, removed, childSessionId, worktreePath, t,
+  path, added, removed, status, childSessionId, worktreePath, sessionCwd, t,
 }: {
   path: string
   added: number
   removed: number
+  status: FileRowStatus
   childSessionId: string | undefined
   worktreePath: string | undefined
+  sessionCwd: string | undefined
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
   const [busy, setBusy] = useState(false)
+  // 改前内容不可得（过大/二进制/轮末兜底补入但影子仓库里没有改前版本）→ 整行置灰。
+  const unavailable = status === 'unavailable'
 
   const openDiff = (): void => {
-    if (childSessionId === undefined) return
+    if (childSessionId === undefined || unavailable) return
     void (async () => {
       const conn = chatRuntimeRef.current?.connection
       if (conn === undefined) return
@@ -246,38 +309,54 @@ function FileRow({
         const result = await conn.rpc.call('/api', 'corumReview/fileBefore', {
           args: { sessionId: childSessionId, path },
         }) as { ok: boolean; value?: FileBeforeResult }
-        if (!result.ok || result.value === undefined || !result.value.exists) {
+        const value = result.value
+        // 状态枚举分支（host 2026-09-13 收口后始终带 status；缺省按旧 exists 语义兜底）。
+        const statusNow = value?.status ?? (value?.exists === true ? 'content' : 'missing')
+        if (!result.ok || value === undefined || statusNow === 'missing') {
           notifyUser('取不到该文件的改动前内容', path)
+          return
+        }
+        if (statusNow === 'unavailable') {
+          notifyUser('取不到该文件的改动前内容', '文件过大或非文本，没有保留改动前内容')
           return
         }
         // 经 chatRuntime cordis 服务的 openContentDiff 桥 → corumEditor 直调
         // （apply.ts 注入，与 ReviewDock 的 openDiff 同款收窄）。
-        const openDiffFn = chatRuntimeRef.current?.openContentDiff
-        if (openDiffFn === undefined) {
+        // 注意：必须经服务对象调用（.openContentDiff(...)），不能把方法摘下来再调
+        // ——impl 是普通类方法、方法体访问私有字段 #openContentDiff，脱离 receiver
+        // 调用会抛 "Cannot read properties of undefined (reading '#openContentDiff')"
+        // （2026-09-13 Review 面小轮修复：用户症状「子卡打开 diff 失败」的末段根因）。
+        const runtime = chatRuntimeRef.current
+        if (runtime?.openContentDiff === undefined) {
           notifyUser('无法打开改动对比', '编辑器服务未就绪')
           return
         }
-        // absolutePath：隔离时 = worktreePath/path，非隔离时 = path（相对父 cwd，
-        // editor 侧自行解析）。worktreePath 来自 changeSummary（host 台账）。
+        // absolutePath：隔离时 = worktreePath/path（worktree 在编辑器工作区内）；
+        // 非隔离时快照给的是**相对子会话 cwd** 的路径，直接当绝对路径传给 editor
+        // 必然报「路径不在当前工作区根下」（问题 1-③）——照 ReviewDock 的 apply.ts
+        // 写法：resolveWorkspacePath(会话 cwd, path) 解析成绝对路径。
         const absolutePath = worktreePath !== undefined
           ? `${worktreePath}/${path}`
-          : path
-        const opened = await openDiffFn({
+          : resolveWorkspacePath(sessionCwd, path)
+        const opened = await runtime.openContentDiff({
           absolutePath,
-          originalContent: result.value.content,
-          ...result.value.created ? { note: '该文件是本轮新建的，左侧为空' } : {},
+          originalContent: value.content,
+          ...(value.created || statusNow === 'absent') ? { note: '该文件是本轮新建的，左侧为空' } : {},
         })
         if (!opened.ok) {
           notifyUser('无法打开改动对比', opened.error)
         }
-      } catch {
-        notifyUser('无法打开改动对比', path)
+      } catch (err) {
+        // 问题 1-①：旧实现静默吞异常、把 path 当原因——用户看到的「无法打开改动
+        // 对比：<路径>」毫无诊断价值。改 console.warn 真实异常 + 呈现 err.message。
+        console.warn('[ui-chat] subagent openDiff threw:', err, { path })
+        notifyUser('无法打开改动对比', err instanceof Error ? err.message : String(err))
       }
     })()
   }
 
   const revertFile = (): void => {
-    if (childSessionId === undefined || busy) return
+    if (childSessionId === undefined || busy || unavailable) return
     setBusy(true)
     void (async () => {
       const conn = chatRuntimeRef.current?.connection
@@ -289,8 +368,10 @@ function FileRow({
         if (!result.ok || result.value === undefined || !result.value.ok) {
           notifyUser('撤销失败', result.value?.message ?? path)
         }
-      } catch {
-        notifyUser('撤销失败', path)
+      } catch (err) {
+        // 问题 1-① 同型（审计漏列的第二处）：同样改 console.warn + 呈现 err.message。
+        console.warn('[ui-chat] subagent revertFile threw:', err, { path })
+        notifyUser('撤销失败', err instanceof Error ? err.message : String(err))
       } finally {
         setBusy(false)
       }
@@ -298,15 +379,24 @@ function FileRow({
   }
 
   return (
-    <li className={css.fileRow}>
-      <button
-        type="button"
-        className={css.filePathButton}
-        title={`${path} — ${t('subagent.openDiff')}`}
-        onClick={openDiff}
-      >
-        {displayPath(path)}
-      </button>
+    <li className={css.fileRow} {...unavailable ? { 'data-unavailable': '' } : {}}>
+      {unavailable ? (
+        <span
+          className={css.filePathDisabled}
+          title={`${path} — ${t('subagent.diffUnavailable')}`}
+        >
+          {displayPath(path)}
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={css.filePathButton}
+          title={`${path} — ${t('subagent.openDiff')}`}
+          onClick={openDiff}
+        >
+          {displayPath(path)}
+        </button>
+      )}
       <span className={css.fileDiff}>
         <span className={css.added}>+{added}</span>
         <span className={css.removed}>−{removed}</span>
@@ -315,8 +405,8 @@ function FileRow({
         <button
           type="button"
           className={css.fileActionButton}
-          disabled={busy}
-          title={t('subagent.revert')}
+          disabled={busy || unavailable}
+          title={unavailable ? t('subagent.revertUnavailable') : t('subagent.revert')}
           aria-label={`${t('subagent.revert')} ${displayPath(path)}`}
           onClick={revertFile}
         >

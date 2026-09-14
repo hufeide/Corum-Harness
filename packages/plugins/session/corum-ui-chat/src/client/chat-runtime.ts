@@ -61,6 +61,17 @@ export interface ChatRuntimeService {
     originalContent: string
     note?: string | undefined
   }) => Promise<{ ok: boolean; error?: string }>
+  /**
+   * 打开文件并滚动定位到指定行（「编辑未命中」卡候选行号点击跳转，2026-09-13）。
+   * apply 注入（corumEditor.openFile + monaco-bridge reveal）。
+   */
+  openFileAtLine?: (path: string, line: number) => Promise<{ ok: boolean; error?: string }>
+  /**
+   * 当前（父）会话 cwd（2026-09-13 问题 1-③ 收口）。
+   * SubagentChanges 非隔离 diff 打开的路径解析基准：resolveWorkspacePath(cwd, path)。
+   * apply 在 view 挂载时注入（ctx.sessions.list 快照）；未注入时返回 undefined。
+   */
+  sessionCwd?: () => string | undefined
 }
 
 /** 内部可变状态 + 监听器集（服务实现的私有后端）。 */
@@ -125,6 +136,29 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   openContentDiff(input: { absolutePath: string; originalContent: string; note?: string | undefined }): Promise<{ ok: boolean; error?: string }> {
     if (this.#openContentDiff === undefined) return Promise.resolve({ ok: false, error: '编辑器服务未就绪' })
     return this.#openContentDiff(input)
+  }
+
+  /** openFileAtLine 桥（「编辑未命中」卡用；apply 注入，幂等）。 */
+  #openFileAtLine: ((path: string, line: number) => Promise<{ ok: boolean; error?: string }>) | undefined
+  /** apply 挂载时注入 openFileAtLine 桥（幂等）。 */
+  setOpenFileAtLine(fn: (path: string, line: number) => Promise<{ ok: boolean; error?: string }>): void {
+    this.#openFileAtLine = fn
+  }
+  /** 「编辑未命中」卡经此桥打开文件并定位行（apply 已注入 corumEditor + monaco reveal）。 */
+  openFileAtLine(path: string, line: number): Promise<{ ok: boolean; error?: string }> {
+    if (this.#openFileAtLine === undefined) return Promise.resolve({ ok: false, error: '编辑器服务未就绪' })
+    return this.#openFileAtLine(path, line)
+  }
+
+  /** 当前会话 cwd 读取桥（apply 注入；问题 1-③ 收口，SubagentChanges diff 打开用）。 */
+  #sessionCwdFn: (() => string | undefined) | undefined
+  /** apply 挂载时注入 cwd 读取桥（幂等）。 */
+  setSessionCwd(fn: () => string | undefined): void {
+    this.#sessionCwdFn = fn
+  }
+  /** SubagentChanges 经此桥取当前会话 cwd（apply 已注入 sessions 快照读取）。 */
+  sessionCwd(): string | undefined {
+    return this.#sessionCwdFn?.()
   }
 }
 

@@ -6,13 +6,18 @@ import {
   IconCheckOutline16, IconChevronDownOutline14, IconChevronUpOutline14, IconCloseOutline16,
   IconEditOutline16, IconQueueOutline14, IconSendOutline14, IconTrashOutline16, projectUserText, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { QueueAction, QueueItemId } from '../contract/queue.ts'
+import type { QueueAction, QueueItemId, QueueRow } from '../contract/queue.ts'
 import { NS } from '../locales.ts'
 import css from './QueueDock.module.css'
 
 /** Queue operations injected by the session-scoped registration. */
 export interface QueueDockInjected {
   updateQueue: (itemId: QueueItemId, action: QueueAction) => Promise<void>
+  /**
+   * Restore one removed row's structured content into the composer draft
+   * (session input facade); returns the block tally for messaging.
+   */
+  restoreDraft: (content: QueueRow['content']) => { text: boolean; attachments: number }
   notify: (level: 'info' | 'error', text: string) => void
 }
 
@@ -23,7 +28,7 @@ export type QueueDockProps = PropsRuntime<'conversation.input.dock'> & QueueDock
  * Queue strip: one item renders directly; multiple items default to a
  * collapsible count header; an empty queue renders nothing.
  */
-export function QueueDock({ useSession, updateQueue, notify, t }: QueueDockProps) {
+export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: QueueDockProps) {
   const inbox = useSession(s => s.queue)
   const queue = useMemo(() => inbox.filter(row => row.placement === 'queued'), [inbox])
   const running = useSession(s => s.running)
@@ -68,6 +73,21 @@ export function QueueDock({ useSession, updateQueue, notify, t }: QueueDockProps
       { kind: 'edit', content: [{ type: 'text', text: editing.text }] },
       t('queue.editFailed'),
     )) setEditing(null)
+  }
+
+  /**
+   * Remove one queued row after restoring its structured content into the
+   * composer (the 「删除即回到对话框」 gesture). Restore runs first so a
+   * rejected removal (already claimed) silently keeps the queue row without
+   * duplicating text into the draft; the Host removes the whole row, so
+   * attachment blocks cannot be selectively kept — their loss is the one
+   * thing worth an info notice.
+   */
+  const removeAndRestore = async (row: QueueRow): Promise<void> => {
+    const restored = restoreDraft(row.content)
+    if (await applyAction(row.id, { kind: 'remove' }, t('queue.removeFailed')) && restored.attachments > 0) {
+      notify('info', t('queue.removeAttachmentsDropped'))
+    }
   }
 
   return (
@@ -167,13 +187,7 @@ export function QueueDock({ useSession, updateQueue, notify, t }: QueueDockProps
                           className={css.action}
                           aria-label={t('queue.remove')}
                           disabled={busy !== null}
-                          onClick={() => {
-                            void applyAction(
-                              row.id,
-                              { kind: 'remove' },
-                              t('queue.removeFailed'),
-                            )
-                          }}
+                          onClick={() => { void removeAndRestore(row) }}
                         >
                           <IconTrashOutline16 size={14} />
                         </button>
@@ -224,6 +238,7 @@ export const queueDockEntry = {
         if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
         return {
           updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
+          restoreDraft: content => conversation.input.for(actx).restoreDraft(content),
           notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
         }
       },

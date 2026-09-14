@@ -217,7 +217,7 @@ const ChatNodeList = memo(function ChatNodeList({ order, ...seatProps }: ChatNod
  */
 export function ChatView({
   useSession, useChat, useChatNode, useChatNodeProcess, useSessions, useStore, actions, renderSlot,
-  sessionId, openFile, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt, fileMentions,
+  sessionId, openFile, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt, revertSteering, fileMentions,
   useTranscriptView, useProjection, t, getAgentName,
 }: ChatViewSlotProps) {
   // 对话区 Agent 头昵称（2026-08-31 用户定调：显示 nickname 而非通用「Corum
@@ -294,6 +294,9 @@ export function ChatView({
     () => inbox.filter(item => item.placement === 'steering'),
     [inbox],
   )
+  // 子 Agent 会话的队列所有权在父侧（Host 对 updateQueue 直接拒），撤回按钮
+  // 只按失败 toast 路径退化会显得可撤；这里与 QueueDock 的 queueMutable 同口径。
+  const queueMutable = useSession(s => s.subagent === null)
   const pendingSubmissions = useSession(s => s.pendingSubmissions)
   // Submission echoes still awaiting their durable counterpart. `order` is the
   // recompute trigger: durable user material always arrives as an append, and
@@ -814,6 +817,9 @@ export function ChatView({
               key={item.id}
               content={item.content}
               renderMessageImages={renderMessageImages}
+              onRevert={queueMutable
+                ? () => revertSteering(item.id)
+                : () => Promise.reject(new Error(t('message.revertUnavailable.subagent')))}
               t={t}
             />
           ))}

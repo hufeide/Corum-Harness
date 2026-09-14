@@ -317,6 +317,15 @@ async function smokeBridge() {
  * 「failed to observe session ... events is not iterable」（用户可见：会话打不开）。
  * 这里在打包时逐个读 package.json，任何 dsh 包与 deploy 根的钉定版本不一致就
  * fail loud，绝不把混版闭包打进 .app。
+ *
+ * fork 替身（2026-09-13 修正）：判定口径是「**官方** dsh 包版本一致」，因此按
+ * manifest.name 是否在 `@deepseek-ai/` 作用域过滤，而不是按目录名。我们的 fork 经
+ * `pnpm-workspace.yaml` 的 `link:` override **顶在官方目录名下**
+ * （`node_modules/@deepseek-ai/dsh-fs-local` 里是 `@corum/corum-fs-local`，版本自带
+ * `0.1.0`）—— 旧口径把这种**有意的替身**误判成版本混装，`pack:host` 直接失败
+ * （fork #14 落地后打包一直是坏的，直到 2026-09-13 重打才暴露）。替身既不静默放行、
+ * 也不误报：单独一行列出「哪些官方包被 fork 顶替」，闭包内 fork 内容的真伪由
+ * `copyDesktopArtifacts()` 里的 fork #14 闭包断言负责。
  */
 async function assertUniformDshVersions() {
   const deployRoot = JSON.parse(await readFile(join(DEPLOY_ROOT, 'package.json'), 'utf8'))
@@ -326,11 +335,18 @@ async function assertUniformDshVersions() {
   }
   const scopeDir = join(HOST_DIR, 'node_modules', '@deepseek-ai')
   const versions = new Map()
+  /** 被 fork 顶替的官方包：目录名（官方名）→ 替身的 manifest.name@version。 */
+  const substitutions = []
   for (const entry of await readdir(scopeDir, { withFileTypes: true })) {
     if (!entry.name.startsWith('dsh-') || !entry.isDirectory()) continue
     const manifestPath = join(scopeDir, entry.name, 'package.json')
     if (!existsSync(manifestPath)) continue
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+    // fork 替身：目录是官方名、内容不是官方包 —— 不算版本混装，但必须显式可见。
+    if (typeof manifest.name !== 'string' || !manifest.name.startsWith('@deepseek-ai/')) {
+      substitutions.push(`@deepseek-ai/${entry.name} ← ${manifest.name}@${manifest.version}`)
+      continue
+    }
     const list = versions.get(manifest.version) ?? []
     list.push(manifest.name)
     versions.set(manifest.version, list)
@@ -340,6 +356,10 @@ async function assertUniformDshVersions() {
     const detail = skew.map(([version, names]) => `${version}: ${names.length} 个（如 ${names.slice(0, 3).join(', ')}）`).join('; ')
     throw new Error(`pack-macos: host closure has mixed dsh versions (expected ${pinned}) — ${detail}。`
       + ' 修 pnpm-workspace.yaml 的 overrides（pnpm 11 不支持 glob，需逐个钉）后重跑。')
+  }
+  if (substitutions.length > 0) {
+    console.log(`[pack-macos] 闭包含 ${substitutions.length} 个 fork 替身（版本断言按官方包口径，替身内容另由 fork 断言把守）：`)
+    for (const line of substitutions) console.log(`  - ${line}`)
   }
   console.log(`[pack-macos] dsh closure uniform at ${pinned} (${versions.get(pinned)?.length ?? 0} packages)`)
 }

@@ -190,6 +190,17 @@ type JournalLine =
 /** journal 文件名（每个工作区一份，与影子仓库同级）。 */
 const JOURNAL_FILE = 'round-journal.jsonl'
 
+/**
+ * 文件改前内容的上线状态枚举（2026-09-13 收口，问题 1-④）。
+ *
+ * host 内部 pre-image 本来就有 content/blob/absent/unavailable 四态，旧上线投影
+ * `{exists, content, created}` 把 `unavailable` 与「文件本来就是空的」压平成同形
+ * （`{exists:true, content:'', created:false}`）——调用方把「取不到改前内容」当成
+ * 「改前为空」开出假 diff。现 snapshot/fileBefore 均带 status，调用方按 status 分支
+ * 并把不可得行置灰。
+ */
+export type ReviewPreimageStatus = 'content' | 'absent' | 'unavailable' | 'missing'
+
 /** 客户端要的文件条目（相对路径 + 真实增删行数 + 当前内容指纹）。 */
 export interface ReviewFileEntry {
   path: string
@@ -201,6 +212,8 @@ export interface ReviewFileEntry {
    * 只按 path 记标记是不够的（文件改了却一直被隐藏）。
    */
   hash: string
+  /** 改前内容状态（content/absent/unavailable）；调用方据 unavailable 把行置灰。 */
+  status?: ReviewPreimageStatus
 }
 
 /** 跑一个 git 子命令（bare 仓库，故显式 --git-dir）。 */
@@ -563,6 +576,15 @@ export class CorumReviewService extends TypertRemoteService {
   }
 
   /** 取（必要时创建）某工作区的影子仓库（bare：只用 plumbing，永不 checkout）。 */
+  /**
+   * 取（必要时创建）某工作区的影子仓库（bare：只用 plumbing，永不 checkout）。
+   *
+   * ⚠️ init 失败会 throw —— **调用方必须 try/catch 降级，绝不能让异常穿过 RPC
+   * 边界**（问题 1-②：fileBefore 把 `shadow repo init failed` 原样抛给客户端，
+   * 落进 SubagentChanges 的静默 catch，用户只看到「无法打开改动对比：<路径>」）。
+   * 本服务的四个 RPC/收尾调用点（snapshot/fileBefore/applyWorktreeChanges/
+   * closeRound）均已改为结构化降级返回。
+   */
   private async ensureRepo(workspace: string): Promise<RepoState> {
     const existing = this.repos.get(workspace)
     if (existing !== undefined) return existing
@@ -683,7 +705,16 @@ export class CorumReviewService extends TypertRemoteService {
         if (added > 0) {
           this.ctx.logger.info(`corum-review round ${round.index}: +${added} path(s) via worktree union`)
         }
-        const repo = await this.ensureRepo(round.workspace)
+        let repo: RepoState
+        try {
+          repo = await this.ensureRepo(round.workspace)
+        } catch (error) {
+          // 影子仓库不可用 → 本轮改动**不落提交**（closeRound 本来就整体在
+          // try/catch 里降级，这里只多一行更明确的日志；轮次 ref 缺失 = 卡片
+          // 下轮重建，不留半截状态）。
+          this.ctx.logger.warn(`corum-review closeRound: ensureRepo failed: ${String(error)}`)
+          return
+        }
         await this.enqueue(repo, async () => {
           const base = await this.ensureBaseline(repo)
           // A：本轮开始时（触达路径换成 pre-image）
@@ -773,7 +804,15 @@ export class CorumReviewService extends TypertRemoteService {
   private async applyWorktreeChanges(round: LiveRound, touched: Map<string, Preimage>): Promise<number> {
     const candidates = await this.scanWorktreeChanges(round, touched)
     if (candidates.length === 0) return 0
-    const repo = await this.ensureRepo(round.workspace)
+    let repo: RepoState
+    try {
+      repo = await this.ensureRepo(round.workspace)
+    } catch (error) {
+      // 影子仓库不可用 → 放弃本轮兜底（pre-image 取 main 版本必须走对象库，
+      // 没有仓库就**绝不能**瞎猜 absent——那会让一次撤销删掉用户的文件）。
+      this.ctx.logger.warn(`corum-review worktree union: ensureRepo failed: ${String(error)}`)
+      return 0
+    }
     let added = 0
     for (const rel of candidates) {
       // eslint-disable-next-line no-await-in-loop -- 量级 = 兜底路径条数（上限 200）
@@ -941,7 +980,16 @@ export class CorumReviewService extends TypertRemoteService {
     // 真的看得见（见 scheduleUnionScan）。不 await：卡片拿手头数据先渲染。
     this.scheduleUnionScan(round)
     if (round.touched.size === 0) return { workspace: round.workspace, roundIndex: round.index, files: [] }
-    const repo = await this.ensureRepo(round.workspace)
+    let repo: RepoState
+    try {
+      repo = await this.ensureRepo(round.workspace)
+    } catch (error) {
+      // 影子仓库不可用（init 失败等）→ 本轮快照给不出来，如实降级为空集并记日志；
+      // 绝不抛给 RPC 调用方（问题 1-②：异常会穿过静默 catch 直达用户通知，且无任何
+      // 诊断信息）。touched 仍在内存里，下一轮/重试时恢复。
+      this.ctx.logger.warn(`corum-review snapshot: ensureRepo failed: ${String(error)}`)
+      return { workspace: round.workspace, roundIndex: round.index, files: [] }
+    }
     const files: ReviewFileEntry[] = []
     for (const [path, pre] of round.touched) {
       const after = this.readCurrent(resolve(round.workspace, path))
@@ -953,7 +1001,14 @@ export class CorumReviewService extends TypertRemoteService {
       if (stats.added === 0 && stats.removed === 0) continue // 净变化 0：不算「更改」
       // eslint-disable-next-line no-await-in-loop -- 同上
       const hash = await this.hashObject(repo, afterText ?? '')
-      files.push({ path, added: stats.added, removed: stats.removed, hash })
+      // 问题 1-④⑤ 收口：把改前状态带上——unavailable 的行由调用方置灰（不可点、
+      // 不可撤销）；blob 形态取不回正文时同样如实报 unavailable。
+      const status: ReviewPreimageStatus =
+        pre.kind === 'unavailable' ? 'unavailable'
+        : pre.kind === 'absent' ? 'absent'
+        : beforeText === null ? 'unavailable'
+        : 'content'
+      files.push({ path, added: stats.added, removed: stats.removed, hash, status })
     }
     return { workspace: round.workspace, roundIndex: round.index, files }
   }
@@ -978,20 +1033,43 @@ export class CorumReviewService extends TypertRemoteService {
     }
   }
 
-  /** 某文件「本轮改动前」的内容（diff 视图左侧）。 */
+  /**
+   * 某文件「本轮改动前」的内容（diff 视图左侧）。
+   *
+   * 返回状态枚举（2026-09-13 收口，问题 1-④）：content=有原文；absent=本轮新建
+   * （左侧应为空）；unavailable=过大/二进制取不到；missing=不在本轮改动里。
+   * exists/content/created 保留作兼容投影；unavailable 时 exists 翻成 false ——
+   * 旧调用方只认 `!exists` 为失败，这样它至少会报「取不到」而不是开出假空 diff。
+   */
   @Remote('fileBefore')
-  async fileBefore(sessionId: string, path: string): Promise<{ exists: boolean; content: string; created: boolean }> {
+  async fileBefore(sessionId: string, path: string): Promise<{
+    exists: boolean
+    content: string
+    created: boolean
+    status: ReviewPreimageStatus
+  }> {
     const round = this.rounds.get(sessionId)
-    if (round === undefined) return { exists: false, content: '', created: false }
+    if (round === undefined) return { exists: false, content: '', created: false, status: 'missing' }
     const pre = round.touched.get(path)
-    if (pre === undefined) return { exists: false, content: '', created: false }
-    if (pre.kind === 'content') return { exists: true, content: pre.text, created: false }
+    if (pre === undefined) return { exists: false, content: '', created: false, status: 'missing' }
+    if (pre.kind === 'content') return { exists: true, content: pre.text, created: false, status: 'content' }
     if (pre.kind === 'blob') {
-      const repo = await this.ensureRepo(round.workspace)
-      return { exists: true, content: (await this.preimageText(repo, pre)) ?? '', created: false }
+      let repo: RepoState
+      try {
+        repo = await this.ensureRepo(round.workspace)
+      } catch (error) {
+        // 影子仓库不可用（init 失败等）→ 如实报「取不到」，绝不抛给 RPC 调用方
+        // （问题 1-②：旧实现把 ensureRepo 的 throw 直接传到客户端的静默 catch）。
+        this.ctx.logger.warn(`corum-review fileBefore: ensureRepo failed: ${String(error)}`)
+        return { exists: false, content: '', created: false, status: 'unavailable' }
+      }
+      const text = await this.preimageText(repo, pre)
+      if (text === null) return { exists: false, content: '', created: false, status: 'unavailable' }
+      return { exists: true, content: text, created: false, status: 'content' }
     }
-    // absent = 本轮新建（左侧应为空）；unavailable = 取不到改前内容（左侧空 + 调用方提示）
-    return { exists: true, content: '', created: pre.kind === 'absent' }
+    // absent = 本轮新建（左侧应为空）；unavailable = 取不到改前内容（调用方置灰）
+    if (pre.kind === 'absent') return { exists: true, content: '', created: true, status: 'absent' }
+    return { exists: false, content: '', created: false, status: 'unavailable' }
   }
 
   /**

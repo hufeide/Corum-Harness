@@ -259,7 +259,18 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
       // P2-1（2026-09-09）：原挂 window.__corumMonacoEditor（可写可清的可变单例，
       // 红线 1 形态）→ 同 bundle 模块引用桥（monaco-bridge.ts）。EditorColumn 的
       // 快捷键兜底经 getCorumMonacoInstance() 取同一实例。
-      setCorumMonacoInstance(instance as unknown as CorumMonacoInstance)
+      setCorumMonacoInstance({
+        trigger: (source, handlerId) => { instance.trigger(source, handlerId, undefined) },
+        // 「编辑未命中」卡行号跳转（2026-09-13）：滚动到行 + 光标定位 + 聚焦。
+        revealLine: (line) => {
+          const model = instance.getModel()
+          if (model === null) return
+          const target = Math.max(1, Math.min(line, model.getLineCount()))
+          instance.revealLineInCenter(target)
+          instance.setPosition({ lineNumber: target, column: 1 })
+          instance.focus()
+        },
+      } satisfies CorumMonacoInstance)
       instance.onDidChangeModelContent(() => {
         const model = instance.getModel()
         if (model !== null) {

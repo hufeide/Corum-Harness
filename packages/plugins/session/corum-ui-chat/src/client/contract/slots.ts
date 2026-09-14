@@ -149,6 +149,12 @@ export interface ChatViewInjected {
     read: () => ChatScrollPosition | null
   }
   forkAt: (seq: number) => void
+  /**
+   * Withdraw one pre-claim steering occurrence back to the pending queue
+   * (host updateQueue remove; the window closes at `agent/inbox/claimed`,
+   * after which the durable steering card no longer offers this).
+   */
+  revertSteering: (itemId: MessageId) => Promise<void>
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** 当前会话的 Agent 显示名（nickname/title/id）；查询失败或非 corum Agent 会话返回 undefined。 */
   getAgentName: () => Promise<string | undefined>

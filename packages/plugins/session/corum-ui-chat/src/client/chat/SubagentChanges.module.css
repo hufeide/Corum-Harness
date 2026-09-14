@@ -146,6 +146,27 @@
   text-decoration: underline;
 }
 
+/* 改前内容不可得（过大/二进制/无可撤销内容）的行：置灰不可点（问题 1-④⑤ 收口）。
+   与 .filePathButton 同排版但非按钮——禁用态用 span 表达，避免 aria 上假装可点。 */
+.filePathDisabled {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.fileRow[data-unavailable] .fileDiff {
+  opacity: 0.5;
+}
+
 .fileDiff {
   display: inline-flex;
   flex: none;

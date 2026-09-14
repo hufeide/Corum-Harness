@@ -142,6 +142,20 @@
 # ── the desktop rows ────────────────────────────────────────────────────────
 
 - insert:
+    # 会话日志归档（Web-only client 插件，无 host 贡献）：native 保存/导入走
+    # 桌面桥（preload.ts 的 saveSessionLog/importSessionLog IPC），取代上方
+    # 禁用的官方 session-log-download。P0-2（2026-09-14）恢复挂载——733d3b70
+    # 曾连同行一起整拆（当时定调移除全部 UI 入口），本轮用户裁决恢复
+    # 「保存到…」（会话头部 utilities 槽）与「导入会话日志」（临时挂
+    # settings.section 自成设置 section；原槽 settings.general.item 是 corum
+    # 死槽，待 P0-5 修渲染点后迁回），不恢复「删除会话」按钮。行 id 沿用
+    # 历史值 session-archive（733d3b70^ 同款）；短 id 纪律同 corum-ollama
+    # （client bundle URL 为 /plugins/<行 id>/client.js）。⚠️ 必须在本
+    # insert 块内：applyEntryPatches 对无 insert 的补丁行只做 id 定向
+    # override，匹配不到即丢弃——顶层新增行永远不会进 composition。
+    - id: session-archive
+      name: '@corum/corum-session-archive'
+
     # Forked encrypted credentials provider (replaces the disabled official
     # credentials row above). NOTE: the row id must differ — the loader rejects
     # a top-level id that collides with a (even disabled) bundle-inserted row
@@ -164,6 +178,17 @@
     # client half mounts the Remote contributions exactly like the official.
     - id: corum-api-remotes
       name: '@corum/corum-api-remotes'
+
+    # Fork #15（session-queue-revert）：**增量补丁**（host-only，无 client
+    # 半；官方 session-controller 行保持启用——其 client.js 是 client 侧
+    # `sessions` 服务的唯一 provider，禁它会让 20 个 client 插件卡在
+    # waiting for service）。本插件在官方服务激活后**就地覆写**其
+    # commands.updateQueue：QueueAction 新增 { kind: 'requeue' }（插话撤回
+    # → 退回队首；官方 remove 是纯丢弃），其余 17 个 Remote 方法与非
+    # requeue 分支全部走官方/vendored 实现（红线 3：本地能力接口收窄，
+    # 不耦合实现包）。
+    - id: corum-session-queue-revert
+      name: '@corum/corum-session-queue-revert'
 
     # Fork #9 完整 seam 服务（取代上方禁用的官方 subagent 行）：
     # 服务名 'subagents' 不变（fork 的 SubagentRuntime super(ctx,'subagents')

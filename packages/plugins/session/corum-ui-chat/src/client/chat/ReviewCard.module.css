@@ -131,6 +131,21 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* 问题 2 父卡聚合：子 Agent 归属 chip（该文件来自子会话轮次）。 */
+.subagentChip {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .spacer {
   flex: 1;
 }

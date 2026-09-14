@@ -118,6 +118,12 @@ export function ReviewCard({
                   </span>
                 )}
               <span className={css.fileDiff}>
+                {/* 问题 2 父卡聚合：子 Agent 归属标注（该行的 pre-image/撤销按子会话路由）。 */}
+                {file.fromSubagent !== undefined && (
+                  <span className={css.subagentChip} title={file.fromSubagent}>
+                    {t('review.fromSubagent')}
+                  </span>
+                )}
                 <span className={css.added}>+{file.added}</span>
                 <span className={css.removed}>−{file.removed}</span>
               </span>

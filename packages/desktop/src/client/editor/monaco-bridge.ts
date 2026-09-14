@@ -20,6 +20,11 @@ export interface CorumMonacoInstance {
    * 本桥只暴露消费面所需的两个（写入端做一次收窄断言）。
    */
   trigger: (source: string, handlerId: string) => void
+  /**
+   * 滚动定位到指定行并选中（「编辑未命中」卡行号跳转，2026-09-13）。
+   * 对应 monaco revealLineInCenter + setPosition + focus；实例无活动模型时 no-op。
+   */
+  revealLine?: (line: number) => void
 }
 
 let corumMonacoInstance: CorumMonacoInstance | undefined

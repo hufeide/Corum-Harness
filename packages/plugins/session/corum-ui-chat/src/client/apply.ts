@@ -33,7 +33,9 @@ import { en, NS, zh } from './locale.ts'
 import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'
 import { createChatStore } from './stores.ts'
 import { TranscriptViewPolicy } from './transcript-view.ts'
+import { patchUpdateQueueWire } from './update-queue-wire.ts'
 import { createChatRuntime, primeSubagentChildCache, type ChatRuntimeService } from './chat-runtime.ts'
+import { EditToolView } from './toolviews/EditToolView.tsx'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../chat-settings.ts'
 import { useTurnDataValue } from './chat/use-turn-data.ts'
 
@@ -90,6 +92,11 @@ interface ContentDiffCapable {
   }) => Promise<{ ok: boolean; error?: string }>
 }
 
+/** corumEditor 的「滚动定位到行」能力面（「编辑未命中」卡行号跳转用，2026-09-13）。 */
+interface EditorRevealCapable {
+  revealLine?: (line: number) => void
+}
+
 /** `__corumNotify` 一次写只读桥（规范 §1 例外：CorumNotification 面）。 */
 interface CorumNotifyBridge {
   __corumNotify?: (n: { tone: 'error'; title: string; message?: string | undefined }) => void
@@ -105,6 +112,10 @@ function notifyUser(title: string, message?: string | undefined): void {
 export const inject = [
   'slots', 'sessions', 'uiSession', 'uiConversation', 'layout', 'locale',
   'settingsScope', 'remote', 'remote.session',
+  // ② wire 补丁读 ctx.typert.remotes（client 侧 descriptor 注册表）——
+  // typert 是官方 client 平台服务（registry client 半提供），声明后激活序
+  // 保证官方 api-remotes 的 mount 已完成（'remote' 依赖链）。
+  'typert',
   // 统一事件中心三-2：corum:open-in-editor 跨 bundle CustomEvent → corumEditor
   // cordis 服务（desktop client provide；红线 4 必须 inject 声明）。
   'corumEditor',
@@ -120,6 +131,11 @@ export const inject = [
  * @param ctx - Client root context.
  */
 export function apply(ctx: Context): void {
+  // fork（corum）② wire 补丁：放宽 client 侧 session/updateQueue 的 strict
+  // descriptor schema（requeue 形状由 update-queue-wire.ts 放行；host 侧由
+  // corum-session-queue-revert 承接）。必须在官方 api-remotes 挂载之后——
+  // 本插件 inject 含 'remote'，激活序保证。
+  patchUpdateQueueWire(ctx)
   const chatSources = new WeakMap<SessionBinding, ObservableSnapshot<ChatSnapshot>>()
   const chatSource = (binding: SessionBinding): ObservableSnapshot<ChatSnapshot> => {
     let source = chatSources.get(binding)
@@ -186,13 +202,13 @@ export function apply(ctx: Context): void {
    * 内部转相对路径 + 点亮编辑器 + pending 挂载认领）。{ ok, error } 结构化反馈：
    * error 时 console.warn + 框架通知（用户可见）。
    */
-  const openFileAt = async (sessionId: SessionId, path: string): Promise<void> => {
+  const openFileAt = async (sessionId: SessionId, path: string): Promise<{ ok: boolean; error?: string }> => {
     const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
     const absolute = resolveWorkspacePath(cwd, path)
     const editor = ctx.corumEditor as unknown as EditorOpenCapable
     if (typeof editor.openFile !== 'function') {
       console.warn('[ui-chat] openFile: corumEditor service missing openFile face')
-      return
+      return { ok: false, error: 'corumEditor service missing openFile face' }
     }
     try {
       const result = await editor.openFile(absolute)
@@ -200,9 +216,21 @@ export function apply(ctx: Context): void {
         console.warn('[ui-chat] openFile failed:', result.error, { path: absolute })
         notifyUser('无法在编辑器打开文件', result.error)
       }
+      return result
     } catch (err) {
       console.warn('[ui-chat] openFile threw:', err, { path: absolute })
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
+  }
+  /**
+   * fork（corum）：「编辑未命中」卡行号跳转的第二段（2026-09-13）——
+   * corumEditor.revealLine 能力面（desktop client 实现：monaco-bridge 同 bundle
+   * 引用直调，不动 CustomEvent/轮询）。openFile 的 pending 认领链在 resolve 前
+   * 已完成 tab 打开，模型绑定在下一渲染帧；reveal 经服务内部 rAF 延后执行。
+   */
+  const openLineInEditor = (line: number): void => {
+    const editor = ctx.corumEditor as unknown as EditorRevealCapable
+    editor.revealLine?.(line)
   }
   const chatScrollPositions = new Map<SessionId, ChatScrollPosition>()
   const transcriptView = new TranscriptViewPolicy(
@@ -323,6 +351,16 @@ export function apply(ctx: Context): void {
           if (!opened.ok) notifyUser('无法打开改动对比', opened.error)
           return opened
         })
+        // fork（corum）：「编辑未命中」卡行号跳转的桥（2026-09-13）——
+        // 打开文件（pending 挂载认领链）后经 corumEditor.revealLine 定位。
+        chatRuntime.setOpenFileAtLine(async (path, line) => {
+          const result = await openFileAt(sessionId, path)
+          openLineInEditor(line)
+          return result
+        })
+        // fork（corum）：当前会话 cwd 读取桥（2026-09-13 问题 1-③ 收口）——
+        // SubagentChanges 非隔离 diff 打开的 resolveWorkspacePath(cwd, path) 基准。
+        chatRuntime.setSessionCwd(() => ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd)
         return {
           hooks: { transcriptView: transcriptView.mode },
           keyedHooks: {
@@ -354,6 +392,20 @@ export function apply(ctx: Context): void {
               .catch(() => {
                 // Fork or child-title failure leaves the source view unchanged.
               })
+          },
+          // 撤回插话（②）：仅在 next-step 待认领窗口内有效 —— Host 端由
+          // @corum/corum-session-queue-revert 的 requeue 分支把消息原子移回
+          // next-turn 队首（QueueDock 立即可编辑/删除/再插话）；已被 step
+          // 认领时报 session/queue-item-not-found，这里统一折成用户可读失败提示。
+          // 类型注：requeue 请求的构造经 update-queue-wire.ts 的
+          // widenUpdateQueueAction（wire 形状直传；client 侧 descriptor
+          // schema 已由 patchUpdateQueueWire 放宽，官方接口签名不可合并拓宽）。
+          revertSteering: async (itemId) => {
+            const result = await session.updateQueue(itemId, { kind: 'requeue' } as never)
+            if (!result.ok) {
+              notifyUser(t('message.revertFailed'), `${result.error.code}: ${result.error.message}`)
+              throw new Error(`${result.error.code}: ${result.error.message}`)
+            }
           },
           // Agent 头昵称（2026-08-31 用户定调：对话区 Agent 头显示 nickname 而非
           // 通用「Corum Agent」）：task 泳道经 listTaskAgents 定位 profileId，普通
@@ -396,6 +448,21 @@ export function apply(ctx: Context): void {
 
   ctx.slots.inject('conversation.approval.detail', () =>
     ctx.slots.register({ name: 'conversation.approval.detail' }, ApprovalCommand))
+
+  // fork（corum）：「编辑未命中」专用卡（2026-09-13 用户裁定）——edit 工具的
+  // FS_EDIT_NOT_FOUND（fork #14 定位提示）是「什么都没改」不是 Error，给编辑
+  // 单独一张卡；keyed 命中**替换**整行通用卡（官方 renderSlot 契约），成功/
+  // 运行态由卡内 CompactRow 覆盖（不回归）。slot 声明经类型导入
+  // @deepseek-ai/dsh-client-ui-tool/client 进 SlotMap（types/client/contract/slots.d.ts）。
+  ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+    name: 'tool.call.toolview',
+    key: 'edit',
+    // 官方 file-mutation-toolview 已占 key='edit' priority 0（同 key 同优先级注册
+    // 直接 throw）；keyed slot 是「最低优先级渲染」的遮蔽序（slot-core register 注释），
+    // 用 -1 遮蔽官方行。
+    priority: -1,
+    locale: NS,
+  }, EditToolView))
 
   ctx.slots.inject('details', () => ctx.slots.register({
     name: 'details',

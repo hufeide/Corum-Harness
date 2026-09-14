@@ -20,6 +20,7 @@ import {
 import { registerPlainText } from '@lexical/plain-text'
 import { createEmptyHistoryState, registerHistory } from '@lexical/history'
 import { mergeRegister } from '@lexical/utils'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type {
   ArbitrateKey, ArbitrateOutcome, CommandClaim, ConsumeTokenRequest, DraftAttachmentId,
   InputActions, InputEffect, InputNotice, InputState, InputTriggerController, PickOutcome,
@@ -279,6 +280,37 @@ export class SessionInputShell implements SessionInput {
       }
       root.selectEnd()
     }, { discrete: true, tag: HISTORY_MERGE_TAG })
+  }
+
+  restoreDraft(content: readonly ContentBlock[]): { text: boolean; attachments: number } {
+    const text = content
+      .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+      .map(block => block.text)
+      .join('')
+      .replace(REFERENCE_PLACEHOLDER_RE, '')
+    const attachments = content.filter(block => block.type === 'image' || block.type === 'file').length
+    if (text === '') return { text: false, attachments }
+    this.editor.update(() => {
+      const root = $getRoot()
+      const empty = root.getTextContent() === ''
+      let paragraph = $createParagraphNode()
+      root.append(paragraph)
+      const lines = text.split('\n')
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i]
+        if (line !== '') paragraph.append($createTextNode(line))
+        if (i < lines.length - 1) {
+          paragraph = $createParagraphNode()
+          root.append(paragraph)
+        }
+      }
+      root.selectEnd()
+      // A fill into an empty composer joins the surrounding history (same
+      // discipline as setDraft); an append onto live text is the user's own
+      // undoable gesture so one Ctrl/Cmd-Z takes the restore back out.
+      if (empty) $addUpdateTag(HISTORY_MERGE_TAG)
+    }, { discrete: true })
+    return { text: true, attachments }
   }
 
   /** Append ordered attachment ids unless an admission transaction is locked. */

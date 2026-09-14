@@ -18,6 +18,8 @@
  * client/index.ts 侧声明。
  */
 
+import { getCorumMonacoInstance } from './monaco-bridge.ts'
+
 /** openFile 结果（chat 侧给用户可见反馈的数据源）。 */
 export interface OpenFileResult {
   ok: boolean
@@ -47,6 +49,12 @@ export interface CorumEditorService {
     originalContent: string
     note?: string | undefined
   }): Promise<OpenFileResult>
+  /**
+   * 滚动定位到当前活动编辑器的指定行（「编辑未命中」卡行号跳转，2026-09-13）。
+   * 经 monaco-bridge 同 bundle 引用直调；无活动编辑器时 no-op（静默——调用方
+   * 是 openFile 之后的定位增强，失败不影响打开结果）。
+   */
+  revealLine?: (line: number) => void
 }
 
 /**
@@ -207,6 +215,14 @@ export function createCorumEditor(
         rel: resolved.rel,
         originalContent: input.originalContent,
         ...input.note !== undefined ? { note: input.note } : {},
+      })
+    },
+
+    revealLine: (line: number): void => {
+      // 延后一帧：openFile 的 pending 认领链 resolve 时 tab 刚打开，MonacoEditor
+      // 的模型绑定在下一渲染帧完成；rAF 后 reveal 才能落在已绑定的模型上。
+      requestAnimationFrame(() => {
+        getCorumMonacoInstance()?.revealLine?.(line)
       })
     },
   }

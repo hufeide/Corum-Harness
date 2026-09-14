@@ -117,6 +117,7 @@
     "@corum/corum-orchestration": "workspace:*",
     "@corum/corum-sandbox-local": "workspace:*",
     "@corum/corum-session-archive": "workspace:*",
+    "@corum/corum-session-queue-revert": "workspace:*",
     "@corum/corum-skill-manager": "workspace:*",
     "@corum/corum-subagent": "workspace:*",
     "@corum/corum-tool-subagent": "workspace:*",

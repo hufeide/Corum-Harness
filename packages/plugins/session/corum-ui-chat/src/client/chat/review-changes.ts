@@ -33,7 +33,12 @@ export interface ReviewFileChange {
    * 当前内容的 blob 哈希（git 数据源提供）。客户端用它做内容级「已看过」判定：
    * 文件再被改动 → 哈希变 → 标记失效、条目重新出现。
    */
-  readonly hash?: string | undefined
+  readonly hash: string
+  /**
+   * 子 Agent 归属标注（问题 2 父卡聚合）：值 = 委托标签。
+   * 该文件来自某个子会话轮次（pre-image/撤销按它路由）；缺省 = 父会话自身改动。
+   */
+  readonly fromSubagent?: string
 }
 
 /** Review 卡完整聚合：总 diff + 每文件 diff。 */

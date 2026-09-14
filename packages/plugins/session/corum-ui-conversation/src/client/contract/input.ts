@@ -9,6 +9,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { LexicalEditor } from 'lexical'
 import type { QueueRow } from './queue.ts'
 import type { InputSubmitMode } from './composer-submission.ts'
@@ -189,6 +190,17 @@ export interface InputTarget {
 export interface SessionInput extends InputTarget {
   /** Replace the whole draft (persisted-draft seed and programmatic writes). */
   setDraft(text: string): void
+  /**
+   * Restore one withdrawn queued message into the composer: every text block
+   * of the structured content lands in the editor (empty draft → fill,
+   * non-empty → append at the end), preserving the queue-side block order.
+   * Image/file blocks cannot ride back — the composer registry holds only
+   * pre-send browser objects while queue blocks are durable content-addressed
+   * references — so the caller surfaces the attachment-loss notice.
+   * @param content - the queue row's structured content.
+   * @returns the block tally for caller messaging.
+   */
+  restoreDraft(content: readonly ContentBlock[]): { readonly text: boolean; readonly attachments: number }
   /** Append ordered browser-owned attachment ids; busy admission phases refuse. */
   addAttachments(ids: readonly DraftAttachmentId[]): boolean
   /** Remove one browser-owned attachment id; busy admission phases refuse. @returns whether the id was removed. */

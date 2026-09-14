@@ -2,7 +2,7 @@ import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@corum/corum-ui-conversation/client'
-import { DocumentFileIcon, fileSizeText, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { DocumentFileIcon, fileSizeText, IconQueueOutline14, JsonBlock, projectUserText, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -251,15 +251,22 @@ function UserStyleBubble({
 
 /**
  * Render one Host-authoritative pending steering item with the same visual
- * language as its eventual durable transcript node.
- * @param props - Pending message content and conversation translator.
+ * language as its eventual durable transcript node. The revert action exists
+ * ONLY here: the row lives in the pre-claim window (before
+ * `agent/inbox/claimed`), so withdrawing it back to the pending queue is
+ * still possible; a claimed steering message is already in the running
+ * turn's context and its durable card deliberately offers no revert.
+ * @param props - Pending message content, revert wiring, and conversation translator.
  * @returns the pending steering bubble.
  */
-export function PendingSteeringBubble({ content, renderMessageImages, t }: {
+export function PendingSteeringBubble({ content, renderMessageImages, onRevert, t }: {
   content: readonly unknown[]
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
+  /** Withdraw this occurrence back to the pending queue (host updateQueue remove). */
+  onRevert: () => Promise<void>
   t: ChatViewSlotProps['t']
 }): ReactNode {
+  const [busy, setBusy] = useState(false)
   return (
     <UserStyleBubble
       content={content}
@@ -271,6 +278,22 @@ export function PendingSteeringBubble({ content, renderMessageImages, t }: {
           text={text}
           clock="start"
           className={css.actions}
+          extraActions={(
+            <Tooltip label={t('message.revertToQueue')} side="bottom">
+              <button
+                type="button"
+                className={css.action}
+                aria-label={t('message.revertToQueue')}
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true)
+                  void onRevert().catch(() => { /* apply.ts 已 toast 失败原因 */ }).finally(() => { setBusy(false) })
+                }}
+              >
+                <IconQueueOutline14 />
+              </button>
+            </Tooltip>
+          )}
           t={t}
         />
       )}
