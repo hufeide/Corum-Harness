@@ -68,9 +68,14 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/analysis/HANDOFF-2026-09-15-unified-project-model-implementation.md` — **最新交接入口**
+- `docs/analysis/HANDOFF-2026-09-15-night-card-fidelity-isolation-and-settings.md` — **最新交接入口**
+  （2026-09-15 夜场：卡片整改与设计稿对照 + 隔离漏洞补漏（父树未提交致静默失真 / 收口强制提交）
+  + `llm-pi-ai` 段注册失败的根因（settings.yaml 里 `off` 被写成布尔 `false`）与两道防线
+  + corum-dev 档案修复（conductor→standard）与技能绑定 + **一单正在 `:9222` 上跑**
+  （会话 `corum-task-7be7c4b2`，6 条卡片缺陷））；**下个 session 从这里开始。**
+- `docs/analysis/HANDOFF-2026-09-15-unified-project-model-implementation.md` — 上一份交接
   （2026-09-15 统一存储/项目模型**实施**场：`type` 字段贯通 + 三条不变式与判定表 + 统一会话索引
-  （`sessionId` 作键 —— 修正了原计划会静默丢 82.9% 的复合键形态）+ 泳道复用修复 + 存量迁移）；下个 session 从这里开始。
+  （`sessionId` 作键 —— 修正了原计划会静默丢 82.9% 的复合键形态）+ 泳道复用修复 + 存量迁移）。
 - `docs/analysis/HANDOFF-2026-09-14-night-agent-capability-and-project-model.md` — 上一份交接
   （2026-09-14 深夜场：六条工作方式纪律 + Agent 能力核查 + **存储/项目组织模型定稿**）。
 - `docs/analysis/HANDOFF-2026-09-14-supervised-rounds.md` — 上一份交接
