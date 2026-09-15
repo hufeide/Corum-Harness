@@ -1787,6 +1787,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: 3.18.2
         version: 3.18.2
+      '@shikijs/langs':
+        specifier: 4.4.3
+        version: 4.4.3
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -1805,6 +1808,9 @@ importers:
       react:
         specifier: ^18.2.0
         version: 18.2.0
+      shiki:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@corum/corum-ui-conversation':
         specifier: workspace:*

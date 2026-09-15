@@ -17,15 +17,27 @@
  *
  * 在终端运行：本轮 UI-only——点击显示「功能待实现」提示，不做任何 IPC/服务接线。
  */
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp, Copy, FileCode, Play, SquareTerminal } from 'lucide-react'
 import { writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import { isScriptFence } from './code-fence-kind.ts'
+import { grammarLoadCount, highlightLines, subscribeGrammarLoaded, type HighlightSpan } from './highlight.ts'
 import css from './CodeCard.module.css'
 
 /** 框架注入的 t（chat namespace + common 词汇）。 */
 type TFunc = ChatViewSlotProps['t']
+
+/**
+ * 把一行的高亮 span 渲染成带 inline style 的 `<span>` 序列（shiki 的
+ * `style.color` 实际值是 `var(--shiki-token-*)`，颜色仍归主题表管）。
+ *
+ * `fallback` 该行 span 为空时用原文兜底——保证任何情况下文本都不丢。
+ */
+function renderSpans(spans: readonly HighlightSpan[], fallback: string): ReactNode {
+  if (spans.length === 0) return fallback
+  return spans.map((span, index) => <span style={span.style} key={index}>{span.text}</span>)
+}
 
 export interface CodeCardProps {
   /** 围栏代码体（不含围栏标记）。 */
@@ -58,6 +70,23 @@ export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps)
 
   const lines = code.split('\n')
   const lineCount = lines.length
+
+  /**
+   * 逐行语法高亮（按行 span 数组，`highlight.ts` = 官方 `ui-primitives` 的实现副本）。
+   *
+   * 用 `highlightLines` 而**不是** `highlightToHtml`：本卡是自建逐行渲染（带行号、
+   * 带折叠态），`highlightToHtml` 返回一整棵 `<pre class="shiki">`，会把正文渲染权
+   * 交回官方、行号与折叠态都得重做。按行接口只换正文，卡片外壳/行号/折叠态全不动。
+   *
+   * `useSyncExternalStore` 复合进依赖：语法是**异步加载**的（懒加载语言首调返回
+   * undefined 并在后台 import），`grammarLoadCount` 变化触发重渲染，语法就绪后自动上色。
+   * `lang` 不支持（或尚未加载完）→ `undefined` → 走无高亮的纯文本，仍是等宽。
+   */
+  const grammarGeneration = useSyncExternalStore(subscribeGrammarLoaded, grammarLoadCount, grammarLoadCount)
+  const highlighted = useMemo(
+    () => highlightLines(code, lang),
+    [code, lang, grammarGeneration],
+  )
 
   const onCopy = useCallback(() => {
     if (copied) return
@@ -137,7 +166,13 @@ export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps)
           {lines.map((line, i) => (
             <div className={css.codeLine} key={i}>
               <span className={css.lineNo}>{i + 1}</span>
-              <code className={css.codeText}>{line}</code>
+              <code className={css.codeText}>
+                {/* 有高亮 → 逐 span 上色；无高亮（未知语言 / 语法未就绪）→ 纯文本原文。
+                    两种形态的文本内容完全一致，只有着色与否的差别。 */}
+                {highlighted === undefined
+                  ? line
+                  : renderSpans(highlighted[i] ?? [], line)}
+              </code>
             </div>
           ))}
         </div>

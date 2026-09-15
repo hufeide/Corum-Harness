@@ -18,7 +18,7 @@
  * 数据来源一律走 file-tool-card.ts 的窄化解析（本文件不散落正则）。
  */
 import { memo, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronUp, FilePen, FilePlus2, FileText, FileX2, Scissors, ShieldAlert, type LucideIcon } from 'lucide-react'
+import { ChevronDown, ChevronUp, FilePen, FilePlus, FileText, FileX, Scissors, ShieldAlert, type LucideIcon } from 'lucide-react'
 import {
   DiffBlock, Pill, ReadBlock, StateDot, Tooltip, diffTotals,
   type DiffBlockLabels, type DiffHunk, type ReadBlockLabels,
@@ -140,6 +140,21 @@ function openHandler(input: CardInput): (() => void) | undefined {
   if (input.state !== 'ok' || input.filePath === undefined) return undefined
   const path = input.filePath
   return () => { input.openFile(path) }
+}
+
+/**
+ * **失败态**路径 chip 的点击目标：打开源文件并定位（编辑器页），**不是** diff 比较页。
+ *
+ * 设计/裁定依据（2026-09-15 用户验收 #6）：「失败时点击链接应该进入**编辑页面**而不是
+ * diff 比较页面」——失败卡没有落盘改动可对比，唯一有意义的动作是回到源文件看现场。
+ * 走既有 `openLineAt` 桥（→ corumEditor.openFile + revealLine），与「编辑未命中」卡的
+ * 行号跳转同一条路径；路径 chip 没有行号语义，统一定位到第 1 行。
+ */
+function openFailureHandler(input: CardInput): (() => void) | undefined {
+  if (input.filePath === undefined || input.openLineAt === undefined) return undefined
+  const path = input.filePath
+  const openLineAt = input.openLineAt
+  return () => { openLineAt(path, 1) }
 }
 
 /* ── 统一壳：head / content / note（缺段即删不留空）───────────────── */
@@ -319,9 +334,21 @@ function ReadCard({ input, t }: { input: CardInput; t: TFunc }) {
 
 /* ── 子态 3 / 4：edit 成功、edit 未命中 ────────────────────────────── */
 
-/** 未命中卡（能力下限：候选锚点 + 相似度标签 + 行号跳转；取舍点 B 默认展开）。 */
+/**
+ * 未命中卡（`edit-miss`，组件 `bCGwp`）。
+ *
+ * **默认折叠**（2026-09-15 用户验收 #6：「默认应该为折叠，当前是展开」）——
+ * 折叠态只有头部一行（`wUNO8` 的 `edit-miss` 折叠卡：图标 + 标题 + 路径 +
+ * 行数/增删 + 状态点 + 展开 chevron，**没有 foot**）；候选锚点 / mismatch /
+ * 原文与 footnote 都属**展开态**内容。
+ *
+ * 三项能力不得回退：候选行号跳转、相似度标签、footnote 说明。
+ */
 function MissCard({ model, input, t }: { model: NonNullable<ReturnType<typeof parseEditNotFound>>; input: CardInput; t: TFunc }) {
+  const [expanded, setExpanded] = useState(false)
   const openLine = (line: number): void => { input.openLineAt?.(input.filePath, line) }
+  // 失败/未命中态的路径 chip → 打开源文件并定位（编辑页），与 FailureCard 同口径。
+  const onOpenPath = openFailureHandler(input) ?? openHandler(input)
   const footnote = ((): string => {
     switch (model.reason) {
       case 'anchor-miss':
@@ -334,16 +361,17 @@ function MissCard({ model, input, t }: { model: NonNullable<ReturnType<typeof pa
   })()
   return (
     <Shell
-      icon={FileX2}
+      icon={FileX}
       tone="error"
       title={t('fileCard.title.edit')}
       path={input.displayPath}
       pathTitle={t('fileCard.openFile')}
+      {...onOpenPath === undefined ? {} : { onOpenPath }}
       stateChip={<StateChip t={t} label={t('fileCard.state.miss')} tone="warn" dot="warning" />}
       trailingChip={<Chip className={css.chipFlag}>{t('fileCard.edit.noChanges')}</Chip>}
-      content={(
+      action={<ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />}
+      content={!expanded ? undefined : (
         <>
-          {/* 默认展开，三项能力不得回退。 */}
           {model.candidates.length > 0 && (
             <div className={css.panel} data-file-card-candidates="">
               {model.candidates.map((candidate, index) => (
@@ -391,7 +419,7 @@ function MissCard({ model, input, t }: { model: NonNullable<ReturnType<typeof pa
           )}
         </>
       )}
-      note={<Note tone="muted" text={footnote} />}
+      note={expanded ? <Note tone="muted" text={footnote} /> : undefined}
     />
   )
 }
@@ -420,7 +448,7 @@ function EditCard({ input, t }: { input: CardInput; t: TFunc }) {
       if (model !== undefined) return <MissCard model={model} input={input} t={t} />
       return <DegradedMissCard input={input} t={t} />
     }
-    return <FailureCard icon={FileX2} title={t('fileCard.title.edit')} input={input} foot={t('fileCard.foot.editFailed')} t={t} />
+    return <FailureCard icon={FileX} title={t('fileCard.title.edit')} input={input} foot={t('fileCard.foot.editFailed')} openInEditor t={t} />
   }
   // 成功态用落盘 diff；运行中用 intended diff（官方 intendedDiff 的 edit 分支同口径）。
   const settledHunks = input.state === 'ok' ? nonEmptyDiffs(input.meta) : undefined
@@ -451,17 +479,24 @@ function EditCard({ input, t }: { input: CardInput; t: TFunc }) {
  * 只是候选区换成**原文可见**——原有的降级能力不回归，也不吞错。
  */
 function DegradedMissCard({ input, t }: { input: CardInput; t: TFunc }) {
+  // 与 MissCard 同口径：**默认折叠** + 两态恒有展开控件；原文与 footnote 属展开态。
+  const [expanded, setExpanded] = useState(false)
+  const onOpenPath = openFailureHandler(input) ?? openHandler(input)
   return (
     <Shell
-      icon={FileX2}
+      icon={FileX}
       tone="error"
       title={t('fileCard.title.edit')}
       path={input.displayPath}
       pathTitle={t('fileCard.openFile')}
+      {...onOpenPath === undefined ? {} : { onOpenPath }}
       stateChip={<StateChip t={t} label={t('fileCard.state.miss')} tone="warn" dot="warning" />}
       trailingChip={<Chip className={css.chipFlag}>{t('fileCard.edit.noChanges')}</Chip>}
-      content={<div className={css.fallbackText} data-file-card-raw="">{input.errorText ?? ''}</div>}
-      note={<Note tone="muted" text={t('editMiss.footnote.anchorMiss')} />}
+      action={<ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />}
+      content={expanded
+        ? <div className={css.fallbackText} data-file-card-raw="">{input.errorText ?? ''}</div>
+        : undefined}
+      note={expanded ? <Note tone="muted" text={t('editMiss.footnote.anchorMiss')} /> : undefined}
     />
   )
 }
@@ -492,7 +527,7 @@ function WriteCard({ input, t }: { input: CardInput; t: TFunc }) {
       : t('fileCard.foot.writeOverwritten', { added: totals.added, removed: totals.removed })
   return (
     <MutationCard
-      icon={FilePlus2}
+      icon={FilePlus}
       tone="success"
       title={t('fileCard.title.write')}
       input={input}
@@ -546,12 +581,12 @@ function MutationCard({ icon, tone, title, input, hunks, mode, foot, footExpande
     </>
   )
   const stateChip = input.state === 'running' ? <StateChip t={t} state="running" /> : undefined
-  // 有内容就给展开/收起按钮——**不再限定 `state !== 'running'`**：
-  // 运行中同样可能已累积可见改动，而「已收起的运行中卡片」若没有按钮，用户只能干看标题
-  // （2026-09-15 用户反馈「没有收起按钮」的成因之一）。
-  const action = hasContent
-    ? <ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />
-    : undefined
+  // 展开控件**恒渲染**：design.pen `wUNO8` 的六张折叠卡**每一张**头部末尾都有
+  // `act-expand`（chevron），`jjSBU`（edit-ok）/ `H4jCs`（write-ok）的展开态则是 `chevron-up`。
+  // 2026-09-15 用户验收 #7：「**折叠态没有收起到图标** —— 折叠态必须有那个展开 chevron 控件」。
+  // 旧实现在 `hasContent === false`（diff 解析不出）时把控件整个吞掉，折叠卡就只剩标题
+  // ⇒ 用户无从展开。故不再以「有内容」为渲染前提。
+  const action = <ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />
   // 展开态专用的脚注（见 `footExpandedOnly` 的文档）：收起时**不渲染**。
   const noteText = footExpandedOnly !== undefined ? (expanded ? footExpandedOnly : undefined) : foot
   return (
@@ -578,16 +613,29 @@ function MutationCard({ icon, tone, title, input, hunks, mode, foot, footExpande
 }
 
 /** read 失败 / write 失败共用：head(+失败状态 chip) + 原因面板 + note（原文绝不吞掉）。 */
-function FailureCard({ icon, title, input, foot, t }: {
+function FailureCard({ icon, title, input, foot, openInEditor = false, t }: {
   icon: LucideIcon
   title: string
   input: CardInput
   foot: string
+  /**
+   * 路径 chip 是否走「打开源文件并定位」（编辑页）。
+   *
+   * 只有**编辑**侧失败卡打开它：用户验收 #6 的原文是「失败时点击链接应该进入**编辑页面**
+   * 而不是 diff 比较页面」——针对的是编辑卡。读取/写入失败卡保持**不可点**（与本次改动前
+   * 一致）：读失败的文件可能根本不存在，写失败也不该引导用户去编辑那个路径。
+   */
+  openInEditor?: boolean
   t: TFunc
 }) {
+  // **默认折叠**（2026-09-15 用户验收 #2：「读取·失败卡默认是展开不是折叠」）。
+  // 折叠态 = 只有头部一行（design.pen `wUNO8` 的六张折叠卡都是这个形态）；
+  // 原因面板与 foot 都属**展开态**内容（`LBUMN` / `yer9p` 画的是带内容的展开态）。
+  const [expanded, setExpanded] = useState(false)
   // 解析不出分档 → 回落纯文本原文（降级不崩；红线：绝不吞错）。
   const causes = input.errorText === undefined ? undefined : classifyFailure(input.errorText, input.errorCode)
   const structured = causes !== undefined && causes[0]?.kind !== 'unknown'
+  const onOpenPath = openInEditor ? (openFailureHandler(input) ?? openHandler(input)) : openHandler(input)
   return (
     <Shell
       icon={icon}
@@ -595,22 +643,27 @@ function FailureCard({ icon, title, input, foot, t }: {
       title={title}
       path={input.displayPath}
       pathTitle={t('fileCard.openFile')}
+      {...onOpenPath === undefined ? {} : { onOpenPath }}
       stateChip={<StateChip t={t} state={input.state} />}
-      content={structured
-        ? (
-          <div className={css.reasonPanel} data-file-card-reason="">
-            {causes.map((cause, index) => (
-              <div className={css.reasonRow} key={`${cause.kind}-${index}`} data-file-card-cause={cause.kind}>
-                <Chip {...index === 0 ? { tone: 'error' as const } : {}} className={css.chipCause}>{t(causeKindKey(cause.kind))}</Chip>
-                <span className={css.reasonText}>{cause.detail}</span>
-              </div>
-            ))}
-          </div>
-        )
-        : input.errorText === undefined
-          ? undefined
-          : <div className={css.fallbackText} data-file-card-raw="">{input.errorText}</div>}
-      note={<Note tone="muted" text={foot} />}
+      // 展开控件**两态恒在**（用户验收 #2：「保证折叠/展开两态都有可用的展开/收起按钮」）。
+      action={<ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />}
+      content={!expanded
+        ? undefined
+        : structured
+          ? (
+            <div className={css.reasonPanel} data-file-card-reason="">
+              {causes.map((cause, index) => (
+                <div className={css.reasonRow} key={`${cause.kind}-${index}`} data-file-card-cause={cause.kind}>
+                  <Chip {...index === 0 ? { tone: 'error' as const } : {}} className={css.chipCause}>{t(causeKindKey(cause.kind))}</Chip>
+                  <span className={css.reasonText}>{cause.detail}</span>
+                </div>
+              ))}
+            </div>
+          )
+          : input.errorText === undefined
+            ? undefined
+            : <div className={css.fallbackText} data-file-card-raw="">{input.errorText}</div>}
+      note={expanded ? <Note tone="muted" text={foot} /> : undefined}
     />
   )
 }
