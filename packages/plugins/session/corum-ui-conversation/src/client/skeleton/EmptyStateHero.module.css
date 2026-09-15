@@ -294,10 +294,16 @@
   background: var(--corum-glass-3, var(--dsw-alias-bg-layer-2));
 }
 
-/* 目录选择失败提示（不静默吞，见 PROGRESS §4）。 */
+/* 目录选择失败提示（不静默吞，见 PROGRESS §4）。
+   ⚠️ 2026-09-16 修正：原来写的是 `--dsw-alias-state-error`（**不带 `-primary` 后缀**）——
+   该 token 不存在，静默 fallback 到硬编码 `#ff5c8a`。这不只是「名字难看」：真实的
+   `--dsw-alias-state-error-primary` 是**分主题**的（浅色 `--dsw-static-red-600` = #ec1313、
+   深色 `--dsw-static-red-400` = #f25a5a），而硬编码 fallback 把两个主题都钉死成粉红
+   ⇒ 浅色主题下错误色的对比度/语义色都不对。改用真实 token 后主题才真正生效。
+   （同族问题见 ReviewCard.module.css 的 BUG-2 修正。） */
 .fieldError {
   font-size: 11px;
-  color: var(--dsw-alias-state-error, #ff5c8a);
+  color: var(--dsw-alias-state-error-primary);
   word-break: break-all;
 }
 

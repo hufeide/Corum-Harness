@@ -240,13 +240,17 @@
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.55));
 }
 
-/* 状态点（design.pen status-pill d，$state-success 6×6）。 */
+/* 状态点（design.pen status-pill d，$state-success 6×6）。
+   ⚠️ 2026-09-16 修正：原来写的是 `--dsw-alias-state-success`（**不带 `-primary` 后缀**）——
+   该 token 在官方 design-platform.css 里**不存在**，于是它静默 fallback 到硬编码 `#22c55e`
+   （见 docs/LESSONS.md 「设计 token 名写错不会报错，只会静默 fallback」）。
+   本文件 :1317+ 的同类状态点用的才是真实定义名。 */
 .agentStatusDot {
   flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--dsw-alias-state-success, #22c55e);
+  background: var(--dsw-alias-state-success-primary);
 }
 
 .agentStats {
