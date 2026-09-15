@@ -114,11 +114,19 @@ export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps)
             : <FileCode size={14} strokeWidth={2} className={css.iconBoxIcon} />}
         </span>
         <span className={css.title}>{t(isScript ? 'codeCard.title.script' : 'codeCard.title.code')}</span>
-        {lang !== undefined && lang !== '' && (
-          <span className={css.chip}>
-            <span className={css.chipLang}>{lang}</span>
-          </span>
-        )}
+        {/*
+          语言位**恒在**（2026-09-16 用户定调「只要语言位保持与设计稿/官方一致」）。
+          设计源：design.pen 三张代码卡的 head 都把 `lang` 画成**固定一栏**
+          （`lIHmW` code-card-expanded 的 `kNCf8` / `jWH6J` collapsed / `JdYy4` script-card-expanded），
+          官方 `CodeBlock` 同样是恒在的信息位（banner 里 `{lang ?? ''}`）。
+          ⇒ **没写语言的围栏（裸 ```）保持空文本 + 定宽 padding 的占位**（左 padding 8px），
+          头部结构与设计稿一致、不因有没有语言而抖动。
+          ⚠️ 与高亮的关系：数据源就是围栏 info string（`fence-split.ts` 的 `node.lang`），
+          **两家都不做「从代码内容猜语言」** —— 裸围栏不着色是正确行为，不是缺陷。
+        */}
+        <span className={css.chip}>
+          <span className={css.chipLang}>{lang ?? ''}</span>
+        </span>
         <span className={css.chip}>
           <span className={css.chipLines}>{t('codeCard.lines', { n: lineCount })}</span>
         </span>
