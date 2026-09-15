@@ -41,6 +41,39 @@ type TFunc = ChatViewSlotProps['t']
 const STREAMING_LINE_GROUP_SIZE = 32
 
 /**
+ * 语言的**规范显示名**（2026-09-16 用户定调：「ts 这种可以写全」）。
+ *
+ * 名字全部取自 shiki 语法注册表自身的 `name` 字段（不是我们自己编的）：
+ * `@shikijs/langs/typescript` 的 `aliases: ['ts','cts','mts']`、
+ * `shellscript` 的 `aliases: ['bash','sh','shell','zsh']`、`python` 的 `['py']`……
+ * 懒加载那 23 个语法同理。
+ */
+const LANG_DISPLAY: ReadonlyMap<string, string> = new Map([
+  ['ts', 'typescript'], ['cts', 'typescript'], ['mts', 'typescript'], ['tsx', 'typescript'],
+  ['js', 'javascript'], ['jsx', 'javascript'], ['cjs', 'javascript'], ['mjs', 'javascript'],
+  ['sh', 'bash'], ['shell', 'bash'], ['zsh', 'bash'],
+  ['py', 'python'], ['rb', 'ruby'], ['rs', 'rust'], ['cs', 'csharp'], ['c#', 'csharp'],
+  ['kt', 'kotlin'], ['kts', 'kotlin'], ['c++', 'cpp'], ['yml', 'yaml'],
+  ['md', 'markdown'], ['properties', 'ini'], ['jsonc', 'json'],
+])
+
+/**
+ * 围栏 info string → 头部 chip 显示的语言名。
+ *
+ * 两条规则：
+ *   ① 别名写全（`ts` → `typescript`、`py` → `python`、`yml` → `yaml`）；
+ *   ② **已经等于语法名的原样保留** —— 尤其 `bash`：它的语法名是 `shellscript`，
+ *      但那名字可读性差，用户 2026-09-16 明确选了「bash 保持 bash」。
+ *   ③ 没写语言（或写了个我们不认识的）→ 占位文案「代码片段」（用户 2026-09-16 定调：
+ *      标题「代码片段」移除后，那个位置由语言位承担，不留空）。
+ */
+function displayLang(lang: string | undefined, placeholder: string): string {
+  const raw = (lang ?? '').trim()
+  if (raw === '') return placeholder
+  return LANG_DISPLAY.get(raw.toLowerCase()) ?? raw
+}
+
+/**
  * 把一行的高亮 span 渲染成带 inline style 的 `<span>` 序列（shiki 的
  * `style.color` 实际值是 `var(--shiki-token-*)`，颜色仍归主题表管）。
  *
@@ -184,8 +217,14 @@ export const CodeCard = memo(function CodeCard({ code, lang, streaming, t }: Cod
     const tail = frame.tail.map((spans, i) => (
       <CodeLine key={tailStart + i} index={tailStart + i} spans={spans} text={rendered[tailStart + i] ?? ''} />
     ))
+    /*
+      注意：这里只产出**代码行容器**（`data-corum-code-lines`），**不含**底部动作行 ——
+      动作行是 `streamedBody` 之外的兄弟节点（见下方 JSX）。原因：流式臂每一帧都会
+      重建这个子树，若把「复制」按钮放在里面，它会**随每一帧被重挂载**，
+      copied 态与 hover 都会被打断。
+    */
     const body = (
-      <div className={css.body} data-corum-code-body="">
+      <div className={css.codeLines} data-corum-code-lines="">
         {[...kept, ...tail]}
       </div>
     )
@@ -209,6 +248,28 @@ export const CodeCard = memo(function CodeCard({ code, lang, streaming, t }: Cod
 
   const firstLine = lines[0] ?? ''
   const summary = t('codeCard.summary', { first: firstLine, n: lineCount })
+  const langText = displayLang(lang, t('codeCard.lang.placeholder'))
+
+  /*
+    复制按钮：**内容的右上角**（2026-09-16 用户定调，与终端卡把「复制输出」移入输出框内
+    的同一条设计思路 —— 复制的是**内容**，就该待在内容上）。折叠态不渲染它。
+    它定义在这里、在 JSX 里作为**代码行容器的兄弟**挂载，这样流式臂逐帧重建行容器时
+    不会把它一起重挂载。
+  */
+  const copyAction = (
+    <div className={css.contentActions} data-corum-code-actions="">
+      <button
+        type="button"
+        className={css.btn}
+        title={t('codeCard.copy')}
+        aria-label={t('codeCard.copy')}
+        onClick={onCopy}
+      >
+        <Copy size={13} strokeWidth={2} className={css.btnIconMuted} />
+        <span className={css.btnLabel}>{copied ? t('copied') : t('copy')}</span>
+      </button>
+    </div>
+  )
 
   return (
     <div className={css.card} data-corum-code-card="">
@@ -218,34 +279,19 @@ export const CodeCard = memo(function CodeCard({ code, lang, streaming, t }: Cod
             ? <SquareTerminal size={14} strokeWidth={2} className={css.iconBoxIconSuccess} />
             : <FileCode size={14} strokeWidth={2} className={css.iconBoxIcon} />}
         </span>
-        <span className={css.title}>{t(isScript ? 'codeCard.title.script' : 'codeCard.title.code')}</span>
         {/*
-          语言位**恒在**（2026-09-16 用户定调「只要语言位保持与设计稿/官方一致」）。
-          设计源：design.pen 三张代码卡的 head 都把 `lang` 画成**固定一栏**
-          （`lIHmW` code-card-expanded 的 `kNCf8` / `jWH6J` collapsed / `JdYy4` script-card-expanded），
-          官方 `CodeBlock` 同样是恒在的信息位（banner 里 `{lang ?? ''}`）。
-          ⇒ **没写语言的围栏（裸 ```）保持空文本 + 定宽 padding 的占位**（左 padding 8px），
-          头部结构与设计稿一致、不因有没有语言而抖动。
-          ⚠️ 与高亮的关系：数据源就是围栏 info string（`fence-split.ts` 的 `node.lang`），
-          **两家都不做「从代码内容猜语言」** —— 裸围栏不着色是正确行为，不是缺陷。
+          ⚠️ 标题「代码片段 / 脚本片段」**已移除**（2026-09-16 用户定调）。因此头部
+          不再有文字标题，语言位承担起识别作用。分类信息并未丢失：图标本身按类分档
+          （代码=file-code@brand / 脚本=square-terminal@success）且带 `data-fence-kind`。
+          「在终端运行」仍只属于脚本片段（见下方 isScript 分支）。
         */}
         <span className={css.chip}>
-          <span className={css.chipLang}>{lang ?? ''}</span>
+          <span className={css.chipLang}>{langText}</span>
         </span>
         <span className={css.chip}>
           <span className={css.chipLines}>{t('codeCard.lines', { n: lineCount })}</span>
         </span>
         <span className={css.spacer} />
-        <button
-          type="button"
-          className={css.btn}
-          title={t('codeCard.copy')}
-          aria-label={t('codeCard.copy')}
-          onClick={onCopy}
-        >
-          <Copy size={13} strokeWidth={2} className={css.btnIconMuted} />
-          <span className={css.btnLabel}>{copied ? t('copied') : t('copy')}</span>
-        </button>
         {/* 「在终端运行」**只属于脚本片段**（2026-09-15 用户定调）：
             代码片段是给人读的，不该出现执行入口。 */}
         {isScript && (
@@ -275,18 +321,21 @@ export const CodeCard = memo(function CodeCard({ code, lang, streaming, t }: Cod
         </button>
       </div>
       {expanded ? (
-        streamedBody !== undefined ? streamedBody : (
-          <div className={css.body} data-corum-code-body="">
-            {lines.map((line, i) => (
-              <CodeLine
-                key={i}
-                index={i}
-                spans={highlighted === undefined ? undefined : (highlighted[i] ?? [])}
-                text={line}
-              />
-            ))}
-          </div>
-        )
+        <div className={css.body} data-corum-code-body="">
+          {streamedBody !== undefined ? streamedBody : (
+            <div className={css.codeLines} data-corum-code-lines="">
+              {lines.map((line, i) => (
+                <CodeLine
+                  key={i}
+                  index={i}
+                  spans={highlighted === undefined ? undefined : (highlighted[i] ?? [])}
+                  text={line}
+                />
+              ))}
+            </div>
+          )}
+          {copyAction}
+        </div>
       ) : (
         <div className={css.collapsedBody} data-corum-code-summary="">
           <span className={css.summaryText}>{summary}</span>

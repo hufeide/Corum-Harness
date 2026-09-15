@@ -42,36 +42,42 @@
   color: var(--dsw-alias-state-success-primary);
 }
 
-.title {
-  font-family: Inter, sans-serif;
-  font-size: 15px;
-  color: var(--dsw-alias-label-primary);
-  white-space: nowrap;
-}
+/* ⚠️ `.title` 已移除（2026-09-16 用户定调「代码片段这个名字可以移除」）。
+   头部不再有文字标题，识别交给图标分档（file-code@brand / square-terminal@success
+   + `data-fence-kind`）与语言 chip。 */
 
-/* 通用 chip 壳：r8 + glass-2 + glass-border + pad [3,8] + gap 5 */
+/* 通用 chip 壳 —— **与编辑/读写卡的 chip 同一规格**（2026-09-16 用户定调
+   「行数统一做成和编辑读写一样的样式」）。对齐目标 = FileToolCard.module.css 的
+   `.chip.chip`：glass-2 + glass-border + r8 + pad[3,8] + **11px / line-height 16 / weight 600** /
+   `$label-tertiary`。
+   ⚠️ 显式写死 `line-height` 是这次对齐的关键：不写就会继承父级行高，
+   chip 会胖一圈（实测 32px → 对齐后 24px）。 */
 .chip {
+  box-sizing: border-box;
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  height: auto;
   padding: 3px 8px;
   border-radius: 8px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
 }
 
-/* 语言 chip 文字 → brand-text；行数 chip 文字 → label-tertiary */
+/* 语言 chip 文字 → brand-text（等宽：语言名天然适合等宽）。 */
 .chipLang {
   font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
-  font-size: 12px;
   color: var(--dsw-alias-brand-text);
 }
 
+/* 行数 chip 文字 → 字号/字重/颜色全部继承上面的 chip 规格，与编辑/读写卡一致。 */
 .chipLines {
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
-  font-size: 12px;
-  color: var(--dsw-alias-label-tertiary);
+  font-family: Inter, sans-serif;
 }
 
 .spacer {
@@ -124,11 +130,34 @@
 /* ── 展开体 ──────────────────────────────────────────────────────── */
 
 .body {
+  /* relative：让右上的「复制」动作行（`.contentActions`）以此为定位锚。 */
+  position: relative;
   display: flex;
   flex-direction: column;
   border-radius: 10px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
-  padding: 8px;
+  /* 顶部留出复制按钮的高度（按钮 25px + 6px 间距），否则它会压住第 1 行。 */
+  padding: 34px 8px 8px;
+}
+
+/* 代码行容器 —— 独立成层的用途是**流式臂逐帧重建的作用域**：
+   它每帧被替换，而底部动作行（`.contentActions`）是它的兄弟，不会被重挂载。 */
+.codeLines {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 「复制」所在的动作行 —— **内容的右上角**（2026-09-16 用户定调）。
+   与终端卡把「复制输出」放进输出框内是同一条设计思路：复制的是内容，就待在内容上。
+   绝对定位贴右上角，因此它不占代码行的宽度，也不会把代码挤窄。 */
+.contentActions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 1;
 }
 
 .codeLine {
