@@ -269,7 +269,7 @@
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
   border: 1px solid var(--dsw-alias-state-error-primary);
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
 }

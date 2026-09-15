@@ -206,7 +206,7 @@
   border-radius: 100px;
   color: var(--dsw-alias-label-primary);
   background: var(--corum-glass-2);
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   box-shadow: var(--dsw-shadow-lv2);
   cursor: pointer;
   pointer-events: auto;

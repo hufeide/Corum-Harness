@@ -39,6 +39,22 @@ export const SUBAGENT_ROLE_VISUAL: Readonly<Record<SubagentDelegationRole, {
   worker: { icon: Wrench, labelKey: 'subagent.role.worker' },
   fork: { icon: GitFork, labelKey: 'subagent.role.fork' },
 }
+
+/**
+ * 卡片**标题前缀**的角色短名（2026-09-15 用户要求：`研究· 标题` / `工作· 标题`）。
+ *
+ * 与 {@link SUBAGENT_ROLE_VISUAL} 分开而不是复用它的 `labelKey`：那些是**长解释**
+ * （「调研子 Agent（只读调查）」，用于 avatar 的 title/aria-label 与无障碍语义），
+ * 而标题前缀要的是**一到两个字**的短名。两者用途不同，故各自成键。
+ *
+ * ⚠️ 只用 `role`（工具名派生）取值；**取不到 role 时不要用这张表** ——
+ * 调用方退回 `subagent.name`（见渲染处注释）。
+ */
+export const SUBAGENT_ROLE_TITLE_KEY: Readonly<Record<SubagentDelegationRole, 'subagent.title.research' | 'subagent.title.worker' | 'subagent.title.fork'>> = {
+  research: 'subagent.title.research',
+  worker: 'subagent.title.worker',
+  fork: 'subagent.title.fork',
+}
 import type { SubagentProgressSnapshot } from '../contract/subagent.ts'
 import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentProgressSubscribe } from '../chat-runtime.ts'
 import { SubagentPlan } from './SubagentPlan.tsx'
@@ -368,7 +384,18 @@ function SubagentRow({
             : (() => { const Icon = SUBAGENT_ROLE_VISUAL[role].icon; return <Icon size={16} strokeWidth={2} className={css.avatarIcon} /> })()}
         </span>
         <span className={css.meta}>
-          <span className={css.name}>{t('subagent.name')}{description !== undefined ? ` · ${description}` : ''}</span>
+          {/* 标题前缀按**角色**分档（2026-09-15 用户要求）：`研究· 核清 section 语义…`、
+              `工作· 整改翻译` —— 前缀紧贴中点，中点后再留一个空格。
+
+              ⚠️ 前缀**只由 `role` 决定**（role 来自父会话日志里那条 `tool/call` 的**工具名**，
+              见上方 SUBAGENT_ROLE_VISUAL 的注释纪律：「**绝不按 label 文案猜**」）。
+              **role 取不到时退回通用 `subagent.name`（「子 Agent」）** ——
+              历史截断 / orchestrate 派出的子会话没有工具名可依，此时硬套「工作」就是**冒充角色**。
+              无 description 时只显示前缀本身（不留悬空的分隔符）。 */}
+          <span className={css.name}>
+            {role !== undefined ? `${t(SUBAGENT_ROLE_TITLE_KEY[role])}· ` : `${t('subagent.name')} · `}
+            {description ?? ''}
+          </span>
           {model !== undefined && (
             <span className={css.modelRow}>
               <Cpu size={13} strokeWidth={2} className={css.modelIcon} />

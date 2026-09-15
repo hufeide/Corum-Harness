@@ -35,7 +35,7 @@ import { createChatStore } from './stores.ts'
 import { TranscriptViewPolicy } from './transcript-view.ts'
 import { patchUpdateQueueWire } from './update-queue-wire.ts'
 import { createChatRuntime, primeSubagentChildCache, type ChatRuntimeService } from './chat-runtime.ts'
-import { EditToolView } from './toolviews/EditToolView.tsx'
+import { FileToolView } from './toolviews/FileToolView.tsx'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../chat-settings.ts'
 import { useTurnDataValue } from './chat/use-turn-data.ts'
 
@@ -449,20 +449,28 @@ export function apply(ctx: Context): void {
   ctx.slots.inject('conversation.approval.detail', () =>
     ctx.slots.register({ name: 'conversation.approval.detail' }, ApprovalCommand))
 
-  // fork（corum）：「编辑未命中」专用卡（2026-09-13 用户裁定）——edit 工具的
-  // FS_EDIT_NOT_FOUND（fork #14 定位提示）是「什么都没改」不是 Error，给编辑
-  // 单独一张卡；keyed 命中**替换**整行通用卡（官方 renderSlot 契约），成功/
-  // 运行态由卡内 CompactRow 覆盖（不回归）。slot 声明经类型导入
-  // @deepseek-ai/dsh-client-ui-tool/client 进 SlotMap（types/client/contract/slots.d.ts）。
-  ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
-    name: 'tool.call.toolview',
-    key: 'edit',
-    // 官方 file-mutation-toolview 已占 key='edit' priority 0（同 key 同优先级注册
-    // 直接 throw）；keyed slot 是「最低优先级渲染」的遮蔽序（slot-core register 注释），
-    // 用 -1 遮蔽官方行。
-    priority: -1,
-    locale: NS,
-  }, EditToolView))
+  // fork（corum）：文件工具卡统一化（2026-09-14 定稿）——read / edit / write 三类
+  // 调用统一成**同一套毛玻璃卡**（设计源 doc/UXDesign/design.pen §1.1 `row-文件工具卡`
+  // 六个 reusable 组件）。三个 key 共用同一个 FileToolView，卡内按 toolName 分流。
+  //
+  // keyed 命中 = **整行替换**官方行（官方 renderSlot 契约），所以卡内必须自己覆盖
+  // 全部子态：read 成功/失败、edit 成功/未命中、write 成功/失败。
+  //
+  // priority -1：官方 file-mutation-toolview 已占 key='edit'/'write' priority 0、
+  // read-toolview 占 key='read' priority 0（同 key 同优先级注册直接 throw）；
+  // keyed slot 是「最低优先级渲染」的遮蔽序（slot-core register 注释），用 -1 遮蔽。
+  // slot 声明经类型导入 @deepseek-ai/dsh-client-ui-tool/client 进 SlotMap
+  // （types/client/contract/slots.d.ts）。
+  ctx.slots.inject('tool.call.toolview', function* () {
+    for (const key of ['read', 'edit', 'write'] as const) {
+      yield ctx.slots.register({
+        name: 'tool.call.toolview',
+        key,
+        priority: -1,
+        locale: NS,
+      }, FileToolView)
+    }
+  })
 
   ctx.slots.inject('details', () => ctx.slots.register({
     name: 'details',

@@ -34,7 +34,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
   background: var(--corum-glass-1);
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 /* 折叠态（设计稿 sKrdG）：整条 40px 高的可点区域，水平内缩 16px。 */
@@ -234,7 +234,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-primary);

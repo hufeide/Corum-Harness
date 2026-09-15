@@ -5,7 +5,7 @@
  * await openDiffFn({ ... })`——把 ChatRuntimeImpl 的类方法摘下来再调，`this` 丢失，
  * 方法体访问私有字段 #openContentDiff 时抛
  * "Cannot read properties of undefined (reading '#openContentDiff')"。
- * 修复：调用方一律经服务对象调用（runtime.openContentDiff(...)），与 EditToolView
+ * 修复：调用方一律经服务对象调用（runtime.openContentDiff(...)），与文件工具卡注册壳
  * 的 openFileAtLine 调用形态一致。
  *
  * 本测试不锁实现（不要求 impl 是箭头函数 / bind），只锁调用方契约：

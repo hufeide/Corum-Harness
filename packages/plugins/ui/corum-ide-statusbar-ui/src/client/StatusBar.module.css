@@ -10,7 +10,7 @@
   background: var(--corum-glass-1);
   border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   box-sizing: border-box;
 }
 .dot {

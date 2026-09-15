@@ -509,7 +509,10 @@ export function apply(ctx: ClientContext): void {
           name: 'settings.section',
           id: def.id,
           order: def.order,
-          label: def.label,
+          // label 传 thunk（SlotLabel 支持 `() => string`，每次读取时求值）⇒
+          // 导航标签跟随当前语言，无需重新注册。SECTION_DEFS 只存 key，
+          // 绑 t 的动作在注册处（此处 t 已由 ctx.locale.bind(NS) 得到）。
+          label: () => t(def.label),
           locale: NS,
           children: { 'settings.plugins.tab': { kind: 'list', scope: 'root' } },
         }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.plugins.tab', owner: {}, opts?: { only?: string }) => ReactNode }) => (
@@ -524,7 +527,10 @@ export function apply(ctx: ClientContext): void {
         name: 'settings.section',
         id: def.id,
         order: def.order,
-        label: def.label,
+        // label 传 thunk（SlotLabel 支持 `() => string`，每次读取时求值）⇒
+          // 导航标签跟随当前语言，无需重新注册。SECTION_DEFS 只存 key，
+          // 绑 t 的动作在注册处（此处 t 已由 ctx.locale.bind(NS) 得到）。
+          label: () => t(def.label),
         locale: NS,
       }, (props: SettingsSectionOwnerProps) => (
         <CorumRpcContext.Provider value={corumRpc}>

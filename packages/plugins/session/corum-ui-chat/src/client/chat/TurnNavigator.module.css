@@ -200,7 +200,7 @@
      `-webkit-backdrop-filter`，而 Chromium 150 已不支持该别名（CDP 实测
      `CSS.supports('-webkit-backdrop-filter','blur(4px)') === false`）→ 玻璃模糊
      静默失效。全仓 43 个 corum CSS 同病（另开一轮统一修），此处先按正确写法。 */
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   animation: dsh-turn-preview-enter 120ms ease-out;

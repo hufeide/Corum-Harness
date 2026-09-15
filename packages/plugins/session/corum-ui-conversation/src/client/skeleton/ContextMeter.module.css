@@ -50,7 +50,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 12px;
   background: var(--corum-glass-1);
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   box-shadow: var(--dsw-shadow-lv3);
   font-size: 12px;
   line-height: 20px;

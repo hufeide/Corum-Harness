@@ -285,7 +285,7 @@
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
   border: 1px solid var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
   border-radius: 18px; /* GpfJh cornerRadius 18 */
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
   /* BUG-26：内容超出时卡内滚动。max-height 用 calc(100vh - 96px) —— top:48px
      之上 + 底部 48px 余量。position:fixed 的 100vh 解析为**当前窗口视口**，
@@ -590,7 +590,7 @@
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 .sidebarCol[data-rail] {
@@ -636,7 +636,7 @@
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 .railButton:hover {
@@ -697,7 +697,7 @@
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 /* ④ 资源管理器 —— glass-1 card (design.pen 210px); column flex likewise. */
@@ -709,7 +709,7 @@
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 /* ⑥ 底部面板 —— glass-1 card (design.pen 150px). */
@@ -720,7 +720,7 @@
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 /* 次侧栏 —— official DetailsPanel drawer, absolutely positioned over the right edge. */
@@ -735,7 +735,7 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 /* 点击 details 抽屉外部关闭的透明遮罩。 */
@@ -952,7 +952,7 @@
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 /* 折叠态：隐藏侧栏会话内容，标题栏常驻（宽度由 GridView minWidth 兜底）。 */
@@ -984,7 +984,7 @@
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 .railBtn {
   flex: none;
@@ -1097,7 +1097,7 @@
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
   text-align: center;

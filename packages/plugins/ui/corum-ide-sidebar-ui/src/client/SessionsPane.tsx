@@ -114,6 +114,40 @@ function isTaskSessionId(id: SessionId): boolean {
 }
 
 /**
+ * 折叠前每个工作区可见的**普通**会话行数（2026-09-15 用户指示「会话栏只展示最近
+ * 五个，其余折叠，和 dsh 官方行为保持一致」）。
+ *
+ * 照抄官方 `dsh/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx:43`
+ * 的 `COLLAPSED_SESSION_LIMIT = 5`。⚠️ 这是 **UI 层**的上限；`tree.ts:421,438` 另有一个
+ * **协议侧** `limit`，两者不是一回事，别混。
+ */
+const COLLAPSED_SESSION_LIMIT = 5
+
+/**
+ * 组内折叠判定：只显示前 `limit` 条**普通**会话，其余交给「展开其余 N 个会话 / 收起」。
+ *
+ * 口径照抄官方 `collapsedSessionRows`（`WorkspaceBrowser.tsx:45-59`）：
+ *   · ⚠️ **`blank`（尚未发过消息的会话）不占名额、永远可见** —— 官方原话「Fold one
+ *     Workspace **without charging its provisional New Session against the ordinary-row
+ *     limit**」⇒ 否则「刚点新建、还没发消息」的会话会被折叠藏起来。
+ *
+ * 抽成纯函数便于单测直接断言该语义（渲染与测试共用一份口径）。
+ */
+function collapseSessions(
+  sessions: readonly SessionSummary[],
+  limit: number = COLLAPSED_SESSION_LIMIT,
+): { visible: readonly SessionSummary[]; hiddenCount: number } {
+  let ordinaryCount = 0
+  const visible = sessions.filter((session) => {
+    if (session.blank === true) return true
+    if (ordinaryCount >= limit) return false
+    ordinaryCount += 1
+    return true
+  })
+  return { visible, hiddenCount: sessions.length - visible.length }
+}
+
+/**
  * 任务模式列表行过滤（对齐官方 WorkspaceBrowser deriveGroups 的可见性规则）：
  * id 前缀 + **origin !== 'subagent'**——子 Agent 路由会话（origin='subagent'，
  * UUID 形态 id）不进分组列表：它们的标题由 subagent routing 管理（host 拒绝
@@ -149,6 +183,16 @@ export function SessionsPane(props: SessionsPaneInjected) {
   // 显式操作的组生效（官方语义：用户折叠的组不被自动重新展开）。
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const explicitGroups = useRef<Set<string>>(new Set())
+  /**
+   * 组内「展开其余 N 个会话」态（2026-09-15 用户指示：会话栏只展示最近 5 条，其余折叠，
+   * 与 dsh 官方一致）。
+   *
+   * **与上面 `collapsed` 是两个正交的轴，别混**：
+   *   · `collapsed` = **整组**收起（组头一折全没了）；
+   *   · `expandedGroups` = 组**展开着**，但组内**只显示 5 条**、其余藏在「展开其余 N 个会话」后面。
+   * 官方也是两层（`WorkspaceBrowser` 的组折叠 + `COLLAPSED_SESSION_LIMIT` 的 overflow 控件）。
+   */
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set())
 
   // 搜索：胶囊点击展开（官方 pattern），输入去抖 ≥2 字触发全文检索。
   const [searchOpen, setSearchOpen] = useState(false)
@@ -461,9 +505,18 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 key={group.key === '' ? 'ungrouped' : group.key}
                 group={group}
                 collapsed={collapsed.has(group.key)}
+                expanded={expandedGroups.has(group.key)}
                 current={current}
                 renamingId={renamingId}
                 onToggle={() => toggleGroup(group.key)}
+                onToggleExpand={() => {
+                  setExpandedGroups(prev => {
+                    const next = new Set(prev)
+                    if (next.has(group.key)) next.delete(group.key)
+                    else next.add(group.key)
+                    return next
+                  })
+                }}
                 onOpen={open}
                 onStartSession={() => { startSession(group.workspace?.workspaceId) }}
                 onRenameRequest={() => { if (group.workspace !== null) setRenaming(group.workspace) }}
@@ -529,12 +582,15 @@ export function SessionsPane(props: SessionsPaneInjected) {
 }
 
 /** 一个工作区分组（design d-*：组行 + 组内会话行）。 */
-function WorkspaceGroup({ group, collapsed, current, renamingId, onToggle, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, pendings }: {
+function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, pendings }: {
   group: { key: string; workspace: WorkspaceView | null; sessions: readonly SessionSummary[] }
   collapsed: boolean
+  /** 组内是否已「展开其余 N 个会话」（与整组 `collapsed` 正交，见调用方注释）。 */
+  expanded: boolean
   current: SessionId | undefined
   renamingId: SessionId | null
   onToggle: () => void
+  onToggleExpand: () => void
   onOpen: (sessionId: SessionId) => void
   onStartSession: () => void
   onRenameRequest: () => void
@@ -617,27 +673,46 @@ function WorkspaceGroup({ group, collapsed, current, renamingId, onToggle, onOpe
           </button>
         </span>
       </div>
-      {/* 组内会话行（design sr：缩进 32 对齐 folder 右侧）。 */}
-      {!collapsed && group.sessions.length > 0 && (
-        <div className={css.groupSessions}>
-          {group.sessions.map(row => (
-            <SessionRow
-              key={row.id}
-              row={row}
-              active={row.id === current}
-              nested
-              renaming={renamingId === row.id}
-              onOpen={() => onOpen(row.id)}
-              onStartRename={() => { onStartRowRename(row.id) }}
-              onSubmitRename={onSubmitRename}
-              onCancelRename={onCancelRename}
-              onFork={() => { onForkRow(row.id) }}
-              onArchive={() => { onArchiveRow(row.id) }}
-              pendings={pendings}
-            />
-          ))}
-        </div>
-      )}
+      {/* 组内会话行（design sr：缩进 32 对齐 folder 右侧）。
+          折叠到最近 5 条 + 「展开其余 N 个会话 / 收起」（2026-09-15 用户指示，口径照抄
+          dsh 官方 WorkspaceBrowser：普通行 5 条上限，blank 不占名额）。 */}
+      {!collapsed && group.sessions.length > 0 && (() => {
+        const { visible, hiddenCount } = expanded
+          ? { visible: group.sessions, hiddenCount: 0 }
+          : collapseSessions(group.sessions)
+        return (
+          <div className={css.groupSessions}>
+            {visible.map(row => (
+              <SessionRow
+                key={row.id}
+                row={row}
+                active={row.id === current}
+                nested
+                renaming={renamingId === row.id}
+                onOpen={() => onOpen(row.id)}
+                onStartRename={() => { onStartRowRename(row.id) }}
+                onSubmitRename={onSubmitRename}
+                onCancelRename={onCancelRename}
+                onFork={() => { onForkRow(row.id) }}
+                onArchive={() => { onArchiveRow(row.id) }}
+                pendings={pendings}
+              />
+            ))}
+            {/* 溢出控件：折叠时显示「展开其余 N 个会话」，展开后显示「收起」。
+                文案带计数（官方词典 sessions.expand/sessions.collapse 同口径）。 */}
+            {(hiddenCount > 0 || expanded) && (
+              <button
+                type="button"
+                className={css.groupMore}
+                aria-expanded={expanded}
+                onClick={onToggleExpand}
+              >
+                {expanded ? '收起' : `展开其余 ${hiddenCount} 个会话`}
+              </button>
+            )}
+          </div>
+        )
+      })()}
       {!collapsed && group.sessions.length === 0 && (
         <div className={css.groupEmpty}>（无会话）</div>
       )}

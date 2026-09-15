@@ -33,7 +33,7 @@
   border-radius: 12px 12px 0 0;
   /* fork（corum 液态玻璃）：队列面板 glass-2 + blur（描边在 ::after）。 */
   background: var(--corum-glass-2);
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }

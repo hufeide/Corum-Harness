@@ -28,6 +28,18 @@ body {
   --corum-glass-3: #FFFFFFB3;
   --corum-glass-border: #FFFFFF;
   --corum-glass-border-active: #5B21F5;
+  /*
+   * 毛玻璃的 backdrop 滤镜（**深浅共用一处**，2026-09-15 抽成变量）。
+   *
+   * 由来：此前 `blur(20px) saturate(140%)` 这**同一个值**硬编码在 **14 个文件的 25 处**
+   * （卡片/面板/浮层/输入区…），想调一次就得改 25 个地方 ⇒ 抽成变量后**一处生效**。
+   *
+   * 浅色保持 20px 不动（2026-09-15 用户定调「浅色不调」）；深色提到 28px ——
+   * 因为深色卡片透明度同步调高了（见下），**底座越透就越需要更强的模糊**，
+   * 否则背景的光斑/文字细节会穿进卡片、干扰读代码。
+   */
+  --corum-glass-blur: blur(20px) saturate(140%);
+
   /* 背景 / 品牌 / 状态 */
   /* 预留：最深层背景（当前无消费方，供后续最底层背景使用） */
   --corum-bg-deep: #DDDCE8;
@@ -43,11 +55,21 @@ body {
 }
 
 body[data-ds-dark-theme] {
-  --corum-glass-1: #1D112BD9;
-  --corum-glass-2: #2A1840D9;
-  --corum-glass-3: #372050CC;
+  /*
+   * 2026-09-15 用户定调：**浅色不动，深色提高透明度**（「玻璃透明效果很弱，需要加强」）。
+   *
+   * 换算（实测数值，不是感觉）：原来 alpha D9 = 217/255 = **85.1% 不透明 ⇒ 只透出 14.9%**，
+   * 那个不透明度下 `backdrop-filter` 的 20px 模糊**根本看不出来** —— 这才是「玻璃很弱」的机制原因。
+   * 现改为 9E = 158/255 = **62.0% ⇒ 透出 38.0%**（用户选定的「明显档」）。
+   * `glass-2`/`glass-3` 按**同一比例**（0.7286）缩放，保持原有三层层次关系不变。
+   */
+  --corum-glass-1: #1D112B9E;
+  --corum-glass-2: #2A18409E;
+  --corum-glass-3: #37205095;
   --corum-glass-border: #B98CFF2E;
   --corum-glass-border-active: #01CDFE;
+  /* 深色底座更透了，模糊相应加强（20px → 28px）以免背景细节穿进卡片干扰读代码。 */
+  --corum-glass-blur: blur(28px) saturate(150%);
   --corum-bg-deep: #0A0612;
   --corum-brand-accent: #FF71CE;
   --corum-label-on-brand: #0A0612;
@@ -113,7 +135,7 @@ body::after {
   background: var(--corum-glass-1);
   border: 1px solid var(--corum-glass-border);
   border-radius: 18px;
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
 /* ── 动效降级 ───────────────────────────────────────────────────────── */

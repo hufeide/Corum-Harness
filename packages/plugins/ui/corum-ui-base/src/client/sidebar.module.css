@@ -423,6 +423,29 @@
   flex-direction: column;
   gap: 2px;
 }
+/* 「展开其余 N 个会话 / 收起」溢出控件（2026-09-15 用户指示：会话栏只展示最近 5 条）。
+   缩进与组内会话行对齐（32px，同 groupEmpty 的左内边距），字号比会话行小一档，
+   颜色走三级标签色 —— 它是**辅助动作**，不该抢会话行的视觉权重。 */
+.groupMore {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px 3px 32px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.groupMore:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--corum-glass-2);
+}
+.groupMore:focus-visible {
+  outline: 2px solid var(--corum-glass-border-active);
+  outline-offset: -2px;
+}
 .groupEmpty {
   padding: 4px 10px 6px 32px;
   color: var(--dsw-alias-label-tertiary);
@@ -727,6 +750,31 @@
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
   font-weight: 600;
+}
+/* 目录不可用行（项目 cwd 失联）：降透明度 + 警示色子行 + 删除入口。 */
+.historyRowUnavailable {
+  opacity: 0.75;
+}
+.historyRowUnavailable .historySub {
+  color: var(--dsw-alias-warn-primary, #d97706);
+}
+.historyRowUnavailable:hover {
+  background: var(--corum-glass-2);
+}
+.historyDelete {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.historyDelete:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-error-primary, #dc2626);
 }
 /* ④ 项目详情 project-header（design：folder-open + 名称/成员数·状态 + ×关闭）。 */
 .projectHeader {

@@ -29,6 +29,7 @@ import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-con
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { SectionNavContext } from './settings/shared.tsx'
+import type { SettingsKey } from './settings-locales.ts'
 import { NAV_GROUP_BY_ID, type SettingsNavGroup } from './settings/SettingsSections.tsx'
 import { OPEN_SETTINGS_SECTION_EVENT } from './service.ts'
 import css from './SettingsShell.module.css'
@@ -79,12 +80,17 @@ function navIcon(id: string): ReactNode {
  * NAV_GROUP_BY_ID 数据源），缺省归 'extensions'（扩展）。5 组标题/顺序保持现状
  * （通用→AGENT→数据与隐私→扩展→高级），不再有「其他」桶——所有 section 都有归属。
  */
-const NAV_GROUPS: { key: SettingsNavGroup; title: string }[] = [
-  { key: 'general', title: '通用' },
-  { key: 'agent', title: 'AGENT' },
-  { key: 'data', title: '数据与隐私' },
-  { key: 'extensions', title: '扩展' },
-  { key: 'advanced', title: '高级' },
+/**
+ * 导航分组定义：`titleKey` 是 locale key（不是显示文本）——分组标题必须跟随语言，
+ * 否则切到 English 后 5 个分组标题仍是中文（实测就是这样）。渲染处用 `t(titleKey)`
+ * 求值（`t` 已是本 effect 的 `ctx.locale.bind(NS)` 绑定）。
+ */
+const NAV_GROUPS: { key: SettingsNavGroup; titleKey: SettingsKey }[] = [
+  { key: 'general', titleKey: 'group.general' },
+  { key: 'agent', titleKey: 'group.agent' },
+  { key: 'data', titleKey: 'group.data' },
+  { key: 'extensions', titleKey: 'group.extensions' },
+  { key: 'advanced', titleKey: 'group.advanced' },
 ]
 
 /** 读某 section 的归属分组（自声明；缺省归扩展）。 */
@@ -139,7 +145,7 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, onOpenPl
   // 为每个分组计算可见项：读每个 section 自声明的 navGroup（缺省归扩展），
   // 保持 5 组标题/顺序现状；无「其他」桶。
   const visibleGroups = NAV_GROUPS.map(group => ({
-    title: group.title,
+    title: t(group.titleKey),
     items: filteredRows.filter(r => navGroupOf(r.id) === group.key),
   })).filter(g => g.items.length > 0)
 

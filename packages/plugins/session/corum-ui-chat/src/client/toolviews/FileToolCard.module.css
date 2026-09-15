@@ -1,0 +1,440 @@
+/* fork（corum）：文件工具卡统一玻璃壳（2026-09-14）。
+ *
+ * 唯一权威 = doc/UXDesign/design.pen §1.1 `row-文件工具卡` 六个 reusable 组件
+ * （壳逐项对齐 SubagentCard.module.css:8-12 的会话区卡族配方）：
+ *   background  $glass-1          → var(--corum-glass-1)
+ *   border      1px $glass-border → var(--corum-glass-border)
+ *   radius      14                → 14px
+ *   backdrop    blur(20)          → blur(20px) saturate(140%)（pen 无 saturate，取舍点 F）
+ *   padding     12                → 12px
+ *   卡内 gap    8                 → 8px
+ *
+ * 颜色**全部**取既有变量（--corum-* / --dsw-alias-*），本文件不写死任何色值；
+ * diff 增删行取状态色**低透明度**（design.pen 的 fill opacity 0.14，取舍点 A），
+ * 用 color-mix() 表达，深浅双主题同一口径。
+ *
+ * 关于 `[class*='_xxx_']`：官方积木（ReadBlock / DiffBlock）的 CSS module 类名带
+ * 构建期作用域后缀，且它是**官方源码**（不改、不 fork），所以只能按「类名含稳定
+ * 词干」选择来调它的外壳。这不复制官方实现，只调其公开外观。
+ */
+
+/* ── 统一壳（六态完全一致，只有内容与状态色不同）───────────────────── */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  margin: 4px 0 4px 4px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 14px;
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
+}
+
+/* ── 第一段 head ─────────────────────────────────────────────────── */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 24×24 图标盒（与 subagent-card 的 act-expand/act-goto 同规格）。 */
+.iconBox {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  color: var(--dsw-alias-brand-text, #5B21F5);
+}
+
+.iconBox[data-tone='error'] { color: var(--dsw-alias-state-error-primary, #E0245E); }
+.iconBox[data-tone='success'] { color: var(--dsw-alias-state-success-primary, #0BA57C); }
+
+.title {
+  flex: none;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 行尾操作按钮（24×24，与图标盒同规格）。 */
+.action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.action:hover { color: var(--dsw-alias-label-primary); }
+
+/* ── chip 族（design.pen 的 path/range/state/mode/stats/flag/cause/sim 同底）──
+ *
+ * 写法说明：一律用 `.chip.chip` 双类提高特异性。官方 `Pill` 的 `.pill` 与 `.chip`
+ * 同为单类选择器，胜负取决于样式表注入顺序（本插件的样式由 inline-css 在运行时
+ * append 到 head，晚于静态 CSS）。双类让「设计稿的 chip 规格」**不依赖加载顺序**
+ * 地稳定生效——这是消除一类脆弱性的显式手段，不是 hack。
+ */
+.chip.chip {
+  box-sizing: border-box;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: auto;
+  padding: 3px 8px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 状态色档（state / sim / cause / mode 的值随档位走）。 */
+.chip.chip[data-tone='success'] { color: var(--dsw-alias-state-success-primary, #0BA57C); }
+.chip.chip[data-tone='error'] { color: var(--dsw-alias-state-error-primary, #E0245E); }
+.chip.chip[data-tone='warn'] { color: var(--dsw-alias-state-warn-primary, #E07A00); }
+.chip.chip[data-tone='idle'] { color: var(--dsw-alias-label-tertiary); }
+
+.chipLabel { white-space: nowrap; }
+
+/* 路径 chip：等宽。长路径保尾部省略 + tooltip 给全路径（见实现报告 G 项）。 */
+.chipPath.chipPath {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.chipPathText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* 路径 chip 的可点形态：button 复位（保留 chip 外观）。 */
+button.chipButton {
+  font: inherit;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button.chipButton:hover { border-color: var(--corum-glass-border-active); }
+
+/* 范围 / 行号 chip：等宽 + 品牌色。 */
+.chipMono.chipMono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text, #5B21F5);
+}
+
+/* ±统计 chip：加绿删红，等宽。 */
+.chipStats.chipStats {
+  gap: 6px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.statAdd { color: var(--dsw-alias-state-success-primary, #0BA57C); }
+.statDel { color: var(--dsw-alias-state-error-primary, #E0245E); }
+
+/* mode 徽标（write 的「新建 / 覆盖」）。 */
+.chipMode.chipMode { font-weight: 600; }
+
+/* flag 徽标（edit 未命中的「文件未改动」、重复行标签）。 */
+.chipFlag.chipFlag { font-size: 11px; font-weight: 500; color: var(--dsw-alias-label-tertiary); }
+
+/* 相似度徽标（design.pen 的 `sim`）：默认琥珀，相同文本转成功色。 */
+.chipSim.chipSim { font-weight: 600; }
+
+/* 失败原因标签：default 中性，首行红描边。 */
+.chipCause.chipCause {
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.chipCause.chipCause[data-tone='error'] {
+  border-color: var(--dsw-alias-state-error-primary, #E0245E);
+  color: var(--dsw-alias-state-error-primary, #E0245E);
+}
+
+/* ── 第二段 content ──────────────────────────────────────────────── */
+.content {
+  min-width: 0;
+  padding: 8px;
+  background: var(--corum-glass-2);
+  border-radius: 10px;
+  /* 卡内滚动（2026-09-15 用户要求「可卡片内滚动」）：展开后内容**在卡片内部**滚动，
+     不再把整条会话撑长（与「默认收起」配套，解决「占的高度太高」）。
+     max-height 用 **vh 相对**而非固定 px：不同窗口高度下都留出上下文余量，
+     同时避免「在小窗口里滚动条本身占满卡片」的反直觉表现。 */
+  max-height: 46vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 滚动区域内的长行（diff/代码）不换行挤压，改由内部纵向滚动承接。 */
+  overscroll-behavior: contain;
+  /* 轻微内缩滚动条，避免与玻璃圆角相切处裁掉首末行。 */
+  scrollbar-gutter: stable;
+}
+
+/* 滚动条走 corum 玻璃token，避免默认亮色滚动条在深色玻璃上刺眼。 */
+.content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: var(--corum-glass-border);
+  border-radius: 4px;
+}
+
+.content::-webkit-scrollbar-thumb:hover {
+  background: var(--corum-glass-border-active);
+}
+
+.content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* content 里的官方积木：只调它公开的 CSS 变量与外壳，不复制其实现。
+   这些选择器带祖先 `.content`，特异性已高于官方单类规则，无需双类。 */
+.content [data-read],
+.content [data-diff] {
+  margin: 0;
+  background: transparent;
+  border-radius: 10px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.content [data-read] {
+  --dsl-read-radius: 10px;
+  --dsl-read-line-height: 18px;
+  --dsl-read-gutter: 44px;
+}
+
+.content [data-diff] {
+  --dsl-diff-radius: 10px;
+  --dsl-diff-line-height: 18px;
+}
+
+/* ReadBlock 的 banner：路径 / 行范围 / 语言已上移到 head 的 chip，这里不再重复；
+   只保留复制按钮（行为等价清单的「复制」不得回退）。 */
+.content [data-read] > [class*='_banner_'] {
+  justify-content: flex-end;
+  padding: 0 0 2px;
+  background: transparent;
+}
+
+.content [data-read] > [class*='_banner_'] > [class*='_label_'],
+.content [data-read] > [class*='_banner_'] > [class*='_action_'] > [class*='_count_'],
+.content [data-read] > [class*='_banner_'] > [class*='_action_'] > [class*='_lang_'] {
+  display: none;
+}
+
+.content [data-read] [class*='_copyButton_'] {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+/* diff 本体：等宽三列（design.pen 的 no / sign / code），去掉官方 code-block 底色。 */
+.content [data-diff] [class*='_body_'] {
+  padding: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.content [data-diff] [class*='_line_'] {
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+/* hunk 头（design.pen 的 `hunk`）：$label-dimmed 11px，不再是官方 primary 600 路径行。 */
+.content [data-diff] [class*='_path_'] {
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 11px;
+  font-weight: 400;
+  padding: 0 6px 4px;
+}
+
+.content [data-diff] [class*='_gap_'] { color: var(--dsw-alias-label-dimmed); }
+
+/* 取舍点 A（**不得改**）：diff 增删行 = 低透明度状态色条，
+ * 代码字保持 $label-primary，只有符号（::before 的 +/−）上状态色。
+ * 取 design.pen 的 fill opacity 0.14，用 color-mix() 表达 → 深浅同口径。 */
+.content [data-diff] [class*='_del_'],
+.content [data-diff] [class*='_add_'] {
+  color: var(--dsw-alias-label-primary);
+}
+
+.content [data-diff] [class*='_del_'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #E0245E) 14%, transparent);
+}
+
+.content [data-diff] [class*='_add_'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #0BA57C) 14%, transparent);
+}
+
+.content [data-diff] [class*='_del_']::before { color: var(--dsw-alias-state-error-primary, #E0245E); }
+.content [data-diff] [class*='_add_']::before { color: var(--dsw-alias-state-success-primary, #0BA57C); }
+
+/* DiffBlock 悬浮复制按钮：收紧到玻璃块内（复制能力保留）。 */
+.content [data-diff] [class*='_copyButton_'] {
+  top: 0;
+  right: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+/* 官方 `└ +N -M · N 个文件` 底栏：设计稿的 data 段只有 hunk 头 + 行，
+ * 增删统计已上移到 head 的 stats chip → 这里不重复渲染（缺段即删不留空）。 */
+.content [data-diff] > [class*='_footer_'] { display: none; }
+
+/* 折叠控件：可见、键盘可达（aria-expanded / 键控由官方 FoldToggle 提供）。 */
+.content [data-read] [class*='_expand_'],
+.content [data-diff] [class*='_expand_'] {
+  width: 100%;
+  padding: 2px 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  text-align: left;
+}
+
+/* ── 失败原因面板（read 失败 / write 失败共用，取舍点 D）────────────── */
+.reasonPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--corum-glass-2);
+  border-radius: 10px;
+}
+
+.reasonRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 原因原文：等宽、可读（**绝不吞错**）。 */
+.reasonText {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-word;
+}
+
+/* ── 候选表 / 失配块（edit 未命中：能力不回归；取舍点 B 默认展开）────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  background: var(--corum-glass-2);
+  border-radius: 10px;
+}
+
+.candidateRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 行号跳转：可点 chip（品牌色），键盘可达。 */
+.lineLink {
+  flex: none;
+  padding: 3px 8px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--dsw-alias-brand-text, #5B21F5);
+  cursor: pointer;
+}
+
+.lineLink:hover { border-color: var(--corum-glass-border-active); }
+
+.mismatchRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mismatchKey {
+  flex: none;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 第三段 note / foot ──────────────────────────────────────────── */
+.note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-warn-primary, #E07A00);
+}
+
+.note[data-tone='muted'] { color: var(--dsw-alias-label-tertiary); }
+
+.noteIcon { flex: none; display: inline-flex; }
+
+/* 降级段：结构化解析给不出时，原文照旧可见（不崩、不吞错）。 */
+.fallbackText {
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--corum-glass-2);
+  border-radius: 10px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

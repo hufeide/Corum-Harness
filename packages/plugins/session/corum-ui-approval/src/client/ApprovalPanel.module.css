@@ -37,7 +37,7 @@
   border: 1px solid var(--dsw-alias-state-warn-primary);
   border-radius: 18px;
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
-  backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }

@@ -11,6 +11,7 @@
  *   （归属分组由 section 自己声明；缺省归 'extensions'）。
  */
 import type { ReactNode } from 'react'
+import type { SettingsKey } from '../settings-locales.ts'
 import { AppearanceSection } from './sections/SettingsAppearanceSection.tsx'
 import { NotificationsSection } from './sections/SettingsNotificationsSection.tsx'
 import { ShortcutsSection } from './sections/SettingsShortcutsSection.tsx'
@@ -54,7 +55,19 @@ export type SettingsNavGroup = 'general' | 'agent' | 'data' | 'extensions' | 'ad
 export interface SectionDef {
   id: string
   order: number
-  label: string
+  /**
+   * 导航标签的 **locale key**（不是显示文本本身）。
+   *
+   * 为什么存 key 而非字符串/预绑定 thunk：导航行由 `settings.section` 槽投影，
+   * 而该槽的 `label` 支持 `SlotLabel = string | (() => string)`——**thunk 每次读取
+   * 时求值**（`@deepseek-ai/dsh-client-ui-slots` 的 `resolveSlotLabel`），因此
+   * 注册期给的 thunk 会跟随当前语言，**无需重新注册**。官方 `ui-settings-general`
+   * 的 General 条目就是这么写的（`label: () => t('general.nav')`）。
+   * 但 `SECTION_DEFS` 是**模块级常量**，拿不到注册期的 `t`（它在 `index.tsx` 的
+   * effect 里经 `ctx.locale.bind(NS)` 得到）⇒ 此处只声明 key，由注册处绑成
+   * `() => t(def.label)`。
+   */
+  label: SettingsKey
   /** 归属分组（自声明）；缺省归 'extensions'（扩展）。 */
   navGroup?: SettingsNavGroup
   /** section 组件；多数无 props，`extensions` 可收可选的 renderTabSlot。 */
@@ -67,27 +80,27 @@ export interface SectionDef {
  * （ExtensionsSection「插件管理」承接）。
  */
 export const SECTION_DEFS: SectionDef[] = [
-  { id: 'appearance', order: 10, label: '外观', navGroup: 'general', Component: AppearanceSection },
-  { id: 'notifications', order: 20, label: '通知', navGroup: 'general', Component: NotificationsSection },
-  { id: 'shortcuts', order: 30, label: '快捷键', navGroup: 'general', Component: ShortcutsSection },
-  { id: 'permissions', order: 50, label: '权限', navGroup: 'agent', Component: PermissionsSection },
-  { id: 'rules', order: 60, label: '规则与指令', navGroup: 'agent', Component: RulesSection },
-  { id: 'memory', order: 70, label: '记忆', navGroup: 'agent', Component: MemorySection },
-  { id: 'terminal', order: 80, label: '终端', navGroup: 'agent', Component: TerminalSection },
-  { id: 'hooks', order: 90, label: 'Hooks 与自动化', navGroup: 'agent', Component: HooksSection },
-  { id: 'agent-loop', order: 100, label: '高级 Agent Loop', navGroup: 'agent', Component: AgentLoopSection },
-  { id: 'agent-presets', order: 110, label: 'Agent 预设', navGroup: 'agent', Component: AgentPresetsSection },
-  { id: 'subagent', order: 115, label: '子 Agent', navGroup: 'agent', Component: SubagentSection },
-  { id: 'account', order: 120, label: '账户与用量', navGroup: 'data', Component: AccountSection },
-  { id: 'privacy', order: 130, label: '隐私', navGroup: 'data', Component: PrivacySection },
-  { id: 'data', order: 140, label: '数据管理', navGroup: 'data', Component: DataSection },
-  { id: 'mcp', order: 150, label: 'MCP 与集成', navGroup: 'extensions', Component: McpSection },
-  { id: 'skills', order: 160, label: '技能', navGroup: 'extensions', Component: SkillsSection },
+  { id: 'appearance', order: 10, label: 'nav.appearance', navGroup: 'general', Component: AppearanceSection },
+  { id: 'notifications', order: 20, label: 'nav.notifications', navGroup: 'general', Component: NotificationsSection },
+  { id: 'shortcuts', order: 30, label: 'nav.shortcuts', navGroup: 'general', Component: ShortcutsSection },
+  { id: 'permissions', order: 50, label: 'nav.permissions', navGroup: 'agent', Component: PermissionsSection },
+  { id: 'rules', order: 60, label: 'nav.rules', navGroup: 'agent', Component: RulesSection },
+  { id: 'memory', order: 70, label: 'nav.memory', navGroup: 'agent', Component: MemorySection },
+  { id: 'terminal', order: 80, label: 'nav.terminal', navGroup: 'agent', Component: TerminalSection },
+  { id: 'hooks', order: 90, label: 'nav.hooks', navGroup: 'agent', Component: HooksSection },
+  { id: 'agent-loop', order: 100, label: 'nav.agentLoop', navGroup: 'agent', Component: AgentLoopSection },
+  { id: 'agent-presets', order: 110, label: 'nav.agentPresets', navGroup: 'agent', Component: AgentPresetsSection },
+  { id: 'subagent', order: 115, label: 'nav.subagent', navGroup: 'agent', Component: SubagentSection },
+  { id: 'account', order: 120, label: 'nav.account', navGroup: 'data', Component: AccountSection },
+  { id: 'privacy', order: 130, label: 'nav.privacy', navGroup: 'data', Component: PrivacySection },
+  { id: 'data', order: 140, label: 'nav.data', navGroup: 'data', Component: DataSection },
+  { id: 'mcp', order: 150, label: 'nav.mcp', navGroup: 'extensions', Component: McpSection },
+  { id: 'skills', order: 160, label: 'nav.skills', navGroup: 'extensions', Component: SkillsSection },
   // fork（corum）：AI 润色配置（2026-09-09 重建；导航 id 沿用历史值 ai-polish）。
-  { id: 'ai-polish', order: 165, label: 'AI 润色', navGroup: 'extensions', Component: PolishSection },
-  { id: 'advanced', order: 170, label: '高级', navGroup: 'advanced', Component: AdvancedSection },
-  { id: 'profiles', order: 180, label: '配置档案', navGroup: 'advanced', Component: ProfilesSection },
-  { id: 'extensions', order: 190, label: '插件管理', navGroup: 'extensions', Component: ExtensionsSection },
+  { id: 'ai-polish', order: 165, label: 'nav.aiPolish', navGroup: 'extensions', Component: PolishSection },
+  { id: 'advanced', order: 170, label: 'nav.advanced', navGroup: 'advanced', Component: AdvancedSection },
+  { id: 'profiles', order: 180, label: 'nav.profiles', navGroup: 'advanced', Component: ProfilesSection },
+  { id: 'extensions', order: 190, label: 'nav.extensions', navGroup: 'extensions', Component: ExtensionsSection },
 ]
 
 /**
