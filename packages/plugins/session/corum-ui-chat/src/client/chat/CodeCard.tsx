@@ -18,9 +18,10 @@
  * 在终端运行：本轮 UI-only——点击显示「功能待实现」提示，不做任何 IPC/服务接线。
  */
 import { memo, useCallback, useState } from 'react'
-import { ChevronDown, ChevronUp, Copy, Play, SquareTerminal } from 'lucide-react'
+import { ChevronDown, ChevronUp, Copy, FileCode, Play, SquareTerminal } from 'lucide-react'
 import { writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
+import { isScriptFence } from './code-fence-kind.ts'
 import css from './CodeCard.module.css'
 
 /** 框架注入的 t（chat namespace + common 词汇）。 */
@@ -36,15 +37,24 @@ export interface CodeCardProps {
 }
 
 /**
- * 代码段卡（设计稿 qLyn3 lIHmW / jWH6J）。
+ * 围栏代码卡（设计稿 qLyn3 lIHmW / jWH6J / JdYy4）——**按用途分两类**（2026-09-15 用户定调）：
  *
- * 默认折叠（与 FileToolCard / SubagentCard 的 disclosure 惯例一致——长块首屏
- * 不占满，用户点击 chevron 展开）。
+ *   · **代码片段**（`isScript === false`）：给人**读**的代码。头部 = 图标 + 「代码片段」+
+ *     语言 chip + 行数 chip + 复制 + 折叠 chevron。**不出「在终端运行」**。
+ *   · **脚本片段**（`isScript === true`）：给用户**去跑**的脚本 —— 典型场景是
+ *     **受沙箱限制 Agent 无法自行执行**（例如需要写工作区外的路径），于是把命令交给用户执行。
+ *     头部额外出现绿色「**在终端运行**」。图标/标题也随之区分（square-terminal / 「脚本片段」）。
+ *
+ * **默认展开**（2026-09-15 用户更正）：代码/脚本片段**默认不折叠**。
+ * 注意与文件卡（read/edit/write）区别 —— 那三张卡是**默认收起**（用户 2026-09-15 定调），
+ * 两类卡片的默认态**刻意不同**，别互相「统一」。
  */
 export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps) {
-  const [expanded, setExpanded] = useState(false)
+  // 默认**展开**（用户 2026-09-15 更正：代码/脚本片段默认不折叠）。
+  const [expanded, setExpanded] = useState(true)
   const [copied, setCopied] = useState(false)
   const [runHint, setRunHint] = useState(false)
+  const isScript = isScriptFence(lang)
 
   const lines = code.split('\n')
   const lineCount = lines.length
@@ -69,10 +79,12 @@ export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps)
   return (
     <div className={css.card} data-corum-code-card="">
       <div className={css.head}>
-        <span className={css.iconBox}>
-          <SquareTerminal size={14} strokeWidth={2} className={css.iconBoxIcon} />
+        <span className={css.iconBox} data-fence-kind={isScript ? 'script' : 'code'}>
+          {isScript
+            ? <SquareTerminal size={14} strokeWidth={2} className={css.iconBoxIconSuccess} />
+            : <FileCode size={14} strokeWidth={2} className={css.iconBoxIcon} />}
         </span>
-        <span className={css.title}>{t('codeCard.title')}</span>
+        <span className={css.title}>{t(isScript ? 'codeCard.title.script' : 'codeCard.title.code')}</span>
         {lang !== undefined && lang !== '' && (
           <span className={css.chip}>
             <span className={css.chipLang}>{lang}</span>
@@ -92,16 +104,21 @@ export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps)
           <Copy size={13} strokeWidth={2} className={css.btnIconMuted} />
           <span className={css.btnLabel}>{copied ? t('copied') : t('copy')}</span>
         </button>
-        <button
-          type="button"
-          className={css.btn}
-          title={runHint ? t('codeCard.runHint') : t('codeCard.run')}
-          aria-label={t('codeCard.run')}
-          onClick={onRun}
-        >
-          <Play size={13} strokeWidth={2} className={css.btnIconSuccess} />
-          <span className={css.btnLabelSuccess}>{runHint ? t('codeCard.runHint') : t('codeCard.run')}</span>
-        </button>
+        {/* 「在终端运行」**只属于脚本片段**（2026-09-15 用户定调）：
+            代码片段是给人读的，不该出现执行入口。 */}
+        {isScript && (
+          <button
+            type="button"
+            className={css.btn}
+            data-run-in-terminal=""
+            title={runHint ? t('codeCard.runHint') : t('codeCard.run')}
+            aria-label={t('codeCard.run')}
+            onClick={onRun}
+          >
+            <Play size={13} strokeWidth={2} className={css.btnIconSuccess} />
+            <span className={css.btnLabelSuccess}>{runHint ? t('codeCard.runHint') : t('codeCard.run')}</span>
+          </button>
+        )}
         <button
           type="button"
           className={css.btn}

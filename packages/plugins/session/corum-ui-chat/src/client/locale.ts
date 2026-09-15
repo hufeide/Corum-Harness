@@ -226,7 +226,10 @@ export const zh = {
   'fileCard.foot.writeCreated': '新建文件 · 已生成 {added} 行。',
   'fileCard.foot.writeOverwritten': '整文件覆盖写入 · 已生成 {added} 行 / 删除 {removed} 行。',
   // ── 代码段卡（2026-09-15）：替换官方 CodeBlock 黑条 banner 的 corum 毛玻璃卡 ──
-  'codeCard.title': '代码段',
+  // 2026-09-15：围栏卡按用途分两档（用户定调）——给人读的是「代码片段」，
+  // 给人跑（受沙箱限制 Agent 自己跑不了）的是「脚本片段」。
+  'codeCard.title.code': '代码片段',
+  'codeCard.title.script': '脚本片段',
   'codeCard.lines': '{n} 行',
   'codeCard.copy': '复制',
   'codeCard.copied': '已复制',
@@ -467,7 +470,8 @@ export const en = {
   'fileCard.foot.writeCreated': 'Created file · {added} lines written.',
   'fileCard.foot.writeOverwritten': 'Whole-file overwrite · {added} lines written / {removed} removed.',
   // ── Code segment card (2026-09-15): replaces official CodeBlock black-bar banner ──
-  'codeCard.title': 'Code',
+  'codeCard.title.code': 'Code',
+  'codeCard.title.script': 'Script',
   'codeCard.lines': '{n} lines',
   'codeCard.copy': 'Copy',
   'codeCard.copied': 'Copied',

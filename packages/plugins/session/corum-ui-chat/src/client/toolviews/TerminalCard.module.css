@@ -180,25 +180,28 @@
 
 /* ── 折叠体 ──────────────────────────────────────────────────────── */
 
-.collapsedBody {
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+/* 命令行（**折叠与展开两态都恒为一行 + 省略号**，2026-09-15 用户定调）。
+   ⚠️ 本块**推翻了 2026-09-15 早前的相反要求**（当时写的是「pre-wrap + 无 ellipsis、
+   长指令必须完整可见」，且把这句写成了「最重要的验收标准」）。新要求的原由：
+   AI 发出的命令常很长，完整铺开占掉半屏；核对只需看开头，全文另有 hover title 与
+   「复制命令」。⇒ 故此处**必须** nowrap + ellipsis。 */
+.cmdRow {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-/* 折叠态命令全文——这是最重要的验收标准：
-   pre-wrap（保留空格 + 换行），overflow-wrap anywhere，无 max-height，
-   无 overflow hidden，无 text-overflow ellipsis。长指令必须完整可见。 */
+/* min-width: 0 是 flex 子项能真正收缩的前提（否则 ellipsis 不生效，会把兄弟挤出去）。 */
 .cmdText {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
   font-size: 12.5px;
   color: var(--dsw-alias-label-primary);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .collapsedHint {

@@ -149,24 +149,28 @@ function TerminalCardBody({ model, t }: { model: NonNullable<ReturnType<typeof t
             : <ChevronDown size={13} strokeWidth={2} />}
         </button>
       </div>
-      {expanded ? (
+      {/*
+        命令行：**折叠与展开两态都恒为一行 + 省略号**（2026-09-15 用户定调）。
+        原由：AI 发出的命令常常很长，完整铺开会占掉半屏；而用户核对命令只需看到开头，
+        真要全文有 title（hover）与「复制命令」。
+        ⚠️ 与早期设计（折叠态完整折行）**相反** —— 那条已被本次要求取代。
+        输出才是展开态的主角，故展开体**不再重复命令回显**（见下方 filter）。
+      */}
+      <div className={css.cmdRow} data-corum-terminal-cmd="">
+        <span className={css.cmdText} title={model.command}>{`$ ${model.command}`}</span>
+        {!expanded && outputLines > 0 && (
+          <span className={css.collapsedHint}>{t('terminalCard.outputCollapsed', { n: outputLines })}</span>
+        )}
+      </div>
+      {expanded && (
         <div className={css.body} data-corum-terminal-body="">
-          {lines.map((line, i) => (
+          {lines.filter(line => line.role !== 'command').map((line, i) => (
             <div className={`${css.bodyLine} ${bodyLineClass(line.role)}`} key={i}>
               {line.text}
             </div>
           ))}
           {model.output === undefined && (
             <div className={`${css.bodyLine} ${css.bodyLineDim}`}>{t('terminalCard.noOutput')}</div>
-          )}
-        </div>
-      ) : (
-        <div className={css.collapsedBody} data-corum-terminal-collapsed="">
-          <div className={css.cmdText}>{`$ ${model.command}`}</div>
-          {outputLines > 0 && (
-            <div className={css.collapsedHint}>
-              {t('terminalCard.outputCollapsed', { n: outputLines })}
-            </div>
           )}
         </div>
       )}
@@ -244,11 +248,12 @@ function FallbackCard({ props, t }: { props: ToolCallViewProps & { t: TFunc }; t
             : <ChevronDown size={13} strokeWidth={2} />}
         </button>
       </div>
-      <div className={css.fallbackBody}>
-        {expanded && output
-          ? `$ ${command}\n${output}`
-          : `$ ${command}`}
+      <div className={css.cmdRow} data-corum-terminal-cmd="">
+        <span className={css.cmdText} title={command}>{`$ ${command}`}</span>
       </div>
+      {expanded && output !== undefined && output !== '' && (
+        <div className={css.fallbackBody}>{output}</div>
+      )}
     </div>
   )
 }
