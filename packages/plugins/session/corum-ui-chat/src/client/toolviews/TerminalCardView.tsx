@@ -11,7 +11,9 @@
  *
  * 复制：复用官方 `writeClipboard`（`@deepseek-ai/dsh-client-ui-primitives`），
  * 与官方 CodeBlock 同款 1000ms copied 态。两个独立复制控件（复制命令 / 复制输出）
- * 保持分离——它们复制不同的东西。
+ * 保持分离——它们复制不同的东西。**位置不同**（2026-09-15 用户定调）：
+ * 「复制命令」在头部（两态都在），「复制输出」在**展开体的框内底部右侧**
+ * （设计源 = design.pen 帧 sCrmX 的 `term > out-actions`），**折叠态不出现**。
  *
  * 折叠态默认（与 FileToolCard / SubagentCard 的 disclosure 惯例一致）。折叠态
  * 命令全文 **必须完整可见、换行、不截断、不用 ellipsis**（验收标准 #1）。
@@ -127,17 +129,6 @@ function TerminalCardBody({ model, t }: { model: NonNullable<ReturnType<typeof t
         </button>
         <button
           type="button"
-          className={css.btn}
-          title={t('terminalCard.copyOutput')}
-          aria-label={t('terminalCard.copyOutput')}
-          onClick={onCopyOut}
-          disabled={model.output === undefined}
-        >
-          <ClipboardList size={13} strokeWidth={2} className={css.btnIcon} />
-          <span className={css.btnLabel}>{copiedOut ? t('terminalCard.copied') : t('terminalCard.copyOutput')}</span>
-        </button>
-        <button
-          type="button"
           className={css.chevronBtn}
           title={expanded ? t('terminalCard.collapse') : t('terminalCard.expand')}
           aria-label={expanded ? t('terminalCard.collapse') : t('terminalCard.expand')}
@@ -172,6 +163,28 @@ function TerminalCardBody({ model, t }: { model: NonNullable<ReturnType<typeof t
           {model.output === undefined && (
             <div className={`${css.bodyLine} ${css.bodyLineDim}`}>{t('terminalCard.noOutput')}</div>
           )}
+          {/*
+            「复制输出」在**展开体的框内、底部右侧**（2026-09-15 用户定调：
+            「展开后**框内**有复制输出比较合理」）。
+            设计源：design.pen 帧 sCrmX 的 `term > out-actions`（spacer + copy-output）。
+            ⚠️ 本块**推翻了卡片初版**（当时它和「复制命令」并排放在头部）—— 两条定调：
+              ① 折叠态**不得**出现它（头部现在只剩「复制命令」+ 折叠 chevron）；
+              ② 它复制的是**输出**，与「复制命令」是两个语义不同的控件，始终分开。
+          */}
+          <div className={css.outActions} data-corum-terminal-out-actions="">
+            <span className={css.outActionsSpacer} />
+            <button
+              type="button"
+              className={css.btn}
+              title={t('terminalCard.copyOutput')}
+              aria-label={t('terminalCard.copyOutput')}
+              onClick={onCopyOut}
+              disabled={model.output === undefined}
+            >
+              <ClipboardList size={13} strokeWidth={2} className={css.btnIcon} />
+              <span className={css.btnLabel}>{copiedOut ? t('terminalCard.copied') : t('terminalCard.copyOutput')}</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

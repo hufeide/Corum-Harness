@@ -178,6 +178,23 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* 输出体底部的动作行（设计稿 sCrmX 的 `term > out-actions`，2026-09-15 用户定调
+   「展开后框内有复制输出比较合理」）。
+   只有「复制输出」一个控件，靠透明 spacer 推到行尾。**折叠态不渲染本行**。 */
+.outActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+/* 透明弹性占位，把按钮顶到行尾（对应设计稿 out-actions 的 `spacer`：
+   `fill_container` 宽 + 1px 高 + 全透明填充）。 */
+.outActionsSpacer {
+  flex: 1 1 auto;
+  height: 1px;
+}
+
 /* ── 折叠体 ──────────────────────────────────────────────────────── */
 
 /* 命令行（**折叠与展开两态都恒为一行 + 省略号**，2026-09-15 用户定调）。
