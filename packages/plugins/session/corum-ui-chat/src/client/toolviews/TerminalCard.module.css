@@ -1,0 +1,239 @@
+/* fork（corum）：终端卡（设计稿 qLyn3 sCrmX expanded / j8ZUL collapsed）。
+   毛玻璃卡 r14 + 光边 + padding 12 + gap 8，头行 25px 高。 */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 14px;
+}
+
+/* ── 头行 ────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 25px;
+}
+
+.iconBox {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+}
+
+.iconBoxIcon {
+  color: var(--dsw-alias-brand-text);
+}
+
+.title {
+  font-family: Inter, sans-serif;
+  font-size: 15px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+/* 状态 pill：r8 + glass-2 + glass-border + pad [3,8] + gap 5 */
+.statusPill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12px;
+}
+
+.statusText {
+  color: var(--dsw-alias-label-primary);
+}
+
+.statusTextSuccess {
+  color: var(--dsw-alias-state-success-primary, #0BA57C);
+}
+
+.statusTextError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* 行数 chip（与 statusPill 同壳，文字 tertiary） */
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ── 按钮 ────────────────────────────────────────────────────────── */
+
+/* 通用按钮壳：r8 + glass-2 + glass-border + pad [4,10] + gap 6 */
+.btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:hover {
+  background: var(--corum-glass-3, rgba(55, 32, 80, 0.8));
+  border-color: var(--corum-glass-border-active, #01CDFE);
+}
+
+.btnIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.btnLabel {
+  font-family: Inter, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.chevronBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 25px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+  transition: color 0.15s ease;
+}
+
+.chevronBtn:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── 展开体 ──────────────────────────────────────────────────────── */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+}
+
+.bodyLine {
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.bodyLineCommand {
+  color: var(--dsw-alias-label-primary);
+}
+
+.bodyLineDim {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.bodyLineSuccess {
+  color: var(--dsw-alias-state-success-primary, #0BA57C);
+}
+
+.bodyLinePlain {
+  color: var(--dsw-alias-label-primary);
+}
+
+.bodyLineFailure {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* ── 折叠体 ──────────────────────────────────────────────────────── */
+
+.collapsedBody {
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 折叠态命令全文——这是最重要的验收标准：
+   pre-wrap（保留空格 + 换行），overflow-wrap anywhere，无 max-height，
+   无 overflow hidden，无 text-overflow ellipsis。长指令必须完整可见。 */
+.cmdText {
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12.5px;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.collapsedHint {
+  font-family: Inter, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── fallback（model=null 时渲染，不崩、不吞错） ──────────────────── */
+
+.fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 14px;
+}
+
+.fallbackHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 25px;
+}
+
+.fallbackBody {
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12.5px;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

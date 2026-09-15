@@ -36,6 +36,7 @@ import { TranscriptViewPolicy } from './transcript-view.ts'
 import { patchUpdateQueueWire } from './update-queue-wire.ts'
 import { createChatRuntime, primeSubagentChildCache, type ChatRuntimeService } from './chat-runtime.ts'
 import { FileToolView } from './toolviews/FileToolView.tsx'
+import { TerminalCardView } from './toolviews/TerminalCardView.tsx'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../chat-settings.ts'
 import { useTurnDataValue } from './chat/use-turn-data.ts'
 
@@ -470,6 +471,22 @@ export function apply(ctx: Context): void {
         locale: NS,
       }, FileToolView)
     }
+  })
+
+  // fork（corum）：终端卡（2026-09-15）—— bash 调用替换为 corum 毛玻璃卡
+  // （设计源 doc/UXDesign/design.pen qLyn3 sCrmX expanded / j8ZUL collapsed）。
+  // priority -1：官方 bash-sample.tsx:161 占 key='bash' priority 0（同 key 同
+  // 优先级注册直接 throw），用 -1 遮蔽。keyed 命中 = 整行替换，所以卡内必须
+  // 覆盖全部子态（model=null 的后台/persistent/错误走 fallback 壳，不空白）。
+  // pwsh / terminal_send 不在 corum 的 shipped preset 中接线（仅 bash 注册），
+  // 故只注册 bash 这一个 key。
+  ctx.slots.inject('tool.call.toolview', function* () {
+    yield ctx.slots.register({
+      name: 'tool.call.toolview',
+      key: 'bash',
+      priority: -1,
+      locale: NS,
+    }, TerminalCardView)
   })
 
   ctx.slots.inject('details', () => ctx.slots.register({
