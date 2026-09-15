@@ -71,7 +71,7 @@
   transition: background 120ms ease;
 }
 .iconBtn:hover {
-  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.05));
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 /* 选项区：vertical gap 8 */
@@ -129,7 +129,7 @@
   height: 16px;
   border-radius: 5px;
   border: 1.5px solid var(--dsw-alias-label-tertiary);
-  color: var(--corum-label-on-brand, var(--dsw-alias-label-on-brand, #fff));
+  color: var(--corum-label-on-brand, var(--corum-label-on-brand, #fff));
 }
 .checkbox[data-on] {
   background: var(--dsw-alias-state-business-primary);
@@ -265,7 +265,7 @@
   border: none;
   border-radius: 9px;
   background: var(--dsw-alias-state-business-primary);
-  color: var(--corum-label-on-brand, var(--dsw-alias-label-on-brand, #fff));
+  color: var(--corum-label-on-brand, var(--corum-label-on-brand, #fff));
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;

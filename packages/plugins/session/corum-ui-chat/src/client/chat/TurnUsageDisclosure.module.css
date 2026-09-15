@@ -78,7 +78,7 @@
 .totalLabel,
 .details .totalValue {
   padding-top: 6px;
-  border-top: 1px solid var(--dsw-alias-separator-primary);
+  border-top: 1px solid var(--dsw-alias-border-l2);
   color: var(--dsw-alias-label-primary);
 }
 

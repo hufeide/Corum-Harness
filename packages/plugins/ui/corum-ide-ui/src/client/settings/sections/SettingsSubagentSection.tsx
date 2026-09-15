@@ -76,7 +76,7 @@ export function SubagentSection() {
           留空 = 机制内置默认。research 实例（subagent_research）为只读实例，恒挂载、不可移除。
         </span>
       </div>
-      {error !== null && <p className={css.hintText} style={{ color: 'var(--dsw-alias-state-danger-primary)' }}>{error}</p>}
+      {error !== null && <p className={css.hintText} style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{error}</p>}
       <SettingGroup title="隔离与并行">
         <SettingRow label="隔离模式" desc="可能并发的子 Agent 写任务隔离到独立 git worktree；单发前台写任务直接在主工作区改。需 git 工作区。">
           <SelectField

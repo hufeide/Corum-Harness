@@ -756,7 +756,7 @@
   opacity: 0.75;
 }
 .historyRowUnavailable .historySub {
-  color: var(--dsw-alias-warn-primary, #d97706);
+  color: var(--dsw-alias-state-warn-primary, #d97706);
 }
 .historyRowUnavailable:hover {
   background: var(--corum-glass-2);
@@ -774,7 +774,7 @@
 }
 .historyDelete:hover {
   background: var(--corum-glass-2);
-  color: var(--dsw-alias-error-primary, #dc2626);
+  color: var(--dsw-alias-state-error-primary, #dc2626);
 }
 /* ④ 项目详情 project-header（design：folder-open + 名称/成员数·状态 + ×关闭）。 */
 .projectHeader {
@@ -996,7 +996,7 @@
   max-height: calc(100vh - 96px);
   border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
-  background: var(--corum-glass-1, var(--dsw-alias-background-primary));
+  background: var(--corum-glass-1, var(--dsw-alias-bg-base));
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
   animation: contentEnter 0.2s ease-out both;
   overflow: hidden;
@@ -1126,7 +1126,7 @@
   appearance: none;
 }
 .wizardTeamSelect option {
-  background: var(--dsw-alias-background-primary);
+  background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
 }
 .wizardRadio {

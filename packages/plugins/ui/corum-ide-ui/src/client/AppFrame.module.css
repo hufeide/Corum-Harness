@@ -1265,7 +1265,7 @@
 .agentCapsuleAborted {
   flex: none;
   font-size: 10.5px;
-  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 /* 状态详情浮层的子 Agent 区（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。 */
@@ -1320,8 +1320,8 @@
 }
 .statusDetailAgentDot[data-done] { background: var(--dsw-alias-state-success-primary); }
 .statusDetailAgentDot[data-outcome='completed'] { background: var(--dsw-alias-state-success-primary); }
-.statusDetailAgentDot[data-outcome='aborted'] { background: var(--dsw-alias-state-warn-primary, #FFB45C); }
-.statusDetailAgentDot[data-outcome='failed'] { background: var(--dsw-alias-state-error-primary, #FF5C7A); }
+.statusDetailAgentDot[data-outcome='aborted'] { background: var(--dsw-alias-state-warn-primary); }
+.statusDetailAgentDot[data-outcome='failed'] { background: var(--dsw-alias-state-error-primary); }
 .statusDetailAgentLabel {
   flex: 0 1 auto;
   min-width: 0;
@@ -1332,8 +1332,8 @@
   color: var(--dsw-alias-label-primary);
 }
 .statusDetailAgentRow[data-done] .statusDetailAgentLabel { color: var(--dsw-alias-label-secondary); }
-.statusDetailAgentRow[data-outcome='aborted'] .statusDetailAgentStep { color: var(--dsw-alias-state-warn-primary, #FFB45C); }
-.statusDetailAgentRow[data-outcome='failed'] .statusDetailAgentStep { color: var(--dsw-alias-state-error-primary, #FF5C7A); }
+.statusDetailAgentRow[data-outcome='aborted'] .statusDetailAgentStep { color: var(--dsw-alias-state-warn-primary); }
+.statusDetailAgentRow[data-outcome='failed'] .statusDetailAgentStep { color: var(--dsw-alias-state-error-primary); }
 .statusDetailAgentStep {
   flex: none;
   font-family: 'JetBrains Mono', monospace;
@@ -1360,14 +1360,14 @@
   font-size: 10px;
   color: var(--dsw-alias-label-secondary);
 }
-.statusDetailAgentRole[data-role='research'] { color: var(--dsw-alias-state-business-primary, #6BA8FF); }
+.statusDetailAgentRole[data-role='research'] { color: var(--dsw-alias-state-business-primary); }
 .statusDetailAgentRole[data-role='worker'] { color: var(--dsw-alias-brand-primary); }
 .statusDetailAgentRole[data-role='fork'] { color: #B48CFF; }
 
 /* 台账状态徽标按状态着色（进行中=warn / 待集成=brand / 已集成=success / 已丢弃=dim）。 */
-.statusDetailAgentBadge[data-status='active'] { color: var(--dsw-alias-state-warn-primary, #FFB45C); }
+.statusDetailAgentBadge[data-status='active'] { color: var(--dsw-alias-state-warn-primary); }
 .statusDetailAgentBadge[data-status='settled'] { color: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); }
-.statusDetailAgentBadge[data-status='integrated'] { color: var(--dsw-alias-state-success-primary, #3EE6B0); }
+.statusDetailAgentBadge[data-status='integrated'] { color: var(--dsw-alias-state-success-primary); }
 .statusDetailAgentBadge[data-status='discarded'] { color: var(--dsw-alias-label-dimmed, var(--dsw-alias-label-tertiary)); }
 
 /* 并行工作区行（P8 后 chip 的新家）：不可点时显式标 default（与可点行的 pointer 区分）。 */

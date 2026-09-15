@@ -34,13 +34,13 @@
 .userHeaderWho {
   font-size: 15px;
   font-weight: 600;
-  color: var(--dsw-alias-label-secondary, #B3A6D9);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .userHeaderTime {
   font-size: 14px;
   font-weight: normal;
-  color: var(--dsw-alias-label-secondary, #B3A6D9);
+  color: var(--dsw-alias-label-secondary);
 }
 .bubble {
   /* Figma's 525px cap held as a share of the width axis (525/748 ≈ 0.702) so
@@ -375,7 +375,7 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--dsw-alias-label-tertiary, rgba(0, 0, 0, 0.45));
+  color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   line-height: 15px;
 }

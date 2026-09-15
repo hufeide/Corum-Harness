@@ -60,9 +60,9 @@
 
 .countdown[data-paused] { animation-play-state: paused; }
 
-.barSuccess { background: var(--dsw-alias-state-success-primary, #3EE6B0); }
-.barWarn { background: var(--dsw-alias-state-warn-primary, #FFB45C); }
-.barError { background: var(--dsw-alias-state-error-primary, #FF5C8A); }
+.barSuccess { background: var(--dsw-alias-state-success-primary); }
+.barWarn { background: var(--dsw-alias-state-warn-primary); }
+.barError { background: var(--dsw-alias-state-error-primary); }
 .barInfo { background: var(--dsw-alias-brand-primary); }
 
 @keyframes toastEnter {
@@ -75,9 +75,9 @@
    成 `--dsw-alias-state-*`，变量不存在 → 一直吃 fallback，浅色主题下也是深色值）。 */
 .toneIcon { flex: none; }
 
-.toneSuccess { color: var(--dsw-alias-state-success-primary, #3EE6B0); }
-.toneWarn { color: var(--dsw-alias-state-warn-primary, #FFB45C); }
-.toneError { color: var(--dsw-alias-state-error-primary, #FF5C8A); }
+.toneSuccess { color: var(--dsw-alias-state-success-primary); }
+.toneWarn { color: var(--dsw-alias-state-warn-primary); }
+.toneError { color: var(--dsw-alias-state-error-primary); }
 .toneInfo { color: var(--dsw-alias-brand-primary); }
 
 /* ② 标题 + 副文案列（fill_container，纵向 gap 2）。 */
@@ -183,7 +183,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: var(--dsw-alias-state-error-primary, #FF5C8A);
+  background: var(--dsw-alias-state-error-primary);
   color: #FFFFFF;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px; /* 设计稿 count 文本 12/700（原实现 10/600） */
@@ -244,7 +244,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: var(--dsw-alias-state-error-primary, #FF5C8A);
+  background: var(--dsw-alias-state-error-primary);
   color: #FFFFFF;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;

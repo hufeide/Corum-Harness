@@ -354,13 +354,13 @@
 
 .subagentReturnIcon {
   flex: none;
-  color: var(--dsw-alias-label-on-brand);
+  color: var(--corum-label-on-brand);
 }
 
 .subagentReturnLabel {
   font-size: 14px;
   font-weight: 600;
-  color: var(--dsw-alias-label-on-brand);
+  color: var(--corum-label-on-brand);
   white-space: nowrap;
 }
 
@@ -700,7 +700,7 @@
   padding: 6px;
   border-radius: 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  background: var(--corum-glass-3, var(--dsw-alias-background-level-3));
+  background: var(--corum-glass-3, var(--dsw-alias-bg-layer-3));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 .agentSelGroupHead {

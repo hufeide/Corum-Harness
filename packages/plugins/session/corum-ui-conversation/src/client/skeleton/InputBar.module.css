@@ -274,11 +274,11 @@
 
 /* 设计稿 tbtn-shield：warn 色图标（$state-warn：浅 #E07A00 / 深 #FFB45C） */
 .tbtnWarn {
-  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 .tbtnWarn svg {
-  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 .tbtnWarn svg path {
@@ -286,11 +286,11 @@
 }
 
 .tbtnWarn:hover:not(:disabled) {
-  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 .tbtnWarn:hover:not(:disabled) svg {
-  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 /* 设计稿 tbtn-agent：@Agent 按钮（26 高，r8，文本 + chevron，padding 0 8px，gap 4）

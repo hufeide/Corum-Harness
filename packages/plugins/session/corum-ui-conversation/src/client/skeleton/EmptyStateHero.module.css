@@ -71,7 +71,7 @@
   flex: none;
   background: var(--dsw-alias-brand-primary);
   border: 1px solid transparent;
-  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
+  color: var(--corum-on-brand, var(--corum-label-on-brand, #0a0612));
 }
 /* tx（设计稿：标题 20/600 + 副标题 15 secondary，vertical gap 2）。 */
 .tx {
@@ -269,7 +269,7 @@
 .dirPath {
   flex: 1;
   min-width: 0;
-  font-family: var(--dsw-alias-font-mono, ui-monospace, monospace);
+  font-family: var(--ds-font-family-code, ui-monospace, monospace);
   font-size: 12px;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -493,7 +493,7 @@
   border: none;
   border-radius: 9px;
   background: var(--dsw-alias-brand-primary);
-  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
+  color: var(--corum-on-brand, var(--corum-label-on-brand, #0a0612));
   cursor: pointer;
 }
 .primaryBtn:disabled,
@@ -579,7 +579,7 @@
   text-align: left;
 }
 .wsOptAdd:hover {
-  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.04));
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 .wsDivider {
   width: 100%;
@@ -601,7 +601,7 @@
   text-align: left;
 }
 .wsOpt:hover {
-  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.04));
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 .wsOpt[data-active] {
   background: rgba(1, 205, 254, 0.1); /* 设计稿 #01CDFE1A */
@@ -693,7 +693,7 @@
   padding: 6px;
   border-radius: 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  background: var(--corum-glass-3, var(--dsw-alias-background-level-3));
+  background: var(--corum-glass-3, var(--dsw-alias-bg-layer-3));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 .agentSelGroupHead {
@@ -884,7 +884,7 @@
   padding: 6px;
   border-radius: 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  background: var(--corum-glass-3, var(--dsw-alias-background-level-3));
+  background: var(--corum-glass-3, var(--dsw-alias-bg-layer-3));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 .modelSelCell {

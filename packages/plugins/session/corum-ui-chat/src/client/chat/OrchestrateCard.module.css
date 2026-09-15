@@ -3,11 +3,11 @@
    状态色对齐设计稿两态实测：running #FFB45C · done #3EE6B0 · failed #FF5C7A。 */
 
 .card {
-  --orch-running: var(--dsw-alias-state-warn-primary, #FFB45C);
-  --orch-done: var(--dsw-alias-state-success-primary, #3EE6B0);
-  --orch-failed: var(--dsw-alias-state-error-primary, #FF5C7A);
-  --orch-aborted: var(--dsw-alias-state-warn-primary, #FFB45C);
-  --orch-idle: var(--dsw-alias-label-tertiary, #7E719E);
+  --orch-running: var(--dsw-alias-state-warn-primary);
+  --orch-done: var(--dsw-alias-state-success-primary);
+  --orch-failed: var(--dsw-alias-state-error-primary);
+  --orch-aborted: var(--dsw-alias-state-warn-primary);
+  --orch-idle: var(--dsw-alias-label-tertiary);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -35,7 +35,7 @@
   height: 18px;
   border-radius: 6px;
   /* 设计稿 avatar fill #01CDFE（品牌青），图标取深色。 */
-  background: var(--dsw-alias-brand-primary, #01CDFE);
+  background: var(--dsw-alias-brand-primary);
 }
 
 .avatarIcon {
@@ -139,7 +139,7 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  border: 1.5px solid var(--dsw-alias-brand-primary, #01CDFE);
+  border: 1.5px solid var(--dsw-alias-brand-primary);
   border-radius: 50%;
 }
 
@@ -147,7 +147,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--dsw-alias-brand-primary, #01CDFE);
+  background: var(--dsw-alias-brand-primary);
 }
 
 /* 虚线主干（设计稿 trunk：2px 宽，段间距 2px 的 dash 堆叠）。
@@ -160,7 +160,7 @@
   margin-top: 2px;
   background: repeating-linear-gradient(
     to bottom,
-    var(--dsw-alias-brand-primary, #01CDFE) 0 4px,
+    var(--dsw-alias-brand-primary) 0 4px,
     transparent 4px 6px
   );
   opacity: 0.55;
@@ -352,7 +352,7 @@
 /* 集成者节点的三态（2026-09-12）：queued=队列中（品牌蓝，与「运行中」区分——
    它不是某个分支在跑，而是机制在等全部任务收尾）/ pending=待集成（warn，需要人插手）。
    旧实现只有 idle（暗灰），配「未启动」文案让人以为这一阶段永远不会自己跑。 */
-.branchChip[data-tone='queued'] { color: var(--dsw-alias-brand-primary, #33C7F4); }
+.branchChip[data-tone='queued'] { color: var(--dsw-alias-brand-primary); }
 .branchChip[data-tone='pending'] { color: var(--orch-running); }
 
 /* 分支状态 chip（设计稿 brX chip：r8 + 1px 描边 + 12/600）。 */
@@ -393,7 +393,7 @@
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 6px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  color: var(--dsw-alias-brand-primary, #4DE3FF);
+  color: var(--dsw-alias-brand-primary);
   cursor: pointer;
 }
 

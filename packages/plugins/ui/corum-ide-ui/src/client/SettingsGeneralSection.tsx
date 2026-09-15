@@ -99,7 +99,7 @@ function ReviewRetentionGroup() {
 
   return (
     <SettingGroup title="改动审查">
-      {error !== null && <p style={{ color: 'var(--dsw-alias-state-danger-primary)', fontSize: 12 }}>{error}</p>}
+      {error !== null && <p style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>{error}</p>}
       <SettingRow
         label="轮次历史保留天数"
         desc="Agent 每轮改动都会记进一个独立的影子 git 仓库（只存被改动的文件）。超过这个天数的轮次历史会被清理，磁盘占用因此有上限；当前轮与已接受的内容不受影响。"
@@ -172,7 +172,7 @@ function AgentStallGroup() {
 
   return (
     <SettingGroup title="Agent 执行">
-      {error !== null && <p style={{ color: 'var(--dsw-alias-state-danger-primary)', fontSize: 12 }}>{error}</p>}
+      {error !== null && <p style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>{error}</p>}
       <SettingRow
         label="卡住自动恢复阈值"
         desc="执行中的任务多久没有任何活动就判定为卡住：主动中断该轮并让任务重排队，避免永久挂起。设太小会打断正常的长时间工具执行（bash 工具自身超时 5 分钟）。"

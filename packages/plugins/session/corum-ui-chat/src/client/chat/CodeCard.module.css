@@ -39,7 +39,7 @@
 /* 脚本片段的图标走成功色（与「在终端运行」同色）——设计稿 JdYy4 用 $state-success，
    与代码片段的 brand 色形成「读」/「跑」的直觉区分。 */
 .iconBoxIconSuccess {
-  color: var(--dsw-alias-state-success-primary, #0BA57C);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .title {
@@ -106,7 +106,7 @@
 
 .btnIconSuccess {
   flex: none;
-  color: var(--dsw-alias-state-success-primary, #0BA57C);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .btnLabel {
@@ -118,7 +118,7 @@
 .btnLabelSuccess {
   font-family: Inter, sans-serif;
   font-size: 12px;
-  color: var(--dsw-alias-state-success-primary, #0BA57C);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 /* ── 展开体 ──────────────────────────────────────────────────────── */

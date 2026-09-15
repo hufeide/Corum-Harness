@@ -555,10 +555,10 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
           ) : !status.meetsMinReq ? (
             <>
               <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
-                color: 'var(--dsw-alias-state-error-primary, #FF5C8A)',
-                border: '1px solid var(--dsw-alias-state-error-primary, #FF5C8A)',
+                color: 'var(--dsw-alias-state-error-primary)',
+                border: '1px solid var(--dsw-alias-state-error-primary)',
               }}>⚠ 配置不足</span>
-              <span style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary, #FF5C8A)' }}>
+              <span style={{ fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' }}>
                 {status.minReqReason ?? '硬件配置不满足要求'}
               </span>
               <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>
@@ -569,8 +569,8 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
           ) : engineReady ? (
             <>
               <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
-                color: 'var(--dsw-alias-state-success-primary, #3EE6B0)',
-                border: '1px solid var(--dsw-alias-state-success-primary, #3EE6B0)',
+                color: 'var(--dsw-alias-state-success-primary)',
+                border: '1px solid var(--dsw-alias-state-success-primary)',
               }}>● 就绪</span>
               <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>
                 引擎已就绪 · {status.models.length} 个模型 · {platformName(status.platform)} · {status.cpuCores} 核 · 内存 {status.totalMemGb} GB
@@ -606,8 +606,8 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
             border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)',
           }}>
             <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
-              color: resident.enabled ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--dsw-alias-label-dimmed)',
-              border: `1px solid ${resident.enabled ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--corum-glass-border)'}`,
+              color: resident.enabled ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-dimmed)',
+              border: `1px solid ${resident.enabled ? 'var(--dsw-alias-state-success-primary)' : 'var(--corum-glass-border)'}`,
             }}>{resident.enabled ? (resident.running ? `● 常驻中 · ${resident.model ?? ''}` : '● 常驻模式') : '○ 进程式'}</span>
             <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', flex: 1 }}>
               {resident.enabled
@@ -658,13 +658,13 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                     <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)' }}>VRAM {m.vramGb}GB</span>
                     <span style={{ fontSize: 10, color: 'var(--dsw-alias-brand-primary)' }}>{m.recommendedSteps} 步 · {m.recommendedSize}px</span>
                   </div>
-                  <span style={{ fontSize: 11, color: m.compatible === false ? 'var(--dsw-alias-state-warn-primary, #E07A00)' : 'var(--dsw-alias-label-tertiary)' }}>
+                  <span style={{ fontSize: 11, color: m.compatible === false ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-label-tertiary)' }}>
                     {m.description}{m.incompatibleReason !== undefined ? ` · ⚠ ${m.incompatibleReason}` : ''}
                     {needsCompanion ? ' · ⚠ 缺少文本编码器（Flux 必需，否则生成失败）' : ''}
                   </span>
                 </div>
                 {downloaded && !needsCompanion
-                  ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary, #3EE6B0)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
+                  ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
                   : <button type="button" disabled={disabled} onClick={() => void downloadModel(m.tier)} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
                       background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
@@ -702,8 +702,8 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                   background: isActive ? 'var(--corum-glass-3)' : 'var(--corum-glass-2)',
                 }}>
                   <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
-                    color: isActive ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--dsw-alias-label-dimmed)',
-                    border: `1px solid ${isActive ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--corum-glass-border)'}`,
+                    color: isActive ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-dimmed)',
+                    border: `1px solid ${isActive ? 'var(--dsw-alias-state-success-primary)' : 'var(--corum-glass-border)'}`,
                   }}>{isActive ? '● 使用中' : '○'}</span>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -719,8 +719,8 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                   {confirmDelete === m.fileName ? (
                     <span style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
                       <button type="button" disabled={busy} onClick={() => void deleteModel(m.fileName)} style={{
-                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary, #FF5C8A)',
-                        background: 'var(--dsw-alias-state-error-primary, #FF5C8A)', color: '#fff', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                        padding: '4px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary)',
+                        background: 'var(--dsw-alias-state-error-primary)', color: '#fff', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
                       }}>确认删除</button>
                       <button type="button" onClick={() => setConfirmDelete(null)} style={{
                         padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
@@ -730,7 +730,7 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                   ) : (
                     <button type="button" disabled={busy} onClick={e => { e.stopPropagation(); setConfirmDelete(m.fileName) }} style={{
                       padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
-                      background: 'transparent', color: 'var(--dsw-alias-state-error-primary, #FF5C8A)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                      background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
                     }}>{busy ? '处理中…' : '删除'}</button>
                   )}
                 </div>
@@ -783,7 +783,7 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
             color: 'var(--dsw-alias-label-primary)', whiteSpace: 'nowrap',
           }}>{onlineSearching ? '搜索中…' : '搜索'}</button>
         </div>
-        {onlineError !== null && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-warn-primary, #E07A00)', marginBottom: 6, display: 'block' }}>{onlineError}</span>}
+        {onlineError !== null && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-warn-primary)', marginBottom: 6, display: 'block' }}>{onlineError}</span>}
         {onlineResults !== null && onlineResults.length === 0 && onlineError === null && (
           <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>无结果</span>
         )}
@@ -808,7 +808,7 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
                     <span style={{ ...MONO, fontSize: 10, color: 'var(--dsw-alias-label-dimmed)' }}>{m.repoId} · {m.fileName}</span>
                   </div>
                   {downloaded
-                    ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary, #3EE6B0)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
+                    ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary)', whiteSpace: 'nowrap' }}>✓ 已下载</span>
                     : <button type="button" disabled={disabled} onClick={() => void downloadOnline(m)} style={{
                         padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
                         background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12,
@@ -874,7 +874,7 @@ function ArtGenSection({ call, subscribeProgress, subscribeJobProgress }: {
             <button type="button" disabled={!canGenerate} onClick={() => void generate()} style={{
               padding: '6px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: canGenerate ? 'pointer' : 'not-allowed',
               border: '1px solid var(--corum-glass-border-active)', background: 'var(--dsw-alias-brand-primary)',
-              color: 'var(--dsw-alias-label-on-brand, #fff)', whiteSpace: 'nowrap',
+              color: 'var(--corum-label-on-brand, #fff)', whiteSpace: 'nowrap',
               opacity: canGenerate ? 1 : 0.5,
             }}>{generating ? '生成中…' : (activeModel === undefined ? '请先选模型' : '生成')}</button>
           </div>

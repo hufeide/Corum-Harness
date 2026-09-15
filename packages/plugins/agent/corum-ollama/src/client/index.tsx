@@ -189,7 +189,7 @@ function DeleteConfirm({ model, onConfirm, onCancel, busy }: {
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" onClick={onCancel} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', fontSize: 12, cursor: 'pointer' }}>取消</button>
-          <button type="button" onClick={onConfirm} disabled={busy} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary, #FF5C8A)', background: 'var(--dsw-alias-state-error-primary, #FF5C8A)', color: '#fff', fontSize: 12, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>
+          <button type="button" onClick={onConfirm} disabled={busy} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary)', background: 'var(--dsw-alias-state-error-primary)', color: '#fff', fontSize: 12, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>
             {busy ? '删除中…' : '确认删除'}
           </button>
         </div>
@@ -231,7 +231,7 @@ function ModelCard({ m, status, deployed, busy, onDeploy, onDelete }: {
             <span key={t} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{t}</span>
           ))}
         </div>
-        <span style={{ fontSize: 11, color: notReadyReason ? 'var(--dsw-alias-state-warn-primary, #E07A00)' : 'var(--dsw-alias-label-tertiary)' }}>
+        <span style={{ fontSize: 11, color: notReadyReason ? 'var(--dsw-alias-state-warn-primary)' : 'var(--dsw-alias-label-tertiary)' }}>
           {m.description} · 需 {m.minMemoryGb} GB 内存 / {m.vramGb} GB VRAM
           {notReadyReason ? ` · ⚠ ${notReadyReason}` : ''}
           {!hasGpu && m.cpuOnly && ' · 纯 CPU 推理（慢 5-10x）'}
@@ -264,8 +264,8 @@ function DeleteButton({ busy, modelId, onDelete }: { busy: boolean; modelId: str
         onClick={() => setConfirm(true)}
         disabled={busy}
         style={{
-          padding: '5px 12px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary, #FF5C8A)',
-          background: 'transparent', color: 'var(--dsw-alias-state-error-primary, #FF5C8A)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+          padding: '5px 12px', borderRadius: 8, border: '1px solid var(--dsw-alias-state-error-primary)',
+          background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', fontSize: 12, cursor: busy ? 'wait' : 'pointer', whiteSpace: 'nowrap',
         }}
       >
         {busy ? '卸载中…' : '卸载'}
@@ -624,8 +624,8 @@ function OllamaSection({ call, subscribeProgress }: {
           {/* 已内置标记 */}
           {status !== null && status.engineBundled && (
             <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600,
-              color: 'var(--dsw-alias-state-success-primary, #3EE6B0)',
-              border: '1px solid var(--dsw-alias-state-success-primary, #3EE6B0)',
+              color: 'var(--dsw-alias-state-success-primary)',
+              border: '1px solid var(--dsw-alias-state-success-primary)',
             }}>已内置</span>
           )}
         </div>
@@ -698,7 +698,7 @@ function OllamaSection({ call, subscribeProgress }: {
             {searching ? '搜索中…' : '搜索'}
           </button>
         </div>
-        {searchError !== null && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-warn-primary, #E07A00)', marginBottom: 6, display: 'block' }}>{searchError}</span>}
+        {searchError !== null && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-warn-primary)', marginBottom: 6, display: 'block' }}>{searchError}</span>}
         {searchResults !== null && searchResults.length === 0 && searchError === null && (
           <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>无搜索结果</span>
         )}
@@ -717,7 +717,7 @@ function OllamaSection({ call, subscribeProgress }: {
                   {t.paramSize !== '-' && <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)' }}>{t.paramSize}</span>}
                   <span style={{ flex: 1 }} />
                   {deployed
-                    ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary, #34a853)', whiteSpace: 'nowrap' }}>✓ 已部署</span>
+                    ? <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-success-primary)', whiteSpace: 'nowrap' }}>✓ 已部署</span>
                     : <button type="button" disabled={busy || status === null || !status.installed} onClick={() => void deployTag(t.fullName)} style={{
                         padding: '4px 10px', borderRadius: 8, border: '1px solid var(--corum-glass-border)',
                         background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-primary)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
@@ -739,8 +739,8 @@ function OllamaSection({ call, subscribeProgress }: {
                 background: m.active ? 'var(--corum-glass-3)' : 'var(--corum-glass-2)',
               }}>
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 600,
-                  color: m.active ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--dsw-alias-label-dimmed)',
-                  border: `1px solid ${m.active ? 'var(--dsw-alias-state-success-primary, #3EE6B0)' : 'var(--corum-glass-border)'}`,
+                  color: m.active ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-dimmed)',
+                  border: `1px solid ${m.active ? 'var(--dsw-alias-state-success-primary)' : 'var(--corum-glass-border)'}`,
                 }}>{m.active ? '● 已激活' : '○ 未激活'}</span>
                 <span style={{ ...MONO, fontSize: 12, color: 'var(--dsw-alias-label-primary)' }}>{m.name}</span>
                 {m.quantization !== undefined && <span style={{ ...MONO, fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'var(--corum-glass-3)', color: 'var(--dsw-alias-label-tertiary)' }}>{m.quantization}</span>}
@@ -749,7 +749,7 @@ function OllamaSection({ call, subscribeProgress }: {
                 {m.contextLength !== undefined && <span style={{ fontSize: 10, color: 'var(--dsw-alias-brand-primary)' }}>{(m.contextLength / 1024).toFixed(0)}K ctx</span>}
                 {m.capabilities?.includes('vision') && <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>vision</span>}
                 <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{m.size}</span>
-                {m.active && m.vramBytes !== undefined && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary, #3EE6B0)' }}>内存 {formatBytesClient(m.vramBytes)}</span>}
+                {m.active && m.vramBytes !== undefined && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>内存 {formatBytesClient(m.vramBytes)}</span>}
                 <span style={{ flex: 1 }} />
                 {/* 激活/停止按钮 */}
                 {m.active

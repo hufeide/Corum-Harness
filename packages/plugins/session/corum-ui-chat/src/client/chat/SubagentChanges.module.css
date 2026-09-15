@@ -116,7 +116,7 @@
 .filePath {
   min-width: 0;
   overflow: hidden;
-  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -131,7 +131,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -153,7 +153,7 @@
   flex: 1;
   overflow: hidden;
   padding: 0;
-  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -173,7 +173,7 @@
   gap: 8px;
   margin-left: auto;
   padding-left: 12px;
-  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
   line-height: 20px;
 }

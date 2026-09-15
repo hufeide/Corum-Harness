@@ -1196,7 +1196,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
             <>
               <span className={css.statusDetailDonut} style={{
                 background: `conic-gradient(var(--dsw-alias-brand-primary) 0deg ${pctOf(messages) * 3.6}deg, `
-                  + `var(--dsw-alias-state-warn-primary, #FFB45C) ${pctOf(messages) * 3.6}deg ${(pctOf(messages) + pctOf(system)) * 3.6}deg, `
+                  + `var(--dsw-alias-state-warn-primary) ${pctOf(messages) * 3.6}deg ${(pctOf(messages) + pctOf(system)) * 3.6}deg, `
                   + `var(--corum-brand-accent, #FF71CE) ${(pctOf(messages) + pctOf(system)) * 3.6}deg ${(pctOf(messages) + pctOf(system) + pctOf(tools)) * 3.6}deg, `
                   + `var(--corum-glass-2, rgba(42,24,64,.85)) ${(pctOf(messages) + pctOf(system) + pctOf(tools)) * 3.6}deg 360deg)`,
               }}>
@@ -1208,7 +1208,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               <span className={css.statusDetailLegend}>
                 {([
                   ['var(--dsw-alias-brand-primary)', '对话消息', messages],
-                  ['var(--dsw-alias-state-warn-primary, #FFB45C)', '系统提示词', system],
+                  ['var(--dsw-alias-state-warn-primary)', '系统提示词', system],
                   ['var(--corum-brand-accent, #FF71CE)', '工具', tools],
                   ['var(--corum-glass-2, rgba(42,24,64,.85))', '未用', ctxFree],
                 ] as const).map(([color, label, n]) => (

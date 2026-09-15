@@ -26,8 +26,8 @@
 .mask {
   position: absolute;
   inset: 0;
-  background: var(--dsw-alias-bg-mask-1, rgba(0, 0, 0, 0.4));
-  backdrop-filter: var(--dsw-mask-blur, none);
+  background: var(--dsw-alias-bg-mask-1);
+  backdrop-filter: var(--dsw-mask-blur);
 }
 
 /* 内容体：相对遮罩在上，恢复交互。 */
