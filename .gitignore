@@ -46,3 +46,11 @@ packages/desktop/.corum-ide-home/
 .dbg-evidence/**/*.png
 .dbg-evidence/**/*.jpg
 .dbg-evidence/**/*.jpeg
+
+# docs/tasks/evidence/ 的截图同样不入库（2026-09-15 立规；历史里的 2 张 ~3.9MB 已 rebase 剔除）：
+# 二进制一旦入库就永久占仓库体积且无法 diff；该目录的 spec / 报告 / md 仍然入库。
+# 由来：监督侧在 6226f0f 误提交 before-codecard.png / before-full-page.png（各 ~1.9MB），
+# 未 push 故改写安全；此后由本规则挡住复发。
+docs/tasks/evidence/**/*.png
+docs/tasks/evidence/**/*.jpg
+docs/tasks/evidence/**/*.jpeg
