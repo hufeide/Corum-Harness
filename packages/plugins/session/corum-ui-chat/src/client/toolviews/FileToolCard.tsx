@@ -274,16 +274,9 @@ function ReadCard({ input, t }: { input: CardInput; t: TFunc }) {
         path={meta.path}
         pathTitle={t('fileCard.openFile')}
         onOpenPath={openHandler(input)}
-        chips={(
-          <>
-            {/* 行数标注（2026-09-15 用户要求「读取的文件、多少行标注清楚」）。
-                `fileCard.read.window`（已读 N / 共 M 行）词典与 labels 接线**一直都在**
-                （见下面 readLabels），但此前**从未渲染**；这里补上它。
-                行区间 chip（L{start}–{end}）保留：前者是**总量**、后者是**本次窗口**，两者互补。 */}
-            <Chip className={css.chipMono}>{t('fileCard.read.window', { shown, total: meta.totalLines })}</Chip>
-            {range !== undefined && <Chip className={css.chipMono}>L{range.start}–{range.end}</Chip>}
-          </>
-        )}
+        // 设计稿 read-ok（`nXoV9`）头部**只有一个** `L1–60` chip。2026-09-15 我曾额外加过
+        // 一枚「已读 N / 共 M 行」并自认与区间 chip「互补」—— 用户验收判定为**重复**，已删除。
+        chips={range === undefined ? undefined : <Chip className={css.chipMono}>L{range.start}–{range.end}</Chip>}
         stateChip={<StateChip t={t} state="ok" />}
         action={(
           <ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />
@@ -446,6 +439,7 @@ function EditCard({ input, t }: { input: CardInput; t: TFunc }) {
       hunks={hunks}
       mode={undefined}
       foot={t('fileCard.foot.editDiff')}
+      footExpandedOnly={t('fileCard.foot.editDiff')}
       t={t}
     />
   )
@@ -513,7 +507,7 @@ function WriteCard({ input, t }: { input: CardInput; t: TFunc }) {
 /* ── 共用：diff 卡（edit / write）与失败卡（read / write）─────────── */
 
 /** edit / write 共用：head(+mode +±统计 +展开控件) + diff 内容 + note。 */
-function MutationCard({ icon, tone, title, input, hunks, mode, foot, t }: {
+function MutationCard({ icon, tone, title, input, hunks, mode, foot, footExpandedOnly, t }: {
   icon: LucideIcon
   tone: 'brand' | 'success'
   title: string
@@ -521,6 +515,16 @@ function MutationCard({ icon, tone, title, input, hunks, mode, foot, t }: {
   hunks: readonly DiffHunk[] | undefined
   mode: ReactNode
   foot: string
+  /**
+   * **仅在展开态**渲染的脚注（与 `foot` 二选一，设了就不再用 `foot`）。
+   *
+   * 设计依据：编辑卡的脚注「点击右上角收起 diff；完整原文可展开查看。」是**展开态专用**
+   * 语义 —— 已经收起了还叫用户「收起 diff」是荒谬的。
+   * 设计稿里展开态是 `edit · 成功`（组件 `jjSBU`，含 chevron-up + 该 foot），
+   * 折叠态是 `edit-ok`（`wUNO8` 里那张**只有头部一行、没有 foot** 的卡）。
+   * 2026-09-15 用户验收报「收起时会有小字『点击右上角收起 diff…』」，即此。
+   */
+  footExpandedOnly?: string
   t: TFunc
 }) {
   // 2026-09-15 用户定调：**默认收起**（原为 `useState(true)` 默认展开 ⇒ 长 diff 一屏占满；
@@ -548,6 +552,8 @@ function MutationCard({ icon, tone, title, input, hunks, mode, foot, t }: {
   const action = hasContent
     ? <ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />
     : undefined
+  // 展开态专用的脚注（见 `footExpandedOnly` 的文档）：收起时**不渲染**。
+  const noteText = footExpandedOnly !== undefined ? (expanded ? footExpandedOnly : undefined) : foot
   return (
     <Shell
       icon={icon}
@@ -566,7 +572,7 @@ function MutationCard({ icon, tone, title, input, hunks, mode, foot, t }: {
           </div>
         )
         : undefined}
-      note={<Note tone="muted" text={foot} />}
+      note={noteText === undefined ? undefined : <Note tone="muted" text={noteText} />}
     />
   )
 }
