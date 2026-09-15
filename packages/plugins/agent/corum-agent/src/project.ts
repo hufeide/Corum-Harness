@@ -10,16 +10,48 @@
  * 需求/任务/BUG 等）的项目数据层在本包内演进（project-core 已废弃移除），
  * 本模型届时对齐扩展。
  *
- * 存储：`$CORUM_HOME/projects/<projectId>/project.json`。
+ * 存储（Round 1 拆分）：索引 `$CORUM_HOME/projects/<projectId>/project.json`
+ * （轻字段），详字段落 `<cwd>/.corum/project/project.json`（见 project-store.ts）。
  * @module @corum/corum-agent/project
  */
 
-/** 一个 corum 项目（轻量版元信息）。 */
+import { realpathSync } from 'node:fs'
+import { normalize } from 'node:path'
+
+/**
+ * 一个 corum 项目（Round 1 拆分形态：索引轻字段 + 项目侧详字段）。
+ *
+ * 「项目数据跟随项目走」（2026-09-14 Round 1）后，持久层一分为二：
+ *   索引（`$CORUM_HOME/projects/<id>/project.json`）只留 6 个轻字段
+ *   （id/name/cwd/addedAt/lastOpenedAt/version）——listProjects() 只枚举索引，
+ *   cwd 失联也仍能列出该条目并提示「目录不可用」；
+ *   详字段（description/workTypes/group 等）落项目侧
+ *   `<cwd>/.corum/project/project.json`（ProjectInfo），由 loadProject()
+ *   合并出完整 CorumProject。
+ */
 export interface CorumProject {
-  /** 项目唯一 id（slug，lower-kebab-case）。即调度事件日志的落点目录名。 */
+  /** 项目唯一 id（slug，lower-kebab-case）。即索引目录名。 */
   id: string
   /** 用户可见项目名。 */
   name: string
+  /**
+   * **工程类型**（工作区的类型标记）：`project` | `task`。
+   *
+   * 用户 2026-09-14 定的统一模型：TASK 模式下工作区**其实也是一个项目**，两种模式
+   * 共用同一套文件行为，只由本字段区分工程类型（`architecture.project.unified-with-type-field`）。
+   *
+   * ⚠️ **与 {@link CorumProject.workTypes} 无关**：`workTypes` 是「项目自定义**工作**类型」
+   * （泳道：general/ui/debug…），本字段是「**工程**类型」。两者语义正交，勿混用。
+   *
+   * 三条不变式（见 {@link canTransitionProjectType} / {@link projectTypeOf}）：
+   *   A · **具权威性**：模式不由用户本次选择决定，由工作区已存的 type 决定；
+   *   B · **单调不可降级**：`task → project` 允许（需确认），`project → task` 禁止；
+   *   C · **互斥**：同一工作区只有一个 type，两模式不共存。
+   *
+   * 缺省（旧存量条目）按 {@link DEFAULT_PROJECT_TYPE}（`project`）读——旧条目都是
+   * 项目模式创建的，缺省为 project 既符合史实，也满足不变式 B（不产生隐式降级）。
+   */
+  type?: ProjectType
   /** 项目工作目录（绝对路径；代码所在，可为空 = 尚未关联工作区）。 */
   cwd?: string
   /** 简短描述（可选）。 */
@@ -70,6 +102,100 @@ export interface ProjectGroupMember {
   profession?: 'pd' | 'techLead' | 'dev' | 'qa'
   /** 来源团队 id（可追溯「这个成员来自哪个团队」；独立 Agent 无此字段）。 */
   fromTeam?: string
+}
+
+// ── 工程类型（工作区的类型标记）────────────────────────────────────────
+
+/**
+ * 工程类型：工作区是「项目」还是「任务」。
+ *
+ * 用户 2026-09-14 统一模型（`architecture.project.unified-with-type-field`）：
+ * 两种模式对用户是同一件事（都是打开工作区做开发），`type` 只是**类型标记**
+ * ——类型不同 ⇒ 保存的数据不同、管理方式不同，但**文件行为统一**。
+ */
+export type ProjectType = 'project' | 'task'
+
+/** 合法工程类型表（运行时校验/遍历用）。 */
+export const PROJECT_TYPES: readonly ProjectType[] = ['project', 'task']
+
+/**
+ * 存量缺省类型：**旧条目一律是项目模式创建的**（`task` 模式此前根本没有项目条目，
+ * 它只有伪项目目录 `projects/task/`）。故缺省读作 `project` 既符合史实，
+ * 也满足不变式 B（不会把已存在的工作区隐式**降级**成 task）。
+ */
+export const DEFAULT_PROJECT_TYPE: ProjectType = 'project'
+
+/** 判断一个值是否是合法工程类型。 */
+export function isProjectType(value: unknown): value is ProjectType {
+  return value === 'project' || value === 'task'
+}
+
+/**
+ * 读一个项目的**权威**工程类型（不变式 A：type 由工作区自身持有）。
+ *
+ * 缺省/脏值 → {@link DEFAULT_PROJECT_TYPE}。调用方**不得**用「用户本次选择」
+ * 覆盖本函数的结果——用户选择只触发校验/提示（见 {@link canTransitionProjectType}
+ * 与 project-service 的判定表门禁）。
+ */
+export function projectTypeOf(project: Pick<CorumProject, 'type'> | undefined): ProjectType {
+  return project !== undefined && isProjectType(project.type) ? project.type : DEFAULT_PROJECT_TYPE
+}
+
+/**
+ * 工程类型迁移判定（不变式 B：**单调不可降级**）。
+ *
+ * 用户 2026-09-14 裁定原话：「当该工作区以 task 方式创建后，用户在项目口径创建新项目时
+ * 打开，发现里面已经有 task 的工程痕迹，则提醒用户是否要升级为 project（设计上 project
+ * 是更高级的组织和管理方式）」；「如果是 task 模式打开一个 project 项目，则提示用户是
+ * 项目模式，是否按照项目模式开启。**拒绝按照 task 模式开启**」；「这个 type 肯定不能改」。
+ *
+ * | from \ to | project | task |
+ * | --- | --- | --- |
+ * | project | 幂等（允许，同口径重开） | **禁止**（降级） |
+ * | task | **允许但需用户确认**（升级） | 幂等（允许，同口径重开） |
+ *
+ * @returns 判定结果：`same` 同口径重开（恢复原项目）／`upgrade` 升级（需确认）／
+ *   `downgrade` 降级（禁止）。
+ */
+export function classifyProjectTypeTransition(
+  from: ProjectType,
+  to: ProjectType,
+): 'same' | 'upgrade' | 'downgrade' {
+  if (from === to) return 'same'
+  return from === 'task' && to === 'project' ? 'upgrade' : 'downgrade'
+}
+
+/**
+ * 类型迁移是否允许（不变式 B 的可判定形式）。
+ * `task → project` 允许（调用方仍须先取得用户确认）；`project → task` 恒 false。
+ */
+export function canTransitionProjectType(from: ProjectType, to: ProjectType): boolean {
+  return classifyProjectTypeTransition(from, to) !== 'downgrade'
+}
+
+/**
+ * 工作区身份规范形：**由 cwd 决定**（`architecture.project.type-is-authoritative-and-monotonic`
+ * 「一工作区一条目、身份由 cwd 决定」）。
+ *
+ * 必须 realpath 归一，否则同一目录会被判成两个工作区：
+ *   - 尾斜杠：`/a/b/` 与 `/a/b`（存量实测 217 条 task 会话里两者并存）；
+ *   - 软链：macOS `/tmp` → `/private/tmp`（`agent-service.ts:1506` 的
+ *     `createAgentForTask` 已有同款先例：attach workspace 前先 realpathSync）。
+ *
+ * 目录不存在（已删/已移动）时 realpath 会抛错 ⇒ 退回「去尾斜杠 + 归一分隔符」的
+ * 字形规范形：死条目的身份仍可比较（供迁移去重），只是拿不到软链解析。
+ */
+export function canonicalWorkspaceKey(cwd: string | undefined): string | undefined {
+  if (cwd === undefined || cwd.trim() === '') return undefined
+  const trimmed = cwd.trim()
+  try {
+    return realpathSync(trimmed)
+  } catch {
+    // 目录不可达：字形归一（折叠重复分隔符、去尾斜杠；保留根 `/`）。绝不 throw——
+    // 死条目的身份仍需可比，迁移/列表都不该因一条失联目录整体失败。
+    const collapsed = normalize(trimmed).normalize('NFC')
+    return collapsed.length > 1 ? collapsed.replace(/\/+$/, '') : collapsed
+  }
 }
 
 /** 项目 id 合法性：lower-kebab-case，与 profile id 同规则。 */

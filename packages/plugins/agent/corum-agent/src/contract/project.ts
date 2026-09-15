@@ -10,12 +10,12 @@
  * @module @corum/corum-agent/contract
  */
 
-import type { CorumProject, ProjectGroup, ProjectGroupMember, WorkType } from '../project.ts'
+import type { CorumProject, ProjectGroup, ProjectGroupMember, ProjectType, WorkType } from '../project.ts'
 import type { CompleteSetupInput, OpenProjectByPathResult } from '../project-service.ts'
 
 // ── 复用的 wire 投影类型（与 project.ts / project-service.ts 同源 re-export） ──
 
-export type { CorumProject, ProjectGroup, ProjectGroupMember, WorkType }
+export type { CorumProject, ProjectGroup, ProjectGroupMember, ProjectType, WorkType }
 export type { CompleteSetupInput, OpenProjectByPathResult }
 
 /**
@@ -28,8 +28,12 @@ export const CORUM_PROJECT_METHODS = {
   listProjects: 'listProjects',
   /** 打开项目（刷新 lastOpenedAt）。参数名是 id。 */
   openProject: 'openProject',
-  /** 按工作目录打开项目（existing 直读 / 空目录进创建向导）。 */
+  /** 按工作目录打开项目（判定表门禁：existing / wizard / upgrade-required / mode-conflict）。 */
   openProjectByPath: 'openProjectByPath',
+  /** 把工作区**升级**为 project（`task → project`，不变式 B 唯一允许的类型变更）。 */
+  upgradeProjectType: 'upgradeProjectType',
+  /** 列出某工作区的会话（可选按工程类型过滤）——会话按 type 隔离显示的数据源。 */
+  listWorkspaceSessions: 'listWorkspaceSessions',
   /** 创建向导提交（空目录 → 新项目 + 拉成员进项目组）。 */
   completeSetup: 'completeSetup',
   /** 列出项目的完整工作类型表（框架兜底 + 项目自定义）。 */
@@ -44,6 +48,8 @@ export const CORUM_PROJECT_METHODS = {
   addMemberToGroup: 'addMemberToGroup',
   /** 从项目组移除一个成员（PM 不可移除）。 */
   removeGroupMember: 'removeGroupMember',
+  /** 删除项目索引条目（只删 $CORUM_HOME/projects/<id>/，不碰项目工作区）。 */
+  deleteProject: 'deleteProject',
 } as const
 
 /** corumProject 已契约化的方法名（CORUM_PROJECT_METHODS 的值联合）。 */
@@ -62,9 +68,12 @@ export interface CreateProjectResult {
   project: CorumProject
 }
 
-/** listProjects 返回：全部项目（最近打开在前）。 */
+/** listProjects 返回：全部项目（最近打开在前）+ 每项 cwd 存活标记
+ * （available=false = 目录被移动/改名，「目录不可用」）。 */
 export interface ListProjectsResult {
   projects: CorumProject[]
+  /** projectId → cwd 是否存活（缺省视为 true，兼容旧 host）。 */
+  availability?: Record<string, boolean>
 }
 
 /** openProject 入参。**参数名是 id**（wire 契约，见文件头注释）。 */
@@ -76,12 +85,27 @@ export interface OpenProjectResult {
   project: CorumProject
 }
 
-/** openProjectByPath 入参：待打开的工作目录绝对路径。 */
+/** openProjectByPath 入参：待打开的工作目录绝对路径 + 用户本次起的口径。
+ *  `requestedType` 缺省 `project`；它**只触发门禁校验**，不改写工作区已存的 type
+ *  （不变式 A：type 具权威性）。 */
 export type OpenProjectByPathArgs = {
   cwd: string
+  requestedType?: ProjectType
 }
-/** openProjectByPath 返回：existing（已有项目）/ wizard（空目录进向导）。 */
+/** openProjectByPath 返回（判定表四种分流）：
+ *  `existing`（同口径恢复原项目）/ `wizard`（无痕迹，直接创建）/
+ *  `upgrade-required`（task 工作区 + project 口径 ⇒ 需用户确认升级）/
+ *  `mode-conflict`（project 工作区 + task 口径 ⇒ 拒绝，只能按项目模式开）。 */
 export type OpenProjectByPathRemoteResult = OpenProjectByPathResult
+
+/** upgradeProjectType 入参：要升级的工作区条目 id。 */
+export type UpgradeProjectTypeArgs = {
+  id: string
+}
+/** upgradeProjectType 返回：升级后的项目实体（type 已为 project）。 */
+export interface UpgradeProjectTypeResult {
+  project: CorumProject
+}
 
 /** completeSetup 入参：创建向导提交。 */
 export type CompleteSetupArgs = {
@@ -154,6 +178,25 @@ export interface RemoveGroupMemberResult {
   group: ProjectGroup
 }
 
+/** deleteProject 入参。 */
+export type DeleteProjectArgs = {
+  id: string
+}
+/** deleteProject 返回：固定 ok。 */
+export interface DeleteProjectResult {
+  ok: true
+}
+
+/** listWorkspaceSessions 入参：工作区 cwd + 可选工程类型过滤。 */
+export type ListWorkspaceSessionsArgs = {
+  cwd: string
+  type?: ProjectType
+}
+/** listWorkspaceSessions 返回：该工作区的会话（可按 type 过滤）。 */
+export interface ListWorkspaceSessionsResult {
+  sessions: Array<{ sessionId: string; cwd: string; profileId: string; type: ProjectType; laneKey: string | null }>
+}
+
 /**
  * corumProject 端点描述表：方法名 → 命名参数对象 / 返回体。
  * `{}` 表示该端点无参数。
@@ -163,6 +206,8 @@ export interface CorumProjectEndpointTable {
   [CORUM_PROJECT_METHODS.listProjects]: { args: {}; result: ListProjectsResult }
   [CORUM_PROJECT_METHODS.openProject]: { args: OpenProjectArgs; result: OpenProjectResult }
   [CORUM_PROJECT_METHODS.openProjectByPath]: { args: OpenProjectByPathArgs; result: OpenProjectByPathRemoteResult }
+  [CORUM_PROJECT_METHODS.upgradeProjectType]: { args: UpgradeProjectTypeArgs; result: UpgradeProjectTypeResult }
+  [CORUM_PROJECT_METHODS.listWorkspaceSessions]: { args: ListWorkspaceSessionsArgs; result: ListWorkspaceSessionsResult }
   [CORUM_PROJECT_METHODS.completeSetup]: { args: CompleteSetupArgs; result: CompleteSetupResult }
   [CORUM_PROJECT_METHODS.listWorkTypes]: { args: ListWorkTypesArgs; result: ListWorkTypesResult }
   [CORUM_PROJECT_METHODS.addWorkType]: { args: AddWorkTypeArgs; result: AddWorkTypeResult }
@@ -170,4 +215,5 @@ export interface CorumProjectEndpointTable {
   [CORUM_PROJECT_METHODS.addTeamToGroup]: { args: AddTeamToGroupArgs; result: AddTeamToGroupResult }
   [CORUM_PROJECT_METHODS.addMemberToGroup]: { args: AddMemberToGroupArgs; result: AddMemberToGroupResult }
   [CORUM_PROJECT_METHODS.removeGroupMember]: { args: RemoveGroupMemberArgs; result: RemoveGroupMemberResult }
+  [CORUM_PROJECT_METHODS.deleteProject]: { args: DeleteProjectArgs; result: DeleteProjectResult }
 }

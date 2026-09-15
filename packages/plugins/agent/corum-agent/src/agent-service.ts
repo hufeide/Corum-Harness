@@ -25,6 +25,14 @@ import { installTaskModelSelection } from './task-model-selection.ts'
 import { childRunInterruptOf } from './child-progress.ts'
 import { CHILD_WORKER_ROLE, TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
 import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
+import {
+  LOCALE_SETTINGS_NAMESPACE,
+  OUTPUT_LANGUAGE_SECTION,
+  OUTPUT_LANGUAGE_VARIABLE,
+  localeIdFromSection,
+  outputLanguageSectionText,
+  outputLanguageVariableValue,
+} from './output-language.ts'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -43,11 +51,14 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset, workStyleTextOf } from './compile.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
-import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
-import { loadProject } from './project-store.ts'
+import { GENERAL_WORK_TYPE, canonicalWorkspaceKey, isValidProjectId, isValidWorkTypeSlug, isGroupMember, projectTypeOf } from './project.ts'
+import { loadProject, findProjectByCwd } from './project-store.ts'
+// 统一会话索引（两模式共用；键 = sessionId，按 cwd 分组）——
+// 见 session-index.ts 的文件头（两套旧索引键空间不同构，不可机械合并）。
+import { findSessionByLane, readSessionIndex, registerSession } from './session-index.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
 import type { PolishConfig } from './profile-store.ts'
-import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID, TASK_PROJECT_ID } from './builtin-profiles.ts'
+import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensurePmProfile, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID } from './builtin-profiles.ts'
 import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './event-projection.ts'
 // fork（corum）：指挥模式（基准模式 `conductor`）——主 Agent 运行时裁剪 + 人格段。
 import {
@@ -484,6 +495,14 @@ export class CorumAgentService extends TypertRemoteService {
     // 版本演进刷新，用户自建/已改的 user profile 不动。服务启动时一次性注册，
     // 让新建任务表单的 Agent 下拉与名片页立即可见全量预置角色。
     ensureBuiltinRoleProfiles()
+    // fork（corum）2026-09-14：**task / pm 也要在启动时播种 spec 基线**。
+    //
+    // 这两个 profile 的 `ensure*` 是**懒加载**的（只在真正用到该 profile 时调用：
+    // `:463/:1487/:1792/:1850` 的 `profileId === TASK_PROFILE_ID ? ensureTaskProfile() : …`），
+    // 于是它们的 `specBaseline` 要等被用到才播种 ⇒ 在此之前「用户数据不被升级覆盖」的保护
+    // **不生效**（2026-09-14 实测：`task` 的基线一直缺失）。这里把两者提前到启动时幂等执行。
+    ensureTaskProfile()
+    ensurePmProfile()
     /**
      * 工具使用策略段（root scope，所有 corum 会话继承）。
      *
@@ -513,6 +532,36 @@ export class CorumAgentService extends TypertRemoteService {
       name: HOST_IDENTITY_SECTION,
       order: 5,
       text: hostIdentityText(corumHome(), process.env.CORUM_DEBUG_PORT),
+    })
+    /**
+     * 输出语言段（root scope，所有 corum 会话继承）：把「用户的母语是什么」作为**事实**
+     * 注入提示词（2026-09-15 用户需求）。
+     *
+     * **只约束对外可见输出**（最终回复 + 思考摘要），**不约束内部推理**——用户明确
+     * 「对于提示词/思考过程不做要求，某些模型确实英文语料训练的比较多。仅在关键结论、
+     * 输出做要求」。措辞细节与理由见 `output-language.ts` 的文件头。
+     *
+     * 语言值走**占位符 `{{output_language}}`**（用户要求）：与 `{{model}}`/`{{cwd}}`
+     * 同一套 `systemPrompt.variable` 机制（`dsh-agent-loop/src/index.ts:421-423` 注册那两个）。
+     * provider **每次组装时求值** ⇒ 用户在设置里改语言后**下一次组装即生效**，
+     * 不缓存、不重启会话。
+     *
+     * ⚠️ provider **绝不返回 `undefined`**：严格插值下 `undefined` 会让整个组装抛错
+     * （`dsh-system-prompt/src/index.ts:334-339` 实测）。未设偏好时返回一句可读的
+     * 「未指定」+ 回退指示，段文本依然自洽。
+     */
+    ctx.systemPrompt.variable(OUTPUT_LANGUAGE_VARIABLE, () => {
+      // settings 服务在 boot 早期可能尚未挂载（与上面 registerSettings 同款情形）；
+      // 读不到就当作「无偏好」——可选偏好绝不阻断会话组装。
+      const settings = ctx.get('settings') as { get?: (ns: string) => unknown } | undefined
+      const localeId = localeIdFromSection(settings?.get?.(LOCALE_SETTINGS_NAMESPACE))
+      return outputLanguageVariableValue(localeId)
+    })
+    // 段文本**静态**（含 `{{output_language}}` 占位符），由上面的变量在组装时插值。
+    ctx.systemPrompt.section({
+      name: OUTPUT_LANGUAGE_SECTION,
+      order: 6,
+      text: outputLanguageSectionText(),
     })
     /**
      * `corumConductor` 服务：把「这个会话是不是指挥模式」暴露给子 Agent 组装方。
@@ -1073,64 +1122,61 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 查项目目录的 session 索引：某 (profile, type) 会话是否已持久化。
+   * 查统一会话索引：某 (工作区, profile, 泳道) 会话是否已持久化。
    * 返回其 sessionId（供 resume），未登记返回 undefined。
+   *
+   * 「按工作区判」是修 `bug.task-lane-reuse-misses-project-sessions` 的关键：
+   * 旧实现 `lookupPersistedSessionId(projectId, …)` 用 **projectId** 作账本边界，
+   * 而 task 模式用的是伪 projectId——同一工作区在两种模式下各有一本账，互不可见。
+   * 改为按 **cwd** 查统一索引后，两模式共享同一本账。
    */
   private lookupPersistedSessionId(projectId: string, profileId: string, type: string): SessionId | undefined {
-    const index = this.readSessionIndex(projectId)
-    const key = `${profileId}${type}`
-    const id = index[key]
-    return id === undefined ? undefined : SessionId(id)
+    // projectId → cwd：索引与工作区同一套账本（会话索引按 cwd 分组）。
+    const project = loadProject(projectId)
+    const cwd = project?.cwd
+    if (cwd === undefined || cwd === '') return undefined
+    const found = findSessionByLane(profileId, type, cwd)
+    return found === undefined ? undefined : SessionId(found)
   }
 
-  /** 把一个 (profile, type) → sessionId 登记进项目目录的 session 索引。 */
+  /** 把一个 (工作区, profile, 泳道) → sessionId 登记进统一会话索引。 */
   private registerSessionId(projectId: string, profileId: string, type: string, sessionId: SessionId): void {
-    const index = this.readSessionIndex(projectId)
-    index[`${profileId}${type}`] = String(sessionId)
-    const path = join(this.projectSessionsDir(projectId), 'sessions.json')
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, JSON.stringify(index, null, 2))
-  }
-
-  /** 读取项目的 session 索引（<projectDir>/corum/sessions.json）。 */
-  private readSessionIndex(projectId: string): Record<string, string> {
-    const path = join(this.projectSessionsDir(projectId), 'sessions.json')
-    if (!existsSync(path)) return {}
-    try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>
-    } catch {
-      return {}
+    const project = loadProject(projectId)
+    const cwd = project?.cwd
+    if (cwd === undefined || cwd === '') {
+      // 无工作区的项目（cwd 缺省）无法按工作区建账——统一模型的身份由 cwd 决定。
+      this.ctx.logger.warn(`corum-agent: project "${projectId}" 无 cwd，跳过会话索引登记（${String(sessionId)}）`)
+      return
     }
+    registerSession(String(sessionId), {
+      cwd,
+      profileId,
+      type: projectTypeOf(project),
+      laneKey: type,
+    })
   }
 
-  /** 项目的 corum 元数据目录（session 索引所在）。 */
-  private projectSessionsDir(projectId: string): string {
-    const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
-      ? process.env.CORUM_HOME
-      : '~/.corum'
-    return join(resolveDshHome(configured), 'projects', projectId, 'corum')
-  }
+  // ── task 会话（统一索引：sessionId 作键，一个工作区多会话）──────────────
 
-  // ── task 会话持久化索引（sessionId → {cwd, profileId}，一个工作区多会话） ──
-
-  /** 读 task 会话索引（<taskDir>/corum/task-sessions.json）。 */
+  /**
+   * 读 task 会话索引（统一索引里 `type='task'` 的那些）。
+   *
+   * **键 = sessionId**（不再是 `<profileId><type>`）：task 模式一个工作区可以有多
+   * 个会话，用复合键会把它们压成一条（实测 217 条会丢 180 条，见台账
+   * `bug.unified-index-shape-loses-task-sessions`）。
+   */
   private readTaskSessionIndex(): Record<string, { cwd: string; profileId: string }> {
-    const path = join(this.projectSessionsDir(TASK_PROJECT_ID), 'task-sessions.json')
-    if (!existsSync(path)) return {}
-    try {
-      return JSON.parse(readFileSync(path, 'utf8')) as Record<string, { cwd: string; profileId: string }>
-    } catch {
-      return {}
+    const out: Record<string, { cwd: string; profileId: string }> = {}
+    for (const [sessionId, entry] of Object.entries(readSessionIndex())) {
+      if (entry.type !== 'task') continue
+      out[sessionId] = { cwd: entry.cwd, profileId: entry.profileId }
     }
+    return out
   }
 
-  /** 登记一条 task 会话（sessionId → cwd/profileId）进 task 索引。 */
+  /** 登记一条 task 会话（sessionId → cwd/profileId）进统一索引（type='task'）。 */
   private registerTaskSession(sessionId: SessionId, cwd: string, profileId: string): void {
-    const index = this.readTaskSessionIndex()
-    index[String(sessionId)] = { cwd, profileId }
-    const path = join(this.projectSessionsDir(TASK_PROJECT_ID), 'task-sessions.json')
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, JSON.stringify(index, null, 2))
+    registerSession(String(sessionId), { cwd, profileId, type: 'task' })
   }
 
   /** 获取已创建的 Agent（未创建返回 undefined）。 */
@@ -1458,6 +1504,21 @@ export class CorumAgentService extends TypertRemoteService {
    * @returns 创建/恢复结果 + 该会话的 sessionId（corum-task-<rand>）。
    */
   async createAgentForTask(cwd: string, profileId: string = TASK_PROFILE_ID, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
+    // 判定表门禁（不变式 C：互斥）——**本方法是「task 模式」入口**，故按 task 口径校验。
+    // 用户 2026-09-14 裁定：「如果是 task 模式打开一个 project 项目，则提示用户是项目
+    // 模式，是否按照项目模式开启。**拒绝按照 task 模式开启**。」
+    // 缺此校验时本入口会绕开门禁直接在 project 工作区里建 task 会话，破坏不变式 C。
+    // ⚠️ 用 realpath 归一查（同 openProjectByPath 的一工作区一条目口径）。
+    const owner = findProjectByCwd(cwd)
+    if (owner !== undefined) {
+      const stored = projectTypeOf(owner.project)
+      if (stored === 'project') {
+        throw new Error(
+          `dev-agent: 工作区 "${cwd}" 已是项目模式（project ${owner.project.id}）——无法以任务模式开启。`
+          + '请按项目模式打开该工作区（同一工作区只能有一个类型）。',
+        )
+      }
+    }
     // profileId 双源（2026-09-02 并列展示）：corum profile（研发/PM 助理/测试/Task
     // 助理，loadProfile 加载）或**官方 preset**（cordis/minimal/ptc/standard，
     // agentPresets 目录——直接 mount preset id，无 corum profile 实体）。
@@ -1599,18 +1660,31 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 找出目标工作区里**尚未发过消息**的 task 泳道（复用候选）。
+   * 找出目标工作区里**尚未发过消息**的泳道会话（复用候选）。
    *
    * 判定（对齐官方 blank 语义）：官方 `applySessionListMetadata` 里
    * `blank = state.blank && event.type !== 'turn/start'`——**日志里出现第一个
    * `turn/start` 就不再是 blank**。host 侧 `ctx.sessions.list()` 返回的是
    * `Session`（无 blank 字段，blank 在客户端摘要层），故此处直接按官方同源
-   * 规则判定：cwd 相同 + 事件流里没有 `turn/start`。
+   * 规则判定：同一工作区 + 事件流里没有 `turn/start`。
+   *
+   * **查全库、不只查 task 索引**（修 `bug.task-lane-reuse-misses-project-sessions`）：
+   * 旧实现只遍历 `readTaskSessionIndex()`（仅 `type='task'`），于是同一工作区里
+   * **项目模式的 blank 会话不会被复用** ⇒ 同一工作区出现两条并行泳道（一条 task、
+   * 一条 project）。这与统一模型（工作区即项目）直接冲突，也违背它自己的原始意图
+   * （源码注释：「连点『新建任务』不该堆一串空会话」）。
+   *
+   * 统一模型下的正确判据：**按工作区判**——`type` 只决定「显示哪些会话」，
+   * 不参与「能不能复用」。故这里遍历**统一索引**（两模式的会话都在里面）。
+   *
+   * 工作区比较走 `canonicalWorkspaceKey`（realpath 归一）：存量实测
+   * `"/a/b/"` 与 `"/a/b"` 同指一个目录，直接比字符串会把一个工作区判成两个。
    */
   private findBlankTaskLane(cwd: string): string | undefined {
-    const index = this.readTaskSessionIndex()
-    for (const [sid, meta] of Object.entries(index)) {
-      if (meta.cwd !== cwd) continue
+    const want = canonicalWorkspaceKey(cwd)
+    if (want === undefined) return undefined
+    for (const [sid, entry] of Object.entries(readSessionIndex())) {
+      if (canonicalWorkspaceKey(entry.cwd) !== want) continue
       const session = this.ctx.sessions.list().find((s) => String(s.id) === sid)
       // 会话不在对象层时保守不复用（宁可新建一个，也不要复用一个可能有历史的会话）。
       if (session === undefined) continue
@@ -2378,8 +2452,11 @@ export class CorumAgentService extends TypertRemoteService {
   async listTaskAgentsRemote(cwd?: string): Promise<{ tasks: TaskAgentSummary[] }> {
     const index = this.readTaskSessionIndex()
     const out: TaskAgentSummary[] = []
+    // cwd 过滤走身份归一（realpath）而非字符串直比：存量实测 "/a/b/" 与 "/a/b"
+    // 同指一个目录，直比会把同一工作区的会话漏掉一半（同 findBlankTaskLane）。
+    const wantCwd = cwd === undefined ? undefined : canonicalWorkspaceKey(cwd)
     for (const [sessionId, meta] of Object.entries(index)) {
-      if (cwd !== undefined && meta.cwd !== cwd) continue
+      if (wantCwd !== undefined && canonicalWorkspaceKey(meta.cwd) !== wantCwd) continue
       const live = this.taskAgents.get(sessionId)
       // 标题/最后活动从持久化读（冷泳道也有；存活表仅标 alive）。读全历史取首条
       // user 消息 + 末条时间，失败回退空（会话损坏不阻塞列表）。

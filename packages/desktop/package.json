@@ -181,6 +181,7 @@
     "@deepseek-ai/dsh-settings": "^0.1.3-alpha.1",
     "@deepseek-ai/dsh-settings-file": "^0.1.3-alpha.1",
     "@deepseek-ai/dsh-shell-env": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-storage-sqlite": "^0.1.3-alpha.1",
     "@deepseek-ai/dsh-system-prompt": "^0.1.3-alpha.1",
     "@deepseek-ai/dsh-terminal": "^0.1.3-alpha.1",
     "@deepseek-ai/dsh-terminal-bash": "^0.1.3-alpha.1",

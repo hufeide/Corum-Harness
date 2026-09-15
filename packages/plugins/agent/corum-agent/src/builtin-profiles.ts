@@ -38,6 +38,41 @@ const PM_PROMPT = [
 ].join('\n')
 
 /**
+ * spec 可同步字段集 —— **内置 spec 拥有、但用户也可编辑**的字段。
+ * 判据：当前值 === 基线值 ⇒ 用户没改过 ⇒ 可随 spec 刷新；不等 ⇒ 用户改过 ⇒ 保留。
+ */
+const SPEC_SYNCED_FIELDS = [
+  'nickname', 'title', 'dimension', 'baseMode', 'prompt',
+  'model', 'subagentModel', 'researchModel', 'executionTools', 'parallelWork',
+] as const
+
+/**
+ * 给一个内置 profile 计算「spec 基线」种子（**只记现值，不改现值**）。
+ *
+ * 为什么需要（2026-09-14）：幂等刷新用「当前值 === 基线值 ⇒ 用户没改过」区分 spec 演进
+ * 与用户修改，所以**没有基线的老安装永远享受不到保护**。这里在首次运行时播种：
+ * 基线 = 现值 ⇒ ① 现值一个都不动；② 用户**今后**的修改会被识别为「改过」并永久保留。
+ */
+function withSeededBaseline(profile: AgentProfile): AgentProfile {
+  if (profile.specBaseline !== undefined) return profile
+  const baseline: Record<string, unknown> = {}
+  for (const field of SPEC_SYNCED_FIELDS) {
+    baseline[field] = (profile as unknown as Record<string, unknown>)[field] ?? null
+  }
+  return { ...profile, specBaseline: baseline }
+}
+
+/**
+ * 内置 profile 的统一收尾：缺基线则播种并落盘。
+ * 所有 `ensure*` 路径都应经由它返回，以免漏播种（2026-09-14：`task` 曾因此拿不到基线）。
+ */
+function settled(profile: AgentProfile): AgentProfile {
+  const next = withSeededBaseline(profile)
+  if (next !== profile) saveProfile(next)
+  return next
+}
+
+/**
  * 确保框架预置的 PM profile 存在（幂等）。
  * PM 是项目组的会话统筹 + 人机交互入口：回收任务执行结果给用户、等待或
  * 自主决策下一指令/任务给到团队。预置一份，所有项目共用引用（项目可后续
@@ -45,14 +80,14 @@ const PM_PROMPT = [
  */
 export function ensurePmProfile(): AgentProfile {
   const existing = loadProfile(PM_PROFILE_ID)
-  // system profile：prompt 随版本演进幂等刷新（保留用户的模型/能力配置）。
+  // system profile：prompt 随版本演进幂等刷新（**保留用户的模型/能力配置**）。
   if (existing !== undefined) {
     if (existing.trust === 'system' && existing.prompt !== PM_PROMPT) {
-      const refreshed = { ...existing, prompt: PM_PROMPT }
+      const refreshed = { ...withSeededBaseline(existing), prompt: PM_PROMPT }
       saveProfile(refreshed)
       return refreshed
     }
-    return existing
+    return settled(existing)
   }
   const profile: AgentProfile = {
     id: PM_PROFILE_ID,
@@ -75,10 +110,18 @@ export function ensurePmProfile(): AgentProfile {
 
 /** task 模式的内置 profile id（单任务会话默认角色）。 */
 export const TASK_PROFILE_ID = 'task'
-/** task 会话持久化索引落的专用伪项目目录（与 project 泳道的项目目录隔离）。 */
-export const TASK_PROJECT_ID = 'task'
+// `TASK_PROJECT_ID = 'task'`（伪项目 id）已于 2026-09-15 随统一模型取消：
+// task 会话不再落 `$CORUM_HOME/projects/task/corum/task-sessions.json`，而是登记进
+// 统一会话索引（$CORUM_HOME/sessions.json，键 = sessionId、按 cwd 分组）。
+// 依据：architecture.project.unified-with-type-field、bug.unified-index-shape-loses-task-sessions。
 
 const TASK_PROMPT = 'You are the single-task development agent for Corum task mode. The user starts one development task in a workspace and you complete it independently.\nHow you work: understand the task → make progress with your tools (read/write files, run commands) → report the result concisely when done.\nYou are a single-task session: no project team, no delegation, no requirement management — focus on doing this one task well.'
+
+/**
+ * task 模式的子 Agent 模型锁（用户 2026-09-14 裁定：为提速换 deepseek-v4.1-flash）。
+ * 只锁 subagentModel，不动 researchModel —— 即「实现型子 Agent 提速，研究型仍走 glm-5.3-flash」。
+ */
+const TASK_SUBAGENT_MODEL = { provider: 'localhost', model: 'deepseek-v4.1-flash', reasoningEffort: 'high' } as const
 
 /**
  * 确保 task 模式的内置 profile 存在（幂等）。
@@ -87,12 +130,21 @@ const TASK_PROMPT = 'You are the single-task development agent for Corum task mo
 export function ensureTaskProfile(): AgentProfile {
   const existing = loadProfile(TASK_PROFILE_ID)
   if (existing !== undefined) {
+    // fork（corum）**2026-09-14 修正：只刷 prompt，绝不碰模型配置**。
+    //
+    // 我（监督侧）起初在这里加了「prompt 或 subagentModel 不一致则一并刷新」，那是**错的**：
+    // 用户拍板原则是「手动改的模型配置属于用户数据，不应该在程序升级后被覆盖」，而
+    // `subagentModel` 正是 设置→Agent 预设 里可编辑的字段（见 `SettingsAgentPresetsSection`
+    // 保存载荷）⇒ 按 spec 刷新它等于每次启动**静默回滚用户改动**。
+    //
+    // 现在：`prompt` 是**只读展示字段**（UI 里可见可改，但本 profile 的 prompt 属内置人格，
+    // 保持随版本刷新以免旧安装卡在过时人格）；**模型与能力配置一律保留用户改动**。
     if (existing.trust === 'system' && existing.prompt !== TASK_PROMPT) {
-      const refreshed = { ...existing, prompt: TASK_PROMPT }
+      const refreshed = { ...withSeededBaseline(existing), prompt: TASK_PROMPT }
       saveProfile(refreshed)
       return refreshed
     }
-    return existing
+    return settled(existing)
   }
   const profile: AgentProfile = {
     id: TASK_PROFILE_ID,
@@ -102,6 +154,7 @@ export function ensureTaskProfile(): AgentProfile {
     baseMode: 'standard',
     prompt: TASK_PROMPT,
     model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    subagentModel: TASK_SUBAGENT_MODEL,
     skills: [],
     mcpServers: [],
     terminal: { mode: 'sandbox' },
@@ -405,7 +458,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     dimension: '研发',
     baseMode: 'conductor',
     model: { provider: 'localhost', model: 'kimi-k3-1', reasoningEffort: 'high' },
-    subagentModel: { provider: 'localhost', model: 'glm-5.3-flash', reasoningEffort: 'high' },
+    subagentModel: { provider: 'localhost', model: 'deepseek-v4.1-flash', reasoningEffort: 'high' },
     researchModel: { provider: 'localhost', model: 'glm-5.3-flash', reasoningEffort: 'high' },
     parallelWork: { isolation: 'write-tasks' },
     // 人格只讲「我是谁 / 怎么干」，机制细节（隔离触发、模型锁、声明式验收、结果回传）
@@ -468,6 +521,74 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
 ]
 
 /**
+ * spec 可同步字段集 —— **内置 spec 拥有、但用户也可编辑**的字段。
+ *
+ * 判据：某字段**从未被用户改过**（当前值 === 基线值）⇒ 允许随 spec 演进刷新；
+ * 一旦用户改过（当前值 !== 基线值）⇒ 永久保留用户值，spec 不再覆盖。
+ *
+ * `skills` / `mcpServers` / `terminal` / `memoryPolicy` / `avatar` 等**不在集合内**：
+ * 它们属能力与个人化配置，spec 从不管，也就永远不会被刷新碰到。
+ */
+const stableStringify = (v: unknown): string => JSON.stringify(v ?? null)
+
+/**
+ * 按「字段来源」计算一次幂等刷新（2026-09-14 用户拍板：手动改的配置属用户数据，
+ * 不得在程序升级后被覆盖）。
+ *
+ * 语义：对每个可同步字段，
+ * · spec 未给值 ⇒ 不动（保留现值；基线记 null 表示「spec 不拥有它」）；
+ * · spec 给了值：
+ *   - **当前值 === 基线值** ⇒ 用户没改过 ⇒ 写入 spec 值（让改名/演进落地）；
+ *   - **当前值 !== 基线值** ⇒ 用户改过 ⇒ **保留用户值**；
+ *   - 基线缺失（老安装）⇒ 同样**保守保留用户值**：宁可漏一次 spec 演进，也不静默覆盖。
+ *
+ * 两个既有契约由此同时满足：`tests/builtin-roles.spec.ts:126-137`（改名必须能落地）与
+ * 用户原则（用户改过的字段不得被升级覆盖）。
+ *
+ * @param existing - 已有的 system profile。
+ * @param spec - 内置角色 spec（唯一事实源）。
+ * @returns 计算后的 profile、新的基线、以及是否发生变化（决定要不要落盘）。
+ */
+export function refreshFromSpec(
+  existing: AgentProfile,
+  spec: BuiltinRoleSpec,
+): { next: AgentProfile; baseline: Record<string, unknown>; changed: boolean } {
+  const prev = existing.specBaseline as Record<string, unknown> | undefined
+  const next: Record<string, unknown> = { ...existing }
+  const baseline: Record<string, unknown> = {}
+  // 老安装（无基线）：**首次只播种、不改值**。
+  //
+  // 播种 = 把现值记成基线，于是「现值 === 基线值」⇒ 这些字段**从此**可以随 spec 演进刷新，
+  // 而用户**今后**的任何修改都会被判为「改过」并永久保留。这一步本身不改任何现值，
+  // 因此绝不会覆盖用户数据。
+  //
+  // 代价（如实记录）：**本次 spec 的改动对「本次之前就已偏离 spec」的老安装不追溯生效**
+  // ——例如把 conductor-lead 的 subagentModel 从 glm-5.3-flash 改成 deepseek-v4.1-flash，
+  // 装了老 profile 的用户不会自动拿到新值（无法区分「它偏离 spec」是用户改的还是老默认）。
+  // 需要追溯时须走**显式迁移**（按 profile.version 升版）或由用户在 设置→Agent 预设 里改。
+  const seeding = prev === undefined
+  let changed = seeding   // 播种需要落盘一次，让基线持久化
+  for (const field of SPEC_SYNCED_FIELDS) {
+    const specValue = (spec as unknown as Record<string, unknown>)[field]
+    if (seeding) {
+      // 播种：基线 = **现值**（而不是 spec 值），这样不会被误判成「用户改过」，也不改现值。
+      const currentValue = (existing as unknown as Record<string, unknown>)[field]
+      baseline[field] = currentValue ?? null
+      continue
+    }
+    baseline[field] = specValue ?? null
+    if (specValue === undefined) continue
+    const currentValue = (existing as unknown as Record<string, unknown>)[field]
+    if (stableStringify(currentValue) !== stableStringify(prev![field])) continue   // 用户改过 ⇒ 保留
+    if (stableStringify(currentValue) !== stableStringify(specValue)) {
+      next[field] = specValue
+      changed = true
+    }
+  }
+  return { next: next as unknown as AgentProfile, baseline, changed }
+}
+
+/**
  * 确保全部行业角色预置 profile 存在（幂等）。
  * 与 ensurePm/ensureTask 同一纪律：system profile 的 prompt 随版本演进幂等
  * 刷新（保留用户的模型/能力/名片配置），user trust 的同名 profile 不动。
@@ -485,37 +606,22 @@ export function ensureBuiltinRoleProfiles(): void {
   for (const spec of BUILTIN_ROLES) {
     const existing = loadProfile(spec.id)
     if (existing !== undefined) {
-      // system profile：prompt / **名片字段**（昵称、标题、维度）/ baseMode / 机制字段
-      // 都随版本演进幂等刷新（模型与能力配置保留用户改动）。
+      // fork（corum）**2026-09-14 修正：用户数据不得被程序升级覆盖**（用户拍板原则）。
       //
-      // 2026-09-13 修正：旧实现的触发条件只比对 prompt 与机制字段，**名片字段改了不进
-      // 刷新分支** → 「指挥者→指挥模式」这类纯改名对既有安装**静默不生效**（只有全新
-      // home 才拿到新名）。注释一直写着「名片字段随版本幂等刷新」，代码却没查它们——
-      // 典型的「注释与实现不一致导致的静默失效」。现在把昵称/标题/维度/baseMode 一并
-      // 纳入判据。
-      if (existing.trust === 'system' && (
-        existing.nickname !== spec.nickname
-        || existing.title !== spec.title
-        || existing.dimension !== spec.dimension
-        || existing.baseMode !== spec.baseMode
-        || existing.prompt !== spec.prompt
-        || existing.executionTools !== spec.executionTools
-        || existing.subagentModel?.model !== spec.subagentModel?.model
-        || existing.researchModel?.model !== spec.researchModel?.model
-      )) {
-        saveProfile({
-          ...existing,
-          nickname: spec.nickname,
-          title: spec.title,
-          dimension: spec.dimension,
-          baseMode: spec.baseMode,
-          prompt: spec.prompt,
-          ...(spec.executionTools !== undefined ? { executionTools: spec.executionTools } : {}),
-          ...(spec.subagentModel !== undefined ? { subagentModel: spec.subagentModel } : {}),
-          ...(spec.researchModel !== undefined ? { researchModel: spec.researchModel } : {}),
-          ...(spec.parallelWork !== undefined ? { parallelWork: spec.parallelWork } : {}),
-          ...(spec.model !== undefined ? { model: spec.model } : {}),
-        })
+      // 旧实现把 nickname/title/dimension/baseMode/prompt/model/subagentModel/researchModel
+      // **八个字段按 spec 无条件覆写**，而注释却写着「保留用户的模型/能力/名片配置」——注释与
+      // 代码相反；且 `tests/builtin-roles.spec.ts` 早就断言「仍然保留用户的模型/能力配置」。
+      // 这八个字段**全部可在 设置→Agent 预设 里编辑** ⇒ 每次启动都会把用户修改**静默刷回**。
+      //
+      // 但也不能一刀切「全不刷」：`tests/builtin-roles.spec.ts:126-137` 钉住「改名必须落地」
+      // （否则「指挥者→指挥模式」这类演进对既有安装静默不生效）—— 那条同样正确。
+      //
+      // 于是采用**按字段来源**判据（见 `AgentProfile.specBaseline` 与 {@link refreshFromSpec}）：
+      // 当前值 === 基线值 ⇒ 用户没改过 ⇒ 随 spec 刷新；不等 ⇒ 用户改过 ⇒ 保留用户值。
+      // 两个契约同时满足，且不靠「值恰好不同」这种脆弱判据。
+      if (existing.trust === 'system') {
+        const { next, baseline, changed } = refreshFromSpec(existing, spec)
+        if (changed) saveProfile({ ...next, specBaseline: baseline })
       }
       continue
     }

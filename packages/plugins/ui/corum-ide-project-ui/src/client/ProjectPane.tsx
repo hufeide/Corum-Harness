@@ -25,7 +25,9 @@ import {
   type ListProjectsResult, type ListProfilesResult,
   type OpenProjectArgs, type OpenProjectResult,
   type OpenProjectByPathArgs, type OpenProjectByPathResult,
+  type UpgradeProjectTypeArgs, type UpgradeProjectTypeResult,
   type CompleteSetupArgs, type CompleteSetupResult,
+  type DeleteProjectArgs, type DeleteProjectResult,
 } from '@corum/corum-agent/contract'
 import {
   Bug, CalendarCheck, CalendarClock, ChevronDown, ChevronRight, Circle, CircleCheck,
@@ -157,6 +159,8 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
   const pendings = useSyncExternalStore(pendingInteractions.subscribe, pendingInteractions.getSnapshot)
   const [projects, setProjects] = useState<readonly CorumProject[]>([])
+  // projectId → cwd 是否存活（false = 目录不可用：不可打开，提供删除入口）。
+  const [availability, setAvailability] = useState<Record<string, boolean>>({})
   const [activeProject, setActiveProject] = useState<CorumProject | null>(null)
   const [projectsLoading, setProjectsLoading] = useState(false)
   const [projectError, setProjectError] = useState<string | null>(null)
@@ -165,6 +169,9 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
   const [manageCounts, setManageCounts] = useState<{ requirements: number; tasks: number; bugs: number } | null>(null)
   // 创建向导（打开空目录时弹出）。
   const [wizard, setWizard] = useState<WizardState | null>(null)
+  // 升级确认（已有 task 工作区被以 project 口径打开 ⇒ 提醒是否升级为 project）。
+  // 不变式 B：task → project 允许但**需用户确认**；project → task 恒禁止。
+  const [upgradePrompt, setUpgradePrompt] = useState<{ projectId: string; cwd: string } | null>(null)
 
   const rows = snapshot.ids
     .map(id => snapshot.byId[id])
@@ -192,12 +199,28 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
     try {
       const result = await callRemote<ListProjectsResult>('corumProject', CORUM_PROJECT_METHODS.listProjects, {})
       setProjects(result.projects)
+      setAvailability(result.availability ?? {})
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error))
     } finally {
       setProjectsLoading(false)
     }
   }, [callRemote])
+
+  /** 删除一个「目录不可用」的项目条目（只删索引，不碰项目工作区）。 */
+  const deleteUnavailableProject = useCallback(async (id: string): Promise<void> => {
+    const name = projects.find(p => p.id === id)?.name ?? id
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`项目「${name}」的目录不可用（被移动或删除）。\n是否删除该项目条目？\n（只删除 Corum 里的项目记录，不删除项目目录内的任何文件）`)) return
+    try {
+      const args: DeleteProjectArgs = { id }
+      await callRemote<DeleteProjectResult>('corumProject', CORUM_PROJECT_METHODS.deleteProject, args)
+      if (activeProject?.id === id) setActiveProject(null)
+      await refreshProjects()
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error))
+    }
+  }, [projects, activeProject, refreshProjects, callRemote])
 
   // 挂载时拉一次历史项目（③b 段数据）。骨架常驻挂载本 pane，此 effect 只跑一次。
   useEffect(() => { void refreshProjects() }, [refreshProjects])
@@ -239,27 +262,64 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
     }
   }, [refreshProjects, callRemote])
 
-  // 「打开项目」：原生选目录 → openProjectByPath 分流（已有直读 / 空目录进向导）。
+  // 「打开项目」：原生选目录 → openProjectByPath 分流。
+  //
+  // 判定表门禁（architecture.project.type-is-authoritative-and-monotonic）：
+  //   existing        ⇒ 同口径，恢复原项目
+  //   wizard          ⇒ 无痕迹，直接进创建向导
+  //   upgrade-required⇒ 已有 task 工作区被以 project 口径打开 ⇒ **需用户确认升级**
+  //   mode-conflict   ⇒ 已有 project 工作区被要求以 task 打开 ⇒ **拒绝**，引导按项目模式开
   const openProjectByPath = useCallback(async (): Promise<void> => {
     setProjectError(null)
     const path = await pickDirectory('打开项目目录')
     if (path === null) return // 用户取消
     setProjectsLoading(true)
     try {
-      const args: OpenProjectByPathArgs = { cwd: path }
+      // 本面板是**项目模式**入口 ⇒ 口径恒为 project。
+      const args: OpenProjectByPathArgs = { cwd: path, requestedType: 'project' }
       const result = await callRemote<OpenByPathResult>('corumProject', CORUM_PROJECT_METHODS.openProjectByPath, args)
-      if (result.kind === 'existing') {
-        setActiveProject(result.project)
-        await refreshProjects()
-      } else {
-        setWizard({ cwd: result.cwd, suggestedName: result.suggestedName })
-        setProjectsLoading(false)
+      switch (result.kind) {
+        case 'existing':
+          setActiveProject(result.project)
+          await refreshProjects()
+          break
+        case 'wizard':
+          setWizard({ cwd: result.cwd, suggestedName: result.suggestedName })
+          setProjectsLoading(false)
+          break
+        case 'upgrade-required':
+          // 提醒是否升级：确认走 upgradeProjectType（唯一允许的类型变更）。
+          setUpgradePrompt({ projectId: result.project.id, cwd: path })
+          setProjectsLoading(false)
+          break
+        case 'mode-conflict':
+          // 拒绝以 task 开启；直接转为按项目模式打开（用户口径是「按项目模式开启」）。
+          setActiveProject(result.project)
+          setProjectError(`「${result.project.name}」已是项目模式工作区——已按项目模式打开（同一工作区只能有一个类型）。`)
+          await refreshProjects()
+          break
       }
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error))
       setProjectsLoading(false)
     }
   }, [refreshProjects, callRemote])
+
+  // 升级确认：task 工作区 → project（不变式 B 唯一允许的类型变更）。
+  const confirmUpgrade = useCallback(async (): Promise<void> => {
+    if (upgradePrompt === null) return
+    setProjectsLoading(true)
+    try {
+      const args: UpgradeProjectTypeArgs = { id: upgradePrompt.projectId }
+      const result = await callRemote<UpgradeProjectTypeResult>('corumProject', CORUM_PROJECT_METHODS.upgradeProjectType, args)
+      setUpgradePrompt(null)
+      setActiveProject(result.project)
+      await refreshProjects()
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error))
+      setProjectsLoading(false)
+    }
+  }, [upgradePrompt, refreshProjects, callRemote])
 
   // 向导完成：activeProject 已由 completeSetup 返回，关掉向导刷新列表。
   const completeWizard = useCallback(async (project: CorumProject): Promise<void> => {
@@ -283,10 +343,12 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
       ) : (
         <ProjectEmpty
           projects={projects}
+          availability={availability}
           loading={projectsLoading}
           error={projectError}
           onOpenProject={(id) => { void openProject(id) }}
           onOpenProjectByPath={() => { void openProjectByPath() }}
+          onDeleteUnavailable={(id) => { void deleteUnavailableProject(id) }}
         />
       )}
       {/* 项目创建向导（空目录触发）：portal 到 body 避开 backdrop-filter 包含块。 */}
@@ -301,17 +363,74 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
         />,
         document.body,
       )}
+      {/* 升级确认（判定表 `upgrade-required`）：task 工作区被以 project 口径打开。
+          变更**只能由用户确认触发**（不变式 B：升级需确认、降级禁止）。 */}
+      {upgradePrompt !== null && createPortal(
+        <UpgradePrompt
+          cwd={upgradePrompt.cwd}
+          onCancel={() => {
+            // 拒绝升级 ⇒ 按 task 口径打开（不变式 A：已存 type 具权威性，不改写）。
+            setUpgradePrompt(null)
+            setProjectsLoading(false)
+          }}
+          onConfirm={() => { void confirmUpgrade() }}
+        />,
+        document.body,
+      )}
     </>
   )
 }
 
-/** 空态（③ 无历史 = 纯空态；③b 有历史 = 空态 + 历史项目段）。 */
-function ProjectEmpty({ projects, loading, error, onOpenProject, onOpenProjectByPath }: {
+/**
+ * 升级确认对话框（`task → project`）。
+ *
+ * 用户 2026-09-14 裁定原话：「当该工作区以 task 方式创建后，用户在项目口径创建
+ * 新项目时打开，发现里面已经有 task 的工程痕迹，则**提醒用户是否要升级为
+ * project**（设计上 project 是更高级的组织和管理方式）」。
+ */
+function UpgradePrompt({ cwd, onCancel, onConfirm }: {
+  cwd: string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className={css.wizardOverlay} role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div className={css.wizardDialog} role="dialog" aria-modal="true" aria-label="升级为项目">
+        <header className={css.wizardHeader}>
+          <span className={css.wizardTitle}>这个工作区是「任务」模式</span>
+        </header>
+        <div className={css.wizardDivider} />
+        <div className={css.wizardBody}>
+          <span className={css.wizardHint}>
+            该工作区已有任务模式的工程痕迹。<strong>项目是更高级的组织和管理方式</strong>，
+            升级后无法再改回任务模式。
+          </span>
+          <div className={css.wizardDir}>
+            <Folder size={12} strokeWidth={2} className={css.wizardDirIcon} />
+            <span className={css.wizardDirPath} title={cwd}>{cwd}</span>
+            <span className={css.wizardDirBadge}>任务模式</span>
+          </div>
+        </div>
+        <footer className={css.wizardFooter}>
+          <button type="button" className={css.wizardBtnGhost} onClick={onCancel}>按任务模式打开</button>
+          <button type="button" className={css.wizardBtnPrimary} onClick={onConfirm}>升级为项目</button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+/** 空态（③ 无历史 = 纯空态；③b 有历史 = 空态 + 历史项目段）。
+ *  目录不可用（available=false）的条目照列：标记「目录不可用」，不可打开，
+ *  提供「删除该条目」入口（只删 Corum 索引记录，不动项目目录）。 */
+function ProjectEmpty({ projects, availability, loading, error, onOpenProject, onOpenProjectByPath, onDeleteUnavailable }: {
   projects: readonly CorumProject[]
+  availability: Record<string, boolean>
   loading: boolean
   error: string | null
   onOpenProject: (id: string) => void
   onOpenProjectByPath: () => void
+  onDeleteUnavailable: (id: string) => void
 }) {
   const history = [...projects].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
   return (
@@ -339,23 +458,46 @@ function ProjectEmpty({ projects, loading, error, onOpenProject, onOpenProjectBy
             <span className={css.historyHint}>双击快速打开</span>
           </div>
           <div className={css.historyList}>
-            {history.map((project, index) => (
-              <button
-                key={project.id}
-                type="button"
-                className={`${css.historyRow}${index === 0 ? ` ${css.historyRowRecent}` : ''}`}
-                onDoubleClick={() => onOpenProject(project.id)}
-                onClick={() => onOpenProject(project.id)}
-                title={`${project.name}（双击快速打开）`}
-              >
-                <Folder size={18} strokeWidth={2} className={index === 0 ? css.historyIconRecent : css.historyIcon} />
-                <span className={css.historyMeta}>
-                  <span className={css.historyName}>{project.name}</span>
-                  <span className={css.historySub}>{project.group?.members.length ?? 0} 成员 · {historyTimeLabel(project.lastOpenedAt)}</span>
-                </span>
-                {index === 0 && <span className={css.historyBadge}>最近</span>}
-              </button>
-            ))}
+            {history.map((project, index) => {
+              const available = availability[project.id] !== false
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  className={`${css.historyRow}${index === 0 ? ` ${css.historyRowRecent}` : ''}${available ? '' : ` ${css.historyRowUnavailable}`}`}
+                  onDoubleClick={() => { if (available) onOpenProject(project.id) }}
+                  onClick={() => { if (available) onOpenProject(project.id) }}
+                  title={available
+                    ? `${project.name}（双击快速打开）`
+                    : `${project.name}（目录不可用：${project.cwd ?? '未关联目录'}）`}
+                >
+                  <Folder size={18} strokeWidth={2} className={index === 0 ? css.historyIconRecent : css.historyIcon} />
+                  <span className={css.historyMeta}>
+                    <span className={css.historyName}>{project.name}</span>
+                    <span className={css.historySub}>
+                      {available
+                        ? <>{project.group?.members.length ?? 0} 成员 · {historyTimeLabel(project.lastOpenedAt)}</>
+                        : <>目录不可用 · {project.cwd ?? '未关联目录'}</>}
+                    </span>
+                  </span>
+                  {!available
+                    ? (
+                      <span
+                        className={css.historyDelete}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`删除项目 ${project.name}`}
+                        title="是否删除该项目？（只删除 Corum 里的项目记录，不删除项目目录）"
+                        onClick={(e) => { e.stopPropagation(); onDeleteUnavailable(project.id) }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onDeleteUnavailable(project.id) } }}
+                      >
+                        <X size={13} strokeWidth={2.5} />
+                      </span>
+                    )
+                    : index === 0 && <span className={css.historyBadge}>最近</span>}
+                </button>
+              )
+            })}
           </div>
         </section>
       )}

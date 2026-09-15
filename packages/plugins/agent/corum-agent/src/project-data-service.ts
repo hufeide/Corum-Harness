@@ -14,25 +14,30 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { CorumAgentService } from './agent-service.ts'
 import type { CorumProject, ProjectGroupMember } from './project.ts'
-import { loadProject } from './project-store.ts'
+import { loadProject, loadProjectIndex } from './project-store.ts'
 import {
   bugSeveritySchema,
   computeRequirementReadiness,
   deriveRequirementStatus,
   entityKey,
-  projectDataDomainSpec,
+  projectDataDomainSpecFor,
+  projectDataDomainName,
   requirementEntitySchema,
   taskEntitySchema,
   bugEntitySchema,
   projectAuditSchema,
 } from './project-entities.ts'
+import type { DomainSpec } from './project-entities.ts'
+import { projectBackendName, registerProjectBackend } from './project-data-backend.ts'
 import type {
   BugEntity,
   BugSeverity,
@@ -66,7 +71,7 @@ export interface ProjectCaller {
   readonly sessionId?: string
 }
 
-type DomainHandle = Domain<typeof projectDataDomainSpec>
+type DomainHandle = Domain<DomainSpec>
 type RequirementsTable = KvTable<string, RequirementEntity>
 type TasksTable = KvTable<string, TaskEntity>
 type BugsTable = KvTable<string, BugEntity>
@@ -80,31 +85,101 @@ interface Tables {
 }
 
 /**
- * ctx.project 数据服务。单例（host 根 ctx），所有写路径串行化在
- * storage-domain 的单域写链上；读路径同步来自 domain 的权威内存态。
+ * ctx.project 数据服务。单例（host 根 ctx），写路径串行化在各项目域的
+ * 单域写链上；读路径同步来自 domain 的权威内存态。
+ *
+ * Round 2 起**一项目一域**（`corum_project_<projectId>`，per-record layout）：
+ * 首次触达某项目时把该项目的专用 json 后端（root = `<cwd>/.corum/project/`）
+ * 注册进官方 storage hub，再经 DomainFacility 开域；域句柄按 projectId 缓存，
+ * close 路径在服务卸载（ctx.effect disposer）时统一关闭。
  */
 export class CorumProjectDataService extends TypertRemoteService {
-  static inject = ['storageDomain']
+  /** 本服务自持的域设施（routes 动态扩充；后端经官方 hub 注册，facility 直读 hub registry）。 */
+  private readonly facility: DomainFacility
 
-  private readonly domainPromise: Promise<DomainHandle>
+  /** 已打开的域句柄缓存（projectId → promise；同项目并发请求共享一次 open）。 */
+  private readonly domains = new Map<string, Promise<DomainHandle>>()
+  /** 本服务创建的 per-project 后端 disposer（卸载时统一释放）。 */
+  private readonly backendDisposers: Array<() => Promise<void>> = []
+  /** 已补进 facility.routes 的项目域名（避免重复登记）。 */
+  private readonly routed = new Set<string>()
+
+  /** 泳道会话反查（ToolExecution.agent → 项目/角色可信身份）。 */
+  private readonly corumAgent: CorumAgentService
 
   constructor(
     ctx: Context,
-    /** 泳道会话反查（ToolExecution.agent → 项目/角色可信身份）。 */
-    private readonly corumAgent: CorumAgentService,
+    corumAgent: CorumAgentService,
   ) {
     super(ctx, 'corumProjectData')
-    this.domainPromise = ctx.storageDomain.open(projectDataDomainSpec)
-    void this.domainPromise.then(domain => {
-      this.ctx.effect(() => () => domain.close(), 'corumProjectData.domainClose')
-    }).catch(error => {
-      this.ctx.logger.error(`corumProjectData: open domain failed: ${String(error)}`)
-    })
+    this.corumAgent = corumAgent
+    // 自持 facility：默认路由指向全局 `json` 后端（兜底；每个项目域都会显式
+    // 补路由），per-project 路由在 openProjectDomain 里逐条登记。
+    this.facility = new DomainFacility(ctx, { backend: 'json', routes: {} })
+    this.ctx.effect(async () => async () => {
+      await Promise.allSettled([...this.domains.values()].map(p => p.then(d => d.close(), () => {})))
+      this.domains.clear()
+      await Promise.allSettled(this.backendDisposers.map(dispose => dispose()))
+    }, 'corumProjectData.close')
   }
 
-  /** 打开后的四张表（requirements/tasks/bugs/audits）。 */
-  private async tables(): Promise<Tables> {
-    const domain = await this.domainPromise
+  /**
+   * 项目 → 已打开的四表。懒开 + 缓存：
+   *   1. 索引取 cwd（loadProjectIndex 轻读，避免拉详字段）；cwd 缺省/失联 → 报错。
+   *   2. 注册 per-project json 后端（root = `<cwd>/.corum/project/`；同 cwd
+   *      复用同名后端实例），disposer 留给卸载路径。
+   *   3. DomainFacility.open(项目域 spec)——域名 `corum_project_<id>` 满足
+   *      官方 UNIT_NAME_RE；同域名并发 open 由 handle cache 收敛为一次。
+   */
+  private async tablesForProject(projectId: string): Promise<Tables> {
+    const cached = this.domains.get(projectId)
+    if (cached !== undefined) return this.tablesOf(await cached)
+    const opening = this.openProjectDomain(projectId)
+    this.domains.set(projectId, opening)
+    try {
+      return this.tablesOf(await opening)
+    } catch (error) {
+      // 开域失败不留坏缓存（下次触达重试）。
+      this.domains.delete(projectId)
+      throw error
+    }
+  }
+
+  /** 打开（或取已开）指定项目的域句柄。缓存命中时直接复用（不重复注册后端）。 */
+  private async openProjectDomain(projectId: string): Promise<DomainHandle> {
+    const index = loadProjectIndex(projectId)
+    const cwd = index?.cwd !== undefined && index.cwd !== '' ? index.cwd : undefined
+    if (cwd === undefined) throw new Error(`project-data: project "${projectId}" has no workspace cwd bound`)
+    if (!existsSync(cwd)) throw new Error(`project-data: project "${projectId}" workspace cwd unavailable (${cwd})`)
+    // per-project 后端（root = <cwd>/.corum/project）注册进官方 hub registry；
+    // 同 cwd 复用同名实例（registry 的 duplicate-backend 防护即缓存语义）。
+    const registration = registerProjectBackend(this.ctx.storage, cwd)
+    if (registration.created) {
+      this.backendDisposers.push(registration.disposer)
+    }
+    // 域名 → 后端名 路由补进自持 facility（官方 Config.routes 是启动期定死的
+    // 普通 Record；本服务持有 facility 实例，运行期写 routes 与官方 open()
+    // 读取 `this.config.routes?.[spec.name]` 的语义完全一致）。
+    const domainName = projectDataDomainName(projectId)
+    const backendName = projectBackendName(cwd)
+    if (!this.routed.has(domainName)) {
+      ;(this.facility as unknown as { config: { routes: Record<string, string> } }).config.routes[domainName] = backendName
+      this.routed.add(domainName)
+    }
+    const spec = projectDataDomainSpecFor(projectId)
+    try {
+      return await this.facility.open(spec)
+    } catch (error) {
+      // 开域失败时若后端是本轮新注册的，立刻释放（不占 registry 名额）。
+      if (registration.created) {
+        void registration.disposer().catch(() => {})
+      }
+      throw new Error(`project-data: open domain "${projectDataDomainName(projectId)}" failed (cwd=${cwd}): ${String(error)}`)
+    }
+  }
+
+  /** 域句柄 → 四表（官方 domain.table(name)）。 */
+  private tablesOf(domain: DomainHandle): Tables {
     return {
       requirements: domain.table('requirements'),
       tasks: domain.table('tasks'),
@@ -204,18 +279,18 @@ export class CorumProjectDataService extends TypertRemoteService {
 
   /** 列出项目需求（默认不含软删）。 */
   async listRequirements(projectId: string, includeDeleted = false): Promise<RequirementEntity[]> {
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(projectId)
     return [...tables.requirements.entries()]
-      .filter(([key, value]) => key.startsWith(`${projectId}/`) && (includeDeleted || value.deletedAt === undefined))
+      .filter(([, value]) => value.projectId === projectId && (includeDeleted || value.deletedAt === undefined))
       .map(([, value]) => value)
       .sort((a, b) => a.createdAt - b.createdAt)
   }
 
   /** 列出项目任务。 */
   async listTasks(projectId: string, requirementId?: string): Promise<TaskEntity[]> {
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(projectId)
     return [...tables.tasks.entries()]
-      .filter(([key, value]) => key.startsWith(`${projectId}/`) && value.deletedAt === undefined)
+      .filter(([, value]) => value.projectId === projectId && value.deletedAt === undefined)
       .map(([, value]) => value)
       .filter(t => requirementId === undefined || t.requirementId === requirementId)
       .sort((a, b) => a.createdAt - b.createdAt)
@@ -223,9 +298,9 @@ export class CorumProjectDataService extends TypertRemoteService {
 
   /** 列出项目 BUG。 */
   async listBugs(projectId: string, requirementId?: string): Promise<BugEntity[]> {
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(projectId)
     return [...tables.bugs.entries()]
-      .filter(([key, value]) => key.startsWith(`${projectId}/`) && value.deletedAt === undefined)
+      .filter(([, value]) => value.projectId === projectId && value.deletedAt === undefined)
       .map(([, value]) => value)
       .filter(b => requirementId === undefined || b.requirementId === requirementId)
       .sort((a, b) => a.createdAt - b.createdAt)
@@ -274,7 +349,7 @@ export class CorumProjectDataService extends TypertRemoteService {
     },
   ): Promise<RequirementEntity> {
     this.assertWrite(caller, 'requirement', 'create')
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     const now = Date.now()
     const requirement = parseEntity(requirementEntitySchema, {
       id: `req-${randomUUID()}`,
@@ -322,7 +397,7 @@ export class CorumProjectDataService extends TypertRemoteService {
     },
   ): Promise<TaskEntity> {
     this.assertWrite(caller, 'task', 'create')
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     await this.requireRequirement(tables, caller.projectId, input.requirementId)
     const project = loadProject(caller.projectId)
     if (project === undefined) throw new Error(`project-data: project "${caller.projectId}" not found`)
@@ -368,7 +443,7 @@ export class CorumProjectDataService extends TypertRemoteService {
   /** 改派任务（TL 直写指派 / PM 直写改派）。 */
   async assignTask(caller: ProjectCaller, taskId: string, assigneeId: string, expectedVersion?: number): Promise<TaskEntity> {
     this.assertWrite(caller, 'task', 'assign')
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     const current = await this.requireTask(tables, caller.projectId, taskId)
     this.assertVersion(current.version, expectedVersion)
     const project = loadProject(caller.projectId)
@@ -403,7 +478,7 @@ export class CorumProjectDataService extends TypertRemoteService {
     expectedVersion?: number,
   ): Promise<TaskEntity> {
     this.assertWrite(caller, 'task', 'status', toStatus)
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     const current = await this.requireTask(tables, caller.projectId, taskId)
     this.assertVersion(current.version, expectedVersion)
     if (!TASK_FLOW[current.status].includes(toStatus)) {
@@ -446,7 +521,7 @@ export class CorumProjectDataService extends TypertRemoteService {
     },
   ): Promise<BugEntity> {
     this.assertWrite(caller, 'bug', 'create')
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     await this.requireRequirement(tables, caller.projectId, input.requirementId)
     const project = loadProject(caller.projectId)
     if (project === undefined) throw new Error(`project-data: project "${caller.projectId}" not found`)
@@ -495,7 +570,7 @@ export class CorumProjectDataService extends TypertRemoteService {
     options: { expectedVersion?: number; fixReleaseId?: string; rejectReason?: string } = {},
   ): Promise<BugEntity> {
     this.assertWrite(caller, 'bug', 'status', toStatus)
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     const current = await this.requireBug(tables, caller.projectId, bugId)
     this.assertVersion(current.version, options.expectedVersion)
     if (!BUG_FLOW[current.status].includes(toStatus)) {
@@ -534,7 +609,7 @@ export class CorumProjectDataService extends TypertRemoteService {
   /** BUG 转交（Dev 直写免确认但留痕；转交后回到 processing）。 */
   async transferBug(caller: ProjectCaller, bugId: string, toUserId: string, reason?: string, expectedVersion?: number): Promise<BugEntity> {
     this.assertWrite(caller, 'bug', 'assign')
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     const current = await this.requireBug(tables, caller.projectId, bugId)
     this.assertVersion(current.version, expectedVersion)
     const project = loadProject(caller.projectId)
@@ -581,7 +656,7 @@ export class CorumProjectDataService extends TypertRemoteService {
   /** PM 判需求结束（服务端重算 Readiness；空需求/阻断严重未清必拒）。 */
   async finishRequirement(caller: ProjectCaller, requirementId: string, expectedVersion?: number): Promise<RequirementEntity> {
     this.assertWrite(caller, 'requirement', 'status', 'finished')
-    const tables = await this.tables()
+    const tables = await this.tablesForProject(caller.projectId)
     const current = await this.requireRequirement(tables, caller.projectId, requirementId)
     this.assertVersion(current.version, expectedVersion)
     const readiness = await this.getReadiness(caller.projectId, requirementId)

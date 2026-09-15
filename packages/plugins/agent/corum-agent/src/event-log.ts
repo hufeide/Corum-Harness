@@ -1,7 +1,9 @@
 /**
  * 团队调度事件日志（项目级持久化）—— TEAM-SCHEDULER-EVENT-LOG.md 最小闭环落地。
  *
- * 存储形态（设计 §3）：`$CORUM_HOME/projects/<projectId>/scheduler-events.jsonl`
+ * 存储形态（设计 §3 + 「项目数据跟随项目走」Round 1）：
+ * `<cwd>/.corum/project/events.jsonl`（旧形态 $CORUM_HOME/projects/<projectId>/
+ * scheduler-events.jsonl 由启动迁移搬入；未迁移时回读旧路径）
  *   - append-only JSONL，每行一个事件；只追加、不改写、不删除；
  *   - 崩溃半行在 fold 时截断忽略（视为崩溃残留，不计入）；
  *   - seq 从 0 连续递增（per-project），fold 校验空洞/乱序拒绝恢复（宁可拒载）。
@@ -21,8 +23,8 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
-import { projectDir } from './project-store.ts'
+import { dirname, join } from 'node:path'
+import { loadProjectIndex, projectDataDir, projectDir } from './project-store.ts'
 import type { CorumDomainEventMap, CorumDomainEventType } from './events.ts'
 
 /** 持久化事件信封（物理线性 seq + 逻辑因果 causedBy，设计 §4.1）。 */
@@ -67,9 +69,23 @@ export interface FoldedSchedulerState {
   readonly memberIds: readonly string[]
 }
 
-/** 项目的事件日志文件路径（$CORUM_HOME/projects/<id>/scheduler-events.jsonl）。 */
+/**
+ * 项目的事件日志文件路径（`<cwd>/.corum/project/events.jsonl`——「项目数据
+ * 跟随项目走」Round 1：日志搬进项目工作区，与项目一起移动）。
+ *
+ * 兼容迁移前的旧路径（$CORUM_HOME/projects/<id>/scheduler-events.jsonl）：
+ * 新路径不存在且旧路径存在时回读旧路径（迁移启动项会把旧文件搬过来；回读
+ * 只兜「迁移未跑完就写」的窗口，避免恢复丢事件）。append 始终写新路径。
+ */
 export function schedulerEventLogPath(projectId: string): string {
-  return join(projectDir(projectId), 'scheduler-events.jsonl')
+  const cwd = loadProjectIndex(projectId)?.cwd
+  const newPath = cwd !== undefined && cwd !== ''
+    ? join(projectDataDir(cwd), 'events.jsonl')
+    : undefined
+  if (newPath !== undefined && existsSync(newPath)) return newPath
+  const legacyPath = join(projectDir(projectId), 'scheduler-events.jsonl')
+  if (!existsSync(legacyPath) && newPath !== undefined) return newPath
+  return legacyPath
 }
 
 /**
@@ -100,7 +116,7 @@ export function appendSchedulerEvent<K extends CorumDomainEventType>(
     at: Date.now(),
     version: 1,
   }
-  mkdirSync(projectDir(projectId), { recursive: true })
+  mkdirSync(dirname(path), { recursive: true })
   appendFileSync(path, `${JSON.stringify(event)}\n`, 'utf8')
   seqCache.set(projectId, seq + 1)
   return event

@@ -155,23 +155,74 @@ export const projectAuditSchema = z.object({
 export type ProjectAudit = z.infer<typeof projectAuditSchema>
 
 /**
- * ctx.project 领域声明：一域多项目，记录 key 用 `<projectId>/<entityId>` 隔离。
- * 官方 storage-domain 负责：schema 校验、单域写链、持久化后发 domain/changed。
+ * 共享实体领域声明（Round 2 起：**一项目一域**）。
+ *
+ * Round 1 及之前是「一域多项目」（`corum_project` 单域落
+ * `$CORUM_HOME/storages/corum_project.json`，记录键 `<projectId>/<entityId>`）；
+ * Round 2 把域按项目分域（`corum_project_<projectId>`），域数据随项目
+ * cwd 走（后端 root = `<cwd>/.corum/project/`，见 project-data-backend.ts），
+ * 记录键退化为裸 entityId（entityKey()）。
+ *
+ * 域名约束：官方 `UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/`。projectId 的合法字符
+ * 集是 `[a-z0-9-]`（isValidProjectId），连字符不在 UNIT_NAME_RE 内 → 归一为
+ * 下划线。归一化冲突（`a-b` 与 `a_b` 同域）由 per-project 后端按 cwd 物理分域
+ * 化解：两个项目 cwd 不同 → 存储物理隔离，同域名仅是句柄名碰撞，由
+ * DomainFacility 的单开约束按需 close/open 轮转处理（见 project-data-service.ts
+ * 的 handle cache）。
  */
-export const projectDataDomainSpec = defineDomain({
-  name: 'corum_project',
-  version: 1,
-  tables: {
+export const PROJECT_DATA_DOMAIN_PREFIX = 'corum_project'
+
+/** 领域声明形（defineDomain 的返回：字面量收窄后的 spec）。 */
+export type DomainSpec = ReturnType<typeof projectDataDomainSpecFor>
+
+/** 表集声明（各项目域共用同一 schema 形）。 */
+export function projectDataTables() {
+  return {
     requirements: domainTable<string, RequirementEntity>(requirementEntitySchema),
     tasks: domainTable<string, TaskEntity>(taskEntitySchema),
     bugs: domainTable<string, BugEntity>(bugEntitySchema),
     audits: domainTable<string, ProjectAudit>(projectAuditSchema),
-  },
-})
+  } as const
+}
 
-/** 实体表键：`<projectId>/<entityId>`（一域多项目隔离）。 */
-export function entityKey(projectId: string, entityId: string): string {
-  return `${projectId}/${entityId}`
+/** 指定项目的域声明（每次调用产生新 spec 对象；spec 是纯声明，无 IO）。
+ * per-record layout：官方 json 后端把每条记录落成
+ * `<root>/<unit>/<table>/<entityId>.json`（unit=域名），即
+ * `<cwd>/.corum/project/corum_project_<id>/requirements/<entityId>.json`。
+ */
+export function projectDataDomainSpecFor(projectId: string) {
+  return defineDomain({
+    name: projectDataDomainName(projectId),
+    version: 1,
+    layout: 'per-record',
+    tables: projectDataTables(),
+  })
+}
+
+/** 项目 id → 域名（`corum_project_<id>`，连字符归一为下划线以过 UNIT_NAME_RE）。 */
+export function projectDataDomainName(projectId: string): string {
+  return `${PROJECT_DATA_DOMAIN_PREFIX}_${projectId.replaceAll('-', '_')}`
+}
+
+/**
+ * 项目 id → per-record unit 目录名。官方 json 后端的 unit 路径由
+ * descriptor.name（= 域名）直接拼接（`join(root, descriptor.name)`），所以
+ * unit 名就是域名 `corum_project_<id>`（连字符已归一为下划线）。合法
+ * projectId 不含下划线 → 归一化是单射，不同项目的 unit 目录互不碰撞。
+ */
+export function projectDataUnitName(projectId: string): string {
+  return projectDataDomainName(projectId)
+}
+
+/** 实体表键（Round 2 起：裸 entityId；项目隔离由 per-project 域 + 独立后端承担）。 */
+export function entityKey(cwd: string, entityId: string): string {
+  return entityId
+}
+
+/** per-record 记录文档里的 version 戳（官方 serializeRecord 同形）。 */
+export interface PerRecordDocument<T> {
+  readonly version: number
+  readonly record: T
 }
 
 /** 需求结束判定聚合视图（PRD §3.5，服务端重算，不冗余存计数）。 */

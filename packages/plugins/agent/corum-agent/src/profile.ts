@@ -163,6 +163,22 @@ export interface AgentProfile {
   version: number
   /** 信任级（system / user）。 */
   trust: 'system' | 'user'
+  /**
+   * fork（corum）：**spec 基线快照** —— 上一次由内置 spec 写入的「可同步字段」值。
+   *
+   * 为什么需要它（2026-09-14 用户拍板「手动改的模型配置属于用户数据，不应该在程序升级后
+   * 被覆盖」）：内置角色（`trust: 'system'`）的字段既要 ①**随 spec 演进幂等刷新**（否则
+   * 「指挥者→指挥模式」这类改名对既有安装静默不生效），又要 ②**不覆盖用户的手工修改**。
+   * 二者只靠「值是否等于 spec」无法区分 —— 用户可能正好改成了与 spec 相同的值，也可能
+   * spec 与用户改成了不同的值。
+   *
+   * 判据（{@link refreshFromSpec}）：**当前值 === 基线值 ⇒ 用户没改过 ⇒ 可随 spec 刷新；
+   * 当前值 !== 基线值 ⇒ 用户改过 ⇒ 保留用户值。**
+   *
+   * 缺省（老安装没有该字段）：对可同步字段一律**保留现值**（宁可漏一次 spec 演进，也不
+   * 静默覆盖用户数据）。
+   */
+  specBaseline?: Record<string, unknown>
 }
 
 /** 校验一个 profile id（slug 形式，防路径逃逸）。 */

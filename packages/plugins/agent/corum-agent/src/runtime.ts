@@ -31,14 +31,13 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { simplifyEventData } from './agent-service.ts'
 import type { CorumAgentService } from './agent-service.ts'
 import { GENERAL_WORK_TYPE, isGroupMember } from './project.ts'
-import { loadProject } from './project-store.ts'
+import { listProjects, loadProject } from './project-store.ts'
 import { publishDomainEvent } from './events.ts'
 import type { CorumDomainEventMap, CorumDomainEventType, TaskEntityType, TaskRef, TaskVia } from './events.ts'
 import { foldSchedulerEvents, readSchedulerEventsFrom } from './event-log.ts'
 import type { SchedulerEvent } from './event-log.ts'
 import type { CorumProjectDataService } from './project-data-service.ts'
 import type { TaskStatus as ProjectTaskStatus } from './project-entities.ts'
-import { listProjects } from './project-store.ts'
 import { laneLabel, makeTaskSource, normalizeTask, taskRef, renderTaskMessage } from './runtime-task.ts'
 import type { EnqueueOptions, Task, TaskStatus } from './runtime-task.ts'
 import { STALL_THRESHOLD_MS, STALL_SCAN_INTERVAL_MS, stallAutoRecoverMsValue } from './runtime-state.ts'
@@ -121,7 +120,16 @@ export class AgentRuntime extends TypertRemoteService {
    * member-removed 的 evicted 或后续清理，不静默调度非成员）。
    */
   private recoverAll(): void {
-    for (const project of listProjects()) {
+    for (const { project, available } of listProjects()) {
+      if (!available) {
+        // cwd 失联（目录被移动/改名）：跳过事件恢复（日志在失联目录里够不着）；
+        // 目录恢复后下次启动自动接回。
+        this.ctx.logger.warn(`corumRuntime: [${project.id}] 项目目录不可用（${project.cwd ?? '未关联'}），跳过调度恢复`)
+        continue
+      }
+      // 详字段（group）在项目侧：<cwd>/.corum/project/project.json。
+      const fullProject = loadProject(project.id)
+      if (fullProject === undefined) continue
       let state
       try {
         state = foldSchedulerEvents(project.id)
@@ -132,7 +140,7 @@ export class AgentRuntime extends TypertRemoteService {
       if (state.eventCount === 0) continue
       let restored = 0
       for (const ps of state.profiles) {
-        if (!isGroupMember(project, ps.profileId)) continue
+        if (!isGroupMember(fullProject, ps.profileId)) continue
         const rt = this.runtime(project.id, ps.profileId)
         // TaskRef → Task：恢复的任务回到 pending（actor 缺省 'user'，事件台账以日志为准）。
         // 兼容旧事件（无完整队列 schema）：补默认 entityType/label/source。

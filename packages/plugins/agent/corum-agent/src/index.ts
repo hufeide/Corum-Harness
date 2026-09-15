@@ -18,6 +18,9 @@ import { AgentRuntime } from './runtime.ts'
 import { CorumProjectService } from './project-service.ts'
 import { CorumTeamService } from './team-service.ts'
 import { CorumProjectDataService } from './project-data-service.ts'
+import { migrateProjectStore } from './project-migration.ts'
+import { migrateProjectData } from './project-data-migration.ts'
+import { migrateSessionIndex } from './session-index-migration.ts'
 
 export type * from './profile.ts'
 export type { AgentProfile, ProfileModel, ProfileTerminal, ProfileMemoryPolicy, SkillBinding } from './profile.ts'
@@ -54,14 +57,34 @@ export type { CorumProject, WorkType, ProjectGroup, ProjectGroupMember } from '.
 export { isValidProjectId, slugifyProjectId, BUILTIN_WORK_TYPES, GENERAL_WORK_TYPE, isValidWorkTypeSlug, resolveWorkTypes, groupMemberIds, isGroupMember, groupPm } from './project.ts'
 export { CorumProjectService } from './project-service.ts'
 export type { CreateProjectInput, OpenProjectByPathResult, CompleteSetupInput } from './project-service.ts'
-export { loadProject, listProjects, saveProject, deleteProject, projectsRoot, projectDir } from './project-store.ts'
+export { loadProject, listProjects, saveProject, deleteProject, projectsRoot, projectDir, loadProjectIndex, projectCwdExists } from './project-store.ts'
+export type { ProjectListEntry, ProjectInfo } from './project-store.ts'
+export { migrateProjectStore } from './project-migration.ts'
+export { migrateProjectData } from './project-data-migration.ts'
+export { migrateSessionIndex } from './session-index-migration.ts'
+export type { SessionIndexMigrationResult } from './session-index-migration.ts'
+// 全局 KV 的 JSON → SQLite 存量迁移（用户 2026-09-15 决定；桌面壳在 boot() 之前调用）。
+export { migrateKvStore, migrateKvStoreAtBoot, kvDatabasePath, storagesRoot } from './kv-store-migration.ts'
+export type { KvMigrationResult, KvUnitMigrationOutcome } from './kv-store-migration.ts'
+// 统一会话索引（两模式共用账本）+ 工作区身份/类型助手——供监控脚本与
+// 外部核验直接消费（不依赖 host 运行时装配）。
+export {
+  corumHome, findSession, findSessionByLane, listSessionsForWorkspace,
+  readSessionIndex, registerSession, sessionIndexPath, unregisterSession, writeSessionIndex,
+} from './session-index.ts'
+export type { SessionIndexEntry } from './session-index.ts'
+export { readLegacyIndexes, parseProjectSessionId } from './legacy-index.ts'
+export type { LegacySession } from './legacy-index.ts'
+export { canonicalWorkspaceKey, classifyProjectTypeTransition, projectTypeOf } from './project.ts'
+export type { ProjectType } from './project.ts'
+export type { ProjectDataMigrationResult } from './project-data-migration.ts'
 export type { CorumTeam } from './team.ts'
 export { isValidTeamId, slugifyTeamId } from './team.ts'
 export { CorumTeamService } from './team-service.ts'
 export { loadTeam, listTeams, saveTeam, deleteTeam, teamsRoot, teamDir } from './team-store.ts'
 export { CorumProjectDataService } from './project-data-service.ts'
 export type { ProjectCaller } from './project-data-service.ts'
-export { projectDataDomainSpec, computeRequirementReadiness, deriveRequirementStatus } from './project-entities.ts'
+export { projectDataDomainSpecFor, projectDataDomainName, projectDataUnitName, projectDataTables, computeRequirementReadiness, deriveRequirementStatus } from './project-entities.ts'
 export type {
   BugEntity,
   BugSeverity,
@@ -131,6 +154,46 @@ export function apply(ctx: Context): void {
   }
 
   const service = new CorumAgentService(ctx)
+  // 「项目数据跟随项目走」启动迁移（幂等可重跑；详见 project-migration.ts）。
+  // 首跑把旧形态详字段/事件日志搬进各项目 cwd，之后每次启动近零开销（无待迁即跳过）。
+  try {
+    const m = migrateProjectStore(msg => ctx.logger.info(msg))
+    ctx.logger.info(
+      `corum-agent: project-store migration done — detail=[${m.detailMigrated.join(',')}] `
+      + `events=[${m.eventsMigrated.join(',')}] unavailable=[${m.skippedUnavailable.join(',')}] `
+      + `backup=${m.backupDir ?? 'none'}`,
+    )
+  } catch (error) {
+    // 迁移失败不阻断启动：读取路径对旧形态向后兼容（详字段回退索引残留/旧日志路径）。
+    ctx.logger.error(`corum-agent: project-store migration failed (非阻断): ${String(error)}`)
+  }
+  // 四表存量迁移（Round 2）：$CORUM_HOME/storages/corum_project.json 按项目
+  // 拆进各 cwd/.corum/project/<projectId>/<table>/<entityId>.json。幂等可重跑；
+  // 备份先行（$CORUM_HOME/backups/project-data-migration-<ts>.json）；归属失败
+  // 的项目数据保留在旧文件，目录恢复后下次启动自动补迁。非阻断。
+  try {
+    const d = migrateProjectData(msg => ctx.logger.info(msg))
+    ctx.logger.info(
+      `corum-agent: project-data migration done — split=[${d.projectsSplit.join(',')}] `
+      + `unknown=[${d.unknownProjects.join(',')}] removed=${d.removed} backup=${d.backupPath ?? 'none'}`,
+    )
+  } catch (error) {
+    ctx.logger.error(`corum-agent: project-data migration failed (非阻断): ${String(error)}`)
+  }
+  // 统一会话索引迁移（2026-09-15）：两套异构旧索引 → $CORUM_HOME/sessions.json
+  // （键 = sessionId）。幂等可重跑；死条目按用户裁定直接丢弃（计数进日志）。
+  // 放在 project-store 迁移之后：后者会收敛项目条目的 cwd 形态，本迁移依赖它
+  // 读出的 cwd 判定工作区身份。非阻断。
+  try {
+    const si = migrateSessionIndex(msg => ctx.logger.info(msg))
+    ctx.logger.info(
+      `corum-agent: session-index migration done — task=${si.fromTaskIndex} project=${si.fromProjectIndex} `
+      + `dropped[cwd-gone=${si.droppedCwdGone} body-missing=${si.droppedBodyMissing} malformed=${si.droppedMalformed}] `
+      + `total=${si.total} backup=${si.backupDir ?? 'none'}`,
+    )
+  } catch (error) {
+    ctx.logger.error(`corum-agent: session-index migration failed (非阻断): ${String(error)}`)
+  }
   new AgentRuntime(ctx, service)
   new CorumProjectService(ctx)
   const projectData = new CorumProjectDataService(ctx, service)

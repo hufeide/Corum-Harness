@@ -39,6 +39,48 @@
     surfaceContext: true
     trustedHosts: []
 
+# ── KV storage backend: sqlite (user decision 2026-09-15) ──────────────────
+#
+# The base bundle routes every domain to the JSON backend (`storage-domain`
+# config.backend: json, root $DSH_HOME/storages). The user asked for the KV
+# layer to move to SQLite, so this overlay adds the official sqlite backend
+# and repoints the domain default at it.
+#
+# Scope (user 2026-09-15, ledger architecture.storage.sqlite-as-unified-backend):
+#   · GLOBAL units only — `workspace`, `message_feedback`, `corum_orchestration`.
+#   · `session_projcache` is NOT migrated: it is disposable derived data
+#     (dsh-session-projection-cache/spec.ts `invalidRecords: 'backup-and-skip'`),
+#     so the sqlite side starts empty and cold reads rebuild it.
+#   · Per-project tables (`corum_project_<id>` under `<cwd>/.corum/project/`)
+#     are NOT affected: they never route through this domain default — corum
+#     registers a per-project JsonStorageBackend instance (`corum-project:<cwd>`,
+#     see corum-agent/project-data-backend.ts). That keeps the §2 "project data
+#     travels with the project, readable and git-diffable" model intact.
+#
+# Why ADD a row instead of replacing storage-json: the two backends register
+# under different hub names (`json` / `sqlite`). Replacing the row would remove
+# the `json` name, and corum's DomainFacility defaults plus the per-project
+# backend construction both rely on it. Adding keeps both names registered and
+# moves only the domain default.
+#
+# ⚠️ node:sqlite has NO SQLCipher/SEE — `PRAGMA key` is silently a no-op here
+# (measured: a marker string stayed plaintext in the db file either way). The
+# database is therefore NOT encrypted at rest; encryption of sensitive values
+# stays an application-layer concern (corum-credentials-local/value-crypto.ts).
+- insert:
+    - id: storage-sqlite
+      name: '@deepseek-ai/dsh-storage-sqlite'
+      config:
+        path: !!js dshHomePath('storages', 'kv.sqlite')
+        journalMode: wal
+
+# Repoint the domain default at the sqlite backend. `routes` is deliberately
+# left unset: every domain without an explicit route follows `backend`, and no
+# domain in this distribution declares one today.
+- id: storage-domain
+  config:
+    backend: sqlite
+
 # ── rows disabled for the desktop surface ──────────────────────────────────
 
 # The official session-log download: a browser surface — its controller drives

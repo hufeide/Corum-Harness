@@ -50,6 +50,7 @@ const OnboardingSettingsSchema = z.object({ welcomeNoticeVersion: z.string() })
 
 export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
+import { migrateKvStoreAtBoot } from '@corum/corum-agent'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
 import { CorumFsService } from './corum-fs.ts'
 import { CorumTerminalService } from './corum-terminal.ts'
@@ -382,6 +383,14 @@ export async function bootDesktop(): Promise<Context> {
     }
   }
   if (telemetryPatch !== undefined) composedOverlays.push(telemetryPatch)
+
+  // 全局 KV 的 JSON → SQLite 存量迁移（用户 2026-09-15 决定；只迁全局 storages/）。
+  // ⚠️ **必须早于 boot()**：config-tree 一旦按 sqlite 挂载，workspace 等服务会在
+  // 首次 open 域时读到**空** SQLite 并把它当成权威状态（空工作区列表），
+  // 之后再补数据就晚了（运行期写入已覆盖）。故先在文件层搬完，再挂树。
+  // 非阻断：失败只记日志（JSON 侧仍是权威，把 storage-domain 的 backend 改回
+  // json 即完全回退）。
+  await migrateKvStoreAtBoot()
 
   const ctx = await boot(
     NAME,
