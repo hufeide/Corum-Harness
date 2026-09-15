@@ -99,6 +99,11 @@ export type {
 } from './project-entities.ts'
 
 /** Cordis 插件名。 */
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { describeSuspiciousYamlKeys, scanSuspiciousYamlKeys } from './settings-yaml-guard.ts'
+
 export const name = 'agent'
 
 /** 运行时依赖的服务（boot 后即就绪）。 */
@@ -127,6 +132,7 @@ const CORUM_AGENT_SETTINGS_SCHEMA = z.object({
 
 /** 挂载 CorumAgentService + AgentRuntime + CorumProjectService + CorumTeamService 单例服务。 */
 export function apply(ctx: Context): void {
+  runSettingsYamlGuard(ctx)
   // settings namespace 注册 + 订阅：settings 服务在 boot 早期可能尚未挂载（与
   // corum-review / corum-git 同款短轮询），拿到后注册并 watch，实时更新阈值。
   const registerSettings = (): boolean => {
@@ -215,5 +221,30 @@ export function apply(ctx: Context): void {
       }
       await service.verify()
     })()
+  }
+}
+
+/**
+ * fork（corum）：启动时预检 `settings.yaml` 的**布尔键**并**大声告警**（2026-09-15 真实故障的防线）。
+ *
+ * 为什么必须做在这里：段被自己的键写坏后，报错是「**settings namespace <ns> is not registered**」，
+ * 完全不指向那个非法键 —— 实测让我先逐项排除了 7 个结构层假设（装配/版本/解析/竞态/overlay…）
+ * 才回头怀疑用户数据。这一行日志把「半小时的排查」变成「一眼看到」。
+ *
+ * 纪律：**只读不写** —— 不擅自改用户数据；只把「哪个文件哪一行的哪个键、为什么炸、怎么改」说清。
+ */
+function runSettingsYamlGuard(ctx: Context): void {
+  try {
+    const home = resolveDshHome()
+    if (home === undefined) return
+    const file = join(home, 'settings.yaml')
+    if (!existsSync(file)) return
+    const hits = scanSuspiciousYamlKeys(readFileSync(file, 'utf8'))
+    if (hits.length === 0) return
+    // 用 error 级：这不是噪声，是「你的设置里有东西会让整段失效」。
+    ctx.logger.error(describeSuspiciousYamlKeys(file, hits))
+  } catch (error: unknown) {
+    // 预检自身绝不阻断启动（它是增强观测，不是启动前提）。
+    ctx.logger.warn(`settings-yaml-guard skipped: ${String(error)}`)
   }
 }

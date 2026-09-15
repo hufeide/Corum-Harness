@@ -141,7 +141,7 @@ export type ReasoningEfforts = Record<string, string | null>
  * 返回 undefined = 不该写（无档位）；调用方决定写/删。
  */
 export function reasoningEffortsOf(
-  levels: readonly string[],
+  levels: readonly (string | boolean | undefined)[],
   existing: unknown,
 ): ReasoningEfforts | undefined {
   if (levels.length === 0) return undefined
@@ -150,7 +150,13 @@ export function reasoningEffortsOf(
       ? existing as Record<string, unknown>
       : {}
   const dict: ReasoningEfforts = {}
-  for (const level of levels) {
+  for (const rawLevel of levels) {
+    // 运行时防御（2026-09-15 真实事故）：档位 id 类型上声明为 string，但**布尔 false 会被
+    // JS 悄悄当成字典键 `"false"`** ⇒ 落盘成 YAML 的 `false:`（**布尔键**）⇒ pi-ai 段校验
+    // 失败 ⇒ 整个 settings 段注册不上，UI 只报「namespace not registered」（不指向该键）。
+    // 语义上布尔 false 就是「关闭推理」= `off`，故**归一化**而不是丢弃。
+    const level = typeof rawLevel === 'string' ? rawLevel : rawLevel === false ? 'off' : undefined
+    if (level === undefined || level === '') continue
     if (level === 'off') { dict.off = null; continue }
     const wire = prev[level]
     dict[level] = typeof wire === 'string' && wire !== '' ? wire : level
