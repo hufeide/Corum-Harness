@@ -68,11 +68,17 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/analysis/HANDOFF-2026-09-15-night-card-fidelity-isolation-and-settings.md` — **最新交接入口**
+- `docs/analysis/HANDOFF-2026-09-16-card-batch-closeout-and-token-audit.md` — **最新交接入口**
+  （2026-09-16 凌晨：卡片 8 条缺陷全部收口 + **纠正上一份交接的事实错误**
+  （pen 画布态 ≠ 磁盘态，「设计稿已改完」其实是没落盘）+ 子任务被限流打断的判据
+  （看 `turn/end` 的 `reason.kind`）+ 全库设计 token 对账（12 个不存在的名字 / 硬编码 fallback 归零）
+  + 两份**可复跑声明式规格**进仓）；**下个 session 从这里开始。**
+- `scripts/audit-dsw-tokens.py` — 设计 token 对账器（按官方 `design-platform.css` + corum
+  `theme-layer.ts` 建权威表，列出「不存在的 token」与「多余 fallback」）。改 CSS token 前后各跑一次。
+- `docs/analysis/HANDOFF-2026-09-15-night-card-fidelity-isolation-and-settings.md` — 上一份交接
   （2026-09-15 夜场：卡片整改与设计稿对照 + 隔离漏洞补漏（父树未提交致静默失真 / 收口强制提交）
   + `llm-pi-ai` 段注册失败的根因（settings.yaml 里 `off` 被写成布尔 `false`）与两道防线
-  + corum-dev 档案修复（conductor→standard）与技能绑定 + **一单正在 `:9222` 上跑**
-  （会话 `corum-task-7be7c4b2`，6 条卡片缺陷））；**下个 session 从这里开始。**
+  + corum-dev 档案修复（conductor→standard）与技能绑定 + 派发了会话 `corum-task-7be7c4b2`）。
 - `docs/analysis/HANDOFF-2026-09-15-unified-project-model-implementation.md` — 上一份交接
   （2026-09-15 统一存储/项目模型**实施**场：`type` 字段贯通 + 三条不变式与判定表 + 统一会话索引
   （`sessionId` 作键 —— 修正了原计划会静默丢 82.9% 的复合键形态）+ 泳道复用修复 + 存量迁移）。
