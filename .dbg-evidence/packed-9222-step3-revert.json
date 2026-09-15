@@ -1,0 +1,15 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 500 },
+    { "eval": "(() => { const b=[...document.querySelectorAll('button[aria-label]')].find(x=>x.getAttribute('aria-label')==='撤回插话，退回排队'); if(!b) return 'no-revert-btn'; b.click(); return 'clicked-revert' })()" },
+    { "wait": 2500 }
+  ],
+  "assert": [
+    { "label": "① 撤回后 pending-steering 归零（1→0）", "js": "document.querySelectorAll('[data-pending-steering]').length === 0" },
+    { "label": "② QueueDock 重新出现且含甲+乙", "js": "(()=>{const d=document.querySelector('[data-queue-dock]'); if(!d) return false; const t=d.innerText; return /排队消息甲/.test(t) && /排队消息乙/.test(t)})()" },
+    { "label": "③ 甲排在队首（revert 语义 = 退回队首，不是退回队尾）", "js": "(()=>{const d=document.querySelector('[data-queue-dock]'); const li=[...d.querySelectorAll('li')].map(x=>(x.innerText||'').trim()); return JSON.stringify(li)})()" },
+    { "label": "④ 队列条数文案", "js": "(()=>{const d=document.querySelector('[data-queue-dock]'); const s=d.querySelector('span'); return (d.innerText||'').split('\\n')[0]})()" },
+    { "label": "⑤ 撤回后截图", "screenshot": "packed-9222-04-reverted" }
+  ]
+}

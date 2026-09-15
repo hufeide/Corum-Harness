@@ -1,0 +1,14 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 500 },
+    { "eval": "(() => { const b=[...document.querySelectorAll('button')].find(x=>((x.getAttribute('aria-label')||x.innerText||'').trim()==='停止生成')); if(!b) return 'no-stop-btn'; b.click(); return 'clicked-stop' })()" },
+    { "wait": 3000 }
+  ],
+  "assert": [
+    { "label": "① 停止后截图（留证）", "screenshot": "packed-9222-06-stopped" },
+    { "label": "② 停止生成按钮消失（回合已停）", "js": "![...document.querySelectorAll('button')].some(b=>((b.getAttribute('aria-label')||b.innerText||'').trim()==='停止生成'))" },
+    { "label": "③ 当前 pending-steering", "js": "document.querySelectorAll('[data-pending-steering]').length" },
+    { "label": "④ 当前 QueueDock", "js": "(()=>{const d=document.querySelector('[data-queue-dock]'); return d? d.innerText.replace(/\\n/g,' | ') : 'NO-DOCK'})()" }
+  ]
+}

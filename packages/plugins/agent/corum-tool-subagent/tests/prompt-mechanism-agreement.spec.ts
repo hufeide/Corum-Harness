@@ -1,0 +1,223 @@
+/**
+ * fork（corum）提示词 ↔ 机制对账（2026-09-15 提示词承诺修复轮）。
+ *
+ * 为什么需要：`corumSandboxEscalationLines` / `corumSchedulingDescription` /
+ * `corumSchedulingSectionText` / `corumRunInBackgroundDescription` 都是模型可见文本，
+ * 它们描述的「通路」必须在机制里真实存在——否则就是向模型承诺了一条不存在的路。
+ * 本 spec 把「描述说的是机制里有的」变成可执行断言：每条描述锚点都对照一个机制
+ * 守卫/拒绝路径，锚点一断就先红。工具名也必须随实例插值——同一段文本服务
+ * `subagent` / `subagent_research` / `subagent_fork` 多个实例，写死任一个就会指错工具。
+ *
+ * 覆盖边界：只钉住本 spec 列出的通路描述与它各自的机制锚点，不做语义等价证明。
+ * 实机装配仍由 CDP 取证。
+ */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import {
+  corumSandboxEscalationLines,
+  corumSchedulingDescription,
+  corumSchedulingSectionText,
+  corumRunInBackgroundDescription,
+} from '../src/index.ts'
+
+const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+
+// Mechanism anchor sources (read at test time, not imported — byte-level check).
+const CHILD_AGENT_SRC = readFileSync(
+  join(import.meta.dirname, '../../corum-subagent/src/child-agent.ts'),
+  'utf8',
+)
+const COMPILE_SRC = readFileSync(
+  join(import.meta.dirname, '../../corum-agent/src/compile.ts'),
+  'utf8',
+)
+
+describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () => {
+  const text = corumSandboxEscalationLines().join('\n')
+
+  it('子会话分岔条目存在：DELEGATED CHILD + pinned to never + 无弹窗 + report as conclusion', () => {
+    expect(text).toContain('DELEGATED CHILD session')
+    expect(text).toContain('pinned to `never`')
+    expect(text).toContain('no approval prompt is reachable')
+    expect(text).toContain('report it as a conclusion')
+  })
+
+  it('主会话那句带条件：approval policy is ask（不再是无条件承诺）', () => {
+    expect(text).toContain('approval policy is `ask`')
+  })
+
+  it('旧的无条件承诺已消失', () => {
+    expect(text).not.toContain('The approval prompt raised by that retry is how the user consents')
+  })
+
+  it('禁止改写成「向主 Agent 请求提权」（防回潮）', () => {
+    const banned = [
+      /ask the parent/i,
+      /notify the parent/i,
+      /request (?:escalation|permission) from the parent/i,
+      /parent (?:can|will) (?:widen|approve)/i,
+      /tell the parent to ask/i,
+    ]
+    for (const re of banned) {
+      expect(text, `banned parent-escalation phrasing: ${String(re)}`).not.toMatch(re)
+    }
+  })
+
+  // Mechanism anchor: if this anchor breaks (child gets an approval path),
+  // the prompt-side assertions above must be re-reviewed — the test goes red first.
+  it('机制锚点：child-agent.ts 仍含 approvalPolicy 钉死为 never', () => {
+    expect(CHILD_AGENT_SRC).toContain("approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never'")
+  })
+
+  it('保留性断言：原有三条仍在线', () => {
+    expect(text).toContain('retry the exact same command once, in the same turn')
+    expect(text).toContain('sandbox_permissions')
+    expect(text).toContain('narrowest wider mode that suffices')
+    expect(text).toContain('never speculatively')
+    expect(text).toContain('A rejected escalation is final for that command')
+  })
+})
+
+describe('块 2 · 例2 research 恒前台（描述 + 机制段 + 拒绝路径三处对齐）', () => {
+  const researchDesc = corumSchedulingDescription({ backgroundEnabled: true, continuable: true, readonlyResearch: true })
+  const workerDesc = corumSchedulingDescription({ backgroundEnabled: true, continuable: true, readonlyResearch: false })
+  const researchSection = corumSchedulingSectionText({ backgroundEnabled: true, continuable: true, readonlyResearch: true }, 'subagent_research', '')
+  const workerSection = corumSchedulingSectionText({ backgroundEnabled: true, continuable: true, readonlyResearch: false }, 'subagent', '')
+
+  it('research 描述：恒前台 + 拒绝后台', () => {
+    expect(researchDesc).toContain('ALWAYS runs in the FOREGROUND')
+    expect(researchDesc).toContain('Do NOT pass `run_in_background: true` (it is rejected)')
+    expect(researchDesc).not.toContain('background by default')
+  })
+
+  it('worker 描述：后台默认（不误伤）', () => {
+    expect(workerDesc).toContain('background by default')
+    expect(workerDesc).not.toContain('ALWAYS runs in the FOREGROUND')
+  })
+
+  it('research 机制段文本：非空 + 恒前台 + 拒绝后台', () => {
+    expect(researchSection).not.toBe('')
+    expect(researchSection).toContain('ALWAYS runs in the FOREGROUND')
+    expect(researchSection).toContain('Do NOT pass `run_in_background: true` (it is rejected)')
+  })
+
+  it('PTC 前缀仍生效', () => {
+    expect(corumSchedulingSectionText({ backgroundEnabled: true, continuable: true, readonlyResearch: true }, 'subagent_research', 'PTC ')).toMatch(/^PTC /)
+  })
+
+  it('worker 机制段：含后台默认', () => {
+    expect(workerSection).toContain('in the background by default')
+  })
+
+  // Dead-code shape: the old guard `backgroundEnabled && continuable && !corumReadonlyResearch`
+  // excluded research from registering its section — that made the research branch dead.
+  // The new guard lets research register `tool:subagent_research`.
+  it('死代码形状钉死：旧守卫已消失，新守卫已就位', () => {
+    expect(SRC).not.toContain('backgroundEnabled && continuable && !corumReadonlyResearch')
+    expect(SRC).toContain('if (corumReadonlyResearch || (backgroundEnabled && continuable))')
+  })
+
+  // Wiring: ensure the test exercises the function that's actually called, not an orphan.
+  it('接线断言：描述块与机制段都调用纯函数', () => {
+    expect(SRC).toContain('corumSchedulingDescription({')
+    expect(SRC).toContain('corumSchedulingSectionText({')
+    expect(SRC).toContain('corumRunInBackgroundDescription({')
+  })
+
+  // Mechanism anchor: the throw that backs the "it is rejected" claim.
+  it('拒绝路径锚点：throw run_in_background is not supported for read-only research', () => {
+    expect(SRC).toContain('run_in_background is not supported for read-only research')
+  })
+})
+
+// 防写死回潮：同一段机制段文本服务 subagent / subagent_research / subagent_fork 三个实例，
+// worker 分支的「Use <toolName> in the background by default」必须随实例 toolName 插值。
+// 若 ${toolName} 被写死成字面量 subagent，fork 实例的机制段会指错工具名（模型手里叫 subagent_fork）。
+describe('块 2b · 段内工具名随实例', () => {
+  it('subagent_fork 实例：机制段含「Use subagent_fork in the background by default」', () => {
+    const text = corumSchedulingSectionText({ backgroundEnabled: true, continuable: true, readonlyResearch: false }, 'subagent_fork', '')
+    expect(text).toContain('Use subagent_fork in the background by default')
+  })
+
+  it('subagent 实例：机制段含「Use subagent in the background by default」且不含 subagent_fork（防写死回潮）', () => {
+    const text = corumSchedulingSectionText({ backgroundEnabled: true, continuable: true, readonlyResearch: false }, 'subagent', '')
+    expect(text).toContain('Use subagent in the background by default')
+    expect(text).not.toContain('subagent_fork')
+  })
+
+  it('research 分支不含后台默认措辞（插值不能让 research 回到后台句）', () => {
+    const text = corumSchedulingSectionText({ backgroundEnabled: true, continuable: true, readonlyResearch: true }, 'subagent_research', '')
+    expect(text).not.toContain('in the background by default')
+  })
+})
+
+describe('块 3 · 参数面 — run_in_background 描述对齐', () => {
+  it('research 实例：不含 Defaults to true；含 omit it', () => {
+    const param = corumRunInBackgroundDescription({ continuable: true, readonlyResearch: true })
+    expect(param).not.toContain('Defaults to true')
+    expect(param).toContain('omit it')
+  })
+
+  it('worker 实例：含 Defaults to true（不误伤）', () => {
+    const param = corumRunInBackgroundDescription({ continuable: true, readonlyResearch: false })
+    expect(param).toContain('Defaults to true')
+  })
+})
+
+/**
+ * 模型可见的通路描述 ↔ 机制锚点。新增任何写进工具 description / 机制段 / 派单模板的
+ * 通路描述时，在这里加一行（描述来源文件 + 描述锚点字符串 + 机制锚点所在文件 + 机制锚点字符串），
+ * 让「提示词说的通路在机制里存在」变成可执行对账，而不是一次性人工复核。
+ *
+ * `claim` 字段 = 被断言必须存在的描述锚点字符串；
+ * `source` = 描述来源文件（已读入的源码文本变量）；
+ * `mechanism` = 机制锚点来源文件（同上）；
+ * `mechanismAnchor` = 机制锚点字符串。
+ */
+const CLAIMS: ReadonlyArray<{
+  readonly claim: string
+  readonly source: string
+  readonly sourceName: string
+  readonly mechanism: string
+  readonly mechanismName: string
+  readonly mechanismAnchor: string
+}> = [
+  // ① 沙箱升级：子会话无弹窗（描述说「pinned to never」，机制锚点是 child-agent.ts 的 approvalPolicy 钉死）
+  {
+    claim: 'pinned to `never`',
+    source: corumSandboxEscalationLines().join('\n'),
+    sourceName: 'corumSandboxEscalationLines()',
+    mechanism: CHILD_AGENT_SRC,
+    mechanismName: 'corum-subagent/src/child-agent.ts',
+    mechanismAnchor: "approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never'",
+  },
+  // ② research 恒前台 / 拒绝后台（描述说「it is rejected」，机制锚点是 index.ts 的 throw）
+  {
+    claim: 'Do NOT pass `run_in_background: true` (it is rejected)',
+    source: corumSchedulingDescription({ backgroundEnabled: true, continuable: true, readonlyResearch: true }),
+    sourceName: 'corumSchedulingDescription(research)',
+    mechanism: SRC,
+    mechanismName: 'corum-tool-subagent/src/index.ts',
+    mechanismAnchor: 'run_in_background is not supported for read-only research',
+  },
+  // ③ research 只读工具面：write/edit are denied / sandbox read-only
+  //   （描述说「write/edit are denied」，机制锚点是 compile.ts research 分支的 readonlyResearch = true + toolFilter deny）
+  {
+    claim: 'write/edit are denied',
+    source: SRC,
+    sourceName: 'corum-tool-subagent/src/index.ts (工具描述决策点文本)',
+    mechanism: COMPILE_SRC,
+    mechanismName: 'corum-agent/src/compile.ts',
+    mechanismAnchor: 'config.readonlyResearch = true',
+  },
+]
+
+describe('块 4 · 可复用收口 — 通路描述 ↔ 机制锚点对账', () => {
+  for (const c of CLAIMS) {
+    it(`${c.sourceName} 含「${c.claim}」且 ${c.mechanismName} 含锚点「${c.mechanismAnchor.slice(0, 60)}…」`, () => {
+      expect(c.source, `claim missing in ${c.sourceName}`).toContain(c.claim)
+      expect(c.mechanism, `anchor missing in ${c.mechanismName}`).toContain(c.mechanismAnchor)
+    })
+  }
+})

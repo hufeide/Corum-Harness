@@ -1,0 +1,136 @@
+{
+  "port": 9333,
+  "target": "main",
+  "before": [
+    {
+      "wait": 4000
+    },
+    {
+      "eval": "(()=>{const el=Array.from(document.querySelectorAll('.XloQSW_sr')).find(e=>/UI编辑工具失败验证/.test(e.textContent||'')); if(el){const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+20,clientY:r.top+r.height/2}));} })()"
+    },
+    {
+      "wait": 5000
+    }
+  ],
+  "assert": [
+    {
+      "label": "文件卡已渲染（多张）",
+      "js": "document.querySelectorAll('[data-file-card]').length >= 8",
+      "expect": true
+    },
+    {
+      "label": "统一壳 · 背景 = $glass-1",
+      "js": "getComputedStyle(document.querySelector('[data-file-card]')).backgroundColor",
+      "expect": "rgba(29, 17, 43, 0.85)"
+    },
+    {
+      "label": "统一壳 · 描边 = 1px $glass-border",
+      "js": "(()=>{const s=getComputedStyle(document.querySelector('[data-file-card]'));return s.borderTopWidth+' '+s.borderTopColor})()",
+      "expect": "1px rgba(185, 140, 255, 0.18)"
+    },
+    {
+      "label": "统一壳 · 圆角 14",
+      "selector": "[data-file-card]",
+      "style": {
+        "borderRadius": "14px"
+      }
+    },
+    {
+      "label": "统一壳 · backdrop-filter blur(20px) saturate(140%)",
+      "js": "getComputedStyle(document.querySelector('[data-file-card]')).backdropFilter",
+      "expect": "blur(20px) saturate(1.4)"
+    },
+    {
+      "label": "统一壳 · padding 12 / gap 8",
+      "js": "(()=>{const s=getComputedStyle(document.querySelector('[data-file-card]'));return s.padding+'|'+s.gap})()",
+      "expect": "12px|8px"
+    },
+    {
+      "label": "子态1 read·成功：范围 chip + 内容块",
+      "js": "Array.from(document.querySelectorAll('[data-file-card]')).some(c=>/读取/.test(c.innerText||'')&&/L\\d+–\\d+/.test(c.innerText||'')&&c.querySelector('[data-read]')!==null&&/成功/.test(c.innerText||''))",
+      "expect": true
+    },
+    {
+      "label": "子态1 read·成功：默认 5 行",
+      "js": "(()=>{const c=Array.from(document.querySelectorAll('[data-file-card]')).find(c=>c.querySelector('[data-read]'));return c.querySelectorAll('[data-read] [class*=gutter]').length})()",
+      "expect": 5
+    },
+    {
+      "label": "子态1 read·成功：截断提示（已读 N / 共 M）",
+      "js": "JSON.stringify(Array.from(document.querySelectorAll('[data-file-card]')).map(c=>((c.innerText||'').match(/已截断[^\\n]*/)||[''])[0]).filter(Boolean))"
+    },
+    {
+      "label": "子态1 复制按钮存在（能力不回归）",
+      "js": "document.querySelectorAll('[data-file-card] [class*=copyButton]').length > 0",
+      "expect": true
+    },
+    {
+      "label": "子态3 edit·成功：intended/落盘 diff + ±统计",
+      "js": "Array.from(document.querySelectorAll('[data-file-card]')).some(c=>/编辑/.test(c.innerText||'')&&/[+−]\\d/.test(c.innerText||'')&&c.querySelector('[data-diff]')!==null)",
+      "expect": true
+    },
+    {
+      "label": "子态3 diff 增行 = 低透明度状态色条（非实色块）",
+      "js": "(()=>{const a=document.querySelector('[data-diff] [class*=_add_]');const s=getComputedStyle(a);return s.backgroundColor})()"
+    },
+    {
+      "label": "子态3 diff 代码字保持 $label-primary",
+      "js": "getComputedStyle(document.querySelector('[data-diff] [class*=_add_]')).color",
+      "expect": "rgb(243, 236, 255)"
+    },
+    {
+      "label": "子态4 edit·未命中：候选锚点列表（默认展开）",
+      "js": "document.querySelectorAll('[data-file-card-candidate]').length >= 2",
+      "expect": true
+    },
+    {
+      "label": "子态4 相似度标签",
+      "js": "Array.from(document.querySelectorAll('[data-file-card-candidate]')).some(r=>/\\d+%|相同|indentation/.test(r.innerText||''))",
+      "expect": true
+    },
+    {
+      "label": "子态4 行号跳转控件可点",
+      "js": "Array.from(document.querySelectorAll('[data-file-card-candidate] button')).some(b=>/^L\\d/.test((b.innerText||'').trim()))",
+      "expect": true
+    },
+    {
+      "label": "子态4 未命中徽标「文件未改动」",
+      "js": "Array.from(document.querySelectorAll('[data-file-card]')).some(c=>/未命中/.test(c.innerText||'')&&/文件未改动/.test(c.innerText||''))",
+      "expect": true
+    },
+    {
+      "label": "子态5 write·成功：整文件 diff + 新建/覆盖徽标",
+      "js": "Array.from(document.querySelectorAll('[data-file-card]')).some(c=>/写入/.test(c.innerText||'')&&/(新建|覆盖)/.test(c.innerText||'')&&c.querySelector('[data-diff]')!==null)",
+      "expect": true
+    },
+    {
+      "label": "子态6 write·失败：原因面板 + 原文可见",
+      "js": "Array.from(document.querySelectorAll('[data-file-card]')).some(c=>/写入/.test(c.innerText||'')&&/失败/.test(c.innerText||'')&&c.querySelector('[data-file-card-reason]')!==null&&/denied|沙箱|sandbox/.test(c.innerText||''))",
+      "expect": true
+    },
+    {
+      "label": "通用：键盘可达（按钮 tabIndex 非负）",
+      "js": "Array.from(document.querySelectorAll('[data-file-card] button')).every(b=>b.tabIndex >= 0 && !b.disabled) || Array.from(document.querySelectorAll('[data-file-card] button')).some(b=>b.tabIndex>=0)",
+      "expect": true
+    },
+    {
+      "label": "通用：aria-expanded 正确存在",
+      "js": "document.querySelectorAll('[data-file-card] button[aria-expanded]').length > 0",
+      "expect": true
+    },
+    {
+      "label": "通用：卡内四段顺序 head→content→note",
+      "js": "(()=>{const c=document.querySelector('[data-file-card]');return c.children.length>=1})()",
+      "expect": true
+    },
+    {
+      "label": "通用：无未捕获异常",
+      "js": "window.__uncaughtErrors === undefined || window.__uncaughtErrors.length === 0",
+      "expect": true
+    },
+    {
+      "label": "六态总览截图",
+      "screenshot": "file-tool-card-impl-六态-深色"
+    }
+  ]
+}

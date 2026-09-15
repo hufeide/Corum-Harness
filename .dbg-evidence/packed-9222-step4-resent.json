@@ -1,0 +1,16 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 500 },
+    { "eval": "(() => { const d=document.querySelector('[data-queue-dock]'); if(!d) return 'no-dock'; const h=d.querySelector('button[aria-controls]'); if(h && h.getAttribute('aria-expanded')!=='true') h.click(); return 'expanded' })()" },
+    { "wait": 800 },
+    { "eval": "(() => { const d=document.querySelector('[data-queue-dock]'); const li=[...d.querySelectorAll('li')].find(x=>/排队消息甲/.test(x.innerText||'')); if(!li) return 'no-item-jia'; const b=[...li.querySelectorAll('button')].find(x=>(x.getAttribute('aria-label')||'')==='插话发送'); if(!b) return 'no-steer-btn'; b.click(); return 'resent-jia-as-steering' })()" },
+    { "wait": 2500 }
+  ],
+  "assert": [
+    { "label": "① 再发送后 pending-steering 重现（=1）", "js": "document.querySelectorAll('[data-pending-steering]').length === 1" },
+    { "label": "② 撤回按钮再次可用", "js": "[...document.querySelectorAll('button[aria-label]')].some(x=>x.getAttribute('aria-label')==='撤回插话，退回排队')" },
+    { "label": "③ QueueDock 只剩乙", "js": "(()=>{const d=document.querySelector('[data-queue-dock]'); return d? d.innerText.replace(/\\n/g,' | ') : 'NO-DOCK'})()" },
+    { "label": "④ 再发送截图", "screenshot": "packed-9222-05-resent" }
+  ]
+}

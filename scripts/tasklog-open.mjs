@@ -18,6 +18,12 @@
  *   node scripts/tasklog-open.mjs            # 渲染 markdown 到 stdout
  *   node scripts/tasklog-open.mjs --check    # 只报冲突/异常，退出码 0/1
  *   node scripts/tasklog-open.mjs --json     # 机器可读
+ *   node scripts/tasklog-open.mjs --count    # **权威计数**（真解析 JSON；报行数/唯一 key/
+ *                                            #   未关闭/冲突/字段覆盖/按 kind 分布）
+ *
+ * ⚠️ 清点规模**一律走 `--count`**，不要用 `grep -o '"key":"…"'`：那个口径只匹配紧凑
+ * JSON，对 `"key": "…"`（冒号后带空格）静默漏掉，实测同一份台账得 197 vs 真值 348
+ * （台账 `tooling.tasklog.count-method` 记录了两次误报的经过）。
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -120,6 +126,34 @@ const mode = process.argv[2]
 
 if (mode === '--json') {
   process.stdout.write(`${JSON.stringify({ open, conflicts, malformed: bad }, null, 2)}\n`)
+} else if (mode === '--count') {
+  // 权威计数口径（台账 `tooling.tasklog.count-method` 要求）：**真解析 JSON**，
+  // 绝不用 `grep -o '"key":"…"'` —— 那个口径只匹配紧凑 JSON，对 `"key": "…"`
+  // （冒号后带空格）静默漏掉；**按行首前几个键判形态**同样会漏（本仓 425 行走
+  // `id` 在前、62 行走 `key` 在前，两种都合法且都带 key）。
+  //
+  // 本子命令的意义：把「报出去的那个数字」固定成可复跑、不随写法漂移的一条命令，
+  // 而不是每轮临时拼 grep（这正是那条教训的由来）。
+  const byKey = new Map()
+  for (const row of rows) {
+    const key = row.key ?? row.id
+    if (key === undefined) continue
+    const list = byKey.get(key) ?? []
+    list.push(row)
+    byKey.set(key, list)
+  }
+  const kinds = {}
+  for (const list of byKey.values()) {
+    const last = list[list.length - 1]
+    const kind = last.kind ?? 'todo'
+    kinds[kind] = (kinds[kind] ?? 0) + 1
+  }
+  console.log(`行数（真解析）      : ${rows.length}${bad.length > 0 ? `（另有坏行 ${bad.length}）` : ''}`)
+  console.log(`唯一 key（key ?? id）: ${byKey.size}`)
+  console.log(`未关闭              : ${open.length}`)
+  console.log(`冲突                : ${conflicts.length} 组`)
+  console.log(`字段覆盖            : 带 key ${rows.filter(r => r.key !== undefined).length} 行 / 带 id ${rows.filter(r => r.id !== undefined).length} 行`)
+  console.log(`未关闭按 kind       : ${Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}=${n}`).join(' ')}`)
 } else if (mode === '--check') {
   if (bad.length > 0) {
     for (const b of bad) console.error(`log.jsonl:${b.line} 不是合法 JSON：${b.text}`)

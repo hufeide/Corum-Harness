@@ -1,0 +1,15 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 500 },
+    { "eval": "(() => { const h=document.querySelector('[data-queue-dock] button'); if(h){h.click(); return 'expanded'} return 'no-dock' })()" },
+    { "wait": 1200 }
+  ],
+  "assert": [
+    { "label": "QueueDock 存在", "js": "!!document.querySelector('[data-queue-dock]')" },
+    { "label": "QueueDock 文本", "js": "document.querySelector('[data-queue-dock]').innerText.replace(/\\n/g,' | ')" },
+    { "label": "全部可见按钮 aria/label 枚举", "js": "[...document.querySelectorAll('button')].map(b=>(b.getAttribute('aria-label')||b.innerText||'').trim()).filter(x=>x).slice(0,40).join(' ~ ')" },
+    { "label": "pending-steering 数", "js": "document.querySelectorAll('[data-pending-steering]').length" },
+    { "label": "展开后截图", "screenshot": "packed-9222-02-queue-expanded" }
+  ]
+}

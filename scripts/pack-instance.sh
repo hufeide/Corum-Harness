@@ -22,15 +22,19 @@
 # 用法：
 #   ./scripts/pack-instance.sh start      # 启动打包实例（默认 :9222）
 #   ./scripts/pack-instance.sh stop       # 停止（只杀自己记录的 PID）
-#   ./scripts/pack-instance.sh restart
+#   ./scripts/pack-instance.sh stop --exclude-session <id>   # 飞行守卫排除自己的会话（可重复）
+#   ./scripts/pack-instance.sh restart [--exclude-session <id> …]
 #   ./scripts/pack-instance.sh status     # 存活 + CDP 可达性
-#   ./scripts/pack-instance.sh update     # 一轮更新：构建改动包 → 重打 host+app → 重启
+#   ./scripts/pack-instance.sh update [--exclude-session <id> …]
+#                                         # 一轮更新：构建改动包 → 重打 host+app → 重启
 #
 # 环境覆盖：
 #   CORUM_HOME          默认 <repo>/packages/desktop/.corum-dev-home（沿用同一份会话/设置）
 #   CORUM_PACK_PORT     默认 9222（CDP 端口）
 #   CORUM_PACK_COMBO    默认 coding
 #   CORUM_PACK_APP      默认 <repo>/packages/desktop/dist/mac-arm64/Corum.app
+#   CORUM_PACK_EXCLUDE_SESSIONS    逗号/空白分隔的会话 id，与 --exclude-session 合并生效
+#   CORUM_PACK_FORCE=1             无视飞行守卫强停（会显著警告并列出将被打断的会话）
 set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,21 +112,175 @@ alive() {
 # 实测事故：`update` 重启 9222 时，跑在该实例上的卡片任务被 `turn/end reason=interrupted`
 # 打断（那轮 48 次调用全是勘察、0 次落文件，才没丢工作）。此后 stop/restart/update
 # 前先看「最近 2 分钟内有没有会话日志在写」——活跃会话每几秒就写事件，mtime 判据够用。
-# 确认无人在跑时可以照常；确实要强停时设 CORUM_PACK_FORCE=1。
+# 确认无人在跑时可以照常；确实要强停时设 CORUM_PACK_FORCE=1（会列出将被打断的会话）。
+#
+# 2026-09-14 修复「守卫拦住自己」：判据只看 mtime、不区分会话，调用者自己的会话
+# （worker 回合末尾重编交付时正在写事件）也会被当成飞行会话 → 必然被自己拒掉。
+# 新增 --exclude-session <id>（可重复）与 CORUM_PACK_EXCLUDE_SESSIONS（逗号/空白分隔），
+# 把「自己」从飞行会话集合里剔除；被排除的会话与命中文件会显式打印（不允许静默放行），
+# 未被排除的飞行会话仍然一律拒绝（守护目的不放宽）。
+EXCLUDE_SESSIONS=()
+fwd=()      # restart/update → stop/start 的排除参数透传（case 分支是顶层作用域，不能用 local）
+_sid=""     # 同上
+
+# 飞行会话 = 最近 2 分钟内有会话日志在写（活跃会话每几秒写一次事件，mtime 判据够用）。
 active_sessions() {
   find "$CORUM_HOME/sessions" -name 'session*.jsonl*' -mmin -2 2>/dev/null
 }
 
+# 解析 stop/restart/update/start（四个子命令都要先过一遍护栏）共用的参数。
+# 识别 --exclude-session <id> / --exclude-session=<id>（可重复）；其余参数一律报错，
+# 防止拼写错误（如 --exclude-sesion）静默失效、守卫被无声绕过。
+parse_guard_args() {
+  local args=("$@") i=0
+  while (( i < ${#args[@]} )); do
+    case "${args[$i]}" in
+      --exclude-session)
+        if (( i + 1 >= ${#args[@]} )); then
+          log "错误：--exclude-session 需要一个会话 id 参数"
+          return 1
+        fi
+        EXCLUDE_SESSIONS+=("${args[$((i + 1))]}")
+        i=$((i + 2))
+        ;;
+      --exclude-session=*)
+        EXCLUDE_SESSIONS+=("${args[$i]#--exclude-session=}")
+        i=$((i + 1))
+        ;;
+      *)
+        log "错误：未知参数 ${args[$i]}（本子命令仅支持 --exclude-session <id>，可重复）"
+        return 1
+        ;;
+    esac
+  done
+  # 环境变量 CORUM_PACK_EXCLUDE_SESSIONS：逗号/空白分隔，与命令行参数合并生效
+  if [[ -n "${CORUM_PACK_EXCLUDE_SESSIONS:-}" ]]; then
+    local env_ids=() e
+    read -r -a env_ids <<< "${CORUM_PACK_EXCLUDE_SESSIONS//,/ }"
+    for e in ${env_ids[@]+"${env_ids[@]}"}; do
+      [[ -n "$e" ]] && EXCLUDE_SESSIONS+=("$e")
+    done
+  fi
+  return 0
+}
+
+# 从命中的日志路径解析会话 id：
+#   · 真实布局  sessions/<project>/<session-id>/session.v2.jsonl(.zstd) → 取父目录名
+#   · 平铺布局  sessions/<project>/<session-id>.jsonl                    → 取文件名去 .jsonl 后缀
+session_id_of_file() {
+  local path="$1" base
+  base="$(basename "$path")"
+  if [[ "$base" == session*.jsonl* ]]; then
+    basename "$(dirname "$path")"
+  else
+    base="${base%.jsonl.zstd}"
+    base="${base%.jsonl}"
+    printf '%s' "$base"
+  fi
+}
+
+# 会话 id 是否命中某个排除项（完整 id 或唯一子串）。
+is_excluded_session() {
+  local sid="$1" ex
+  for ex in ${EXCLUDE_SESSIONS[@]+"${EXCLUDE_SESSIONS[@]}"}; do
+    [[ -n "$ex" && "$sid" == *"$ex"* ]] && return 0
+  done
+  return 1
+}
+
 assert_no_active_turns() {
-  [[ "${CORUM_PACK_FORCE:-}" == "1" ]] && return 0
-  local hot
-  hot="$(active_sessions || true)"
-  if [[ -n "$hot" ]]; then
-    log "⚠️ 拒绝重启：该 home 下有会话在最近 2 分钟内仍在写事件（很可能有 Agent 正在跑）："
-    printf '%s\n' "$hot" | while read -r line; do log "   $line"; done
-    log "  重启会打断它们（host 随实例重启）。等它跑完再执行，或确认可打断时用 CORUM_PACK_FORCE=1 强制执行。"
+  local hot_files line path sid found i
+  local -a sid_order=() sid_blob=() excluded_ids=() excluded_files=() remaining=()
+  local force=0
+  [[ "${CORUM_PACK_FORCE:-}" == "1" ]] && force=1
+
+  hot_files="$(active_sessions || true)"
+
+  # 归并：会话 id → 命中文件列表（bash 3.2 兼容，不用关联数组）
+  if [[ -n "$hot_files" ]]; then
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      sid="$(session_id_of_file "$path")"
+      found=-1
+      for ((i = 0; i < ${#sid_order[@]}; i++)); do
+        [[ "${sid_order[$i]}" == "$sid" ]] && { found=$i; break; }
+      done
+      if (( found < 0 )); then
+        sid_order+=("$sid")
+        sid_blob+=("$path")
+      else
+        sid_blob[$found]="${sid_blob[$found]}"$'\n'"$path"
+      fi
+    done <<< "$hot_files"
+  fi
+
+  local n=${#sid_order[@]}
+  if (( n == 0 )); then
+    log "飞行守卫：核验到 0 个飞行会话（最近 2 分钟无会话日志写入），放行"
+    return 0
+  fi
+
+  # 决策过程第一步：核验到 N 个飞行会话，逐个列出（含命中文件，可复核）
+  log "飞行守卫：核验到 $n 个飞行会话（最近 2 分钟内有会话日志写入）："
+  for ((i = 0; i < ${#sid_order[@]}; i++)); do
+    log "   · ${sid_order[$i]}"
+    while IFS= read -r line; do [[ -n "$line" ]] && log "       $line"; done <<< "${sid_blob[$i]}"
+  done
+
+  # 子串排除项若命中多个不同会话，提示可能过宽（排除面看得见）
+  local ex matches
+  for ex in ${EXCLUDE_SESSIONS[@]+"${EXCLUDE_SESSIONS[@]}"}; do
+    matches=0
+    for sid in ${sid_order[@]+"${sid_order[@]}"}; do
+      [[ "$sid" == *"$ex"* ]] && matches=$((matches + 1))
+    done
+    if (( matches > 1 )); then
+      log "⚠️ 排除项 '$ex' 按子串命中了 $matches 个不同会话（可能过宽，请核对）："
+      for sid in ${sid_order[@]+"${sid_order[@]}"}; do
+        [[ "$sid" == *"$ex"* ]] && log "       · $sid"
+      done
+    elif (( matches == 0 )); then
+      log "注：排除项 '$ex' 未命中任何飞行会话（拼写错误会静默失效，特此提示）"
+    fi
+  done
+
+  if (( force )); then
+    log "⚠️⚠️ CORUM_PACK_FORCE=1：正在无视飞行守卫！以上 $n 个飞行会话将全部被强行打断（host 随实例重启）："
+    for sid in ${sid_order[@]+"${sid_order[@]}"}; do log "   · $sid"; done
+    return 0
+  fi
+
+  # 决策过程第二步：其中 M 个被显式排除，逐个列出 id 与命中文件（不允许静默放行）
+  for ((i = 0; i < ${#sid_order[@]}; i++)); do
+    sid="${sid_order[$i]}"
+    if is_excluded_session "$sid"; then
+      excluded_ids+=("$sid")
+      excluded_files+=("${sid_blob[$i]}")
+    else
+      remaining+=("$sid")
+    fi
+  done
+  local m=${#excluded_ids[@]}
+  if (( m > 0 )); then
+    log "其中 $m 个被显式排除（--exclude-session / CORUM_PACK_EXCLUDE_SESSIONS）："
+    for ((i = 0; i < ${#excluded_ids[@]}; i++)); do
+      log "   · 已排除 ${excluded_ids[$i]}"
+      while IFS= read -r line; do [[ -n "$line" ]] && log "       $line"; done <<< "${excluded_files[$i]}"
+    done
+  else
+    log "其中 0 个被显式排除"
+  fi
+
+  # 不变式：任何未被排除的飞行会话仍然必须导致拒绝
+  local r=${#remaining[@]}
+  if (( r > 0 )); then
+    log "⚠️ 拒绝 stop/restart/update：仍有 $r 个未被排除的飞行会话（很可能有 Agent 正在跑）："
+    for sid in ${remaining[@]+"${remaining[@]}"}; do log "   · $sid"; done
+    log "  重启会打断它们（host 随实例重启）。等它跑完，或用 --exclude-session <id> 排除你自己的会话；"
+    log "  确认可全部打断时才用 CORUM_PACK_FORCE=1 强制执行。"
     return 1
   fi
+  log "飞行守卫：所有飞行会话均已被显式排除，放行"
   return 0
 }
 
@@ -170,6 +328,7 @@ assert_no_dev_instance() {
 
 case "${1:-status}" in
   start)
+    parse_guard_args "${@:2}" || exit 2
     if [[ ! -x "$APP_BIN" ]]; then
       log "打包实例不存在：$APP_BIN"
       log "先跑：cd packages/desktop && node scripts/pack-macos.mjs && ./node_modules/.bin/electron-builder --mac --arm64"
@@ -214,11 +373,16 @@ case "${1:-status}" in
     resolve_master_key
     ;;
   stop)
+    parse_guard_args "${@:2}" || exit 2
     stop_own
     ;;
   restart)
-    "$0" stop
-    "$0" start
+    # EXCLUDE_SESSIONS 重建成参数透传给 stop 与 start，两段守卫决策一致
+    parse_guard_args "${@:2}" || exit 2
+    fwd=()
+    for _sid in ${EXCLUDE_SESSIONS[@]+"${EXCLUDE_SESSIONS[@]}"}; do fwd+=(--exclude-session "$_sid"); done
+    "$0" stop ${fwd[@]+"${fwd[@]}"}
+    "$0" start ${fwd[@]+"${fwd[@]}"}
     ;;
   status)
     if alive; then
@@ -232,13 +396,16 @@ case "${1:-status}" in
   update)
     # 一轮调试做完调这个：构建「改动过的包」→ 重打 host 闭包 + .app → 重启打包实例。
     # 注意：**不要**在这里跑 `pnpm install`（本仓库裸装会挂；带 --filter 会剪掉别的项目依赖）。
+    parse_guard_args "${@:2}" || exit 2
     log "1/3 构建 desktop 壳与 client 插件产物"
     ( cd "$DESKTOP" && ./node_modules/.bin/tsc -b >/dev/null && ./node_modules/.bin/tsdown --config tsdown.config.ts >/dev/null && node scripts/inline-monaco-css.mjs >/dev/null )
     log "2/3 重打 host 闭包 + .app（pack-macos.mjs 失败即整体失败）"
     ( cd "$DESKTOP" && node scripts/pack-macos.mjs ) || { log "pack-macos.mjs 失败，未产出新包，保持旧实例运行"; exit 1; }
     ( cd "$DESKTOP" && ./node_modules/.bin/electron-builder --mac --arm64 >/dev/null ) || { log "electron-builder 失败，保持旧实例运行"; exit 1; }
     log "3/3 重启打包实例"
-    "$0" restart
+    fwd=()
+    for _sid in ${EXCLUDE_SESSIONS[@]+"${EXCLUDE_SESSIONS[@]}"}; do fwd+=(--exclude-session "$_sid"); done
+    "$0" restart ${fwd[@]+"${fwd[@]}"}
     log "完成。改了 client 源码的插件需要在 update 前先各自 build（如 packages/plugins/**/run build）"
     ;;
   *)

@@ -640,9 +640,12 @@ export function corumEfficiencyDisciplineLines(): string[] {
 /**
  * fork（corum）：沙箱拒绝 → 一次升级 → 由用户裁决（机制段条目，单一事实源）。
  *
- * 契约与官方 `tool-bash` 描述同源（被拒是预期内的事、同回合重试一次、审批弹窗即
- * 用户同意、拒绝即终结），这里按通用规范口径复述，使「被拒 → 升级一次」成为
- * 明确路径而不是临场发挥。措辞纪律同 {@link corumEfficiencyDisciplineLines}。
+ * 这段文本同时注入主会话与子会话（preset scope 共享，子 Agent 经
+ * `agentPresets.composeFrom` 继承父的 preset scope 段），所以弹窗承诺必须双分岔：
+ * 主会话的审批策略是 `ask`（弹窗真实存在），子会话的审批策略钉死为 `never`
+ * （`corum-subagent/src/child-agent.ts` 的 `captureDelegatedPolicyOverrides`，
+ * `approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never'`），
+ * 子会话拿不到可审批通路。措辞纪律同 {@link corumEfficiencyDisciplineLines}。
  * @returns 机制段的沙箱升级行（含前置空行）。
  */
 export function corumSandboxEscalationLines(): string[] {
@@ -650,10 +653,75 @@ export function corumSandboxEscalationLines(): string[] {
     '',
     'SANDBOX DENIALS AND ESCALATION:',
     '- A blocked file operation reports a `[sandbox: file access denied under <mode> mode]` marker. That is a policy decision, not a failure of the command: read the marker instead of assuming the denial.',
-    '- When a wider mode would let the command succeed, retry the exact same command once, in the same turn, with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. The approval prompt raised by that retry is how the user consents — do not detour through chat to ask first.',
+    '- When a wider mode would let the command succeed, retry the exact same command once, in the same turn, with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. In a session whose approval policy is `ask` that retry raises the approval prompt, and the user\'s answer to it is the consent — do not detour through chat to ask first.',
+    '- In a DELEGATED CHILD session the approval policy is pinned to `never`, so no approval prompt is reachable and a retry is rejected deterministically. Treat a denial there as the final result: report it as a conclusion in your final report, so the caller sees it, instead of reworking around it or waiting for an approval that cannot come.',
     '- Escalate only from a real denial, never speculatively. If the session states that approval prompts are disabled, a denial is final: do not set `sandbox_permissions`.',
     '- A rejected escalation is final for that command: stop and explain it instead of working around it. It does not forbid attempting or escalating other commands later.',
   ]
+}
+
+/**
+ * fork（corum）：工具描述里的调度句（单一事实源）。
+ *
+ * 模型可见文本内联在 `defineTool` 回调里时只有实机重启后读工具描述才能验证
+ * 它是否与机制事实一致。抽成导出纯函数后单测能直接断言「research 实例读到
+ * 恒前台」并钉住它与 `run_in_background` 拒绝路径（throw）一致。措辞纪律同
+ * {@link corumEfficiencyDisciplineLines}。
+ * @param options.backgroundEnabled - 是否启用后台调度。
+ * @param options.continuable - 是否为 continuable 后台模式。
+ * @param options.readonlyResearch - 是否为只读研究实例。
+ * @returns 接在 `wording.description` 后面的调度描述句（开头保留一个空格）。
+ */
+export function corumSchedulingDescription(options: { readonly backgroundEnabled: boolean; readonly continuable: boolean; readonly readonlyResearch: boolean }): string {
+  if (options.readonlyResearch) {
+    return ' This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass `run_in_background: true` (it is rejected).'
+  }
+  if (!options.backgroundEnabled) {
+    return ' This call waits for the subagent and returns its result.'
+  }
+  if (options.continuable) {
+    return ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child\'s nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result.'
+  }
+  return ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
+}
+
+/**
+ * fork（corum）：机制段 `tool:${toolName}` 的调度文本（单一事实源）。
+ *
+ * 与 {@link corumSchedulingDescription} 同源：research 实例读「恒前台」，其余实例
+ * 读官方后台默认措辞。抽成纯函数的原因同上——模型可见文本内联在
+ * `systemPrompt.section` 回调里时只有实机重启才能验证，抽出后单测直接断言。
+ * @param options - 同 {@link corumSchedulingDescription}。
+ * @param toolName - 段内点名的是本实例的工具名——同一段文本服务
+ * `subagent` / `subagent_research` / `subagent_fork` 三个实例，写死任一个就会指错工具。
+ * @param ptcPrefix - PTC 模式前缀（非 PTC 为空串）。
+ * @returns 机制段文本（`ptcPrefix` + 调度句）。
+ */
+export function corumSchedulingSectionText(options: { readonly backgroundEnabled: boolean; readonly continuable: boolean; readonly readonlyResearch: boolean }, toolName: string, ptcPrefix: string): string {
+  if (options.readonlyResearch) {
+    return ptcPrefix + 'This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass `run_in_background: true` (it is rejected) — a backgrounded investigation leaves you guessing or repeating work. It has a shell for read-only commands (`git log`, `ls`, reading PID/log files, a verify script\'s `status`) but its sandbox is pinned to `read-only` and write/edit are denied, so it can never modify the repo. Fan out several research calls in ONE message when you need answers from different angles.'
+  }
+  return ptcPrefix + `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`
+}
+
+/**
+ * fork（corum）：`run_in_background` 参数 schema 的描述（单一事实源）。
+ *
+ * 与 {@link corumSchedulingDescription} / {@link corumSchedulingSectionText} 同源：
+ * research 实例的 `run_in_background` 被拒绝（throw），描述必须说实话而非写
+ * 「Defaults to true」。抽成纯函数的原因同上——模型可见 schema 描述同样需要
+ * 可执行断言钉住它与拒绝路径一致。措辞纪律同 {@link corumEfficiencyDisciplineLines}。
+ * @param options.continuable - 是否为 continuable 后台模式。
+ * @param options.readonlyResearch - 是否为只读研究实例。
+ * @returns 参数描述句。
+ */
+export function corumRunInBackgroundDescription(options: { readonly continuable: boolean; readonly readonlyResearch: boolean }): string {
+  if (options.readonlyResearch) {
+    return 'Not supported for this read-only research tool: it always runs in the foreground and `true` is rejected — omit it.'
+  }
+  return options.continuable
+    ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.'
+    : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.'
 }
 
 interface DelegationRunRequest {
@@ -1435,14 +1503,7 @@ export function apply(ctx: Context, config: Config): void {
         name: toolName,
         // fork（corum）：描述头追加隔离语义（英文，接在官方 wording 前）。
         description: 'Delegates run in isolated git worktrees when this instance has isolation configured and the delegation can run concurrently with another write child; a lone write delegation edits the parent working tree directly (no worktree, no branch). The result states which of the two happened, so you never have to guess whether a branch carries the work. ' 
-          + wording.description + (backgroundEnabled
-          // The completion notice is the continuation service's own behavior, not
-          // a separately installed capability, so this promise holds whenever the
-          // continuable background path is reachable at all.
-          ? continuable
-            ? ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child\'s nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result.'
-            : ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
-          : ' This call waits for the subagent and returns its result.')
+          + wording.description + corumSchedulingDescription({ backgroundEnabled, continuable, readonlyResearch: corumReadonlyResearch })
           // fork（corum）：决策点分工（2026-09-14 委派正确性轮）——工具描述是模型
           // 选工具时唯一**贴着选择点**读到的文本，因此分工必须写在这里，而不是只
           // 写在机制段里。只读调研走 `subagent_research`（无修改 → 不召唤写能力
@@ -1450,7 +1511,18 @@ export function apply(ctx: Context, config: Config): void {
           // （它没有别的委派工具可选）。
           + (corumReadonlyResearch
             ? ''
-            : ' For work that only READS — research, search, fact-finding, verification by inspection, summarization — call `subagent_research` instead: it is read-only (write/edit denied, sandbox pinned to `read-only`), so it needs no isolation and its report returns in the tool result. Call this write-capable tool when the subtask must create or modify files. A subtask that changes nothing must not be given a write-capable child: isolation, branches and merging all exist for changes.'),
+            // fork（corum）2026-09-14 修正（用户点名「主 Agent 派 research 去验收」）：
+            //
+            // 原文把 `verification by inspection`（验收）整类划给只读研究工具，模型照做 ⇒
+            // **执行型验收被派给没有 write 工具的子会话**，派单里于是出现「不许改任何文件」
+            // 与「必须造 fixture」并存的矛盾要求（实证：会话 `6364e3ea` 派单同时含这两句）。
+            //
+            // 改为按**是否需要执行**分流，并把两者的**工具面边界**写清 —— 决策点上模型唯一
+            // 贴着选择点读到的文本就是这里：
+            //   · `subagent_research`：有 shell 可跑只读命令，但 **write/edit 被拒、沙箱锁 read-only**；
+            //   · 本工具（写能力）：bash + read + **write/edit**，可在仓库内落盘。
+            // 需要跑断言、造 fixture、落盘证据的验收 ⇒ 必须用本工具。
+            : ' Choose by whether the subtask must EXECUTE or only JUDGE. `subagent_research` is read-only: it has a shell for read-only commands, but **write/edit are denied and its sandbox is pinned to `read-only`**, so it can never create a file, a fixture, or an evidence artifact inside the repo. Use it for knowledge work and judgement-by-reading — research, search, fact-finding, summarization, comparing an implementation against a spec by reading code. Call THIS write-capable tool whenever the subtask must create or modify anything, including **executable verification**: running assertions, building a fixture or temp home, or writing evidence files. Running a verification is not the same as inspecting one. Never ask a read-only child to write: a "do not modify files" instruction and a "create this fixture" instruction cannot both hold — if you must both constrain writes and require a fixture, use this tool and scope the writes explicitly. A subtask that changes nothing must not be given a write-capable child: isolation, branches and merging all exist for changes.'),
         parameters: {
           description: {
             type: 'string',
@@ -1478,9 +1550,7 @@ export function apply(ctx: Context, config: Config): void {
           ...backgroundEnabled ? {
             run_in_background: {
               type: 'boolean' as const,
-              description: continuable
-                ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.'
-                : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.',
+              description: corumRunInBackgroundDescription({ continuable, readonlyResearch: corumReadonlyResearch }),
             },
           } : {},
         },
@@ -1951,9 +2021,9 @@ export function apply(ctx: Context, config: Config): void {
       // A backend fiber may activate later; a misspelled provider remains visible in this log.
       runtimeCtx.logger.info(`subagent provider "${config.provider}" not registered yet; the "${config.toolName ?? 'subagent'}" tool will register when it appears`)
     }
-    // fork（corum）：只给 worker 实例注册这条「后台默认」段落。research 实例的
-    // 工具 description 已逐字携带同一句（2026-09-09 用户指出提示词多处重叠——
-    // 此前 worker/research/subagent_fork 三个实例各注册一段几乎相同的文字）。
+    // fork（corum）：research 与 worker 各注册自己的 `tool:${toolName}` 段——段名
+    // 不同（`tool:subagent_research` / `tool:subagent`）不冲突；text 按读者可见性
+    // 自我抑制（工具不可见时返回空串，等价于不注册）。
     /**
      * fork（corum）：PTC 模式前缀——该模式下工具不直接暴露，全部经 `run_code` 的
      * 生成式 SDK 调用（官方 ptc preset 的 `tool-presentation mode: ptc`）。2026-09-09
@@ -1967,7 +2037,7 @@ export function apply(ctx: Context, config: Config): void {
         ? ''
         : 'This agent runs in PTC mode: every tool below is called from inside `run_code` (e.g. `await tools.subagent({...})`), not as a direct tool call. '
 
-    if (backgroundEnabled && continuable && !corumReadonlyResearch) {
+    if (corumReadonlyResearch || (backgroundEnabled && continuable)) {
       // The section follows provider availability without its own manual
       // lifecycle: empty text is omitted from rendered prompts while the tool is
       // absent, and the registration itself stays owned by this plugin fiber.
@@ -1976,11 +2046,7 @@ export function apply(ctx: Context, config: Config): void {
         order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
         text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
           ? ''
-          // fork（corum）2026-09-12 用户定调：只读研究实例的措辞改成「恒前台、报告就在
-          // 工具结果里、沙箱只读但有 shell」；worker / fork 实例保持官方后台默认措辞。
-          : corumReadonlyResearch
-            ? `${corumPtcPrefix(context.scope)}This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass \`run_in_background: true\` (it is rejected) — a backgrounded investigation leaves you guessing or repeating work. It has a shell for read-only commands (\`git log\`, \`ls\`, reading PID/log files, a verify script's \`status\`) but its sandbox is pinned to \`read-only\` and write/edit are denied, so it can never modify the repo. Fan out several research calls in ONE message when you need answers from different angles.`
-            : `${corumPtcPrefix(context.scope)}Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`,
+          : corumSchedulingSectionText({ backgroundEnabled, continuable, readonlyResearch: corumReadonlyResearch }, toolName, corumPtcPrefix(context.scope)),
       })
     }
 
@@ -2011,9 +2077,14 @@ export function apply(ctx: Context, config: Config): void {
             `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
             '',
             'Choose the right delegation form by the shape of the work:',
-            '- READ-ONLY work (research, search, fact-finding, verification by inspection, summarization) → call `subagent_research`.',
+            '- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — e.g. checking an implementation against a spec, or comparing output against expected values) → call `subagent_research`.',
             '- Work that CHANGES files → call `subagent`.',
             '- ONE focused, self-contained subtask that must create or modify files (an implementation, a scoped fix) → call `subagent`.',
+            // fork（corum）2026-09-14：**执行型验收**必须走写能力工具（用户点名「主 Agent 派
+            // research 去验收」）。验收分两种，旧文案把两者都塞进只读清单，于是需要跑断言/造
+            // fixture/落盘证据的验收被派给没有 write 的子会话 ⇒ 派单自相矛盾（实证会话
+            // `6364e3ea`：「不许改任何文件」与「必须造 fixture」并存）。
+            '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → call `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.',
           ]
           if (hasResearch) {
             lines.push('- ANY read-only work — searching the codebase, reading files, tracing a call path, summarizing a module, gathering facts, answering "how does X work", or running read-only commands (`git log`, `ls`, a verify script\'s `status`) → call `subagent_research`. It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you get the findings inline instead of waiting for a notice — never try to background it (`run_in_background: true` is rejected). It has a shell but its sandbox is pinned to `read-only` and the mutating tools (write/edit/str_replace_editor) are denied, so it can investigate freely and can never modify the repo. Fan out several such searches in ONE message when you need answers from different angles.')

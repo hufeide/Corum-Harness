@@ -1,0 +1,15 @@
+{
+  "port": 9333,
+  "target": "main",
+  "before": [
+    { "wait": 4000 },
+    { "eval": "(()=>{const el=Array.from(document.querySelectorAll('.XloQSW_sr')).find(e=>/UI编辑工具失败验证/.test(e.textContent||'')); if(el){const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+20,clientY:r.top+r.height/2}));} })()" },
+    { "wait": 5000 }
+  ],
+  "assert": [
+    { "label": "未命中卡 head chip 顺序：未命中 → 文件未改动", "js": "(()=>{const c=Array.from(document.querySelectorAll('[data-file-card]')).find(x=>/未命中/.test(x.innerText||'')); const h=c.children[0]; return Array.from(h.children).map(e=>(e.innerText||'').trim()).filter(Boolean).join(' | ')})()" },
+    { "label": "diff 底栏已隐藏（不重复统计）", "js": "(()=>{const f=document.querySelector('[data-diff] > [class*=_footer_]'); return f? getComputedStyle(f).display : 'NONE-STILL-OK(no-edits)'})()" },
+    { "label": "diff 内容仍在", "js": "document.querySelectorAll('[data-diff] [class*=_line_]').length > 0", "expect": true },
+    { "label": "最终总览截图", "screenshot": "file-tool-card-impl-六态-深色" }
+  ]
+}

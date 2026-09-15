@@ -33,20 +33,30 @@ function between(from: string, to: string): string {
 }
 
 describe('决策点分工 — 只读调研不走写能力子 Agent（源码扫描对账单测）', () => {
-  it('工具 description 的决策点文本：只读 → `subagent_research`，写 → 本工具', () => {
-    // 锚点顺序即规则：先说只读该去哪，再说本工具管什么。
-    const block = SRC.slice(
-      SRC.indexOf('For work that only READS'),
-      SRC.indexOf('parameters:', SRC.indexOf('For work that only READS')),
-    )
+  it('工具 description 的决策点文本：按「需不需要执行」分流，且写明两边工具面边界', () => {
+    // 2026-09-14 修正后的契约（用户点名「主 Agent 派 research 去验收」）：
+    // 旧文案把 `verification by inspection`（验收）整类划给只读工具 ⇒ 执行型验收被派给
+    // 没有 write 的子会话 ⇒ 派单里「不许改文件」与「必须造 fixture」并存（实证 6364e3ea）。
+    // 现在按 **EXECUTE 还是 JUDGE** 分流，并把工具面边界写在决策点上。
+    const anchor = 'Choose by whether the subtask must EXECUTE or only JUDGE'
+    const start = SRC.indexOf(anchor)
+    expect(start, `anchor not found: ${anchor}`).toBeGreaterThanOrEqual(0)
+    const block = SRC.slice(start, SRC.indexOf('parameters:', start))
     expect(block).not.toBe('')
-    expect(block).toContain('call `subagent_research` instead')
-    expect(block).toContain('read-only (write/edit denied, sandbox pinned to `read-only`)')
-    expect(block).toContain('Call this write-capable tool when the subtask must create or modify files')
-    // 负向规则：没有修改就不该召唤写能力子 Agent。
+
+    // ① 只读工具的能力边界必须写清（这是旧文案缺失、导致误派的部分）。
+    expect(block).toContain('`subagent_research` is read-only')
+    expect(block).toContain('write/edit are denied')
+    expect(block).toContain('pinned to `read-only`')
+    // ② **执行型验收**必须走写能力工具（本次修的核心）。
+    expect(block).toContain('executable verification')
+    expect(block).toContain('Running a verification is not the same as inspecting one')
+    // ③ 「不许改文件」与「必须造 fixture」不可并存，必须显式点明。
+    expect(block).toContain('cannot both hold')
+    // ④ 负向规则保留：没有修改就不该召唤写能力子 Agent。
     expect(block).toContain('A subtask that changes nothing must not be given a write-capable child')
-    // 决策点文本必须**排在**参数表之前（模型先读到分工，再看到参数）。
-    expect(SRC.indexOf('For work that only READS')).toBeLessThan(SRC.indexOf('parameters: {', SRC.indexOf('For work that only READS')))
+    // ⑤ 决策点文本必须**排在**参数表之前（模型先读到分工，再看到参数）。
+    expect(start).toBeLessThan(SRC.indexOf('parameters: {', start))
   })
 
   it('机制段：只读与写两条并列在选择清单最前，且带负向规则', () => {
@@ -134,13 +144,12 @@ describe('I 沙箱升级 — 被拒 → 同回合升级一次 → 由用户裁�
     expect(text).toContain('policy decision, not a failure of the command')
   })
 
-  it('同回合重试同一条命令一次，带最窄够用档 + 一句 justification，审批弹窗即同意', () => {
+  it('同回合重试同一条命令一次，带最窄够用档 + 一句 justification，主会话审批弹窗即同意', () => {
     expect(text).toContain('retry the exact same command once, in the same turn')
     expect(text).toContain('sandbox_permissions')
     expect(text).toContain('narrowest wider mode that suffices')
     expect(text).toContain('justification')
-    expect(text).toContain('that retry is how the user consents')
-    expect(text).toContain('do not detour through chat to ask first')
+    expect(text).toContain('approval policy is `ask`')
   })
 
   it('两条边界：不得预先猜测式升级；被拒即终结（但不影响后续其它命令）', () => {

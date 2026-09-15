@@ -1,0 +1,17 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 500 },
+    { "eval": "document.querySelector('[contenteditable=true]').focus()" },
+    { "wait": 300 },
+    { "key": "Meta+a" },
+    { "wait": 300 },
+    { "key": "Backspace" },
+    { "wait": 800 }
+  ],
+  "assert": [
+    { "label": "① composer 草稿已清空", "js": "(()=>{const c=document.querySelector('[contenteditable=true]'); return ((c&&c.innerText)||'').trim().length === 0})()" },
+    { "label": "② 无队列残留", "js": "!document.querySelector('[data-queue-dock]') && document.querySelectorAll('[data-pending-steering]').length===0" },
+    { "label": "③ 清场完成截图", "screenshot": "packed-9222-08-draft-cleared" }
+  ]
+}

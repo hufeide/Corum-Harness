@@ -1,0 +1,16 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 500 },
+    { "eval": "(() => { const d=document.querySelector('[data-queue-dock]'); if(!d) return 'no-dock'; const h=d.querySelector('button[aria-controls]'); if(h && h.getAttribute('aria-expanded')!=='true') h.click(); return 'ensured-expanded' })()" },
+    { "wait": 800 },
+    { "eval": "(() => { const d=document.querySelector('[data-queue-dock]'); const li=[...d.querySelectorAll('li')].find(x=>/排队消息甲/.test(x.innerText||'')); if(!li) return 'no-item-jia'; const b=[...li.querySelectorAll('button')].find(x=>(x.getAttribute('aria-label')||'')==='插话发送'); if(!b) return 'no-steer-btn'; b.click(); return 'clicked-steer-jia' })()" },
+    { "wait": 2500 }
+  ],
+  "assert": [
+    { "label": "插话后 pending-steering 数", "js": "document.querySelectorAll('[data-pending-steering]').length" },
+    { "label": "撤回按钮 aria 枚举", "js": "[...document.querySelectorAll('button[aria-label]')].map(b=>b.getAttribute('aria-label')).filter(a=>/撤回|排队|插话/.test(a||'')).join(' ~ ')" },
+    { "label": "QueueDock 文本（甲应已移出）", "js": "(()=>{const d=document.querySelector('[data-queue-dock]'); return d? d.innerText.replace(/\\n/g,' | ') : 'NO-DOCK'})()" },
+    { "label": "插话后截图", "screenshot": "packed-9222-03-steered-jia" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 2000 },
+    { "eval": "(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('新建任务')); return b ? (b.click(), 'clicked-new-task') : 'no-new-task-button' })()" },
+    { "wait": 2000 },
+    { "eval": "(() => { const rw=[...document.querySelectorAll('button, [role=radio]')].find(x=>x.textContent.includes('工作区读写')); rw && rw.click(); const s=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='开始'); s && s.click(); return 'form-done' })()" },
+    { "wait": 3500 },
+    { "eval": "document.querySelector('[contenteditable=true]').focus()" },
+    { "type": "运行 sleep 600，期间不要输出任何内容，结束后只回复 DONE", "submit": true },
+    { "wait": 4000 },
+    { "eval": "document.querySelector('[contenteditable=true]').focus()" },
+    { "type": "排队消息甲：第一段测试文本", "submit": true },
+    { "wait": 1500 },
+    { "eval": "document.querySelector('[contenteditable=true]').focus()" },
+    { "type": "排队消息乙：第二段测试文本", "submit": true },
+    { "wait": 2500 }
+  ],
+  "assert": [
+    { "label": "① 两个待认领插话气泡（撤回窗口存在）", "js": "document.querySelectorAll('[data-pending-steering]').length === 2" },
+    { "label": "② 撤回按钮×2（aria 含「退回排队」）", "js": "[...document.querySelectorAll('button[aria-label]')].filter(b => b.getAttribute('aria-label').includes('退回排队')).length === 2" },
+    { "label": "③ 插话态截图", "screenshot": "packed-9222-01-steering" }
+  ]
+}

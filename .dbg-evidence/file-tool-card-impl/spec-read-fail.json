@@ -1,0 +1,17 @@
+{
+  "port": 9333,
+  "target": "main",
+  "before": [
+    { "wait": 4000 },
+    { "eval": "(()=>{const el=Array.from(document.querySelectorAll('.XloQSW_sr')).find(e=>/读取 SSH 配置并绕过沙箱限制/.test(e.textContent||'')); if(el){const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+20,clientY:r.top+r.height/2}));} })()" },
+    { "wait": 5000 }
+  ],
+  "assert": [
+    { "label": "子态2 read·失败：玻璃失败档（同一张壳）", "js": "document.querySelectorAll('[data-file-card]').length >= 1", "expect": true },
+    { "label": "子态2 失败壳仍是统一玻璃壳", "js": "(()=>{const s=getComputedStyle(document.querySelector('[data-file-card]'));return s.backdropFilter+'|'+s.borderRadius+'|'+s.backgroundColor})()", "expect": "blur(20px) saturate(1.4)|14px|rgba(29, 17, 43, 0.85)" },
+    { "label": "子态2 读取 + 失败状态 chip", "js": "/读取/.test(document.querySelector('[data-file-card]').innerText||'') && /失败/.test(document.querySelector('[data-file-card]').innerText||'')", "expect": true },
+    { "label": "子态2 错误原文可见（不吞错）", "js": "/cannot read|not found|ENOENT/.test(document.querySelector('[data-file-card]').innerText||'')", "expect": true },
+    { "label": "子态2 脚注给出下一步", "js": "/glob|路径可能已变更/.test(document.querySelector('[data-file-card]').innerText||'')", "expect": true },
+    { "label": "子态2 read·失败 截图", "screenshot": "file-tool-card-impl-read-fail-深色" }
+  ]
+}

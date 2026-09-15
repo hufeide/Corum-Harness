@@ -1,0 +1,72 @@
+{
+  "port": 9333,
+  "target": "main",
+  "before": [
+    {
+      "wait": 4000
+    },
+    {
+      "eval": "(()=>{const el=Array.from(document.querySelectorAll('.XloQSW_sr')).find(e=>/UI编辑工具失败验证/.test(e.textContent||'')); if(el){const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+20,clientY:r.top+r.height/2}));} })()"
+    },
+    {
+      "wait": 5000
+    },
+    {
+      "eval": "new Promise((res)=>{const t0=Date.now();const tick=()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/切换到浅色主题/.test(x.getAttribute('aria-label')||''));if(b){b.click();return res('clicked')}if(Date.now()-t0>15000)return res('timeout');setTimeout(tick,150)};tick()})"
+    },
+    {
+      "wait": 1500
+    },
+    {
+      "eval": "new Promise((res)=>{const t0=Date.now();const tick=()=>{const v=getComputedStyle(document.body).getPropertyValue('--dsw-alias-label-primary').trim();if(v==='#0E0E1C')return res('light');if(Date.now()-t0>10000)return res('still:'+v);setTimeout(tick,150)};tick()})"
+    },
+    {
+      "wait": 800
+    }
+  ],
+  "assert": [
+    {
+      "label": "⓪ 前置：文件卡已在场（断言对象存在）",
+      "js": "document.querySelectorAll('[data-file-card]').length > 0",
+      "expect": true
+    },
+    {
+      "label": "① 浅色主题已生效（label-primary 翻浅）",
+      "js": "getComputedStyle(document.body).getPropertyValue('--dsw-alias-label-primary').trim()",
+      "expect": "#0E0E1C"
+    },
+    {
+      "label": "② 统一壳 · 背景 = $glass-1（浅）",
+      "js": "getComputedStyle(document.querySelector('[data-file-card]')).backgroundColor",
+      "expect": "rgba(255, 255, 255, 0.9)"
+    },
+    {
+      "label": "③ 统一壳 · 描边 = $glass-border（浅）",
+      "js": "getComputedStyle(document.querySelector('[data-file-card]')).borderTopColor",
+      "expect": "rgb(255, 255, 255)"
+    },
+    {
+      "label": "④ 统一壳 · backdrop-filter 不变",
+      "js": "getComputedStyle(document.querySelector('[data-file-card]')).backdropFilter",
+      "expect": "blur(20px) saturate(1.4)"
+    },
+    {
+      "label": "⑤ diff 删行色条（红 14%，浅色同一口径）",
+      "js": "(()=>{const a=document.querySelector('[data-diff] [class*=_del_]');return a?getComputedStyle(a).backgroundColor:'NO-DIFF'})()"
+    },
+    {
+      "label": "⑥ diff 代码字 = $label-primary（浅：深文本，可读）",
+      "js": "(()=>{const a=document.querySelector('[data-diff] [class*=_add_]');return a?getComputedStyle(a).color:'NO-DIFF'})()",
+      "expect": "rgb(14, 14, 28)"
+    },
+    {
+      "label": "⑦ 浅色截图",
+      "screenshot": "file-tool-card-impl-浅色"
+    },
+    {
+      "label": "⑧ 恢复深色（收尾）",
+      "js": "(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/切换到深色主题/.test(x.getAttribute('aria-label')||'')); if(b)b.click(); return true})()",
+      "expect": true
+    }
+  ]
+}

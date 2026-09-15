@@ -1,0 +1,17 @@
+{
+  "port": 9222,
+  "before": [
+    { "wait": 500 },
+    { "eval": "(() => { const b=[...document.querySelectorAll('button[aria-label]')].find(x=>x.getAttribute('aria-label')==='撤回插话，退回排队'); if(!b) return 'no-revert'; b.click(); return 'reverted-jia-to-queue' })()" },
+    { "wait": 2000 },
+    { "eval": "(() => { const d=document.querySelector('[data-queue-dock]'); if(!d) return 'no-dock'; const h=d.querySelector('button[aria-controls]'); if(h && h.getAttribute('aria-expanded')!=='true') h.click(); return 'expanded' })()" },
+    { "wait": 800 },
+    { "eval": "(() => { const d=document.querySelector('[data-queue-dock]'); if(!d) return 'no-dock'; const out=[]; for (const li of [...d.querySelectorAll('li')]) { const b=[...li.querySelectorAll('button')].find(x=>(x.getAttribute('aria-label')||'').startsWith('删除排队消息')); if(b){b.click(); out.push('deleted:'+(li.innerText||'').slice(0,20))} } return out.join(' ; ') || 'no-delete-buttons' })()" },
+    { "wait": 2000 }
+  ],
+  "assert": [
+    { "label": "① 队列已清空（无 QueueDock 或无条目）", "js": "(()=>{const d=document.querySelector('[data-queue-dock]'); if(!d) return true; return d.querySelectorAll('li').length===0})()" },
+    { "label": "② 无 pending-steering 残留", "js": "document.querySelectorAll('[data-pending-steering]').length === 0" },
+    { "label": "③ 清场后截图", "screenshot": "packed-9222-07-cleaned" }
+  ]
+}

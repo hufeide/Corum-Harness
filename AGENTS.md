@@ -59,17 +59,26 @@
   `dev-conventions.md`.
 - `docs/audit/NEXT-PHASE-DEFERRED.md` — deferred/closed architecture items
   (sidebarMode service done, slot-registry service done). Note
-  `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md` §C1 carries a superseded
-  "precondition not met" conclusion — this file wins.
+  `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md` §C1 was corrected in place
+  (2026-09), but its **§C3a still carries an uncorrected superseded
+  "precondition not met" conclusion** — `NEXT-PHASE-DEFERRED.md` wins.
+  (Tracked: ledger `docs.audit.c3a-contradiction`.)
 - `docs/fork-delta.md` — diff ledger of the fork packages (now 13, incl. the
   sandbox fork) + official-upgrade runbook (required reading before touching
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/HANDOFF-2026-09-12-session-orchestration.md` — **最新交接入口**（2026-09-12：
+- `docs/analysis/HANDOFF-2026-09-15-unified-project-model-implementation.md` — **最新交接入口**
+  （2026-09-15 统一存储/项目模型**实施**场：`type` 字段贯通 + 三条不变式与判定表 + 统一会话索引
+  （`sessionId` 作键 —— 修正了原计划会静默丢 82.9% 的复合键形态）+ 泳道复用修复 + 存量迁移）；下个 session 从这里开始。
+- `docs/analysis/HANDOFF-2026-09-14-night-agent-capability-and-project-model.md` — 上一份交接
+  （2026-09-14 深夜场：六条工作方式纪律 + Agent 能力核查 + **存储/项目组织模型定稿**）。
+- `docs/analysis/HANDOFF-2026-09-14-supervised-rounds.md` — 上一份交接
+  （2026-09-14 监督式委派轮：八条硬纪律 + 本场交付 + 待办队列）。
+- `docs/HANDOFF-2026-09-12-session-orchestration.md` — 上一份交接（2026-09-12：
   第四轮交付真机验穿 + BUG-26/27/30~35、编排卡状态机（队列中/集成中/已集成/待集成/集成失败）、
   隔离台账 durable 判据与「并行工作区」栏分档、通知栏列表与浮窗解耦、浮窗可关、
-  ui-verify 装置升级）；下个 session 从这里开始。
+  ui-verify 装置升级）。
 - `docs/HANDOFF-2026-09-10-tray-and-notification-ownership.md` — 通知归属分档（全局只进主窗 /
   浮窗留直接反馈 toast + macOS 托盘常驻：菜单栏未读数字、关窗隐藏、单实例锁）。
 - `docs/HANDOFF-2026-09-10-session-bar-and-notifications.md` — 上一份交接（会话条
