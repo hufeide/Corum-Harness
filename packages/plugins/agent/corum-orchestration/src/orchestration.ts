@@ -439,6 +439,98 @@ export function corumWorktreeHasUncommitted(worktreePath: string): boolean {
 }
 
 /**
+ * fork（corum）：**隔离前置校验 —— 父树必须干净**（2026-09-15 机制补漏，用户裁定「严格」）。
+ *
+ * 由来（真实事故，用户 2026-09-15 亲述）：子 Agent 的「Integrate BEFORE evidence branch」失败，
+ * 根因是**派发前父树的改动未提交**。机制链条：
+ * `git worktree add <path> -b <branch>`（**不指定 base**）⇒ git 默认**从 HEAD 建分支**；
+ * 而父工作树的未提交改动**只存在于工作树、不在任何提交里** ⇒ **隔离子看不到它们**。
+ * 实证（2026-09-15）：在父树改过的 `theme.css` 里 grep 新增值 `1D112B9E`——
+ * **父树命中 1、worktree 命中 0**；隔离子实际工作在旧 HEAD，代码基不含父树那批改动。
+ * ⇒ 子会在**过时的树**上开发/验证，**并可能报告成功**（静默失真，比显式失败更危险）。
+ *
+ * **判据取「严格」档**（用户 2026-09-15 裁定）：`porcelain` **任何**一行都拦，**含 untracked `??`**。
+ * 理由：**子的树必须等于父的树**——untracked 的**新源码**同样致命（若父树有新文件未提交，
+ * 子会缺这个文件而构建失败或行为不同）。
+ *
+ * @param parentCwd - 父工作树目录。
+ * @returns 拒绝原因（可直接抛给调用方的多行文本）；干净或 git 不可用时返回 `undefined`。
+ */
+export function corumDirtyParentRefusal(parentCwd: string): string | undefined {
+  const porcelain = corumGitStatusPorcelain(parentCwd)
+  if (porcelain === '') return undefined
+  const lines = porcelain.split('\n').filter((line) => line.trim() !== '')
+  if (lines.length === 0) return undefined
+  const shown = lines.slice(0, 5).map((line) => `  ${line}`).join('\n')
+  const more = lines.length > 5 ? `\n  …and ${lines.length - 5} more` : ''
+  return [
+    `isolation refused: the parent working tree has ${lines.length} uncommitted change(s) in ${parentCwd}`,
+    shown + more,
+    'An isolated child branches off HEAD, so it CANNOT see uncommitted work: it would develop and',
+    'verify against a stale tree and may report success while the parent state differs.',
+    'Commit (or stash) the parent changes first, then retry the delegation.',
+  ].join('\n')
+}
+
+/** fork（corum）：收口强制提交的结果（失败原因**结构化**，供上层投递给模型）。 */
+export interface CorumSettleCommitFailure {
+  readonly slug: string
+  readonly path: string
+  /** 可读的失败原因（git stderr 摘要或异常文本）。 */
+  readonly reason: string
+}
+
+/** 机制自动提交的提交信息（可识别，**不冒充** Agent 的提交）。 */
+export const CORUM_AUTO_COMMIT_SUBJECT = 'wip(isolated): auto-commit on settle'
+
+/**
+ * fork（corum）：**收口强制提交** —— 把 worktree 里未提交的改动就地提交（2026-09-15 机制补漏）。
+ *
+ * 用户 2026-09-15 裁定：「一旦做成基于 git worktree 的隔离分支形式，**无论如何每次工作结束
+ * Agent 必须提交**，这一点要在**机制上保证**，而**不是 Agent 自己决定是否要提交**」。
+ * ⇒ 因此这里**由机制执行**：收口前把「未提交」这一态消灭掉，而不是发个提醒等 Agent 自觉。
+ *
+ * 提交发生在**隔离分支**上（我们自己的分支，不是用户的主干历史）⇒ 安全且必要：
+ * 那些提交是该分支工作的**唯一副本**（既有代码注释原话：nobody sees them otherwise）。
+ * 顺带修好一个既有问题：`reconcileAndReclaim` 与 `corumCleanupWorktree` 在 worktree 脏时
+ * **跳过回收/保留现场**，于是留下孤儿目录；自动提交后这一态不再出现。
+ *
+ * @param worktreePath - 目标 worktree 目录。
+ * @param slug - 台账条目的 slug（进提交信息，便于追责与检索）。
+ * @returns `undefined` = 成功或无需提交（干净/目录不存在/非 git）；否则为**结构化失败原因**。
+ */
+export function corumCommitWorktreeOnSettle(
+  worktreePath: string,
+  slug: string,
+): CorumSettleCommitFailure | undefined {
+  if (!existsSync(worktreePath)) return undefined
+  if (!corumWorktreeHasUncommitted(worktreePath)) return undefined
+  const run = (args: string[]): { code: number; stderr: string } => {
+    try {
+      execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' })
+      return { code: 0, stderr: '' }
+    } catch (error: unknown) {
+      const stderr = (error as { stderr?: Buffer | string }).stderr
+      return { code: 1, stderr: stderr === undefined ? String(error) : String(stderr) }
+    }
+  }
+  const added = run(['add', '-A'])
+  if (added.code !== 0) return { slug, path: worktreePath, reason: `git add failed: ${added.stderr.trim()}` }
+  // `--no-verify`：机制提交不该被宿主的钩子拦下（钩子失败会让「必须提交」失效）。
+  const committed = run([
+    'commit',
+    '--no-verify',
+    '-m',
+    CORUM_AUTO_COMMIT_SUBJECT,
+    '-m',
+    `Isolated worktree ${slug} still had uncommitted changes at settle; the mechanism committed them` +
+      ' so that no isolated work can be lost (user rule 2026-09-15: a work round must end committed).',
+  ])
+  if (committed.code === 0) return undefined
+  return { slug, path: worktreePath, reason: `git commit failed: ${committed.stderr.trim()}` }
+}
+
+/**
  * fork（corum）：一次性读出「已并入 HEAD 的分支名」集合（单条 git 命令）。
  * @param cwd - 主树工作目录。
  * @returns 分支短名集合；git 不可用/失败时返回空集合（对账退化为「什么都不翻」）。
@@ -1264,6 +1356,14 @@ export class CorumOrchestration extends Service {
   private readonly ledger = new Map<string, CorumWorktreeEntry[]>()
   /** 台账 session → 父会话 cwd（dispose 清理时定位 git 主干）。 */
   private readonly ledgerCwds = new Map<string, string>()
+  /**
+   * 收口时**强制提交失败**的暂存（key=父 session id）。
+   *
+   * 为什么用实例字段而不是返回值：`settleFromEnd` 在 `subagent/end` 监听里被调用，
+   * 而 emitter 的 **per-listener 容错会吞掉抛错** ⇒ 失败无法靠 throw 抵达模型。
+   * 故 settle 暂存、调用方经 {@link drainSettleCommitFailures} 取走并以 notice 投递给模型。
+   */
+  private readonly commitFailures = new Map<string, CorumSettleCommitFailure[]>()
   /** Phase 4：持久化 domain 句柄（storageDomain 缺失时为 undefined，回落纯内存）。 */
   private readonly domainPromise: Promise<Domain<typeof corumOrchestrationDomainSpec>> | undefined
 
@@ -1428,6 +1528,11 @@ export class CorumOrchestration extends Service {
     const root = path.resolve(parentCwd, options.worktreeRoot ?? '.corum-worktrees')
     const branch = `${options.branchPrefix ?? 'wt/'}${slug}`
     const worktreePath = path.join(root, slug)
+    // 2026-09-15 机制补漏（用户裁定「严格」）：父树有**任何**未提交改动（含 untracked）即拒绝隔离 ——
+    // 子从 HEAD 建分支、看不到未提交工作，会在过时的树上开发/验证并可能**静默**报成功。
+    // 放在 `mkdirSync`/`worktree add` **之前**，连半成品目录都不产生。
+    const refusal = corumDirtyParentRefusal(parentCwd)
+    if (refusal !== undefined) throw new Error(refusal)
     mkdirSync(root, { recursive: true })
     try {
       corumGit(parentCwd, ['worktree', 'add', worktreePath, '-b', branch])
@@ -1595,12 +1700,46 @@ export class CorumOrchestration extends Service {
     if (sessionId === undefined) return false
     const entries = this.ledger.get(sessionId)
     if (entries === undefined) return false
+    // 2026-09-15 机制补漏：**收口前强制提交**（用户裁定：机制保证，不由 Agent 自己决定）。
+    // 在 `corumMarkSettled` **之前**做：未提交的隔离成果不允许存活过收口。
+    // ⚠️ 本函数在 `subagent/end` 监听里被调用，而 **emitter 的 per-listener 容错会吞掉抛错**
+    // （既有注释明写此前 `parentAgent.session.id` 抛错就是被吞掉的）⇒ **失败不能靠 throw 传给模型**，
+    // 故失败原因**暂存到台账实例**，由调用方（corum-tool-subagent，已有 notice 投递机制）取走并投递。
+    const failures: CorumSettleCommitFailure[] = []
+    for (const entry of entries) {
+      if (entry.status !== 'active') continue
+      const failure = corumCommitWorktreeOnSettle(entry.path, entry.slug)
+      if (failure !== undefined) failures.push(failure)
+    }
+    if (failures.length > 0) this.commitFailures.set(sessionId, failures)
     const flipped = corumMarkSettled(entries, { runId: String(info.runId), childId: String(info.id) })
     if (flipped) {
       this.persist(sessionId)
       this.emitFrame(sessionId)
     }
     return flipped
+  }
+
+  /**
+   * fork（corum）：**取走**该会话最近一次收口的提交失败（取出即清，避免重复投递）。
+   *
+   * 与 {@link settleFromEnd} 配对：settle 负责尝试提交并暂存失败，
+   * 调用方（`corum-tool-subagent`）取走后经 `parent.inject(...)` 以 notice 形态交给模型，
+   * 由模型把提交完成（用户裁定：「commit 失败后交由模型处理并完成提交」）。
+   * @param sessionId - 父会话 id（台账键）。**省略时取走并清空全部会话的暂存**——
+   * 调用方拿不到父会话（`parent` undefined）时用它兜底，避免失败在实例里越积越多。
+   * @returns 失败清单；无失败时为空数组。
+   */
+  drainSettleCommitFailures(sessionId?: string): readonly CorumSettleCommitFailure[] {
+    if (sessionId !== undefined) {
+      const failures = this.commitFailures.get(sessionId)
+      if (failures === undefined) return []
+      this.commitFailures.delete(sessionId)
+      return failures
+    }
+    const all = [...this.commitFailures.values()].flat()
+    this.commitFailures.clear()
+    return all
   }
 
   /** 供单测直接操作台账（行为等价迁移前的测试面）。 */

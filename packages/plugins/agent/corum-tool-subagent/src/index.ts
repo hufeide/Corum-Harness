@@ -570,6 +570,63 @@ function corumNotifyForegroundResult(
 }
 
 /**
+ * fork（corum）：**收口强制提交失败**的模型面投递（2026-09-15 机制补漏）。
+ *
+ * 用户裁定：「commit 失败后**交由模型处理并完成提交**」。⇒ 这里不是「报告一个错误然后算了」，
+ * 而是把失败变成**模型必须接手的待办**，因此消息里必须给全三样：
+ *   ① **哪个 worktree**（slug + 路径）；② **为什么失败**（git stderr 摘要，逐条可读）；
+ *   ③ **下一步该做什么**（把提交补上；工作与现场都还在，没有丢）。
+ *
+ * 投递方式与 {@link corumNotifyForegroundResult} 同款（`form: 'notice'`，会话里一条可见注入行）：
+ * 走 `parent.inject()`（模型面上下文，**不唤醒驱动器**）——父 Agent 正在等工具结果，
+ * 下一个 step 边界领取；注入失败只告警，不让收口本身失败。
+ *
+ * @param parent - 委派方 Agent（注入目标）。
+ * @param failures - 收口时提交失败的 worktree 清单（结构化）。
+ * @param logger - 注入失败时的告警出口。
+ */
+function corumNotifySettleCommitFailures(
+  parent: Agent,
+  failures: readonly CorumSettleCommitFailure[],
+  logger: { warn: (message: string) => void },
+): void {
+  try {
+    const summary = `Settle auto-commit FAILED for ${failures.length} isolated worktree(s) — you must finish the commit`
+    const detail = failures
+      .map(failure => `· ${failure.slug}  ${failure.path}\n  reason: ${failure.reason}`)
+      .join('\n')
+    parent.inject(createUserMessage({
+      content: [
+        { type: 'text', text: summary },
+        {
+          type: 'text',
+          text: [
+            'The mechanism auto-commits an isolated worktree when it settles so that no isolated work can be',
+            'lost. That commit FAILED, so the work is still uncommitted inside the worktree(s) below — it is',
+            'NOT lost, but nobody can see it until it is committed.',
+            '',
+            detail,
+            '',
+            'Do this next: fix the cause (a missing `git config user.email`/`user.name` is the common one),',
+            'then commit inside each worktree listed above, and report the resulting commit hash(es).',
+            'Do not discard the worktree and do not force-remove it.',
+          ].join('\n'),
+        },
+      ],
+      // 与 corumNotifyForegroundResult 同款跨包类型收窄（fork #9 的 source 声明在
+      // @corum/corum-subagent 的模块增补里，本包程序看不到那个 MessageSourceMap 合并）。
+      source: {
+        kind: 'subagent-settled',
+        form: 'notice',
+        summary: boundContextSummary(summary),
+      } as unknown as MessageSource,
+    }))
+  } catch (error: unknown) {
+    logger.warn(`settle commit-failure notice was not delivered to its parent: ${String(error)}`)
+  }
+}
+
+/**
  * Model-facing wording from the provider's conversation-history descriptor
  * ({@link SubagentProvider.inheritsParentContext}).
  * A fresh child needs a standalone prompt; a forked child already sees the
@@ -798,7 +855,9 @@ export {
   corumWorktreeHasUncommitted,
   corumWriteToolsForPlatform,
 } from './orchestration.ts'
-export type { CorumCleanupOptions, CorumIntegrationTruth, CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
+// 2026-09-15 机制补漏：收口强制提交失败的**结构化形状**（投递给模型时逐条标注）。
+import type { CorumSettleCommitFailure } from './orchestration.ts'
+export type { CorumCleanupOptions, CorumIntegrationTruth, CorumSettleCommitFailure, CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 export { CorumOrchestration } from './orchestration.ts'
 
 export function apply(ctx: Context, config: Config): void {
@@ -882,6 +941,23 @@ export function apply(ctx: Context, config: Config): void {
     // fork（corum）：settle 联动已下沉编排器 service（台账实例字段 + 帧发射）。
     const parent = carrierKeyOf(this) as Agent | undefined
     orchestration.settleFromEnd(info, parent)
+    // 2026-09-15 机制补漏：**收口强制提交失败 ⇒ 交给模型完成提交**（用户裁定：
+    // 「commit 失败后交由模型处理并完成提交」）。
+    // ⚠️ 必须在这里投递，不能在 `settleFromEnd` 里 throw —— emitter 的 per-listener
+    // 容错会**吞掉**抛错（本文件上方注释已记过 `parentAgent.session.id` 抛错被吞的先例）。
+    // 有 parent 时按会话精确取走；拿不到 parent 时兜底取走全部，避免失败在实例里累积。
+    const failures = orchestration.drainSettleCommitFailures(
+      parent === undefined ? undefined : String(parent.session.id),
+    )
+    if (failures.length === 0) return
+    if (parent === undefined) {
+      ctx.logger.warn(
+        `settle auto-commit failed for ${failures.length} worktree(s) but no parent Agent was reachable,`
+          + ` so the model was not told: ${failures.map(failure => `${failure.slug}: ${failure.reason}`).join('; ')}`,
+      )
+      return
+    }
+    corumNotifySettleCommitFailures(parent, failures, ctx.logger)
   }) as never, { global: true })
 
   // fork（corum）：全局设置的 RPC 面（「子 Agent」设置 section 读写；

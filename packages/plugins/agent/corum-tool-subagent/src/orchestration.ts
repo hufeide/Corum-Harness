@@ -50,6 +50,9 @@ export {
   corumPendingIntegration,
   corumResearchToolFilter,
   corumShouldIsolate,
+  corumCommitWorktreeOnSettle,
+  CORUM_AUTO_COMMIT_SUBJECT,
+  corumDirtyParentRefusal,
   corumVisibleToolNames,
   corumWorktreeHasUncommitted,
   corumWriteToolsForPlatform,
@@ -57,6 +60,7 @@ export {
 } from '@corum/corum-orchestration'
 export type {
   CorumCleanupOptions,
+  CorumSettleCommitFailure,
   CorumIntegrationTruth,
   CorumWorktreeEntry,
   CorumWorktreeLedgerFrame,
