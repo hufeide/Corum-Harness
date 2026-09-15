@@ -60,6 +60,12 @@ export const AssistantProse = memo(function AssistantProse({
             key={i}
             code={segment.code}
             lang={segment.lang}
+            // 流式臂的通路（与官方 CodeBlock 的 `streaming` 同义）：本组件本来就从框架
+            // 拿到 `streaming`，原先只透传给了 MarkdownText，**漏传给了代码卡** ⇒
+            // 代码卡永远走整块重算臂。同时 `key={i}` 是**位置稳定**的（同一个围栏在
+            // segments 里的下标不随增长变化），正是官方要求的 stream-stable key ——
+            // 增量缓存才能在跨 chunk 的多次渲染间存活。
+            streaming={streaming}
             t={t}
           />
         )

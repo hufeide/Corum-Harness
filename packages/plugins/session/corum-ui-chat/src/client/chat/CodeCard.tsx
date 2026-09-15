@@ -17,16 +17,28 @@
  *
  * 在终端运行：本轮 UI-only——点击显示「功能待实现」提示，不做任何 IPC/服务接线。
  */
-import { memo, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp, Copy, FileCode, Play, SquareTerminal } from 'lucide-react'
 import { writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import { isScriptFence } from './code-fence-kind.ts'
-import { grammarLoadCount, highlightLines, subscribeGrammarLoaded, type HighlightSpan } from './highlight.ts'
+import {
+  StreamingHighlightSession, grammarLoadCount, highlightLines, subscribeGrammarLoaded,
+  type HighlightSpan, type StreamingHighlightFrame,
+} from './highlight.ts'
 import css from './CodeCard.module.css'
 
 /** 框架注入的 t（chat namespace + common 词汇）。 */
 type TFunc = ChatViewSlotProps['t']
+
+/**
+ * 流式臂里「已完成行」的分组大小（**与官方 `CodeBlock` 同值**）。
+ *
+ * 作用：已完成的行按 32 行一组冻结成**元素组**，跨帧复用同一个 React 元素
+ * （`key` 取该组首行号），于是增量增长时 React 只对「最后未满的一组 + 尾部行」
+ * 做 reconcile —— 已结算的几十上百行连 diff 都不做。
+ */
+const STREAMING_LINE_GROUP_SIZE = 32
 
 /**
  * 把一行的高亮 span 渲染成带 inline style 的 `<span>` 序列（shiki 的
@@ -39,11 +51,44 @@ function renderSpans(spans: readonly HighlightSpan[], fallback: string): ReactNo
   return spans.map((span, index) => <span style={span.style} key={index}>{span.text}</span>)
 }
 
+/**
+ * 一行代码（行号 + 正文）—— **模块级组件**，两条臂共用。
+ *
+ * ⚠️ 必须是模块级而不是卡内内联箭头：内联组件每次渲染都是**新类型**，React 会
+ * unmount/remount 整棵子树 —— 那会**恰好摧毁流式臂要保住的元素复用**，行多了就是
+ * 每帧全量重建。模块级身份稳定，`memo` 才真正生效。
+ */
+const CodeLine = memo(function CodeLine({ index, spans, text }: {
+  index: number
+  spans: readonly HighlightSpan[] | undefined
+  text: string
+}) {
+  return (
+    <div className={css.codeLine}>
+      <span className={css.lineNo}>{index + 1}</span>
+      <code className={css.codeText}>
+        {/* 有高亮 → 逐 span 上色；无高亮（不支持的语言 / 语法未就绪）→ 纯文本原文。
+            两种形态的文本内容完全一致，只有着色与否的差别。 */}
+        {spans === undefined ? text : renderSpans(spans, text)}
+      </code>
+    </div>
+  )
+})
+
 export interface CodeCardProps {
   /** 围栏代码体（不含围栏标记）。 */
   code: string
   /** 围栏语言（info string）；无语言时为 undefined。 */
   lang: string | undefined
+  /**
+   * 该围栏是否**仍在增长**（助手消息流式输出中）。
+   *
+   * 官方的同名 prop（`ui-primitives` `CodeBlockProps.streaming`）就是这条通路：
+   * `true` 时走 `StreamingHighlightSession` 的**增量分词**臂（只重算新增文本，
+   * 已完成行连同元素一起冻结复用）；`false`/缺省时走整块高亮臂。
+   * 由 `AssistantProse` 透传（它本来就从框架拿到 `streaming`）。
+   */
+  streaming?: boolean
   /** Locale seat。 */
   t: TFunc
 }
@@ -61,7 +106,7 @@ export interface CodeCardProps {
  * 注意与文件卡（read/edit/write）区别 —— 那三张卡是**默认收起**（用户 2026-09-15 定调），
  * 两类卡片的默认态**刻意不同**，别互相「统一」。
  */
-export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps) {
+export const CodeCard = memo(function CodeCard({ code, lang, streaming, t }: CodeCardProps) {
   // 默认**展开**（用户 2026-09-15 更正：代码/脚本片段默认不折叠）。
   const [expanded, setExpanded] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -87,6 +132,66 @@ export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps)
     () => highlightLines(code, lang),
     [code, lang, grammarGeneration],
   )
+
+  /*
+    ── 流式臂：照抄官方的 token 级增量高亮 ────────────────────────────────
+    行为与官方 `CodeBlock` 一致（TextMate 分词是按行、前向的：一行的 token 只取决于
+    它自己的文本与进入它时的语法状态 ⇒ **追加文本永不改变已完成行的 token**），
+    所以只对「新增文本」重新分词，已完成行连同**元素**一起冻结复用。
+
+    与官方的两点刻意差异（都属于「按我们的壳适配」，不是行为差异）：
+      ① 官方按 32 行分组产出 `renderLine`，行是裸 `\n` 分隔的文本行；
+         我们是**每行一个带行号的 flex 行**（`css.codeLine`），所以按「单行元素」缓存
+         （比官方更细的粒度）—— 未满 32 行时同样只 reconcile 尾部。
+      ② 官方输出 `<pre class="shiki">`；我们保持自己的 `css.body` + `css.codeText` 壳。
+
+    语法懒加载：未加载完 → `updateFrame` 返回 `undefined` → 走纯文本；
+    `grammarGeneration`（`useSyncExternalStore`）变化会触发重跑，语法就绪后自动上色。
+  */
+  const sessionRef = useRef<StreamingHighlightSession | null>(null)
+  const streamCacheRef = useRef<{
+    code: string
+    generation: number
+    frame: StreamingHighlightFrame
+    lines: ReactNode[]
+    body: ReactNode
+  } | null>(null)
+
+  const streamedBody = useMemo(() => {
+    if (streaming !== true || !expanded) {
+      // 离开流式臂（已结算 / 折叠态）⇒ 丢弃会话与缓存，避免陈旧状态跨消息泄漏。
+      sessionRef.current = null
+      streamCacheRef.current = null
+      return undefined
+    }
+    // `code.split('\n')` 与 `lines` 同源：同一份文本的行数必然一致（纯函数，无副作用）。
+    const rendered = code.split('\n')
+    sessionRef.current ??= new StreamingHighlightSession()
+    const frame = sessionRef.current.updateFrame(code, lang)
+    if (frame === undefined) {
+      streamCacheRef.current = null
+      return undefined
+    }
+    const previous = streamCacheRef.current
+    if (previous?.frame === frame && previous.code === code) return previous.body
+    const sameGeneration = previous?.generation === frame.generation
+    const kept = sameGeneration ? [...previous.lines] : []
+    for (const spans of frame.appended) {
+      const idx = kept.length
+      kept.push(<CodeLine key={idx} index={idx} spans={spans} text={rendered[idx] ?? ''} />)
+    }
+    const tailStart = kept.length
+    const tail = frame.tail.map((spans, i) => (
+      <CodeLine key={tailStart + i} index={tailStart + i} spans={spans} text={rendered[tailStart + i] ?? ''} />
+    ))
+    const body = (
+      <div className={css.body} data-corum-code-body="">
+        {[...kept, ...tail]}
+      </div>
+    )
+    streamCacheRef.current = { code, generation: frame.generation, frame, lines: kept, body }
+    return body
+  }, [streaming, expanded, code, lang, grammarGeneration])
 
   const onCopy = useCallback(() => {
     if (copied) return
@@ -170,20 +275,18 @@ export const CodeCard = memo(function CodeCard({ code, lang, t }: CodeCardProps)
         </button>
       </div>
       {expanded ? (
-        <div className={css.body} data-corum-code-body="">
-          {lines.map((line, i) => (
-            <div className={css.codeLine} key={i}>
-              <span className={css.lineNo}>{i + 1}</span>
-              <code className={css.codeText}>
-                {/* 有高亮 → 逐 span 上色；无高亮（未知语言 / 语法未就绪）→ 纯文本原文。
-                    两种形态的文本内容完全一致，只有着色与否的差别。 */}
-                {highlighted === undefined
-                  ? line
-                  : renderSpans(highlighted[i] ?? [], line)}
-              </code>
-            </div>
-          ))}
-        </div>
+        streamedBody !== undefined ? streamedBody : (
+          <div className={css.body} data-corum-code-body="">
+            {lines.map((line, i) => (
+              <CodeLine
+                key={i}
+                index={i}
+                spans={highlighted === undefined ? undefined : (highlighted[i] ?? [])}
+                text={line}
+              />
+            ))}
+          </div>
+        )
       ) : (
         <div className={css.collapsedBody} data-corum-code-summary="">
           <span className={css.summaryText}>{summary}</span>
