@@ -48,11 +48,31 @@
 }
 
 /* ── markdown 代码块：glass-2 浅底 + 玻璃光边 + r10 ──────────────────
-   pre/code 由 markdown 渲染器产出，不走本包 module.css，只能从这里锚定。 */
+   pre/code 由 markdown 渲染器产出，不走本包 module.css，只能从这里锚定。
+   稳定钩子 = .md-code-block（CodeBlock.tsx:170 的全局类名），
+   不用哈希类名（每次构建变）。
+
+   黑条根因（实测 :9333）：官方 CodeBlock.module.css:27
+   `background-color: var(--dsw-alias-bg-base)` 让 bannerWrap 在暗色主题下
+   填 `#0D0817`。这里用玻璃面覆盖它。 */
 [data-chat-flow] pre,
-[data-chat-flow] code[class*="language-"],
-[data-chat-flow] [class*="CodeBlock"] {
-  background: var(--corum-glass-2);
-  border: 1px solid var(--corum-glass-border);
+[data-chat-flow] code[class*="language-"] {
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 10px;
+}
+
+/* 官方代码块根容器 + bannerWrap：用玻璃面替换 var(--dsw-alias-bg-base) 黑底 */
+[data-chat-flow] .md-code-block {
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
+}
+
+[data-chat-flow] .md-code-block > [class*="bannerWrap"] {
+  background: transparent;
+}
+
+[data-chat-flow] .md-code-block > [class*="bannerWrap"] > [class*="banner"] {
+  background: transparent;
 }

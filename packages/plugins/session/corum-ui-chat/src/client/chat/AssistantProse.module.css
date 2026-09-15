@@ -1,0 +1,7 @@
+/* fork（corum）：拆分后的段间节奏（与 AssistantMarkdown.module.css .body gap:16px 一致）。 */
+
+.split {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}

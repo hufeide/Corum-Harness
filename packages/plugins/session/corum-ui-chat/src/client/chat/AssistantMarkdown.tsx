@@ -8,6 +8,7 @@ import { markdownLabels } from '../markdown-labels.ts'
 import { ReasoningRow } from './ReasoningRow.tsx'
 import { useSearchableHidden } from './searchable-hidden.ts'
 import { useAgentName } from './agent-name-context.ts'
+import { AssistantProse } from './AssistantProse.tsx'
 import css from './AssistantMarkdown.module.css'
 
 /** 设计稿 x1mv8q head：Agent 头（avatar + who + dur），每次回复前显示。
@@ -66,12 +67,13 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
     switch (block.kind) {
       case 'text':
         rendered.push(
-          <MarkdownText
+          <AssistantProse
             key={i}
             text={block.text}
             streaming={streaming}
             labels={labels}
             fileMentions={mentions}
+            t={t}
           />,
         )
         break

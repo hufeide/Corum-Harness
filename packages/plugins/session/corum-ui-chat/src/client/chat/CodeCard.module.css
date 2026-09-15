@@ -1,0 +1,168 @@
+/* fork（corum）：代码段卡（设计稿 qLyn3 lIHmW expanded / jWH6J collapsed）。
+   毛玻璃卡 r14 + 光边 + padding 12 + gap 8，头行 25px 高。 */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 14px;
+}
+
+/* ── 头行 ────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 25px;
+}
+
+.iconBox {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+}
+
+.iconBoxIcon {
+  color: var(--dsw-alias-brand-text);
+}
+
+.title {
+  font-family: Inter, sans-serif;
+  font-size: 15px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+/* 通用 chip 壳：r8 + glass-2 + glass-border + pad [3,8] + gap 5 */
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+}
+
+/* 语言 chip 文字 → brand-text；行数 chip 文字 → label-tertiary */
+.chipLang {
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-brand-text);
+}
+
+.chipLines {
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ── 按钮 ────────────────────────────────────────────────────────── */
+
+/* 通用按钮壳：r8 + glass-2 + glass-border + pad [4,10] + gap 6 */
+.btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:hover {
+  background: var(--corum-glass-3, rgba(55, 32, 80, 0.8));
+  border-color: var(--corum-glass-border-active, #01CDFE);
+}
+
+.btnIconMuted {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.btnIconSuccess {
+  flex: none;
+  color: var(--dsw-alias-state-success-primary, #0BA57C);
+}
+
+.btnLabel {
+  font-family: Inter, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.btnLabelSuccess {
+  font-family: Inter, sans-serif;
+  font-size: 12px;
+  color: var(--dsw-alias-state-success-primary, #0BA57C);
+}
+
+/* ── 展开体 ──────────────────────────────────────────────────────── */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  padding: 8px;
+}
+
+.codeLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 19px;
+  padding: 0 6px;
+}
+
+.lineNo {
+  flex: none;
+  width: 20px;
+  text-align: right;
+  font-family: Inter, sans-serif;
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+  white-space: nowrap;
+}
+
+.codeText {
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12.5px;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 折叠体 ──────────────────────────────────────────────────────── */
+
+.collapsedBody {
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
+  padding: 6px 10px;
+}
+
+.summaryText {
+  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
