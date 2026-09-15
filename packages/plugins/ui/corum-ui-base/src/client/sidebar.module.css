@@ -756,7 +756,7 @@
   opacity: 0.75;
 }
 .historyRowUnavailable .historySub {
-  color: var(--dsw-alias-state-warn-primary, #d97706);
+  color: var(--dsw-alias-state-warn-primary);
 }
 .historyRowUnavailable:hover {
   background: var(--corum-glass-2);
@@ -774,7 +774,7 @@
 }
 .historyDelete:hover {
   background: var(--corum-glass-2);
-  color: var(--dsw-alias-state-error-primary, #dc2626);
+  color: var(--dsw-alias-state-error-primary);
 }
 /* ④ 项目详情 project-header（design：folder-open + 名称/成员数·状态 + ×关闭）。 */
 .projectHeader {

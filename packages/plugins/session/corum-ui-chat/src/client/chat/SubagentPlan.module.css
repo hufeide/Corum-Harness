@@ -76,5 +76,5 @@
 /* 已完成的任务项弱化（划掉感不强求，色调已降为 tertiary）。 */
 .planItem[data-tone='done'] .itemText {
   text-decoration: line-through;
-  text-decoration-color: var(--dsw-alias-label-tertiary, rgba(185, 140, 255, 0.3));
+  text-decoration-color: var(--dsw-alias-label-tertiary);
 }

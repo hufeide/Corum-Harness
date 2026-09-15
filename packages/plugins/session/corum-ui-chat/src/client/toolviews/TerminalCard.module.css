@@ -62,7 +62,7 @@
 }
 
 .statusTextSuccess {
-  color: var(--dsw-alias-state-success-primary, #0BA57C);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .statusTextError {
@@ -167,7 +167,7 @@
 }
 
 .bodyLineSuccess {
-  color: var(--dsw-alias-state-success-primary, #0BA57C);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .bodyLinePlain {
