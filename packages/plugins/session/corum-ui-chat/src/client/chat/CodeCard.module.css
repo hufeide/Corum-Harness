@@ -63,7 +63,7 @@
   border-radius: 8px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
@@ -123,13 +123,13 @@
 
 .btnLabel {
   font-family: Inter, sans-serif;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
 
 .btnLabelSuccess {
   font-family: Inter, sans-serif;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-success-primary);
 }
 
@@ -179,7 +179,7 @@
   width: 20px;
   text-align: right;
   font-family: Inter, sans-serif;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-dimmed);
   white-space: nowrap;
 }
@@ -202,7 +202,7 @@
 
 .summaryText {
   font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   white-space: pre-wrap;
   word-break: break-word;

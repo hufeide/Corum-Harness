@@ -111,7 +111,7 @@ body[data-ds-dark-theme] .panel {
 }
 
 .headerTitle {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--pm-label-primary);
 }
@@ -125,7 +125,7 @@ body[data-ds-dark-theme] .panel {
 
 /* installed-count iobGY：11px label-tertiary */
 .installedCount {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-tertiary);
   white-space: nowrap;
@@ -211,7 +211,7 @@ body[data-ds-dark-theme] .panel {
   background: transparent;
   color: var(--pm-label-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   outline: none;
 }
 
@@ -236,7 +236,7 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-glass-2);
   color: var(--pm-label-secondary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 
@@ -277,7 +277,7 @@ body[data-ds-dark-theme] .panel {
   background: transparent;
   color: var(--pm-label-secondary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -313,7 +313,7 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-glass-2);
   color: var(--pm-label-secondary);
   font-family: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   line-height: 14px;
   cursor: pointer;
@@ -379,13 +379,13 @@ body[data-ds-dark-theme] .panel {
 }
 
 .featuredTag {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--pm-brand-text);
 }
 
 .featuredName {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--pm-label-primary);
   white-space: nowrap;
@@ -394,7 +394,7 @@ body[data-ds-dark-theme] .panel {
 }
 
 .featuredDesc {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-secondary);
   white-space: nowrap;
@@ -418,7 +418,7 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-brand-primary);
   color: var(--pm-label-on-brand);
   font-family: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -492,7 +492,7 @@ body[data-ds-dark-theme] .panel {
 }
 
 .mktName {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--pm-label-primary);
   white-space: nowrap;
@@ -501,7 +501,7 @@ body[data-ds-dark-theme] .panel {
 }
 
 .mktDesc {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-secondary);
   white-space: nowrap;
@@ -527,13 +527,13 @@ body[data-ds-dark-theme] .panel {
 }
 
 .mktScore {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-secondary);
 }
 
 .mktDl {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-tertiary);
 }
@@ -548,18 +548,18 @@ body[data-ds-dark-theme] .panel {
 /* 版本号：JetBrains Mono 10px label-tertiary */
 .monoVer {
   font-family: var(--pm-font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-tertiary);
 }
 
 .metaSep {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--pm-label-dimmed);
 }
 
 .metaDim {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-dimmed);
 }
@@ -573,7 +573,7 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-brand-primary);
   color: var(--pm-label-on-brand);
   font-family: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -612,7 +612,7 @@ body[data-ds-dark-theme] .panel {
   background: transparent;
   color: var(--pm-label-secondary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 
@@ -661,7 +661,7 @@ body[data-ds-dark-theme] .panel {
 }
 
 .cardName {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--pm-label-primary);
   white-space: nowrap;
@@ -671,7 +671,7 @@ body[data-ds-dark-theme] .panel {
 
 .cardVer {
   flex: none;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--pm-label-tertiary);
   white-space: nowrap;
@@ -730,13 +730,13 @@ body[data-ds-dark-theme] .panel {
 
 .hintText {
   flex: none;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--pm-label-tertiary);
 }
 
 .errorText {
   flex: none;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--pm-state-error);
   overflow-wrap: anywhere;
 }
@@ -758,7 +758,7 @@ body[data-ds-dark-theme] .panel {
 .noticeText {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--pm-label-secondary);
   overflow-wrap: anywhere;
 }
@@ -771,7 +771,7 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-brand-primary);
   color: var(--pm-label-on-brand);
   font-family: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 
@@ -801,7 +801,7 @@ body[data-ds-dark-theme] .panel {
   background: transparent;
   color: var(--pm-label-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 

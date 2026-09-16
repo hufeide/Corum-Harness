@@ -29,11 +29,9 @@ SKIP_DIRS = {'node_modules', 'lib', 'dist', '.git', 'build'}
 PATTERN = re.compile(r'font-size:\s*(\d+)px\b')
 
 DEFAULT_ROOTS = [
-    'packages/plugins/ui/corum-ide-ui',
-    'packages/plugins/session/corum-ui-chat',
-    'packages/plugins/session/corum-ui-conversation',
-    'packages/plugins/ui/corum-ide-panel-bottom-ui',
-    'packages/desktop/src/client',
+    # 全仓扫描 —— 见文件头「手挑范围 = 制造部分生效」的说明。
+    # SKIP_DIRS 会排除 node_modules / lib / dist（构建产物）。
+    'packages',
 ]
 
 MARKER = '--corum-ui-font-scale'

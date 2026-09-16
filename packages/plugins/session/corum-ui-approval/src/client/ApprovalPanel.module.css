@@ -91,7 +91,7 @@
 .command {
   color: var(--dsw-alias-label-tertiary);
   font-family: var(--ds-font-family-code);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
   word-break: break-all;
 }
@@ -236,7 +236,7 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
   text-align: left;
   transition: background 0.12s ease;

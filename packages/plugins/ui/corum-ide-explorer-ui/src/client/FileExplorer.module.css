@@ -27,7 +27,7 @@
 .headerRoot {
   flex: 1;
   min-width: 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -81,7 +81,7 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: normal;
   text-align: left;
   cursor: pointer;
@@ -140,16 +140,16 @@
 .loading {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
 
 .emptyDir {
   padding: 4px 8px 4px 22px;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 .error {
   padding: 8px;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
 }

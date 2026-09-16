@@ -21,7 +21,7 @@
   background: var(--corum-glass-2);
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-primary);
   text-align: left;
@@ -61,7 +61,7 @@
   padding: 7px 10px;
   border-radius: 8px;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
 }
 
 /* compact 变体 — 弹窗版本选择器（设计稿 ExxZt verSel: radius 6, padding [3,7], Mono 10px, 11 箭头） */
@@ -70,7 +70,7 @@
   padding: 3px 7px;
   border-radius: 6px;
   gap: 3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -101,7 +101,7 @@
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;  font-size: 14px;
+  font-family: 'Inter', -apple-system, sans-serif;  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
   text-align: left;
@@ -125,7 +125,7 @@
   background: transparent;
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   text-align: left;

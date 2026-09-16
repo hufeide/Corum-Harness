@@ -19,6 +19,6 @@
   min-height: 0;
   padding: 24px;
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
 }

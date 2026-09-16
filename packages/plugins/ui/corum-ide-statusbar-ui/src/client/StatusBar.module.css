@@ -24,7 +24,7 @@
   background: var(--dsw-alias-state-success-primary);
 }
 .seg {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: normal;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
@@ -34,7 +34,7 @@
   min-width: 0;
 }
 .model {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: normal;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;

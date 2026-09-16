@@ -40,13 +40,13 @@
   gap: 14px; /* 设计稿 hero-text gap 14 */
 }
 .newSessionTitle {
-  font-size: 34px; /* 设计稿 slogan 34/700 */
+  font-size: calc(34px * var(--corum-ui-font-scale, 1)); /* 设计稿 slogan 34/700 */
   font-weight: 700;
   line-height: 1.2;
   color: var(--dsw-alias-label-primary);
 }
 .newSessionSub {
-  font-size: 15px; /* 设计稿 sub 15 */
+  font-size: calc(15px * var(--corum-ui-font-scale, 1)); /* 设计稿 sub 15 */
   color: var(--dsw-alias-label-tertiary);
 }
 .quickCommands {
@@ -87,12 +87,12 @@
   color: var(--dsw-alias-state-business-primary); /* icon 16 $brand-primary */
 }
 .quickCommandTitle {
-  font-size: 14px; /* 设计稿 title 14/600 */
+  font-size: calc(14px * var(--corum-ui-font-scale, 1)); /* 设计稿 title 14/600 */
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 .quickCommandDesc {
-  font-size: 12px; /* 设计稿 desc 12，lineHeight 1.5 */
+  font-size: calc(12px * var(--corum-ui-font-scale, 1)); /* 设计稿 desc 12，lineHeight 1.5 */
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
 }

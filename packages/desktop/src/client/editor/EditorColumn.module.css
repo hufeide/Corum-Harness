@@ -86,7 +86,7 @@
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
   max-width: 160px;
@@ -181,7 +181,7 @@
 .crumb {
   flex: none;
   padding: 0 14px 8px;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
   white-space: nowrap;
@@ -206,7 +206,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
 }
@@ -225,7 +225,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 6px;
   background: var(--corum-glass-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
@@ -250,7 +250,7 @@
   align-items: center;
   gap: 10px;
   padding: 6px 14px 8px;
-  font-size: 9px;
+  font-size: calc(9px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
 }
@@ -292,7 +292,7 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -300,7 +300,7 @@
 .loadError {
   flex: none;
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
 }
 
@@ -331,7 +331,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 4px 24px;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 1.7;
   color: var(--dsw-alias-label-primary);
 }
@@ -397,7 +397,7 @@
   justify-content: center;
   gap: 8px;
   height: 100%;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -405,7 +405,7 @@
 .externalChangedText {
   font-family: 'Inter', system-ui, sans-serif;
   color: var(--dsw-alias-state-warn-primary);
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
 }
 
 /* ── tab 预览态（VS Code 斜体临时 tab） ── */
@@ -453,7 +453,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   text-align: left;
   cursor: pointer;
   transition: background 0.1s ease;

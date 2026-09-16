@@ -29,7 +29,7 @@
 /* 组标题（设计稿 gt: Inter 12px 600, label-secondary）*/
 .groupTitle {
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
   line-height: 1.4;

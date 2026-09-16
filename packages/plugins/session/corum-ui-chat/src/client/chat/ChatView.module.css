@@ -158,7 +158,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   background: var(--corum-glass-2);
   cursor: pointer;

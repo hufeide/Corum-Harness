@@ -104,7 +104,7 @@
 .title {
   min-width: 0;
   overflow: hidden;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 24px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -116,7 +116,7 @@
   gap: 8px;
   margin-left: 10px;
   font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
 }
 
@@ -137,7 +137,7 @@
   padding: 1px 6px;
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 6px;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   line-height: 14px;
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
@@ -165,7 +165,7 @@
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 28px;
   white-space: nowrap;
   flex: none;
@@ -225,7 +225,7 @@
   min-width: 0;
   overflow: hidden;
   font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -242,7 +242,7 @@
   border: none;
   background: transparent;
   font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -263,7 +263,7 @@
   margin-left: auto;
   padding-left: 12px;
   font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
 }
 
@@ -288,7 +288,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 6px;
   background: var(--corum-glass-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 16px;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
@@ -324,7 +324,7 @@
 .notice {
   flex: 1 1 100%;
   margin-top: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-state-error-primary);
 }

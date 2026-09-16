@@ -121,7 +121,7 @@
 .crumbSep {
   /* figma: "/" separators are 14px caption gray (75:7903), one tint lighter than crumb text. */
   color: var(--dsw-alias-label-caption);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
 }
 
@@ -132,7 +132,7 @@
   border: none;
   border-radius: 12px;
   background: transparent;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
   color: var(--dsw-alias-label-tertiary);
   text-overflow: ellipsis;
@@ -141,7 +141,7 @@
 }
 
 .crumbSubagent {
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
 }
 
@@ -190,7 +190,7 @@
   padding: 0 0 11px;
   border: none;
   background: transparent;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 16px;
   font-weight: 500;
   color: var(--dsw-alias-label-tertiary);
@@ -419,14 +419,14 @@
 }
 
 .subagentReturnLabel {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--corum-label-on-brand);
   white-space: nowrap;
 }
 
 .subagentReturnHint {
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--corum-on-brand-muted, rgba(255, 255, 255, 0.72));
   white-space: nowrap;
   overflow: hidden;
@@ -641,7 +641,7 @@
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-label-tertiary));
   background: var(--corum-glass-2, transparent);
   color: var(--dsw-alias-state-business-primary);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -718,7 +718,7 @@
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   text-align: left;
 }
@@ -731,7 +731,7 @@
 }
 .agentSelGroupCount {
   flex: none;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -754,7 +754,7 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   text-align: left;
   /* 不换行：让面板 width:max-content 按真实最长条目撑开（配合面板宽度自
      适应）；面板 max-width 兜底时本条 overflow ellipsis 由面板 overflow-x
@@ -797,7 +797,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   outline: none;
   padding: 2px 0;
 }
@@ -824,13 +824,13 @@
 .agentSelItemHint {
   flex: none;
   margin-left: auto;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
 }
 .agentSelEmpty {
   padding: 12px 8px;
   text-align: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }

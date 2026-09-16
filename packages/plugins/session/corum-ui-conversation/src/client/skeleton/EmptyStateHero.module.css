@@ -83,13 +83,13 @@
   flex: 1;
 }
 .t {
-  font-size: 20px;
+  font-size: calc(20px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   line-height: 1.2;
 }
 .d {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   line-height: 1.4;
   color: var(--dsw-alias-label-secondary);
 }
@@ -107,7 +107,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
   padding: 0 4px;
@@ -149,7 +149,7 @@
 .recentTitle {
   flex: 1;
   min-width: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -161,14 +161,14 @@
   flex: none;
   width: 3em;
   text-align: right;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 .recentTime {
   flex: none;
   width: 5em;
   text-align: right;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -199,7 +199,7 @@
 .formTitle {
   flex: 1;
   min-width: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
 }
@@ -228,7 +228,7 @@
   gap: 4px;
 }
 .label {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
@@ -246,7 +246,7 @@
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 10px;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
   appearance: none;
 }
@@ -270,7 +270,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--ds-font-family-code, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -282,7 +282,7 @@
 .pickBtn {
   flex: none;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   border: none;
   border-radius: 8px;
@@ -302,14 +302,14 @@
    ⇒ 浅色主题下错误色的对比度/语义色都不对。改用真实 token 后主题才真正生效。
    （同族问题见 ReviewCard.module.css 的 BUG-2 修正。） */
 .fieldError {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
   word-break: break-all;
 }
 
 /* 工作区字段下方的说明（blank 会话语义提示）。 */
 .fieldHint {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -371,7 +371,7 @@
   border-radius: 10px;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
   flex: none;
@@ -388,7 +388,7 @@
   gap: 6px;
 }
 .permEmpty {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 .permOpt {
@@ -452,7 +452,7 @@
   flex: 1;
 }
 .permName {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -460,7 +460,7 @@
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
 }
 .permDesc {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -474,7 +474,7 @@
 .ghostBtn {
   padding: 6px 12px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   border: none;
   border-radius: 9px;
@@ -488,7 +488,7 @@
 .primaryBtn {
   padding: 6px 12px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   border: none;
   border-radius: 9px;
@@ -536,12 +536,12 @@
   min-width: 0;
 }
 .wsTriggerName {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text, var(--dsw-alias-label-primary));
 }
 .wsTriggerPath {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -573,7 +573,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   cursor: pointer;
   text-align: left;
@@ -615,7 +615,7 @@
   min-width: 0;
 }
 .wsOptName {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -623,7 +623,7 @@
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
 }
 .wsOptPath {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -657,7 +657,7 @@
   cursor: pointer;
   text-align: left;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
 .agentSelTrigger:hover {
   border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
@@ -709,7 +709,7 @@
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   text-align: left;
 }
@@ -722,7 +722,7 @@
 }
 .agentSelGroupCount {
   flex: none;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -745,7 +745,7 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   text-align: left;
   /* 不换行：让面板 width:max-content 按真实最长条目撑开（配合面板宽度自适应）。 */
   white-space: nowrap;
@@ -786,7 +786,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   outline: none;
   padding: 2px 0;
 }
@@ -813,14 +813,14 @@
 .agentSelItemHint {
   flex: none;
   margin-left: auto;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
 }
 .agentSelEmpty {
   padding: 14px 10px;
   text-align: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -846,7 +846,7 @@
   cursor: pointer;
   text-align: left;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
 .modelSelTrigger:hover {
   border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
@@ -861,7 +861,7 @@
 .modelSelTriggerEffort {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
 }
 .modelSelChevron {
   flex: none;
@@ -900,7 +900,7 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   text-align: left;
 }
 .modelSelCell:hover {
@@ -909,7 +909,7 @@
 .modelSelCellLabel {
   flex: none;
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
 }
 .modelSelCellValue {
   flex: 1 1 auto;
@@ -938,7 +938,7 @@
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   text-align: left;
 }
@@ -947,7 +947,7 @@
 }
 .modelSelGroupTitle {
   padding: 6px 8px 3px;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -969,7 +969,7 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   text-align: left;
   white-space: nowrap;
 }

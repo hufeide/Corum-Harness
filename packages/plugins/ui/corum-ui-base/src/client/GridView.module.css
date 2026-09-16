@@ -134,16 +134,16 @@
   gap: 6px;
   height: 100%;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
 }
 
 .detachedIcon {
-  font-size: 20px;
+  font-size: calc(20px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-brand-primary);
 }
 
 .detachedHint {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-dimmed);
 }
 

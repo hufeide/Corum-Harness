@@ -74,38 +74,38 @@
 
 .title {
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .dialog .title {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
 }
 
 .message {
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
   line-height: 1.5;
 }
 
 .dialog .message {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
 
 .warning {
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-state-error-primary);
   line-height: 1.4;
 }
 
 .dialog .warning {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
 }
 
 .row {
@@ -122,7 +122,7 @@
   background: var(--corum-glass-2);
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-primary);
 }
@@ -139,7 +139,7 @@
   background: var(--dsw-alias-state-error-primary);
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--corum-label-on-brand);
 }
@@ -151,7 +151,7 @@
   background: var(--dsw-alias-brand-primary, var(--corum-state-running));
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--corum-label-on-brand);
 }

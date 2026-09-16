@@ -36,13 +36,13 @@
 }
 
 .agentWho {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
 }
 
 .agentDur {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: normal;
   color: var(--dsw-alias-label-secondary);
 }
@@ -85,7 +85,7 @@
   border-radius: 6px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
 }
 

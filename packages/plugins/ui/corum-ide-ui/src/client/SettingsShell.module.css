@@ -39,7 +39,7 @@
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
   font-family: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 22px;
 }
 
@@ -148,7 +148,7 @@
   background: transparent;
   /* 设计稿: Inter 11px normal, label-tertiary */
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-primary);
 }
@@ -176,7 +176,7 @@
   /* 设计稿: Inter 10px 700, label-dimmed */
   padding: 2px 9px;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   line-height: 1.4;
   color: var(--dsw-alias-label-dimmed);
@@ -198,7 +198,7 @@
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
   /* 设计稿: 12px normal/idle 600/active */
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
   text-align: left;
@@ -262,7 +262,7 @@
 .headerTitle {
   /* 设计稿: Inter 15px 700, label-primary */
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
   overflow: hidden;
@@ -298,7 +298,7 @@
   background: transparent;
   cursor: pointer;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
 }

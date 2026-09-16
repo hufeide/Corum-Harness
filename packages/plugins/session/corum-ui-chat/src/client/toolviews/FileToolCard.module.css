@@ -60,7 +60,7 @@
 
 .title {
   flex: none;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -101,7 +101,7 @@
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
@@ -120,7 +120,7 @@
   flex: 0 1 auto;
   min-width: 0;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -135,7 +135,7 @@
 button.chipButton {
   font: inherit;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 
@@ -144,7 +144,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
 /* 范围 / 行号 chip：等宽 + 品牌色。 */
 .chipMono.chipMono {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
 }
@@ -162,7 +162,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
 .chipMode.chipMode { font-weight: 600; }
 
 /* flag 徽标（edit 未命中的「文件未改动」、重复行标签）。 */
-.chipFlag.chipFlag { font-size: 11px; font-weight: 500; color: var(--dsw-alias-label-tertiary); }
+.chipFlag.chipFlag { font-size: calc(11px * var(--corum-ui-font-scale, 1)); font-weight: 500; color: var(--dsw-alias-label-tertiary); }
 
 /* 相似度徽标（design.pen 的 `sim`）：默认琥珀，相同文本转成功色。 */
 .chipSim.chipSim { font-weight: 600; }
@@ -253,14 +253,14 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
 
 .content [data-read] [class*='_copyButton_'] {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
 }
 
 /* diff 本体：等宽三列（design.pen 的 no / sign / code），去掉官方 code-block 底色。 */
 .content [data-diff] [class*='_body_'] {
   padding: 0;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
 }
 
 .content [data-diff] [class*='_line_'] {
@@ -271,7 +271,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
 /* hunk 头（design.pen 的 `hunk`）：$label-dimmed 11px，不再是官方 primary 600 路径行。 */
 .content [data-diff] [class*='_path_'] {
   color: var(--dsw-alias-label-dimmed);
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   padding: 0 6px 4px;
 }
@@ -302,7 +302,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
   top: 0;
   right: 0;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
 }
 
 /* 官方 `└ +N -M · N 个文件` 底栏：设计稿的 data 段只有 hunk 头 + 行，
@@ -315,7 +315,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
   width: 100%;
   padding: 2px 6px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   text-align: left;
 }
 
@@ -342,7 +342,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
   flex: 1 1 auto;
   min-width: 0;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
   word-break: break-word;
@@ -373,7 +373,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-label-primary);
 }
@@ -386,7 +386,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   line-height: 16px;
   color: var(--dsw-alias-brand-text);
@@ -404,7 +404,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
 
 .mismatchKey {
   flex: none;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -415,7 +415,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
   align-items: center;
   gap: 8px;
   min-width: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-state-warn-primary);
 }
@@ -432,7 +432,7 @@ button.chipButton:hover { border-color: var(--corum-glass-border-active); }
   background: var(--corum-glass-2);
   border-radius: 10px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 17px;
   color: var(--dsw-alias-label-tertiary);
   white-space: pre-wrap;

@@ -10,13 +10,13 @@
 
 .heading {
   margin: 0;
-  font-size: 18px;
+  font-size: calc(18px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
 }
 
 .intro {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -35,7 +35,7 @@
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
   cursor: pointer;
 }
@@ -80,6 +80,6 @@
 
 .empty {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }

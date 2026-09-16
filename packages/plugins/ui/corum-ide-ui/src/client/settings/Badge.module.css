@@ -11,7 +11,7 @@
   padding: 2px 7px;
   border-radius: 6px;
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;

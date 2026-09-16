@@ -22,7 +22,7 @@
 }
 
 .planTitle {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
 }
@@ -56,7 +56,7 @@
 }
 
 .itemText {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 1.4;
   color: var(--dsw-alias-label-tertiary);
   white-space: pre-wrap;
@@ -65,7 +65,7 @@
 
 /* 当前进行中的任务项高亮（brand 色 + 全文，设计稿 active 节点语义）。 */
 .itemTextActive {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   line-height: 1.4;
   color: var(--dsw-alias-label-primary);

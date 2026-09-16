@@ -27,7 +27,7 @@
   border: 1px solid var(--corum-glass-border-active);
   border-radius: 10px;
   background: var(--corum-glass-2);
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }

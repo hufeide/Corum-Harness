@@ -108,7 +108,7 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
@@ -152,7 +152,7 @@
   padding: 6px 10px;
   border-radius: 9px;
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
@@ -190,7 +190,7 @@
   color: var(--dsw-alias-label-secondary);
 }
 .secHeadTitle {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
@@ -202,7 +202,7 @@
   border-radius: 8px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   line-height: 16px;
   text-align: center;
 }
@@ -221,7 +221,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
 }
 .searchInput::placeholder {
   color: var(--dsw-alias-label-tertiary);
@@ -279,7 +279,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
 }
 .headSearchInput::placeholder {
   color: var(--dsw-alias-label-tertiary);
@@ -383,7 +383,7 @@
 .groupTitle {
   flex: 1;
   min-width: 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -433,7 +433,7 @@
   border: none;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   text-align: left;
   cursor: pointer;
   border-radius: 6px;
@@ -449,7 +449,7 @@
 .groupEmpty {
   padding: 4px 10px 6px 32px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
 .sessionList {
   flex: 1;
@@ -516,7 +516,7 @@
 }
 .srResultTitle {
   color: var(--dsw-alias-label-primary);
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -530,7 +530,7 @@
 .srResultCtx {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -540,7 +540,7 @@
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -551,7 +551,7 @@
   min-width: 0;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -594,7 +594,7 @@
 .srTime {
   flex: none;
   color: var(--dsw-alias-label-secondary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
 }
 .srRename {
   padding: 0;
@@ -613,7 +613,7 @@
 }
 .empty {
   padding: 16px 8px;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
 }
 .emptyState {
   display: flex;
@@ -630,12 +630,12 @@
 }
 .emptyTitle {
   color: var(--dsw-alias-label-secondary);
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
 }
 .emptyHint {
   max-width: 190px;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
 }
 .projectMode {
@@ -660,7 +660,7 @@
 }
 .projectError {
   color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary));
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 1.4;
 }
 .projectError {
@@ -688,7 +688,7 @@
 }
 .historyHint {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
 }
 .historyList {
   display: flex;
@@ -731,7 +731,7 @@
 }
 .historyName {
   color: var(--dsw-alias-label-primary);
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -739,7 +739,7 @@
 }
 .historySub {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
 }
 .historyBadge {
@@ -748,7 +748,7 @@
   border-radius: 999px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
 }
 /* 目录不可用行（项目 cwd 失联）：降透明度 + 警示色子行 + 删除入口。 */
@@ -800,7 +800,7 @@
 }
 .projectHeaderName {
   color: var(--dsw-alias-label-primary);
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -808,7 +808,7 @@
 }
 .projectHeaderSub {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
 }
 .projectHeaderClose {
@@ -881,7 +881,7 @@
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -889,7 +889,7 @@
 .manageCount {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-variant-numeric: tabular-nums;
 }
 .manageRow[data-pending] .manageCount {
@@ -920,7 +920,7 @@
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -929,7 +929,7 @@
 .teamGhCount {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-variant-numeric: tabular-nums;
 }
 .teamSessions {
@@ -957,7 +957,7 @@
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -965,12 +965,12 @@
 .teamSrTime {
   flex: none;
   color: var(--dsw-alias-label-secondary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
 }
 .teamEmpty {
   padding: 9px 8px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
 }
 .loadingIcon {
   animation: spin 0.9s linear infinite;
@@ -1011,7 +1011,7 @@
 .wizardTitle {
   flex: 1;
   color: var(--dsw-alias-label-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
 }
 .wizardStepper {
@@ -1023,7 +1023,7 @@
 }
 .wizardStep {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
 }
 .wizardStepActive {
@@ -1051,7 +1051,7 @@
 }
 .wizardLabel {
   color: var(--dsw-alias-label-secondary);
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
 }
 .wizardInput {
@@ -1063,7 +1063,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
 }
 .wizardInput:focus {
   border-color: var(--corum-glass-border-active);
@@ -1085,7 +1085,7 @@
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1096,12 +1096,12 @@
   border-radius: 5px;
   background: var(--dsw-alias-state-warn-primary, var(--corum-glass-3));
   color: var(--corum-label-on-brand, #fff);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
 }
 .wizardHint {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
 }
 .wizardTeamPicker {
@@ -1122,7 +1122,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   appearance: none;
 }
 .wizardTeamSelect option {
@@ -1139,7 +1139,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   text-align: left;
   cursor: pointer;
 }
@@ -1172,7 +1172,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   text-align: left;
   cursor: pointer;
 }
@@ -1190,7 +1190,7 @@
 .wizardMemberId {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
 }
 .wizardDone {
   flex: 1;
@@ -1206,12 +1206,12 @@
 }
 .wizardDoneTitle {
   color: var(--dsw-alias-label-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
 }
 .wizardDoneSub {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
 }
 .wizardFooter {
   flex: none;
@@ -1227,7 +1227,7 @@
   padding: 0 14px;
   border-radius: 8px;
   font: inherit;
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   cursor: pointer;
 }

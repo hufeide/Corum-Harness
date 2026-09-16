@@ -47,12 +47,12 @@
   min-width: 0;
 }
 .qGroup {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
 }
 .qTitle {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -143,7 +143,7 @@
   min-width: 0;
 }
 .optionLabel {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -151,7 +151,7 @@
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
 }
 .optionDesc {
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -190,7 +190,7 @@
   background: transparent;
   resize: none;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
 .customInput::placeholder {
@@ -233,7 +233,7 @@
   cursor: default;
 }
 .pageNum {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -249,7 +249,7 @@
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   cursor: pointer;
   transition: border-color 120ms ease;
@@ -266,7 +266,7 @@
   border-radius: 9px;
   background: var(--dsw-alias-state-business-primary);
   color: var(--corum-label-on-brand, var(--corum-label-on-brand, #fff));
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   cursor: pointer;
   transition: opacity 120ms ease;

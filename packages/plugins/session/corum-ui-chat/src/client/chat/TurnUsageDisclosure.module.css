@@ -50,7 +50,7 @@
   border-radius: 12px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
 }
 

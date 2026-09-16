@@ -27,7 +27,7 @@
   border: none;
   background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
   width: fit-content;
@@ -36,7 +36,7 @@
 
 .hint {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -72,13 +72,13 @@
   min-width: 0;
 }
 .cardName {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
 }
 .cardDesc {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 16px;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -122,7 +122,7 @@
 .statusDot_dim { background: var(--dsw-alias-label-dimmed); }
 .statusDot_error { background: var(--dsw-alias-state-error-primary); }
 .statusText {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   line-height: 14px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -168,7 +168,7 @@
   font: inherit;
   cursor: pointer;
 }
-.chipText { font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-secondary); }
+.chipText { font-size: calc(10px * var(--corum-ui-font-scale, 1)); line-height: 14px; color: var(--dsw-alias-label-secondary); }
 .chipGo { display: inline-flex; color: var(--dsw-alias-label-dimmed); }
 .chip:hover .chipText { color: var(--dsw-alias-label-primary); }
 .chipAdd {
@@ -181,7 +181,7 @@
   border-radius: 7px;
   color: var(--dsw-alias-label-tertiary);
   font: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 .chipAdd:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
@@ -198,7 +198,7 @@
   border: none;
   background: none;
   font: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   outline: none;
 }
@@ -212,7 +212,7 @@
   align-self: stretch;
 }
 .customIdLabel {
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   line-height: 14px;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -224,7 +224,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
 .customIdInput:focus { outline: none; border-color: var(--corum-glass-border-active); }
@@ -242,7 +242,7 @@
   border-radius: 16px;
   color: var(--dsw-alias-label-tertiary);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 .addCard:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-1); }
@@ -258,7 +258,7 @@
   gap: 2px;
 }
 .settingGroupTitle {
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -285,8 +285,8 @@
   padding: 10px 2px;
 }
 .fieldMeta { display: inline-flex; flex-direction: column; gap: 2px; min-width: 0; }
-.fieldLabel { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); }
-.fieldDesc { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.fieldLabel { font-size: calc(13px * var(--corum-ui-font-scale, 1)); line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.fieldDesc { font-size: calc(11px * var(--corum-ui-font-scale, 1)); line-height: 16px; color: var(--dsw-alias-label-tertiary); }
 
 .textField {
   width: 180px;
@@ -296,7 +296,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
 .textFieldWide { width: 260px; }
@@ -315,7 +315,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
@@ -366,7 +366,7 @@
   padding: 0 14px;
   border-radius: 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
   border: 1px solid transparent;
 }
@@ -417,7 +417,7 @@
   justify-content: center;
   width: 44px;
   height: 30px;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -430,7 +430,7 @@
   padding: 3px 9px;
   background: var(--corum-glass-2);
   border-radius: 6px;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
@@ -447,9 +447,9 @@
 .footRight { display: inline-flex; align-items: center; gap: 8px; }
 
 /* ── 错误 / 提示 ── */
-.error { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); }
-.notice { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
-.savedNotice { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-success-primary); }
+.error { margin: 0; font-size: calc(12px * var(--corum-ui-font-scale, 1)); line-height: 18px; color: var(--dsw-alias-state-error-primary); }
+.notice { margin: 0; font-size: calc(12px * var(--corum-ui-font-scale, 1)); line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.savedNotice { margin: 0; font-size: calc(12px * var(--corum-ui-font-scale, 1)); line-height: 18px; color: var(--dsw-alias-state-success-primary); }
 
 /* ── 编辑器内分隔 ── */
 .hDivider { height: 1px; background: var(--corum-glass-border); opacity: 0.5; }
@@ -488,11 +488,11 @@
   border: 1px solid var(--corum-glass-border);
   color: var(--corum-brand-accent, var(--dsw-alias-brand-primary));
 }
-.modelCardProv { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.modelCardName { font-size: 14px; line-height: 20px; font-weight: 700; color: var(--dsw-alias-label-primary); }
-.modelCardSpecs { font-size: 11px; color: var(--dsw-alias-label-secondary); }
+.modelCardProv { font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
+.modelCardName { font-size: calc(14px * var(--corum-ui-font-scale, 1)); line-height: 20px; font-weight: 700; color: var(--dsw-alias-label-primary); }
+.modelCardSpecs { font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-secondary); }
 .modelCardDiv { height: 1px; background: var(--corum-glass-border); opacity: 0.5; }
-.modelCardPrice { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+.modelCardPrice { font-size: calc(10px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 .modelCardAdd {
   display: flex;
   flex-direction: column;
@@ -506,7 +506,7 @@
   border-radius: 16px;
   color: var(--dsw-alias-label-tertiary);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 .modelCardAdd:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-1); }
@@ -555,7 +555,7 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 .segBtnActive { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); color: var(--corum-label-on-brand, #fff); font-weight: 600; }
@@ -577,7 +577,7 @@
   border-radius: 8px;
   background: transparent;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   text-align: left;
@@ -612,10 +612,10 @@
   color: transparent;
 }
 .selCbOn { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); border-color: transparent; color: var(--corum-label-on-brand, #fff); }
-.selRowId { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); }
-.selRowSpec { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+.selRowId { font-size: calc(12px * var(--corum-ui-font-scale, 1)); font-weight: 600; color: var(--dsw-alias-label-primary); }
+.selRowSpec { font-size: calc(10px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 .selRowDisabled { opacity: 0.5; cursor: default; }
-.selRowTag { margin-left: auto; font-size: 10px; color: var(--dsw-alias-label-dimmed); }
+.selRowTag { margin-left: auto; font-size: calc(10px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-dimmed); }
 /* 单选 radio 圆点 */
 .radio {
   display: inline-flex;
@@ -631,7 +631,7 @@
 .radioOn { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); border-color: transparent; }
 .radioInner { width: 6px; height: 6px; border-radius: 50%; background: var(--corum-label-on-brand, #fff); }
 .btnRowBetween { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.lockedProviderTag { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-weight: 400; }
+.lockedProviderTag { font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); font-weight: 400; }
 
 /* ── 主页：供应商卡片（单列横排大卡） ── */
 .providerList { display: flex; flex-direction: column; gap: 10px; }
@@ -662,14 +662,14 @@
   border-radius: 16px;
   color: var(--dsw-alias-label-tertiary);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 .addProviderCard:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-1); }
 
 /* ── 锁定供应商（添加模型场景，只读） ── */
 .lockedProvider { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--corum-glass-2); border: 1px solid var(--corum-glass-border); border-radius: 10px; width: fit-content; }
-.lockedProviderName { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.lockedProviderName { font-size: calc(12px * var(--corum-ui-font-scale, 1)); font-weight: 600; color: var(--dsw-alias-label-primary); }
 
 /* ── 表单字段（label 上 + 控件下，整宽） ── */
 .fieldCol { display: flex; flex-direction: column; gap: 6px; }
@@ -690,13 +690,13 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
 .inputFull:focus { outline: none; border-color: var(--corum-glass-border-active); }
 .inputFull::placeholder { color: var(--dsw-alias-label-dimmed); }
 .priceInput { display: inline-flex; align-items: center; gap: 4px; }
-.priceUnit { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.priceUnit { font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 
 
 /* ── 列表 ul 重置 ── */
@@ -751,14 +751,14 @@
 .candidateId {
   flex: 1 1 auto;
   font-family: var(--ds-font-family-code);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   overflow-wrap: anywhere;
 }
 
 .candidateEmpty {
   margin: 24px 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 20px;
   text-align: center;
 }

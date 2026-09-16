@@ -1,6 +1,6 @@
 .description {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 24px;
   color: var(--dsw-alias-label-secondary);
 }

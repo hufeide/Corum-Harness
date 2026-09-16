@@ -48,7 +48,7 @@
 }
 
 .name {
-  font-size: 16px;
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -57,7 +57,7 @@
 }
 
 .task {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -78,7 +78,7 @@
 }
 
 .modelText {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -95,7 +95,7 @@
   border: 1px solid var(--corum-glass-border-active, #01CDFE);
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
   white-space: nowrap;
@@ -120,7 +120,7 @@
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-state-success-primary);
   white-space: nowrap;
@@ -136,7 +136,7 @@
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-state-warn-primary);
   white-space: nowrap;
@@ -152,7 +152,7 @@
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-state-error-primary);
   white-space: nowrap;
@@ -228,7 +228,7 @@
 }
 
 .stepText {
-  font-size: 15px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -258,13 +258,13 @@
 }
 
 .detailTitle {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
 }
 
 .detailBody {
-  font-size: 14px;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
   color: var(--dsw-alias-label-secondary);
   white-space: pre-wrap;
@@ -299,7 +299,7 @@
   border-radius: 8px;
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   background: transparent;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   white-space: nowrap;
   color: var(--dsw-alias-label-tertiary);

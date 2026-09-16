@@ -12,13 +12,13 @@
 }
 
 .title {
-  font-size: 13px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .meta {
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -30,7 +30,7 @@
   border-radius: 9px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 

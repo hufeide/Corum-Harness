@@ -30,14 +30,14 @@
 
 .slot {
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
 }
 
 .badge {
   margin-left: auto;
-  font-size: 10px;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
   padding: 2px 7px;
   border-radius: 999px;
   color: var(--corum-label-on-brand, #fff);
@@ -45,7 +45,7 @@
 }
 
 .caption {
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
   color: var(--dsw-alias-label-secondary);
 }
@@ -53,7 +53,7 @@
 .facts {
   margin: 0;
   padding: 0 0 0 16px;
-  font-size: 11px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 1.6;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -71,7 +71,7 @@
   border-radius: 10px;
   background: var(--dsw-alias-brand-primary);
   color: var(--corum-label-on-brand, #fff);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 
@@ -85,7 +85,7 @@
   border-radius: 10px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
 
