@@ -40,12 +40,12 @@
  * @module corum-ide-ui/client/settings/sections/SettingsTerminalSection
  */
 
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
 import { Badge } from '../Badge.tsx'
-import { GlassButton } from '../shared.tsx'
+import { GlassButton, useFontPrefs } from '../shared.tsx'
 import { CorumSettingsContext } from '../shared.tsx'
 import css from '../SettingsSections.module.css'
 
@@ -131,6 +131,22 @@ export function TerminalSection() {
 
   const cwdValue = cwdDraft ?? user.cwd ?? resolved.cwd ?? ''
 
+  // 乙类终端字面真源（fontPrefs cordis 服务，跨 bundle 单例；context 下发）。
+  const fontPrefs = useFontPrefs()
+  const font = useSyncExternalStore(
+    (listener) => fontPrefs?.subscribe(listener) ?? (() => {}),
+    () => fontPrefs?.getPrefs() ?? null,
+  )
+  const fontReady = fontPrefs !== null && font !== null
+  const terminalFont = font?.terminal
+  /** 字族受控输入草稿（失焦写回；null = 未编辑，跟随真源）。 */
+  const [familyDraft, setFamilyDraft] = useState<string | null>(null)
+  useEffect(() => { setFamilyDraft(null) }, [terminalFont?.fontFamily])
+  /** 字号候选（含当前真源值置顶）。 */
+  const termSizeOptions = (current: number): { id: string; label: string }[] =>
+    [current, ...[10, 11, 12, 13, 14, 15, 16, 18, 20].filter(v => v !== current)]
+      .map(v => ({ id: String(v), label: String(v) }))
+
   return (
     <>
       {error !== null && <p style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>{error}</p>}
@@ -201,11 +217,28 @@ export function TerminalSection() {
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="乙类 · 内置终端外观（只影响你的观感）">
-        <SettingRow label="终端字体" desc="**仅内置终端内**生效的等宽字族（与外观页、编辑器页各自独立）。" badge={OFFLINE}>
-          <SelectField value="jbm" options={[{ id: 'jbm', label: 'JetBrains Mono' }]} onChange={noop} disabled />
+        <SettingRow label="终端字体" desc="**仅内置终端内**生效的等宽字族（含回退栈，失焦写回；空 = 回落默认）。与外观页、编辑器页各自独立。" badge={fontReady ? undefined : OFFLINE}>
+          <input
+            className={css.textInput}
+            value={familyDraft ?? terminalFont?.fontFamily ?? ''}
+            placeholder="'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace"
+            disabled={!fontReady}
+            onChange={e => { setFamilyDraft(e.target.value) }}
+            onBlur={() => {
+              if (familyDraft === null) return
+              const raw = familyDraft.trim()
+              setFamilyDraft(null)
+              if (raw !== (terminalFont?.fontFamily ?? '')) fontPrefs?.setPrefs({ terminal: { fontFamily: raw } })
+            }}
+          />
         </SettingRow>
-        <SettingRow label="终端字号" desc="仅内置终端内的文字大小（px）。" badge={OFFLINE} divider={false}>
-          <SelectField value="13" options={[{ id: '13', label: '13' }]} onChange={noop} disabled />
+        <SettingRow label="终端字号" desc="仅内置终端内的文字大小（px，实时生效）。" badge={fontReady ? undefined : OFFLINE} divider={false}>
+          <SelectField
+            value={String(terminalFont?.fontSize ?? 13)}
+            options={termSizeOptions(terminalFont?.fontSize ?? 13)}
+            onChange={id => { fontPrefs?.setPrefs({ terminal: { fontSize: Number(id) } }) }}
+            disabled={!fontReady}
+          />
         </SettingRow>
       </SettingGroup>
     </>

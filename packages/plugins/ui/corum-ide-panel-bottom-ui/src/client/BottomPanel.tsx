@@ -55,26 +55,37 @@ export interface BottomPanelInjected {
    * （组件 unmount 时调用）。
    */
   onTerminalOutput: (listener: (frame: { id: string; data: string; seq: number }) => void) => () => void
+  /**
+   * 终端字面真源（PRD §4.2 乙类）：fontPrefs cordis 服务的终端分组子面。
+   * 缺省（服务未 provide）时组件回落现状硬编码值，不构成破坏。
+   */
+  fontPrefs?: {
+    getTerminal: () => { fontSize: number; fontFamily: string }
+    subscribe: (listener: () => void) => () => void
+  } | undefined
 }
 
 /** Composed props: the shell's owner share + 本插件注入面。 */
 export type BottomPanelProps = PropsRuntime<'corum.panel'> & BottomPanelInjected
 
 /** The IDE terminal panel (real xterm.js driven by host node-pty; see module doc). */
-export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, onTerminalOutput, snapshot }: BottomPanelProps) {
+export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, onTerminalOutput, snapshot, fontPrefs }: BottomPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
     if (container === null) return
 
+    // 终端字面真源（fontPrefs cordis 服务，跨 bundle 单例）；缺省回落现状硬编码。
+    const initialFont = fontPrefs?.getTerminal()
+
     // xterm 主题：透明背景融入玻璃卡（RegionCard 基座承载玻璃外观），前景/光标/
     // 选区对齐现有 data-tone 终端配色与 ide-ui theme.css 的 --corum-*/--dsw-* 设计
     // token。xterm 主题要具体色值（不吃 var()），但 var() 可内联进 CSS 颜色字符串——
     // xterm ITheme 接受任意 CSS color，故直接用 var() 引用设计 token（明暗主题随动）。
     const term = new Terminal({
-      fontFamily: "'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace",
-      fontSize: 13,
+      fontFamily: initialFont?.fontFamily ?? "'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace",
+      fontSize: initialFont?.fontSize ?? 13,
       cursorBlink: true,
       cursorStyle: 'bar',
       scrollback: 2000,
@@ -90,6 +101,14 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
+
+    // 终端字面实时生效（PRD §4.2 乙类）：fontSize/fontFamily 对 xterm updateOptions
+    // 有效。订阅 cordis 服务，设置页写入即实时反映到已打开的终端。
+    const disposeFontPrefs = fontPrefs?.subscribe(() => {
+      const next = fontPrefs.getTerminal()
+      term.options.fontSize = next.fontSize
+      term.options.fontFamily = next.fontFamily
+    })
 
     // 会话 id 与 $on 订阅 dispose（create 成功后填充）。
     let sessionId: string | null = null
@@ -163,6 +182,7 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
     return () => {
       disposed = true
       disposeOutput?.()
+      disposeFontPrefs?.()
       resizeObserver.disconnect()
       dataSub.dispose()
       if (sessionId !== null) {

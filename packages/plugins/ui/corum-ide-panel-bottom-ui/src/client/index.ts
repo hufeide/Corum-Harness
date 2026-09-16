@@ -24,8 +24,8 @@ import type { BottomPanelInjected } from './BottomPanel.tsx'
 
 export type { BottomPanelInjected } from './BottomPanel.tsx'
 
-/** Required services: the slots registry + the connection rpc face + the layout face (ctx.layout.closeRegion) + the Remote event face (ctx.remote.$on 终端输出推送)。 */
-export const inject = ['slots', 'connection', 'layout', 'remote']
+/** Required services: the slots registry + the connection rpc face + the layout face (ctx.layout.closeRegion) + the Remote event face (ctx.remote.$on 终端输出推送) + fontPrefs（终端字面真源，PRD §4.2 乙类）。 */
+export const inject = ['slots', 'connection', 'layout', 'remote', 'fontPrefs']
 
 /** RPC 信封（与 BottomPanel.tsx 的 RpcEnvelope 同构；host Typert Remote 返回）。 */
 interface Envelope<T> {
@@ -40,12 +40,22 @@ interface Envelope<T> {
  */
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
+  // 终端字面真源（PRD §4.2 乙类）：fontPrefs cordis 服务（desktop provide，
+  // 跨 bundle 单例）。本地能力接口收窄（红线 3——不 import desktop 实现包类型）。
+  const fontPrefs = ctx.get('fontPrefs') as {
+    getPrefs(): { terminal: { fontSize: number; fontFamily: string } }
+    subscribe(listener: () => void): () => void
+  } | undefined
   ctx.effect(
     () => ctx.slots.inject('corum.panel', () => ctx.slots.register(
       {
         name: 'corum.panel',
         inject: (): BottomPanelInjected => ({
           closeRegion: () => { ctx.layout.closeRegion('corum.panel') },
+          fontPrefs: fontPrefs === undefined ? undefined : {
+            getTerminal: () => fontPrefs.getPrefs().terminal,
+            subscribe: (listener) => fontPrefs.subscribe(listener),
+          },
           create: async () => {
             const result = await connection.rpc.call('/api', 'corumTerminal/create', { args: {} })
             return result as Envelope<{ id: string }>

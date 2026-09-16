@@ -25,6 +25,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import { EditorColumn } from './editor/EditorColumn.tsx'
 import type { EditorApiRef, EditorColumnInjected } from './editor/EditorColumn.tsx'
 import { createCorumEditor, createEditorReadySource, type CorumEditorService } from './editor/corum-editor.ts'
+import { createFontPrefs, setFontPrefsInstance, type FontPrefsStore } from './editor/font-prefs.ts'
 import { createCorumFsClient, type CorumFsClient } from './editor/corum-fs-client.ts'
 import type { FsEntry } from './editor/ExplorerPane.tsx'
 
@@ -56,6 +57,12 @@ declare module '@deepseek-ai/cordis' {
      * 本包 provide；消费方经 inject 取（同 bundle 的 EditorColumn 仍走注入面，行为不变）。
      */
     corumFsClient: CorumFsClient
+    /**
+     * 编辑器/终端「字面」偏好（PRD §4.23 E1/E2/E3、§4.2 乙类）。
+     * 本包 provide；Monaco（同 bundle）直接订阅，xterm（panel-bottom-ui）与
+     * 设置页（ide-ui）经 inject + 局部能力接口收窄消费（红线 1/3/4）。
+     */
+    fontPrefs: FontPrefsStore
   }
 }
 
@@ -77,6 +84,15 @@ export function apply(ctx: Context): void {
   if (typeof window !== 'undefined') {
     ;(window as unknown as { __corumNotify?: NotificationStore['notify'] }).__corumNotify = notifications.notify
   }
+
+  // 字面偏好服务（PRD §4.23 E1/E2/E3、§4.2 乙类，§5 剩余项 3）：单实例
+  // provide 到 **client root**（与 ctx.notifications 同层——cordis 嵌套 inject
+  // 块（editorCtx）里 provide 的服务对兄弟 bundle 不可见，实测 ide-ui 卡在
+  // "waiting for service: fontPrefs"）。Monaco（本 bundle，经 font-prefs 实例
+  // 桥取同一实例）/ xterm（panel-bottom-ui inject）/ 设置页（ide-ui inject）共享。
+  const fontPrefs = createFontPrefs()
+  ctx.provide('fontPrefs', fontPrefs)
+  setFontPrefsInstance(fontPrefs)
 
   // 常用事件 → 通知栏（2026-09-10 用户「要把一些常用的事件接入通知栏」）。
   // 通知通道此前只有两个罕见失败分支在用，日常使用中根本看不到通知栏；

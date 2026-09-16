@@ -65,7 +65,7 @@ import { GeneralSection } from './SettingsGeneralSection.tsx'
 import { SECTION_DEFS } from './settings/SettingsSections.tsx'
 import { ExtensionsSection } from './settings/sections/SettingsExtensionsSection.tsx'
 import { DataSection } from './settings/sections/SettingsDataSection.tsx'
-import { CorumRpcContext, CorumSettingsContext, NotificationPrefsContext, type CorumSettingsFace } from './settings/shared.tsx'
+import { CorumRpcContext, CorumSettingsContext, FontPrefsContext, NotificationPrefsContext, type CorumSettingsFace } from './settings/shared.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
@@ -211,7 +211,7 @@ export interface CorumSidebarOwnerProps {
 
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
-export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions', 'notifications']
+export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions', 'notifications', 'fontPrefs']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -533,6 +533,18 @@ export function apply(ctx: ClientContext): void {
       setPrefs(patch: Partial<NotificationPrefsFaceLocal>): void
       subscribePrefs(listener: () => void): () => void
     } | undefined ?? null
+    // 字面偏好面（PRD §4.23 E1/E2/E3、§4.2 乙类）：fontPrefs cordis 服务
+    // （desktop provide，跨 bundle 单例；inject 声明获取，红线 4）。本地能力
+    // 接口收窄（红线 3）；编辑器/终端 section 经 context 接真源、实时联动。
+    interface FontPrefsFaceLocal {
+      editor: { fontSize: number; fontFamily: string; lineHeight: number }
+      terminal: { fontSize: number; fontFamily: string }
+    }
+    const fontPrefsSvc = ctx.get('fontPrefs') as {
+      getPrefs(): FontPrefsFaceLocal
+      setPrefs(patch: { editor?: Partial<FontPrefsFaceLocal['editor']>; terminal?: Partial<FontPrefsFaceLocal['terminal']> }): void
+      subscribe(listener: () => void): () => void
+    } | undefined ?? null
     // fork（corum）：general section 也包 CorumSettingsContext.Provider——其「工作区」
     // 组（新工作区始终初始化 git 开关，2026-09-09 用户需求）是 GeneralSection 里第一个
     // 真实持久化项，需要 settings 面；此前 GeneralSection 单独注册未包 Provider（纯静态
@@ -617,7 +629,9 @@ export function apply(ctx: ClientContext): void {
         <CorumRpcContext.Provider value={corumRpc}>
           <CorumSettingsContext.Provider value={corumSettings}>
             <NotificationPrefsContext.Provider value={notificationsSvc}>
-              <SettingsSectionHost {...props} render={def.Component} />
+              <FontPrefsContext.Provider value={fontPrefsSvc}>
+                <SettingsSectionHost {...props} render={def.Component} />
+              </FontPrefsContext.Provider>
             </NotificationPrefsContext.Provider>
           </CorumSettingsContext.Provider>
         </CorumRpcContext.Provider>

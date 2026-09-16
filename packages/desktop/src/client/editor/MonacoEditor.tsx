@@ -46,6 +46,7 @@ import type { editor as MonacoEditorApi } from 'monaco-editor'
 import { applyCorumTheme, corumThemeName, defineCorumThemes } from './monaco-theme.ts'
 import { installMonacoWorkerEnvironment } from './worker.ts'
 import { setCorumMonacoInstance, type CorumMonacoInstance } from './monaco-bridge.ts'
+import { getFontPrefsInstance } from './font-prefs.ts'
 
 /** One code file shown in the editor. */
 export interface MonacoFileModel {
@@ -156,6 +157,8 @@ function disposeModels(paths: readonly string[]): void {
 export function MonacoEditor({ file, dark = true, className, editable = false, onContentChange, onCursorChange, disposePaths }: MonacoEditorProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null)
+  /** 字面偏好订阅的退订函数（try 块内订阅 → 桥到 effect cleanup 退订）。 */
+  const fontPrefsDisposeRef = useRef<(() => void) | null>(null)
   // Stable refs to callbacks so the editor is not recreated on every parent render.
   const onContentChangeRef = useRef(onContentChange)
   onContentChangeRef.current = onContentChange
@@ -192,6 +195,10 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
       }
     })
     findWidgetFix.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
+    // 字面偏好（PRD §4.23 E1/E2/E3）：cordis 服务真源（font-prefs 实例桥，
+    // 同 bundle）。服务未 provide 时回落现状硬编码缺省（font-prefs DEFAULT_EDITOR）。
+    const fontPrefs = getFontPrefsInstance()
+    const editorFont = fontPrefs?.getPrefs().editor
     try {
       const instance = editor.create(host, {
         value: '',
@@ -230,10 +237,10 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         cursorBlinking: 'smooth',
         cursorSmoothCaretAnimation: 'on',
         smoothScrolling: true,
-        // 字体/行高（对齐设计 token；JetBrains Mono 优先）。
-        fontFamily: "'JetBrains Mono', 'SFMono-Regular', Menlo, monospace",
-        fontSize: 13,
-        lineHeight: 20,
+        // 字体/行高（真源 = font-prefs cordis 服务；缺省对齐原硬编码 234-236 行值）。
+        fontFamily: editorFont?.fontFamily ?? "'JetBrains Mono', 'SFMono-Regular', Menlo, monospace",
+        fontSize: editorFont?.fontSize ?? 13,
+        lineHeight: editorFont?.lineHeight ?? 20,
         letterSpacing: 0,
         // 行号/装饰。
         lineNumbers: 'on',
@@ -256,6 +263,19 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         formatOnType: false,
       })
       editorRef.current = instance
+      // 字面偏好实时生效（PRD §4.23）：fontSize/fontFamily/lineHeight 均实测对
+      // updateOptions 有效（区别于 diff 布局等布局类选项需重建）。订阅 cordis
+      // 服务，设置页写入即实时反映到已打开的编辑器。dispose 经 ref 桥到 cleanup。
+      const disposeFontPrefs = fontPrefs?.subscribe(() => {
+        const next = getFontPrefsInstance()?.getPrefs().editor
+        if (next === undefined) return
+        instance.updateOptions({
+          fontFamily: next.fontFamily,
+          fontSize: next.fontSize,
+          lineHeight: next.lineHeight,
+        })
+      })
+      fontPrefsDisposeRef.current = disposeFontPrefs ?? null
       // P2-1（2026-09-09）：原挂 window.__corumMonacoEditor（可写可清的可变单例，
       // 红线 1 形态）→ 同 bundle 模块引用桥（monaco-bridge.ts）。EditorColumn 的
       // 快捷键兜底经 getCorumMonacoInstance() 取同一实例。
@@ -292,6 +312,8 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     }
     return () => {
       findWidgetFix.disconnect()
+      fontPrefsDisposeRef.current?.()
+      fontPrefsDisposeRef.current = null
       setCorumMonacoInstance(undefined)
       editorRef.current?.dispose()
       editorRef.current = null

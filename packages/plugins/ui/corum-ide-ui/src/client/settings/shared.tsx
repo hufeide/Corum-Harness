@@ -72,6 +72,42 @@ export function useNotificationPrefs(): NotificationPrefsService | null {
   return useContext(NotificationPrefsContext)
 }
 
+/* ── 编辑器/终端「字面」偏好面（PRD v2 §4.23 E1/E2/E3、§4.2 乙类）────────── */
+
+/** 编辑器字面（Monaco 子集；与 desktop font-prefs 同形，跨 bundle 窄化，红线 3）。 */
+export interface EditorFontFace {
+  fontSize: number
+  fontFamily: string
+  lineHeight: number
+}
+
+/** 终端字面（xterm 子集）。 */
+export interface TerminalFontFace {
+  fontSize: number
+  fontFamily: string
+}
+
+/** 字面偏好快照（编辑器 + 终端两组）。 */
+export interface FontPrefsFace {
+  editor: EditorFontFace
+  terminal: TerminalFontFace
+}
+
+/** 设置页消费的字面偏好写/读面。 */
+export interface FontPrefsService {
+  getPrefs(): FontPrefsFace
+  setPrefs(patch: { editor?: Partial<EditorFontFace>; terminal?: Partial<TerminalFontFace> }): void
+  subscribe(listener: () => void): () => void
+}
+
+/** 字面偏好 Context（与 NotificationPrefsContext 同构下发；编辑器/终端 section 消费）。 */
+export const FontPrefsContext = createContext<FontPrefsService | null>(null)
+
+/** 取出字面偏好面；未 provide 时返回 null（控件降级为禁用 + 未上线）。 */
+export function useFontPrefs(): FontPrefsService | null {
+  return useContext(FontPrefsContext)
+}
+
 /* ── section 操作上下文（SettingsShell 经 owner props → Host 下发 openSection/close）── */
 
 /** 设置壳的 section 操作面：openSection 切换 section、close 关闭设置面板。 */

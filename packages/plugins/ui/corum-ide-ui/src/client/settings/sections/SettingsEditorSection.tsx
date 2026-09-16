@@ -28,13 +28,13 @@
  * @module corum-ide-ui/client/settings/sections/SettingsEditorSection
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
 import { Switch } from '../Switch.tsx'
 import { Badge } from '../Badge.tsx'
-import { GlassButton } from '../shared.tsx'
+import { GlassButton, useFontPrefs } from '../shared.tsx'
 import css from '../SettingsSections.module.css'
 
 /* ── 编辑器（PRD §4.23）────────────────────────────────────────────── */
@@ -69,12 +69,24 @@ function readDiffSideBySide(): boolean {
 /**
  * 编辑器设置分区。
  *
- * 唯一可写项是 E20（diff 布局）；其余 24 项为「目标态占位」，禁用并标注未上线。
+ * 字体组（E1 字族 / E2 字号 / E3 行高）已接真源（fontPrefs cordis 服务）；
+ * E20（diff 布局）走 localStorage；其余项为「目标态占位」，禁用并标注未上线。
  *
  * @returns the editor settings section.
  */
 export function EditorSection() {
   const [sideBySide, setSideBySide] = useState<boolean>(readDiffSideBySide)
+  // 字面偏好真源（fontPrefs cordis 服务，跨 bundle 单例；context 下发）。
+  const fontPrefs = useFontPrefs()
+  const font = useSyncExternalStore(
+    (listener) => fontPrefs?.subscribe(listener) ?? (() => {}),
+    () => fontPrefs?.getPrefs() ?? null,
+  )
+  const fontReady = fontPrefs !== null && font !== null
+  /** 字族受控输入草稿（失焦写回；null = 未编辑，跟随真源）。 */
+  const [familyDraft, setFamilyDraft] = useState<string | null>(null)
+  // 真源变化（外部写入）时清掉草稿，避免显示陈旧值。
+  useEffect(() => { setFamilyDraft(null) }, [font?.editor.fontFamily])
 
   /** 写入 diff 布局偏好（格式对齐 `EditorColumn.tsx`：`'1'`/`'0'`）。 */
   const applyDiffLayout = useCallback((id: string) => {
@@ -84,6 +96,15 @@ export function EditorSection() {
       localStorage.setItem(DIFF_SIDE_BY_SIDE_KEY, next ? '1' : '0')
     } catch { /* 容量满 / 隐私模式：退回会话内记忆 */ }
   }, [])
+
+  const editorFont = font?.editor
+  /** 字号/行高候选（含当前真源值置顶）。 */
+  const sizeOptions = (current: number): { id: string; label: string }[] =>
+    [current, ...[10, 11, 12, 13, 14, 15, 16, 18, 20].filter(v => v !== current)]
+      .map(v => ({ id: String(v), label: String(v) }))
+  const lineHeightOptions = (current: number): { id: string; label: string }[] =>
+    [current, ...[0, 16, 18, 20, 22, 24, 28].filter(v => v !== current)]
+      .map(v => ({ id: String(v), label: v === 0 ? '0（自动）' : String(v) }))
 
   return (
     <>
@@ -95,14 +116,36 @@ export function EditorSection() {
       </div>
 
       <SettingGroup title="字体">
-        <SettingRow label="编辑器字体" desc={`仅编辑器内生效。当前硬编码：'JetBrains Mono', 'SFMono-Regular', Menlo, monospace`} badge={OFFLINE}>
-          <SelectField value="jbm" options={[{ id: 'jbm', label: 'JetBrains Mono' }]} onChange={noop} disabled />
+        <SettingRow label="编辑器字体" desc="仅编辑器内生效的等宽字族（含回退栈，失焦写回；空 = 回落默认）。" badge={fontReady ? undefined : OFFLINE}>
+          <input
+            className={css.textInput}
+            value={familyDraft ?? editorFont?.fontFamily ?? ''}
+            placeholder="'JetBrains Mono', 'SFMono-Regular', Menlo, monospace"
+            disabled={!fontReady}
+            onChange={e => { setFamilyDraft(e.target.value) }}
+            onBlur={() => {
+              if (familyDraft === null) return
+              const raw = familyDraft.trim()
+              setFamilyDraft(null)
+              if (raw !== (editorFont?.fontFamily ?? '')) fontPrefs?.setPrefs({ editor: { fontFamily: raw } })
+            }}
+          />
         </SettingRow>
-        <SettingRow label="编辑器字号" desc="当前硬编码：13" badge={OFFLINE}>
-          <SelectField value="13" options={[{ id: '13', label: '13' }]} onChange={noop} disabled />
+        <SettingRow label="编辑器字号" desc="仅编辑器内的文字大小（px，实时生效）。" badge={fontReady ? undefined : OFFLINE}>
+          <SelectField
+            value={String(editorFont?.fontSize ?? 13)}
+            options={sizeOptions(editorFont?.fontSize ?? 13)}
+            onChange={id => { fontPrefs?.setPrefs({ editor: { fontSize: Number(id) } }) }}
+            disabled={!fontReady}
+          />
         </SettingRow>
-        <SettingRow label="行高" desc="0 = 按字号自动。当前硬编码：20" badge={OFFLINE}>
-          <SelectField value="20" options={[{ id: '20', label: '20' }]} onChange={noop} disabled />
+        <SettingRow label="行高" desc="0 = 按字号自动（px，实时生效）。" badge={fontReady ? undefined : OFFLINE}>
+          <SelectField
+            value={String(editorFont?.lineHeight ?? 20)}
+            options={lineHeightOptions(editorFont?.lineHeight ?? 20)}
+            onChange={id => { fontPrefs?.setPrefs({ editor: { lineHeight: Number(id) } }) }}
+            disabled={!fontReady}
+          />
         </SettingRow>
         <SettingRow label="字距" desc="当前硬编码：0" badge={OFFLINE}>
           <SelectField value="0" options={[{ id: '0', label: '0' }]} onChange={noop} disabled />
