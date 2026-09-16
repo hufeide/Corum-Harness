@@ -15,15 +15,15 @@
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 0 6px;
-  gap: 8px;
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .actions {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 
 .toggle {
@@ -31,8 +31,8 @@
   flex: none;
   align-items: center;
   height: 20px;
-  padding: 0 7px;
-  gap: 4px;
+  padding: 0 calc(7px * var(--corum-density-scale, 1));
+  gap: calc(4px * var(--corum-density-scale, 1));
   border: 0;
   border-radius: 3px;
   color: var(--dsw-alias-label-tertiary);
@@ -74,8 +74,8 @@
   box-sizing: border-box;
   width: 88px;
   height: 20px;
-  padding: 0 5px;
-  gap: 4px;
+  padding: 0 calc(5px * var(--corum-density-scale, 1));
+  gap: calc(4px * var(--corum-density-scale, 1));
   border: 0;
   border-radius: 0;
   color: var(--dsw-alias-label-tertiary);
@@ -140,8 +140,8 @@
   flex: none;
   align-items: center;
   height: 20px;
-  padding: 0 5px;
-  gap: 4px;
+  padding: 0 calc(5px * var(--corum-density-scale, 1));
+  gap: calc(4px * var(--corum-density-scale, 1));
   border: 0;
   border-radius: 3px;
   color: var(--dsw-alias-label-tertiary);
@@ -172,8 +172,8 @@
   min-width: 84px;
   height: 22px;
   margin-left: auto;
-  padding: 0 6px;
-  gap: 4px;
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+  gap: calc(4px * var(--corum-density-scale, 1));
   border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: 4px;
   color: var(--dsw-alias-label-caption);

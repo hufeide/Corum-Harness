@@ -1,11 +1,11 @@
 .trigger {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   min-width: 0;
   max-width: 220px;
   height: 28px;
-  padding: 0 4px 0 8px;
+  padding: 0 calc(4px * var(--corum-density-scale, 1)) 0 calc(8px * var(--corum-density-scale, 1));
   border: none;
   /* Rounded chip chrome, matching the sibling model trigger. */
   border-radius: 24px;

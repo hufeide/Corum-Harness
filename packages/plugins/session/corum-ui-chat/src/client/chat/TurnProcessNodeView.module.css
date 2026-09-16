@@ -7,7 +7,7 @@
   /* fork（corum 液态玻璃）：工具聚合条从「底部分隔线」升级为 glass-2 浅卡
      + 玻璃光边 + r12，高度由 33 升到 37 保持视觉节奏。 */
   height: 37px;
-  padding: 0 10px;
+  padding: 0 calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 12px;
   background: var(--corum-glass-2);

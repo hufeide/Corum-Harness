@@ -3,9 +3,9 @@
 .card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 12px;
-  padding: 14px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  margin: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1));
   border-radius: 14px;
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
@@ -25,7 +25,7 @@
 .popout {
   margin-top: 6px;
   align-self: flex-start;
-  padding: 5px 11px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(11px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 9px;
   background: transparent;

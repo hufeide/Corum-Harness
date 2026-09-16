@@ -60,7 +60,7 @@
 /* A closed process reads as one summary immediately followed by its answer.
    Expanded process rows return to the ordinary 16px rhythm. */
 .flowItem[data-turn-process-answer] {
-  --dsh-chat-flow-gap: 8px;
+  --dsh-chat-flow-gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 /* A keyed renderer may intentionally decline its row after dispatch (the
@@ -157,7 +157,7 @@
   /* fork（corum 液态玻璃）：glass-2 浅卡 + 光边。 */
   border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
-  padding: 4px 12px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   background: var(--corum-glass-2);

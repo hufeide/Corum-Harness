@@ -7,12 +7,12 @@
 
 /* ── 消息流：裸流正文无卡（减框），块间节奏 ─────────────────────────── */
 [data-chat-flow] {
-  padding: 4px 2px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
 
 /* ── 统一收尾行（turn-tail）：轻操作行，不包卡，平时低调 hover 提亮 ── */
 [data-turn-tail] {
-  padding: 2px 0;
+  padding: calc(2px * var(--corum-density-scale, 1)) 0;
   opacity: 0.85;
 }
 [data-turn-tail]:hover {

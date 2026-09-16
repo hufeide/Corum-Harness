@@ -13,15 +13,15 @@
 .fields {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 8px 0 0;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  margin: calc(8px * var(--corum-density-scale, 1)) 0 0;
   padding-top: 8px;
   border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
 .field {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -43,8 +43,8 @@
 .files {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  margin: 0 0 8px;
+  gap: calc(4px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  margin: 0 0 calc(8px * var(--corum-density-scale, 1));
   padding: 0;
   list-style: none;
 }
@@ -52,7 +52,7 @@
 .file {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -67,7 +67,7 @@
 
 /* catalog: a replacement notice above one row per published entry. */
 .catalogNotice {
-  margin: 0 0 6px;
+  margin: 0 0 calc(6px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-caption);
 }
 
@@ -75,7 +75,7 @@
 .entries {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -83,7 +83,7 @@
 
 .entry {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -105,14 +105,14 @@
 .sections {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   margin: 0;
 }
 
 .section {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -129,7 +129,7 @@
 
 /* relay: who sent this, above what they said. */
 .relaySender {
-  margin: 0 0 6px;
+  margin: 0 0 calc(6px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-caption);
   overflow-wrap: anywhere;
 }
@@ -138,15 +138,15 @@
 .recalls {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 0 0 8px;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  margin: 0 0 calc(8px * var(--corum-density-scale, 1));
   padding: 0;
   list-style: none;
 }
 
 .recall {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 

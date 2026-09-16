@@ -106,7 +106,7 @@ body[data-ds-dark-theme] .panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 20px 14px 24px;
+  padding: calc(18px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1)) calc(24px * var(--corum-density-scale, 1));
   box-sizing: border-box;
 }
 
@@ -120,7 +120,7 @@ body[data-ds-dark-theme] .panel {
 .headerRight {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--corum-density-scale, 1));
 }
 
 /* installed-count iobGY：11px label-tertiary */
@@ -164,8 +164,8 @@ body[data-ds-dark-theme] .panel {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 24px 20px;
+  gap: calc(14px * var(--corum-density-scale, 1));
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(24px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   overflow-y: auto;
 }
@@ -176,7 +176,7 @@ body[data-ds-dark-theme] .panel {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;
 }
 
@@ -186,8 +186,8 @@ body[data-ds-dark-theme] .panel {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
   border-radius: 9px;
@@ -228,8 +228,8 @@ body[data-ds-dark-theme] .panel {
 .sortBtn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
   border-radius: 9px;
@@ -260,9 +260,9 @@ body[data-ds-dark-theme] .panel {
   z-index: 5;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   min-width: 100%;
-  padding: 3px;
+  padding: calc(3px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
   border-radius: 9px;
@@ -271,7 +271,7 @@ body[data-ds-dark-theme] .panel {
 }
 
 .sortOption {
-  padding: 5px 10px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 7px;
   background: transparent;
@@ -300,13 +300,13 @@ body[data-ds-dark-theme] .panel {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
 }
 
 /* chip：r7 / p[4,10] / 10px 600（active：glass-1 + glass-border-active） */
 .chip {
-  padding: 4px 10px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -335,9 +335,9 @@ body[data-ds-dark-theme] .panel {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: calc(14px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 14px;
+  padding: calc(14px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border-active);
   border-radius: 16px;
@@ -363,14 +363,14 @@ body[data-ds-dark-theme] .panel {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: calc(3px * var(--corum-density-scale, 1));
 }
 
 /* r0 k9P8pH：gap 6 / align center */
 .featuredTagRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 .featuredStar {
@@ -406,13 +406,13 @@ body[data-ds-dark-theme] .panel {
 .featuredMeta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 /* btn-install iYM1T：brand-primary / r10 / p[7,16] / 12px 600 on-brand */
 .installBtnLg {
   flex: none;
-  padding: 7px 16px;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 10px;
   background: var(--pm-brand-primary);
@@ -444,7 +444,7 @@ body[data-ds-dark-theme] .panel {
 .marketGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: calc(14px * var(--corum-density-scale, 1));
   width: 100%;
 }
 
@@ -452,9 +452,9 @@ body[data-ds-dark-theme] .panel {
 .mktCard {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
-  padding: 14px;
+  padding: calc(14px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
   border-radius: 16px;
@@ -466,7 +466,7 @@ body[data-ds-dark-theme] .panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;
 }
 
@@ -474,7 +474,7 @@ body[data-ds-dark-theme] .panel {
 .mktCardLeft {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -513,7 +513,7 @@ body[data-ds-dark-theme] .panel {
 .mktStats {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .statStar {
@@ -542,7 +542,7 @@ body[data-ds-dark-theme] .panel {
 .mktMeta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 /* 版本号：JetBrains Mono 10px label-tertiary */
@@ -567,7 +567,7 @@ body[data-ds-dark-theme] .panel {
 /* 卡片安装按钮：brand-primary / r8 / p[5,12] / 11px 600 on-brand */
 .installBtn {
   flex: none;
-  padding: 5px 12px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: var(--pm-brand-primary);
@@ -606,7 +606,7 @@ body[data-ds-dark-theme] .panel {
 
 /* 小按钮：ghost（无底 / label-secondary 11px，hover 变 primary） */
 .viewsEntry {
-  padding: 4px 8px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -625,7 +625,7 @@ body[data-ds-dark-theme] .panel {
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;
 }
 
@@ -633,10 +633,10 @@ body[data-ds-dark-theme] .panel {
 .card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--corum-density-scale, 1));
   flex: none;
   min-height: 66px;
-  padding: 14px;
+  padding: calc(14px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
   border-radius: 16px;
@@ -649,14 +649,14 @@ body[data-ds-dark-theme] .panel {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 
 /* nrow：gap 8 / align center */
 .cardNameRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -682,7 +682,7 @@ body[data-ds-dark-theme] .panel {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 
 /* 开关 sw：36×20 / r10 / brand-primary，knob 16×16（x=18,y=2）on-brand；
@@ -746,9 +746,9 @@ body[data-ds-dark-theme] .panel {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 24px 20px;
-  padding: 8px 12px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  margin: 0 calc(24px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--pm-glass-border);
   border-radius: 12px;
@@ -765,7 +765,7 @@ body[data-ds-dark-theme] .panel {
 
 .noticeAction {
   flex: none;
-  padding: 4px 10px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: var(--pm-brand-primary);
@@ -793,9 +793,9 @@ body[data-ds-dark-theme] .panel {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   align-self: flex-start;
-  padding: 4px 8px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;

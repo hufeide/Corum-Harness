@@ -21,7 +21,7 @@
   width: 100%;
   max-width: var(--dsh-composer-card-max-width);
   margin-bottom: 6px;
-  padding: 4px 8px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 8px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
@@ -36,10 +36,10 @@
   flex-direction: column;
   /* 设计稿 htxWi：padding [12, 12, 10, 14]（上 12 / 右 12 / 下 10 / 左 14）。
      gap 10（设计稿 Chat Input 的 layout gap）。 */
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;
   max-width: var(--dsh-composer-card-max-width);
-  padding: 12px 12px 10px 14px;
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
   /* Input stroke: black/0.10 light, white/0.06 dark (figma darkmode note says
      the input border is one notch weaker than buttons) — exactly the
      l2-darkmode-thin pair. Fill: the input surface token (elevated in dark). */
@@ -103,8 +103,8 @@
 .accessory {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px 0;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)) 0;
 }
 
 /* Floating overlay anchor (menu / popupSelect shell): entries position
@@ -147,7 +147,7 @@
    and scrolls it). 设计稿 htxWi input-line：fontSize 17，height 100。 */
 .input {
   box-sizing: border-box;
-  padding: 4px 12px 0 16px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)) 0 calc(16px * var(--corum-density-scale, 1));
   font-family: var(--dsw-font-family);
   font-size: calc(17px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
@@ -209,7 +209,7 @@
   flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   padding: 0;
   min-width: 0;
 }
@@ -223,12 +223,12 @@
 }
 
 .tools {
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   flex: none;
 }
 
 .modes {
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 /* 设计稿 spacer：fill_container */
@@ -239,7 +239,7 @@
 
 .trailing {
   flex: none;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 /* 设计稿 tbtn：26×26 r8 ghost 按钮 */
@@ -298,8 +298,8 @@
    会话区最小宽度时允许缩小（flex-shrink: 1），文本截断显示。 */
 .tbtnAgent {
   width: auto;
-  padding: 0 8px;
-  gap: 4px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  gap: calc(4px * var(--corum-density-scale, 1));
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -332,8 +332,8 @@
    会话区最小宽度时允许缩小（flex-shrink: 1），文本截断显示。 */
 .tbtnModel {
   width: auto;
-  padding: 0 6px;
-  gap: 5px;
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+  gap: calc(5px * var(--corum-density-scale, 1));
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -402,7 +402,7 @@
 .select {
   max-width: 220px;
   height: 26px;
-  padding: 0 20px 0 8px;
+  padding: 0 calc(20px * var(--corum-density-scale, 1)) 0 calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   outline: none;
@@ -431,7 +431,7 @@
 
 .retry {
   margin-left: 8px;
-  padding: 1px 8px;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: 1px solid currentColor;
   border-radius: 4px;
   background: transparent;

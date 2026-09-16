@@ -3,7 +3,7 @@
 .strip {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: calc(16px * var(--corum-density-scale, 1));
   height: 100%;
   min-width: 0;
 }
@@ -11,7 +11,7 @@
 .segment {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   white-space: nowrap;
   color: var(--dsw-alias-label-secondary);
 }

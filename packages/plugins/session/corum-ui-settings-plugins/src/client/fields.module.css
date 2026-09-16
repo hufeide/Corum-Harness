@@ -3,8 +3,8 @@
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 0;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1)) 0;
 }
 
 .field + .field {
@@ -14,7 +14,7 @@
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .label {
@@ -29,13 +29,13 @@
 .badges {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .badge {
   border-radius: 999px;
   corner-shape: round;
-  padding: 1px 8px;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 17px;
   white-space: nowrap;
@@ -47,7 +47,7 @@
 .badgeMuted {
   border-radius: 999px;
   corner-shape: round;
-  padding: 1px 8px;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 17px;
   white-space: nowrap;
@@ -75,7 +75,7 @@
 
 .input {
   height: 34px;
-  padding: 0 12px;
+  padding: 0 calc(12px * var(--corum-density-scale, 1));
   border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-3);

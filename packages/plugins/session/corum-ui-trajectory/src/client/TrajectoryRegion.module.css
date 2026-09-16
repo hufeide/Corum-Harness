@@ -17,7 +17,7 @@
   flex: 1 1 auto;
   place-items: center;
   min-height: 0;
-  padding: 24px;
+  padding: calc(24px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-secondary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 20px;

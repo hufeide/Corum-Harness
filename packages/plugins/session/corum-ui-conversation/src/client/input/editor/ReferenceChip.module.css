@@ -6,9 +6,9 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: calc(3px * var(--corum-density-scale, 1));
   max-width: 240px;
-  padding: 0 6px;
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
   border-radius: 6px;
   vertical-align: bottom;
   line-height: 22px;

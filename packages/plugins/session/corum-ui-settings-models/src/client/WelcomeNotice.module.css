@@ -13,7 +13,7 @@
 }
 
 .error {
-  margin: 16px 0 0;
+  margin: calc(16px * var(--corum-density-scale, 1)) 0 0;
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 22px;
   color: var(--dsw-alias-state-error-primary);

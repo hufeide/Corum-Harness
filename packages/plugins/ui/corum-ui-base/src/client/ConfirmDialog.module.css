@@ -17,10 +17,10 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 360px;
   max-width: calc(100vw - 48px);
-  padding: 16px;
+  padding: calc(16px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
   background: var(--corum-glass-1);
@@ -60,8 +60,8 @@
   width: 224px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 12px;
   background: var(--corum-glass-1);
@@ -111,12 +111,12 @@
 .row {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   padding-top: 4px;
 }
 
 .cancelBtn {
-  padding: 5px 12px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
@@ -133,7 +133,7 @@
 }
 
 .confirmBtnDanger {
-  padding: 5px 12px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: var(--dsw-alias-state-error-primary);
@@ -145,7 +145,7 @@
 }
 
 .confirmBtnPrimary {
-  padding: 5px 12px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: var(--dsw-alias-brand-primary, var(--corum-state-running));

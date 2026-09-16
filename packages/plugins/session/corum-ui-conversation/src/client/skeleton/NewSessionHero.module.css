@@ -18,7 +18,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 36px; /* 设计稿 center-stage gap 36 */
+  gap: calc(36px * var(--corum-density-scale, 1)); /* 设计稿 center-stage gap 36 */
   /* ⚠️ 2026-09-16（用户报障①：「空态的宽度受 session 宽度左右调节的束缚」）：
      这里原来写 `max-width: var(--dsh-composer-card-max-width, 720px)`，而那个变量是
      `calc(var(--dsh-chat-content-width) + 32px)`、`--dsh-chat-content-width` 又取
@@ -29,7 +29,7 @@
      既不引用会话宽度轴、也不需要 max-width。 */
   width: 100%;
   margin: 0 auto;
-  padding: 40px 0; /* 设计稿 center-stage pad 40 */
+  padding: calc(40px * var(--corum-density-scale, 1)) 0; /* 设计稿 center-stage pad 40 */
   text-align: center;
   box-sizing: border-box; /* padding 计入宽度，防溢出容器导致水平偏移 */
 }
@@ -37,7 +37,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px; /* 设计稿 hero-text gap 14 */
+  gap: calc(14px * var(--corum-density-scale, 1)); /* 设计稿 hero-text gap 14 */
 }
 .newSessionTitle {
   font-size: calc(34px * var(--corum-ui-font-scale, 1)); /* 设计稿 slogan 34/700 */
@@ -52,7 +52,7 @@
 .quickCommands {
   display: flex;
   flex-direction: row;
-  gap: 14px; /* 设计稿 shortcut-group gap 14 */
+  gap: calc(14px * var(--corum-density-scale, 1)); /* 设计稿 shortcut-group gap 14 */
   justify-content: center;
   /* 窄容器时三张 220 卡会溢出：允许换行，空态不该出现横向滚动。 */
   flex-wrap: wrap;
@@ -61,9 +61,9 @@
   display: flex;
   flex-direction: column; /* 设计稿竖排：head 行 + desc 行 */
   align-items: flex-start;
-  gap: 10px; /* 设计稿卡片 gap 10 */
+  gap: calc(10px * var(--corum-density-scale, 1)); /* 设计稿卡片 gap 10 */
   width: 220px; /* 设计稿卡片宽 220 */
-  padding: 18px; /* 设计稿卡片 pad 18 */
+  padding: calc(18px * var(--corum-density-scale, 1)); /* 设计稿卡片 pad 18 */
   border-radius: 16px; /* 设计稿卡片 cr 16 */
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-label-tertiary)); /* #B98CFF2E */
   background: var(--corum-glass-2, transparent); /* #1D112BD9 */
@@ -79,7 +79,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px; /* 设计稿 head gap 8 */
+  gap: calc(8px * var(--corum-density-scale, 1)); /* 设计稿 head gap 8 */
   width: 100%;
 }
 .quickCommandIcon {

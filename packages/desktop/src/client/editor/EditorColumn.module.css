@@ -68,8 +68,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 10px 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
   /* 固定高度对齐 ExplorerPane titlebar（同 53px），消除子像素取整导致的
      折叠/展开两态按钮 Y 差 1px。 */
@@ -81,8 +81,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 10px 9px 12px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(9px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
@@ -180,7 +180,7 @@
 
 .crumb {
   flex: none;
-  padding: 0 14px 8px;
+  padding: 0 calc(14px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
@@ -194,7 +194,7 @@
 .code {
   flex: 1;
   min-height: 0;
-  padding: 0 14px 14px;
+  padding: 0 calc(14px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
 }
 
 /* Review 卡 diff tab 的「重建不完整」提示横幅（见 EditorColumn 的 openContentDiff）。
@@ -202,7 +202,7 @@
 .diffNote {
   flex: none;
   margin-bottom: 8px;
-  padding: 6px 10px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
@@ -216,12 +216,12 @@
   display: flex;
   flex: none;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   padding-bottom: 6px;
 }
 
 .diffToggle {
-  padding: 2px 10px;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 6px;
   background: var(--corum-glass-2);
@@ -248,8 +248,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 14px 8px;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   font-size: calc(9px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
@@ -299,7 +299,7 @@
 /* 加载失败提示条。 */
 .loadError {
   flex: none;
-  padding: 6px 14px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
 }
@@ -330,7 +330,7 @@
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 4px 24px;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1)) calc(24px * var(--corum-density-scale, 1));
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 1.7;
   color: var(--dsw-alias-label-primary);
@@ -354,7 +354,7 @@
   justify-content: center;
   height: 100%;
   overflow: auto;
-  padding: 8px;
+  padding: calc(8px * var(--corum-density-scale, 1));
 }
 .previewImg {
   max-width: 100%;
@@ -395,7 +395,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   height: 100%;
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
@@ -434,7 +434,7 @@
   position: fixed;
   z-index: 1000;
   min-width: 130px;
-  padding: 4px;
+  padding: calc(4px * var(--corum-density-scale, 1));
   border-radius: 10px;
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
@@ -442,13 +442,13 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
 }
 .tabMenuItem {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 6px 10px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -464,7 +464,7 @@
 }
 .tabMenuDivider {
   height: 1px;
-  margin: 3px 6px;
+  margin: calc(3px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   background: var(--corum-glass-border);
 }
 /* ── 面包屑可点击段 ── */
@@ -528,7 +528,7 @@
   border: none !important;
   border-radius: 10px !important;
   box-shadow: none !important;
-  padding: 4px !important;
+  padding: calc(4px * var(--corum-density-scale, 1)) !important;
 }
 :global(.monaco-menu .monaco-action-bar.vertical .action-menu-item) {
   border-radius: 6px !important;
@@ -551,7 +551,7 @@
 /* 菜单分隔线 */
 :global(.monaco-menu .monaco-action-bar.vertical .action-menu-item.separator) {
   border-bottom: 1px solid var(--corum-glass-border) !important;
-  margin: 3px 6px !important;
+  margin: calc(3px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1)) !important;
   padding: 0 !important;
   height: 1px !important;
 }

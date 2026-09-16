@@ -191,7 +191,7 @@
   width: min(300px, calc(100cqw - 120px));
   max-height: var(--turn-preview-height);
   overflow: hidden;
-  padding: 10px 12px;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 10px;
   color: var(--dsw-alias-label-primary);

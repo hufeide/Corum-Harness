@@ -16,8 +16,8 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  padding: 14px;
-  gap: 8px;
+  padding: calc(14px * var(--corum-density-scale, 1));
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 /* 窄轨只保留品牌；完整的任务/项目工作流需要宽侧栏。 */
@@ -39,7 +39,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-height: 40px;
 }
 /* brand-logo（design W7RwT1 2026-08-28 定稿 v7）：矩道品牌卡 134×54 圆角 10
@@ -74,7 +74,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   width: 110px;
   height: 36px;
-  padding: 2px;
+  padding: calc(2px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   background: var(--corum-glass-2);
@@ -102,7 +102,7 @@
   position: relative;
   z-index: 1;
   min-width: 0;
-  padding: 5px 7px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -147,9 +147,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: calc(5px * var(--corum-density-scale, 1));
   min-height: 30px;
-  padding: 6px 10px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border-radius: 9px;
   font: inherit;
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
@@ -174,7 +174,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   padding-top: 6px;
   animation: contentEnter 0.2s ease-out both;
 }
@@ -182,8 +182,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 0 4px 4px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1)) 0 calc(4px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1));
 }
 .secHeadIcon {
   flex: none;
@@ -198,7 +198,7 @@
 .secHeadBadge {
   flex: none;
   min-width: 16px;
-  padding: 0 4px;
+  padding: 0 calc(4px * var(--corum-density-scale, 1));
   border-radius: 8px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-tertiary);
@@ -234,7 +234,7 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   width: 22px;
   height: 22px;
   overflow: hidden;
@@ -244,7 +244,7 @@
 }
 .headSearchOpen {
   width: 150px;
-  padding: 0 4px 0 2px;
+  padding: 0 calc(4px * var(--corum-density-scale, 1)) 0 calc(2px * var(--corum-density-scale, 1));
   border-color: var(--corum-glass-border);
   background: var(--corum-glass-2);
 }
@@ -307,7 +307,7 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   transition: opacity 0.12s ease;
 }
 .headActionsHidden {
@@ -350,14 +350,14 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 .groupRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   height: 30px;
-  padding: 0 10px 0 12px;
+  padding: 0 calc(10px * var(--corum-density-scale, 1)) 0 calc(12px * var(--corum-density-scale, 1));
   border-radius: 8px;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
@@ -394,7 +394,7 @@
   flex: none;
   display: none;
   align-items: center;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 .groupRow:hover .groupActions,
 .groupRowMenuOpen .groupActions {
@@ -421,7 +421,7 @@
 .groupSessions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 /* 「展开其余 N 个会话 / 收起」溢出控件（2026-09-15 用户指示：会话栏只展示最近 5 条）。
    缩进与组内会话行对齐（32px，同 groupEmpty 的左内边距），字号比会话行小一档，
@@ -429,7 +429,7 @@
 .groupMore {
   display: flex;
   align-items: center;
-  padding: 3px 10px 3px 32px;
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1)) calc(3px * var(--corum-density-scale, 1)) calc(32px * var(--corum-density-scale, 1));
   border: none;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
@@ -447,7 +447,7 @@
   outline-offset: -2px;
 }
 .groupEmpty {
-  padding: 4px 10px 6px 32px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1)) calc(32px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
@@ -457,8 +457,8 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 1px 0;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  padding: calc(1px * var(--corum-density-scale, 1)) 0;
 }
 
 /* 状态点（7px；brand/success/warn/idle）。 */
@@ -477,14 +477,14 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
   /* width:100% 必须 box-sizing:border-box——否则 padding（嵌套行 paddingLeft:32
      + paddingRight:10）加在 width 之外，行实际宽 = 容器宽 + 42px，溢出 list 容器
      （曾致行右缘 330 > 侧栏 300、时间/标题被裁——「会话栏布局与设计稿不符」）。 */
   box-sizing: border-box;
   min-height: 34px;
-  padding: 8px 10px 8px 12px;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
@@ -512,7 +512,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 .srResultTitle {
   color: var(--dsw-alias-label-primary);
@@ -524,7 +524,7 @@
 .srResultMeta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 .srResultCtx {
@@ -612,7 +612,7 @@
   text-align: center;
 }
 .empty {
-  padding: 16px 8px;
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
 }
 .emptyState {
@@ -620,8 +620,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 24px 12px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(24px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   /* 空态进入（DESIGN §7.10：opacity + translateY(10px→0) 300ms spring）。 */
   animation: emptyEnter 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
@@ -664,7 +664,7 @@
   line-height: 1.4;
 }
 .projectError {
-  padding: 7px 8px;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
@@ -675,7 +675,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   padding-top: 8px;
   overflow-y: auto;
 }
@@ -683,8 +683,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 0 6px 4px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1)) 0 calc(6px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1));
 }
 .historyHint {
   color: var(--dsw-alias-label-tertiary);
@@ -693,14 +693,14 @@
 .historyList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 .historyRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 6px 8px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -727,7 +727,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
 }
 .historyName {
   color: var(--dsw-alias-label-primary);
@@ -744,7 +744,7 @@
 }
 .historyBadge {
   flex: none;
-  padding: 2px 6px;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   border-radius: 999px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-secondary);
@@ -781,8 +781,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 10px 12px;
+  gap: calc(9px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 12px;
   background: var(--corum-glass-2);
@@ -796,7 +796,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 .projectHeaderName {
   color: var(--dsw-alias-label-primary);
@@ -839,7 +839,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: calc(9px * var(--corum-density-scale, 1));
   overflow-y: auto;
 }
 .manageSection,
@@ -847,7 +847,7 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
 }
 .teamChevron {
   flex: none;
@@ -861,13 +861,13 @@
 .teamList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 .manageRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 8px;
 }
 .manageRow:hover {
@@ -907,9 +907,9 @@
 .teamGh {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 3px 0 3px 4px;
+  padding: calc(3px * var(--corum-density-scale, 1)) 0 calc(3px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1));
   border: none;
   background: transparent;
   font: inherit;
@@ -935,14 +935,14 @@
 .teamSessions {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
 }
 .teamSr {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 8px 10px 8px 12px;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 12px;
   background: transparent;
@@ -968,7 +968,7 @@
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
 }
 .teamEmpty {
-  padding: 9px 8px;
+  padding: calc(9px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
 }
@@ -1005,8 +1005,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 16px 10px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
 }
 .wizardTitle {
   flex: 1;
@@ -1018,8 +1018,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px 12px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: 0 calc(16px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
 }
 .wizardStep {
   color: var(--dsw-alias-label-tertiary);
@@ -1045,8 +1045,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   overflow-y: auto;
 }
 .wizardLabel {
@@ -1056,7 +1056,7 @@
 }
 .wizardInput {
   height: 30px;
-  padding: 0 10px;
+  padding: 0 calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 7px;
   outline: none;
@@ -1071,8 +1071,8 @@
 .wizardDir {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 9px;
+  gap: calc(7px * var(--corum-density-scale, 1));
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
@@ -1092,7 +1092,7 @@
 }
 .wizardDirBadge {
   flex: none;
-  padding: 1px 6px;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   border-radius: 5px;
   background: var(--dsw-alias-state-warn-primary, var(--corum-glass-3));
   color: var(--corum-label-on-brand, #fff);
@@ -1107,8 +1107,8 @@
 .wizardTeamPicker {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 9px;
+  gap: calc(7px * var(--corum-density-scale, 1));
+  padding: 0 calc(9px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
@@ -1132,9 +1132,9 @@
 .wizardRadio {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 5px 2px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
   border: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
@@ -1154,9 +1154,9 @@
 .wizardMembers {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   margin-left: 21px;
-  padding: 4px;
+  padding: calc(4px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
@@ -1164,9 +1164,9 @@
 .wizardMemberRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 5px 6px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -1198,8 +1198,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 18px 0;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(18px * var(--corum-density-scale, 1)) 0;
 }
 .wizardDoneIcon {
   color: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary));
@@ -1217,14 +1217,14 @@
   flex: none;
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   border-top: 1px solid var(--corum-glass-border);
 }
 .wizardBtnGhost,
 .wizardBtnPrimary {
   height: 30px;
-  padding: 0 14px;
+  padding: 0 calc(14px * var(--corum-density-scale, 1));
   border-radius: 8px;
   font: inherit;
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
@@ -1314,7 +1314,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   perspective: 1400px;
 }
 .pane {
@@ -1329,7 +1329,7 @@
 .pane[data-flipping] {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 /* 新面板：入流撑起 sidebarBody 高度；rotateY -90°→0° + 淡入 200ms
    easeOutExpo，延迟 40ms 起跳（= 与旧面板退出重叠 80ms）。 */

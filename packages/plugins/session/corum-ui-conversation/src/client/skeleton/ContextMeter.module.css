@@ -45,7 +45,7 @@
   z-index: 100;
   box-sizing: border-box;
   width: 264px;
-  padding: 12px;
+  padding: calc(12px * var(--corum-density-scale, 1));
   /* fork（corum 液态玻璃）：弹出面板 glass-1 主卡 + 玻璃光边 + blur。 */
   border: 1px solid var(--corum-glass-border);
   border-radius: 12px;
@@ -61,7 +61,7 @@
 .header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 .figures {
@@ -88,8 +88,8 @@
 
 .bar {
   display: flex;
-  gap: 1px;
-  margin: 10px 0 12px;
+  gap: calc(1px * var(--corum-density-scale, 1));
+  margin: calc(10px * var(--corum-density-scale, 1)) 0 calc(12px * var(--corum-density-scale, 1));
   height: 4px;
   border-radius: 999px;
   background: var(--dsw-alias-interactive-bg-hover);
@@ -128,15 +128,15 @@
 }
 
 .rows {
-  margin: 6px 0 0;
+  margin: calc(6px * var(--corum-density-scale, 1)) 0 0;
 }
 
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 2px 0;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1)) 0;
 }
 
 .row dt {

@@ -3,8 +3,8 @@
 .plan {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 10px;
@@ -13,7 +13,7 @@
 .planHead {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 .planIcon {
@@ -30,7 +30,7 @@
 .planList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -39,7 +39,7 @@
 .planItem {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 

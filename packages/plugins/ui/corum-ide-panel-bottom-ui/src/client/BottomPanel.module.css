@@ -3,10 +3,10 @@
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   height: 100%;
   min-width: 0;
-  padding: 10px 14px;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   /* 玻璃卡外观由 RegionCard 基座统一承载，本根卡透明（避免双层叠加）。 */
 }
@@ -16,14 +16,14 @@
 .tabs {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   flex: none;
 }
 /* pt-终端（active：glass-2 + active-border r10 pad[6,12]）。 */
 .tabActive {
   display: inline-flex;
   align-items: center;
-  padding: 6px 12px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border-active);
   border-radius: 10px;
   background: var(--corum-glass-2);

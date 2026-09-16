@@ -22,5 +22,5 @@
 
 .sep {
   color: var(--dsw-alias-border-l2);
-  margin: 0 10px; /* carries the former flex gap */
+  margin: 0 calc(10px * var(--corum-density-scale, 1)); /* carries the former flex gap */
 }

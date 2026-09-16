@@ -5,7 +5,7 @@
 .card {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--corum-density-scale, 1));
   /* 宽度对齐 composer 输入卡（--dsh-composer-card-max-width，由 corum-ui-conversation
      的 .root 发布，= 对话列宽 + 32px）——挂在 conversation.input.dock 时默认是
      composerStack 的直接子元素、width:100% 会铺满整个对话区，与上方对话流/下方输入卡
@@ -13,7 +13,7 @@
   width: 100%;
   max-width: var(--dsh-composer-card-max-width, 720px);
   margin-inline: auto;
-  padding: 14px 18px 12px;
+  padding: calc(14px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border-radius: 16px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
@@ -25,7 +25,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;
 }
 .qIcon {
@@ -42,7 +42,7 @@
 .headTx {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -78,7 +78,7 @@
 .options {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
 }
 
@@ -87,9 +87,9 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 10px 14px;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
   border-radius: 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: transparent;
@@ -138,7 +138,7 @@
 .optionTx {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -161,19 +161,19 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   /* border-box：content-box 下 width:100% 会把左右各 12px 的 padding 加到内容宽之外，
      容器右缘顶出卡片右边框 ~7px（实测）。与 .card 统一 border-box。 */
   box-sizing: border-box;
   width: 100%;
-  padding: 9px 12px;
+  padding: calc(9px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border-radius: 10px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
 }
 .custom[data-free] {
   align-items: flex-start;
-  padding: 12px 14px;
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
 }
 .customIcon {
   flex: none;
@@ -202,7 +202,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
 }
 /* q-pager 左下角：prev/next 32×32 r9 + page 15/600 */
@@ -210,7 +210,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 .pageBtn {
   display: inline-flex;
@@ -244,7 +244,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 7px 14px;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
   border-radius: 9px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
@@ -261,7 +261,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 7px 18px;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 9px;
   background: var(--dsw-alias-state-business-primary);

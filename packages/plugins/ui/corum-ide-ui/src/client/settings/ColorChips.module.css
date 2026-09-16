@@ -6,7 +6,7 @@
 .chips {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   flex: none;
 }
 

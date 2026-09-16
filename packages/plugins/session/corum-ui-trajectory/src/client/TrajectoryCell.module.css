@@ -6,8 +6,8 @@
   align-items: center;
   box-sizing: border-box;
   height: 38px;
-  padding: 0 8px 0 20px;
-  gap: 24px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1)) 0 calc(20px * var(--corum-density-scale, 1));
+  gap: calc(24px * var(--corum-density-scale, 1));
   border-radius: 8px;
   border: 0.5px solid var(--dsw-alias-border-l4);
   background: var(--dsw-alias-bg-layer-3);
@@ -40,7 +40,7 @@
   box-sizing: border-box;
   height: 22px;
   max-width: 100%;
-  padding: 0 4px;
+  padding: 0 calc(4px * var(--corum-density-scale, 1));
   border-radius: 6px;
   font: var(--dsw-font-xs-strong-13);
   white-space: nowrap;
@@ -123,7 +123,7 @@
   align-items: center;
   justify-content: flex-end;
   width: 320px;
-  gap: 12px;
+  gap: calc(12px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 

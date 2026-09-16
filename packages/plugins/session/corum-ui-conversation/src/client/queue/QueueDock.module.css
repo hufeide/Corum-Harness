@@ -29,7 +29,7 @@
   position: relative;
   overflow: hidden;
   width: 100%;
-  padding: 2px 0;
+  padding: calc(2px * var(--corum-density-scale, 1)) 0;
   border-radius: 12px 12px 0 0;
   /* fork（corum 液态玻璃）：队列面板 glass-2 + blur（描边在 ::after）。 */
   background: var(--corum-glass-2);
@@ -54,12 +54,12 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;
   height: 36px;
   /* Right inset 12px puts the chevron on the same vertical line as the Todo
      header's chevron (12px body padding there). */
-  padding: 4px 12px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -114,10 +114,10 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;
   height: 36px;
-  padding: 4px 5px 4px 12px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(5px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border-radius: 8px;
 }
 
@@ -144,7 +144,7 @@
 .editor {
   box-sizing: border-box;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 6px;
   outline: none;
@@ -160,7 +160,7 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 
 .action {

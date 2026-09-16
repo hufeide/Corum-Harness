@@ -8,7 +8,7 @@
 .offline {
   display: inline-flex;
   align-items: center;
-  padding: 2px 7px;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1));
   border-radius: 6px;
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: calc(14px * var(--corum-ui-font-scale, 1));

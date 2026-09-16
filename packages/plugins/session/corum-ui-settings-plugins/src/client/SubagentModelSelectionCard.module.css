@@ -1,14 +1,14 @@
 .permission {
   display: grid;
-  gap: 6px;
-  padding: 12px 0;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1)) 0;
 }
 
 .toggleRow {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(16px * var(--corum-density-scale, 1));
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
   color: var(--dsw-alias-label-primary);
@@ -25,7 +25,7 @@
   flex: 0 0 auto;
   width: 36px;
   height: 20px;
-  padding: 2px;
+  padding: calc(2px * var(--corum-density-scale, 1));
   border: 0;
   border-radius: 10px;
   background: var(--dsw-alias-border-l3);
@@ -62,7 +62,7 @@
 
 .selection {
   display: grid;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 
 .hint,
@@ -88,7 +88,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--corum-density-scale, 1));
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
 }
@@ -103,25 +103,25 @@
 
 .models {
   display: grid;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
   max-height: 280px;
   margin: 0;
-  padding: 10px;
+  padding: calc(10px * var(--corum-density-scale, 1));
   overflow: auto;
   border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: 8px;
 }
 
 .models legend {
-  padding: 0 4px;
+  padding: 0 calc(4px * var(--corum-density-scale, 1));
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
 
 .modelGroup {
   display: grid;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 .modelGroup + .modelGroup {
@@ -131,7 +131,7 @@
 }
 
 .providerName {
-  padding: 0 6px;
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   color: var(--dsw-alias-label-tertiary);
@@ -141,9 +141,9 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
-  padding: 6px;
+  padding: calc(6px * var(--corum-density-scale, 1));
   border-radius: 6px;
   cursor: pointer;
 }

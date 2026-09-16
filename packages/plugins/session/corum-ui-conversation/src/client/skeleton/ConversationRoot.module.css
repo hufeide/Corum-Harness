@@ -55,11 +55,11 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   min-height: var(--corum-session-topbar-height, 44px);
   margin: var(--corum-session-topbar-margin, 12px 12px 0);
-  padding: 0 12px;
+  padding: 0 calc(12px * var(--corum-density-scale, 1));
   /* 无卡片外观（2026-09-11 用户定调）：去掉 glass-1 底、glass-border 描边与圆角，
      让会话标题与状态胶囊**直接坐在环境背景上**，与左侧 nav 上方的 titlebarRow
      (AppFrame.module.css .navTitleBar —— 本来就无底无边) 视觉一致。
@@ -90,7 +90,7 @@
      min-height + 居中承担，这里只保证行内元素居中不换行）。 */
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -98,14 +98,14 @@
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
 .crumbs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -114,7 +114,7 @@
 .crumbSeg {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -128,7 +128,7 @@
 .crumb {
   max-width: 220px;
   overflow: hidden;
-  padding: 4px 8px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 12px;
   background: transparent;
@@ -159,14 +159,14 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .headerUtilities {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   margin-left: 20px;
 }
 
@@ -179,7 +179,7 @@
   position: relative;
   z-index: 1;
   display: flex;
-  gap: 36px;
+  gap: calc(36px * var(--corum-density-scale, 1));
   margin-top: 4px;
   padding-left: 8px;
 }
@@ -187,7 +187,7 @@
 /* figma .Tab 34:11442: 13/16 text (figma wt510, rendered 500), gap 8 to the 2px bar. */
 .tab {
   position: relative;
-  padding: 0 0 11px;
+  padding: 0 0 calc(11px * var(--corum-density-scale, 1));
   border: none;
   background: transparent;
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
@@ -309,7 +309,7 @@
 .composerStack {
   /* Horizontal geometry (card width, clearance, dock inset) rides the shared
      .root variables above so takeover siblings match the stack. */
-  --dsh-composer-stack-gap: 6px;
+  --dsh-composer-stack-gap: calc(6px * var(--corum-density-scale, 1));
 
   display: flex;
   flex-direction: column;
@@ -391,8 +391,8 @@
   width: 100%;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 12px 16px;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 10px;
   background: var(--dsw-alias-brand-primary);
@@ -573,7 +573,7 @@
   --dsh-composer-card-max-width: calc(clamp(680px, calc(var(--dsh-conversation-column-width, 0px) * 0.64), 920px) + 32px);
   /* figma 75:8208 drew 12 between all three rows; the workspace row now sits
      8 above the card (its margin-top restores 12 under the hero chrome). */
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   /* Foot inside the centered box floats the stack a bit above true center. */
   padding-bottom: 32px;
   /* Card cap + both clearances: the hero input card lands at exactly the same
@@ -605,7 +605,7 @@
 .heroWorkspaceRow {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   min-width: 0;
   margin-top: 4px;
   /* figma drew px 8; nudged +12 so the chip's folder glyph lines up closer to
@@ -635,8 +635,8 @@
 .agentLockChip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border-radius: 999px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-label-tertiary));
   background: var(--corum-glass-2, transparent);
@@ -657,7 +657,7 @@
   display: inline-flex;
   flex-direction: row;
   align-items: center;
-  gap: 3px;
+  gap: calc(3px * var(--corum-density-scale, 1));
   border: none;
   background: transparent;
   color: inherit;
@@ -688,7 +688,7 @@
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   /* 宽度自适应最长条目（2026-09-07 用户定调：「昵称-岗位」变长后 220px 写死
      会截断）。width:max-content 按内容撑开，min-width 保底（短列表不塌缩成
      窄条），max-width 防极端长昵称把面板顶出列；条目自身 white-space:nowrap
@@ -699,7 +699,7 @@
   max-height: 320px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 6px;
+  padding: calc(6px * var(--corum-density-scale, 1));
   border-radius: 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-3, var(--dsw-alias-bg-layer-3));
@@ -709,9 +709,9 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 6px 8px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -738,16 +738,16 @@
 .agentSelList {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 2px 0 4px 20px;
+  gap: calc(1px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1)) 0 calc(4px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1));
 }
 .agentSelItem {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 6px 8px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -781,8 +781,8 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 5px;
-  padding: 3px 5px 5px;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(5px * var(--corum-density-scale, 1)) calc(5px * var(--corum-density-scale, 1));
   margin-bottom: 2px;
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
@@ -799,7 +799,7 @@
   font: inherit;
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   outline: none;
-  padding: 2px 0;
+  padding: calc(2px * var(--corum-density-scale, 1)) 0;
 }
 .agentSelSearchInput::placeholder {
   color: var(--dsw-alias-label-tertiary);
@@ -829,7 +829,7 @@
   color: var(--dsw-alias-label-tertiary);
 }
 .agentSelEmpty {
-  padding: 12px 8px;
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   text-align: center;
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);

@@ -9,8 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 2px;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
   box-sizing: border-box;
 }
 
@@ -20,14 +20,14 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 
 /* label 行（含 badge）*/
 .labelRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 /* 行标题（设计稿: Inter 13px 600, label-primary）*/

@@ -13,7 +13,7 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
 
@@ -22,7 +22,7 @@
 .back {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   padding: 0;
   border: none;
   background: none;
@@ -47,28 +47,28 @@
   background: var(--corum-glass-1);
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
-  padding: 14px 16px;
+  padding: calc(14px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 
 .cardHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 .cardHeadLeft {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 .cardHeadTitle {
   display: inline-flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 .cardName {
@@ -85,7 +85,7 @@
 .cardHeadRight {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   flex: none;
 }
 
@@ -107,8 +107,8 @@
 .statusPill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border-radius: 6px;
 }
@@ -129,7 +129,7 @@
 }
 
 /* ── 行内小图标钮（✏️🗑 26×26 r7） ── */
-.rowActions { display: inline-flex; align-items: center; gap: 2px; }
+.rowActions { display: inline-flex; align-items: center; gap: calc(2px * var(--corum-density-scale, 1)); }
 .iconBtn {
   display: inline-flex;
   align-items: center;
@@ -156,12 +156,12 @@
 .iconBtn:disabled { opacity: 0.4; cursor: default; }
 
 /* ── chips 行 ── */
-.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: calc(6px * var(--corum-density-scale, 1)); }
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 7px;
@@ -174,8 +174,8 @@
 .chipAdd {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 4px 8px;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   background: transparent;
   border: 1px solid var(--corum-glass-border);
   border-radius: 7px;
@@ -208,7 +208,7 @@
 .customIdField {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   align-self: stretch;
 }
 .customIdLabel {
@@ -219,7 +219,7 @@
 .customIdInput {
   width: 100%;
   height: 34px;
-  padding: 8px 12px;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
@@ -235,8 +235,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 12px 16px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   background: transparent;
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
@@ -252,10 +252,10 @@
   background: var(--corum-glass-1);
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
-  padding: 6px 16px 10px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
 }
 .settingGroupTitle {
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
@@ -268,11 +268,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 2px;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
-.settingControl { flex: none; display: inline-flex; align-items: center; gap: 8px; max-width: 60%; flex-wrap: wrap; justify-content: flex-end; }
-.settingRowStacked { flex-direction: column; align-items: stretch; gap: 6px; }
+.settingControl { flex: none; display: inline-flex; align-items: center; gap: calc(8px * var(--corum-density-scale, 1)); max-width: 60%; flex-wrap: wrap; justify-content: flex-end; }
+.settingRowStacked { flex-direction: column; align-items: stretch; gap: calc(6px * var(--corum-density-scale, 1)); }
 .settingControlStacked { max-width: none; width: 100%; justify-content: flex-start; }
 .settingDivider { height: 1px; background: var(--corum-glass-border); opacity: 0.5; }
 
@@ -281,17 +281,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 2px;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
-.fieldMeta { display: inline-flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fieldMeta { display: inline-flex; flex-direction: column; gap: calc(2px * var(--corum-density-scale, 1)); min-width: 0; }
 .fieldLabel { font-size: calc(13px * var(--corum-ui-font-scale, 1)); line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); }
 .fieldDesc { font-size: calc(11px * var(--corum-ui-font-scale, 1)); line-height: 16px; color: var(--dsw-alias-label-tertiary); }
 
 .textField {
   width: 180px;
   height: 32px;
-  padding: 7px 10px;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
@@ -310,7 +310,7 @@
   width: 100%;
   height: 32px;
   appearance: none;
-  padding: 7px 30px 7px 10px;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(30px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
@@ -361,9 +361,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   height: 34px;
-  padding: 0 14px;
+  padding: 0 calc(14px * var(--corum-density-scale, 1));
   border-radius: 10px;
   font: inherit;
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
@@ -426,8 +426,8 @@
 .resultPill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border-radius: 6px;
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
@@ -442,9 +442,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
-.footRight { display: inline-flex; align-items: center; gap: 8px; }
+.footRight { display: inline-flex; align-items: center; gap: calc(8px * var(--corum-density-scale, 1)); }
 
 /* ── 错误 / 提示 ── */
 .error { margin: 0; font-size: calc(12px * var(--corum-ui-font-scale, 1)); line-height: 18px; color: var(--dsw-alias-state-error-primary); }
@@ -458,14 +458,14 @@
 .cardGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--corum-density-scale, 1));
 }
 .modelCard {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
-  padding: 14px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1));
   background: var(--corum-glass-1);
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
@@ -475,7 +475,7 @@
   min-height: 148px;
 }
 .modelCard:hover { border-color: var(--corum-glass-border-active); }
-.modelCardTop { display: inline-flex; align-items: center; gap: 8px; }
+.modelCardTop { display: inline-flex; align-items: center; gap: calc(8px * var(--corum-density-scale, 1)); }
 .brandLogo {
   display: inline-flex;
   align-items: center;
@@ -498,8 +498,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 14px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1));
   min-height: 148px;
   background: transparent;
   border: 1px solid var(--corum-glass-border);
@@ -541,15 +541,15 @@
 .segSwitch {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   width: fit-content;
 }
 .segBtn {
-  padding: 5px 14px;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -562,8 +562,8 @@
 .brandGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-  padding: 8px;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
@@ -571,8 +571,8 @@
 .brandCell {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -589,8 +589,8 @@
 .selRow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   background: transparent;
@@ -630,17 +630,17 @@
 }
 .radioOn { background: var(--corum-state-running, var(--dsw-alias-brand-primary)); border-color: transparent; }
 .radioInner { width: 6px; height: 6px; border-radius: 50%; background: var(--corum-label-on-brand, #fff); }
-.btnRowBetween { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.btnRowBetween { display: flex; align-items: center; justify-content: space-between; gap: calc(8px * var(--corum-density-scale, 1)); }
 .lockedProviderTag { font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); font-weight: 400; }
 
 /* ── 主页：供应商卡片（单列横排大卡） ── */
-.providerList { display: flex; flex-direction: column; gap: 10px; }
+.providerList { display: flex; flex-direction: column; gap: calc(10px * var(--corum-density-scale, 1)); }
 .providerCard {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 14px 16px;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   background: var(--corum-glass-1);
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
@@ -649,14 +649,14 @@
   cursor: pointer;
 }
 .providerCard:hover { border-color: var(--corum-glass-border-active); }
-.providerCardLeft { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
-.providerCardRight { display: inline-flex; align-items: center; gap: 8px; flex: none; color: var(--dsw-alias-label-tertiary); }
+.providerCardLeft { display: inline-flex; align-items: center; gap: calc(10px * var(--corum-density-scale, 1)); min-width: 0; }
+.providerCardRight { display: inline-flex; align-items: center; gap: calc(8px * var(--corum-density-scale, 1)); flex: none; color: var(--dsw-alias-label-tertiary); }
 .addProviderCard {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 14px 16px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   background: transparent;
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
@@ -668,24 +668,24 @@
 .addProviderCard:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-1); }
 
 /* ── 锁定供应商（添加模型场景，只读） ── */
-.lockedProvider { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--corum-glass-2); border: 1px solid var(--corum-glass-border); border-radius: 10px; width: fit-content; }
+.lockedProvider { display: inline-flex; align-items: center; gap: calc(8px * var(--corum-density-scale, 1)); padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)); background: var(--corum-glass-2); border: 1px solid var(--corum-glass-border); border-radius: 10px; width: fit-content; }
 .lockedProviderName { font-size: calc(12px * var(--corum-ui-font-scale, 1)); font-weight: 600; color: var(--dsw-alias-label-primary); }
 
 /* ── 表单字段（label 上 + 控件下，整宽） ── */
-.fieldCol { display: flex; flex-direction: column; gap: 6px; }
+.fieldCol { display: flex; flex-direction: column; gap: calc(6px * var(--corum-density-scale, 1)); }
 .formCard {
   background: var(--corum-glass-1);
   border: 1px solid var(--corum-glass-border);
   border-radius: 16px;
-  padding: 16px;
+  padding: calc(16px * var(--corum-density-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--corum-density-scale, 1));
 }
 .inputFull {
   width: 100%;
   height: 34px;
-  padding: 8px 12px;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
@@ -695,15 +695,15 @@
 }
 .inputFull:focus { outline: none; border-color: var(--corum-glass-border-active); }
 .inputFull::placeholder { color: var(--dsw-alias-label-dimmed); }
-.priceInput { display: inline-flex; align-items: center; gap: 4px; }
+.priceInput { display: inline-flex; align-items: center; gap: calc(4px * var(--corum-density-scale, 1)); }
 .priceUnit { font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 
 
 /* ── 列表 ul 重置 ── */
-.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(14px * var(--corum-density-scale, 1)); }
 
 /* ── 编辑器卡（嵌在 provider 卡内展开的表单区） ── */
-.editorSection { display: flex; flex-direction: column; gap: 12px; }
+.editorSection { display: flex; flex-direction: column; gap: calc(12px * var(--corum-density-scale, 1)); }
 
 /* ── 候选模型拾取弹窗（官方 0.1.3 增量：搜索框 candidateToolbar/Search/Empty
    + candidateList 全套，corum 此前缺失——合并自官方 ModelsSection.module.css） ── */
@@ -716,7 +716,7 @@
 .candidateToolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   margin-bottom: 6px;
 }
 
@@ -728,7 +728,7 @@
 .candidateList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   max-height: 320px;
   margin: 0;
   overflow-y: auto;
@@ -743,8 +743,8 @@
 .candidateLabel {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   cursor: pointer;
 }
 
@@ -756,7 +756,7 @@
 }
 
 .candidateEmpty {
-  margin: 24px 0;
+  margin: calc(24px * var(--corum-density-scale, 1)) 0;
   color: var(--dsw-alias-label-secondary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 20px;

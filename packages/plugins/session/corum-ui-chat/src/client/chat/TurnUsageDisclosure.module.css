@@ -20,7 +20,7 @@
   flex: none;
   width: 2px;
   height: 2px;
-  margin: 0 8px;
+  margin: 0 calc(8px * var(--corum-density-scale, 1));
   border-radius: 1px;
   background: var(--dsw-alias-label-caption);
 }
@@ -39,12 +39,12 @@
 .details {
   display: grid;
   grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
-  gap: 6px 16px;
+  gap: calc(6px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   /* Indent under the title, which starts at leading (16 + delta) + gap 6. */
   width: calc(100% - 22px - var(--dsh-content-font-delta, 0px));
   margin: 4px 0 0 calc(22px + var(--dsh-content-font-delta, 0px));
-  padding: 10px 16px 12px 12px;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
   /* fork（corum 液态玻璃）：用量明细 glass-2 浅底 + 玻璃光边 + r12。 */
   border: 1px solid var(--corum-glass-border);
   border-radius: 12px;

@@ -5,7 +5,7 @@
 .actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   height: calc(28px + var(--dsh-content-font-delta, 0px));
 }
 
@@ -28,7 +28,7 @@
 
 /* Separator between the clock and the run-time label (time · Ran for 15s). */
 .runTimeDot {
-  margin: 0 10px;
+  margin: 0 calc(10px * var(--corum-density-scale, 1));
 }
 
 /* Message containers opt in with data-time-hover-root: the time label fades
@@ -52,7 +52,7 @@
   justify-content: center;
   width: calc(28px + var(--dsh-content-font-delta, 0px));
   height: calc(28px + var(--dsh-content-font-delta, 0px));
-  padding: 6px;
+  padding: calc(6px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 28px;
   background: transparent;

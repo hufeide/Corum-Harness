@@ -131,7 +131,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   height: 100%;
   color: var(--dsw-alias-label-tertiary);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));

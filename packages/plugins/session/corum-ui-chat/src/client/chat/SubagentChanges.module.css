@@ -4,8 +4,8 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 10px;
@@ -14,7 +14,7 @@
 .head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   flex-wrap: wrap;
 }
 
@@ -33,7 +33,7 @@
 .worktreeRow {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: calc(5px * var(--corum-density-scale, 1));
   min-width: 0;
   margin-left: auto;
 }
@@ -55,7 +55,7 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  padding: 2px 7px;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1));
   border-radius: 6px;
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   background: transparent;
@@ -69,8 +69,8 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1));
   border-radius: 6px;
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   background: transparent;
@@ -84,7 +84,7 @@
 .empty {
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
-  padding: 4px 2px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
 
 .fileList {
@@ -104,13 +104,13 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 3px 2px;
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
 
 .fileRowFallback {
   display: flex;
   align-items: center;
-  padding: 3px 2px;
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
 
 .filePath {
@@ -170,7 +170,7 @@
 .fileDiff {
   display: inline-flex;
   flex: none;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   margin-left: auto;
   padding-left: 12px;
   font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -189,7 +189,7 @@
 .fileActions {
   display: inline-flex;
   flex: none;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   padding-left: 8px;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -203,8 +203,8 @@
 .fileActionButton {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 8px;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 6px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));

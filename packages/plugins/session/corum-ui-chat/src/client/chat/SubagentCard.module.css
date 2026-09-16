@@ -3,8 +3,8 @@
 .card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1));
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 14px;
@@ -14,7 +14,7 @@
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .avatar {
@@ -44,7 +44,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
 }
 
 .name {
@@ -68,7 +68,7 @@
 .modelRow {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: calc(5px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -90,8 +90,8 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border-active, #01CDFE);
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
@@ -115,8 +115,8 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
@@ -131,8 +131,8 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
@@ -147,8 +147,8 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
@@ -217,7 +217,7 @@
 .stepRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -239,8 +239,8 @@
 .detail {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 10px;
@@ -249,7 +249,7 @@
 .detailHead {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 .detailIcon {
@@ -295,7 +295,7 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  padding: 3px 8px;
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 8px;
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   background: transparent;

@@ -10,8 +10,8 @@
   --orch-idle: var(--dsw-alias-label-tertiary);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(14px * var(--corum-density-scale, 1));
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   border-radius: 14px;
@@ -23,7 +23,7 @@
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .avatar {
@@ -47,7 +47,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
 }
 
 .name {
@@ -72,8 +72,8 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border-radius: 9px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
@@ -191,20 +191,20 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 
 .branches {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
 .branchRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -252,8 +252,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border-radius: 8px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.4));
 }
@@ -264,7 +264,7 @@
 .mergeStage {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
 }
 
 /* 汇总小标题——比分支 label 弱、字号更小，一眼读出「这不是并行分支」。 */
@@ -279,8 +279,8 @@
 .mergeCard {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border-radius: 8px;
   background: rgba(42, 24, 64, 0.2);
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
@@ -312,7 +312,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(1px * var(--corum-density-scale, 1));
 }
 
 .branchLabel {
@@ -336,7 +336,7 @@
 .branchModel {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   margin-top: 1px;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -358,7 +358,7 @@
 /* 分支状态 chip（设计稿 brX chip：r8 + 1px 描边 + 12/600）。 */
 .branchChip {
   flex: none;
-  padding: 2px 8px;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 8px;
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;

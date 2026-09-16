@@ -26,7 +26,7 @@
      顶 margin 0、高 40，底部与左侧红绿灯/图标按钮底对齐；非交互区承担拖窗
      （卡内按钮经 ConversationRoot.module.css 的 .header button 规则 no-drag）。
      浮窗不走 .frame（floatingRoot 独立 root），不受影响。 */
-  --corum-session-topbar-margin: 0 12px 0;
+  --corum-session-topbar-margin: 0 calc(12px * var(--corum-density-scale, 1)) 0;
   --corum-session-topbar-height: 40px;
   --corum-session-topbar-app-region: drag;
 }
@@ -87,7 +87,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   height: 40px;
   box-sizing: border-box;
 }
@@ -104,7 +104,7 @@
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -117,7 +117,7 @@
   width: 28px;
   height: 28px;
   margin: 0;
-  padding: 6px;
+  padding: calc(6px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -158,7 +158,7 @@
   width: 28px;
   height: 28px;
   margin: 0;
-  padding: 6px;
+  padding: calc(6px * var(--corum-density-scale, 1));
   border-radius: 8px;
   justify-content: center;
   gap: 0;
@@ -174,10 +174,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   height: 28px;
   margin: 0;
-  padding: 0 8px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -225,8 +225,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   margin: 0 -8px 0 0;
   border: none;
   border-radius: 7px;
@@ -283,9 +283,9 @@
   z-index: 60;
   display: flex;
   flex-direction: column;
-  gap: 12px; /* 设计稿 ④ gap 12 */
+  gap: calc(12px * var(--corum-density-scale, 1)); /* 设计稿 ④ gap 12 */
   width: 560px; /* 设计稿 ④ 真实浮层宽度 560（非撑宽的长方形：旧版 min-width 480 + 三列 chart） */
-  padding: 16px; /* ④ pad 16 */
+  padding: calc(16px * var(--corum-density-scale, 1)); /* ④ pad 16 */
   background: var(--corum-glass-1, rgba(29, 17, 43, 0.92));
   border: 1px solid var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
   border-radius: 18px; /* GpfJh cornerRadius 18 */
@@ -307,7 +307,7 @@
 .statusDetailHead {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 .statusDetailDot {
@@ -334,13 +334,13 @@
 .statusDetailGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px 12px;
+  gap: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
 }
 
 .statusDetailStat {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -389,7 +389,7 @@
   /* 设计稿 ④：两列等高（左 = 生成速度曲线，右 = 上下文 donut）。旧版是 3 列
      align-items:end（donut / 命中率曲线 / 累计费用曲线），后两者已按用户要求删除。 */
   align-items: stretch;
-  gap: 16px;
+  gap: calc(16px * var(--corum-density-scale, 1));
 }
 
 /* 曲线列限宽：donut 列内容窄（200），把剩余宽度给曲线（设计稿 chart-speed
@@ -397,7 +397,7 @@
 .statusDetailChartCol {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
@@ -405,7 +405,7 @@
 .statusDetailChartColHead {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
 .statusDetailChartColSpacer {
@@ -426,14 +426,14 @@
 .statusDetailSpeedFoot {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: calc(14px * var(--corum-density-scale, 1));
   flex-wrap: wrap;
 }
 
 .statusDetailSpeedItem {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   white-space: nowrap;
 }
 
@@ -490,7 +490,7 @@
 .statusDetailLegend {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--corum-density-scale, 1));
   /* 图例在 donut 下方、占满该列宽度（设计稿 ④ 的纵向环+图例）；
      旧版是横向并排 legend w150，窄列下数值会被裁切。 */
   width: 100%;
@@ -499,7 +499,7 @@
 .statusDetailLegendRow {
   display: flex;
   align-items: center;
-  gap: 6px; /* lr gap 6 */
+  gap: calc(6px * var(--corum-density-scale, 1)); /* lr gap 6 */
 }
 
 .statusDetailLegendDot {
@@ -537,7 +537,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  padding: 6px;
+  padding: calc(6px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -566,7 +566,7 @@
 /* (legacy grid tracks — superseded by GridView, kept for reference)
 .mainRow {
   display: grid;
-  gap: 14px;
+  gap: calc(14px * var(--corum-density-scale, 1));
   min-height: 0;
   flex: 1;
   transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);
@@ -622,9 +622,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   height: 100%;
-  padding: 10px 0;
+  padding: calc(10px * var(--corum-density-scale, 1)) 0;
   box-sizing: border-box;
 }
 
@@ -853,7 +853,7 @@
   position: relative;
   /* 卡片承担整条拖窗；左边距 = inset 66 + 设计稿 gap 8 = 74。 */
   --corum-session-topbar-app-region: drag;
-  --corum-session-topbar-margin: 12px 12px 0 74px;
+  --corum-session-topbar-margin: calc(12px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)) 0 calc(74px * var(--corum-density-scale, 1));
 }
 
 .floatingRoot[data-self-chrome] /* 「收回到主窗口」按钮：app-region:no-drag 才能在拖拽区里点到（否则整条 chrome
@@ -900,10 +900,10 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--corum-density-scale, 1));
   height: 40px;
   /* 系统红黄绿圆点（titleBarStyle:'hidden' 保留）在左上角，左 padding 让位。 */
-  padding: 0 14px 0 84px;
+  padding: 0 calc(14px * var(--corum-density-scale, 1)) 0 calc(84px * var(--corum-density-scale, 1));
   -webkit-app-region: drag; /* drag the window by its chrome */
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
@@ -927,7 +927,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: calc(12px * var(--corum-density-scale, 1));
   overflow: hidden;
 }
 
@@ -980,10 +980,10 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   height: 100%;
   min-height: 0;
-  padding: 10px 8px 14px;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
   overflow: hidden;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
@@ -1032,7 +1032,7 @@
   width: 24px;
   height: 24px;
   margin: 0;
-  padding: 3px;
+  padding: calc(3px * var(--corum-density-scale, 1));
   border-radius: 8px;
   justify-content: center;
   gap: 0;
@@ -1061,7 +1061,7 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  padding: 40px;
+  padding: calc(40px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   background: var(--dsw-alias-bg-base);
 }
@@ -1072,7 +1072,7 @@
 }
 
 .launcherTitle {
-  margin: 0 0 8px;
+  margin: 0 0 calc(8px * var(--corum-density-scale, 1));
   font-size: calc(28px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
@@ -1087,7 +1087,7 @@
 .launcherGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 20px;
+  gap: calc(20px * var(--corum-density-scale, 1));
   max-width: 900px;
   width: 100%;
 }
@@ -1096,8 +1096,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 28px 16px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(28px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
@@ -1122,8 +1122,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 28px 16px;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(28px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   border: 2px dashed var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
   background: transparent;
@@ -1193,7 +1193,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: calc(6px * var(--corum-density-scale, 1));
   height: 100%;
   color: var(--dsw-alias-label-dimmed);
 }
@@ -1215,7 +1215,7 @@
   flex: none;
   width: 1px;
   height: 12px;
-  margin: 0 2px;
+  margin: 0 calc(2px * var(--corum-density-scale, 1));
   background: var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
 .agentCapsuleDot {
@@ -1272,7 +1272,7 @@
 .statusDetailAgents {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: calc(5px * var(--corum-density-scale, 1));
   margin-top: 2px;
   padding-top: 10px;
   border-top: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
@@ -1280,7 +1280,7 @@
 .statusDetailAgentsHead {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 .statusDetailAgentsTitle {
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
@@ -1295,9 +1295,9 @@
 .statusDetailAgentRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 4px 6px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -1342,7 +1342,7 @@
 }
 .statusDetailAgentBadge {
   flex: none;
-  padding: 1px 6px;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   border-radius: 6px;
   background: var(--corum-glass-2);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
@@ -1353,7 +1353,7 @@
    调研=业务蓝（只读调查） / 执行=品牌主色（干活） / 分叉=紫（继承上下文）。 */
 .statusDetailAgentRole {
   flex: none;
-  padding: 1px 6px;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   border-radius: 6px;
   border: 1px solid var(--corum-glass-3, rgba(255, 255, 255, 0.14));
   background: transparent;
@@ -1387,9 +1387,9 @@
 .statusDetailFoldRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--corum-density-scale, 1));
   width: 100%;
-  padding: 4px 6px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
   background: transparent;
