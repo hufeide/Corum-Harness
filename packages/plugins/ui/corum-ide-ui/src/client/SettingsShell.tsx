@@ -62,7 +62,7 @@ function navIcon(id: string): ReactNode {
     memory: <Brain className={cls} size={14} />,
     terminal: <Terminal className={cls} size={14} />,
     hooks: <Webhook className={cls} size={14} />,
-    'agent-loop': <Repeat className={cls} size={14} />,
+    'agent-settings': <Repeat className={cls} size={14} />,
     account: <User className={cls} size={14} />,
     privacy: <Shield className={cls} size={14} />,
     data: <Archive className={cls} size={14} />,

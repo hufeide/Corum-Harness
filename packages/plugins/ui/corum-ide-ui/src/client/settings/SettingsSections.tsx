@@ -16,13 +16,12 @@ import { AppearanceSection } from './sections/SettingsAppearanceSection.tsx'
 import { NotificationsSection } from './sections/SettingsNotificationsSection.tsx'
 import { ShortcutsSection } from './sections/SettingsShortcutsSection.tsx'
 import { TerminalSection } from './sections/SettingsTerminalSection.tsx'
-import { AgentLoopSection } from './sections/SettingsAgentLoopSection.tsx'
+import { AgentSettingsSection } from './sections/SettingsAgentSettingsSection.tsx'
 import { PermissionsSection } from './sections/SettingsPermissionsSection.tsx'
 import { MemorySection } from './sections/SettingsMemorySection.tsx'
 import { PrivacySection } from './sections/SettingsPrivacySection.tsx'
 import { DataSection } from './sections/SettingsDataSection.tsx'
 import { HooksSection } from './sections/SettingsHooksSection.tsx'
-import { SubagentSection } from './sections/SettingsSubagentSection.tsx'
 import { AgentPresetsSection } from './sections/SettingsAgentPresetsSection.tsx'
 import { AccountSection } from './sections/SettingsAccountSection.tsx'
 import { McpSection } from './sections/SettingsMcpSection.tsx'
@@ -82,18 +81,22 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'appearance', order: 10, label: 'nav.appearance', navGroup: 'general', Component: AppearanceSection },
   { id: 'notifications', order: 20, label: 'nav.notifications', navGroup: 'general', Component: NotificationsSection },
   { id: 'shortcuts', order: 30, label: 'nav.shortcuts', navGroup: 'general', Component: ShortcutsSection },
-  { id: 'permissions', order: 50, label: 'nav.permissions', navGroup: 'agent', Component: PermissionsSection },
+  { id: 'permissions', order: 65, label: 'nav.permissions', navGroup: 'agent', Component: PermissionsSection },
   // ➖ rules（规则与指令）分区已按用户裁定移除（2026-09-16）。
   //   依据：C1「自定义 Agent 预设已覆盖这个能力 …… 我的设计理念就是以 Agent 为单位
   //   进行管控」+ B4「移除系统提示词前缀」⇒ 全局提示词注入不提供用户可写出口，
   //   「全局自定义指令」与「人格 Personality」两个入口一并取消（PRD §4.1 / §6.4 / §11 C1）。
   //   ⚠️ 不要恢复：本分区在设计与正确性上都已被 Agent 预设取代。
-  { id: 'memory', order: 70, label: 'nav.memory', navGroup: 'agent', Component: MemorySection },
-  { id: 'terminal', order: 80, label: 'nav.terminal', navGroup: 'agent', Component: TerminalSection },
+  { id: 'memory', order: 60, label: 'nav.memory', navGroup: 'agent', Component: MemorySection },
+  { id: 'terminal', order: 18, label: 'nav.terminal', navGroup: 'general', Component: TerminalSection },
   { id: 'hooks', order: 90, label: 'nav.hooks', navGroup: 'agent', Component: HooksSection },
-  { id: 'agent-loop', order: 100, label: 'nav.agentLoop', navGroup: 'agent', Component: AgentLoopSection },
+  // ✏️ M2 重构：原 `agent-loop`（「高级 Agent Loop」）改名并扩容为 `agent-settings`（「智能体设置」），
+  //    同时**并入**原 `subagent`（「子 Agent」）分区 —— 用户 2026-09-16 第二批裁定
+  //    「子 Agent 并入智能体设置」⇒ 导航由 24 项收敛为 23 项。
+  //    ⚠️ 顺带移除了原分区里的「系统提示词前缀」（用户裁定 B4/C1：以 Agent 为单位管控，
+  //    全局提示词入口会造成污染）与两个无真源的自造项（重试次数 / 重试间隔）。
+  { id: 'agent-settings', order: 55, label: 'nav.agentSettings', navGroup: 'agent', Component: AgentSettingsSection },
   { id: 'agent-presets', order: 110, label: 'nav.agentPresets', navGroup: 'agent', Component: AgentPresetsSection },
-  { id: 'subagent', order: 115, label: 'nav.subagent', navGroup: 'agent', Component: SubagentSection },
   { id: 'account', order: 120, label: 'nav.account', navGroup: 'data', Component: AccountSection },
   { id: 'privacy', order: 130, label: 'nav.privacy', navGroup: 'data', Component: PrivacySection },
   { id: 'data', order: 140, label: 'nav.data', navGroup: 'data', Component: DataSection },
@@ -103,7 +106,8 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'ai-polish', order: 165, label: 'nav.aiPolish', navGroup: 'extensions', Component: PolishSection },
   { id: 'advanced', order: 170, label: 'nav.advanced', navGroup: 'advanced', Component: AdvancedSection },
   { id: 'profiles', order: 180, label: 'nav.profiles', navGroup: 'advanced', Component: ProfilesSection },
-  { id: 'extensions', order: 190, label: 'nav.extensions', navGroup: 'extensions', Component: ExtensionsSection },
+  // 扩展组次序按设计稿：插件管理 → MCP 与集成 → 技能 → AI 润色 → Ollama(195) → 本地文生图(197)。
+  { id: 'extensions', order: 145, label: 'nav.extensions', navGroup: 'extensions', Component: ExtensionsSection },
 ]
 
 /**
