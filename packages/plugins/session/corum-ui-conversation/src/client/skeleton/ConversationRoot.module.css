@@ -318,23 +318,23 @@
 
 /* ── 空态标题栏分隔线（2026-09-16 用户定调，**只在空态**）──────────────────
    背景：空态时会话顶栏被 `.headerHidden { display: none }` 收走，于是「标题栏带」
-   与「内容区」之间没有任何视觉分界。用户要求补一条 1px 线，且 **y 与左侧 nav 对齐**。
+   与「内容区」之间没有任何视觉分界。用户要求补一条 1px 线。
 
    为什么必须是绝对定位：`.scrollBody` 是 `flex: 1` 且 `overflow-y: auto`，
    `.composerHero` 又是 `align-self: center` —— 内容永远不贴顶，用盒子模型摆不出这条线
-   （实测：scrollBody 内容从 y=173 起）。以 `.root`（`position: relative`）为锚。
-   注意 `.scrollBody` 自身只高出 `.root` 1px（实测 root y=1 / scrollBody y=2），
-   故 `top: 110px` 落在视口 y=111。
+   （实测 scrollBody 内容从 y=173 起）。以 `.root`（`position: relative`）为锚。
 
-   110 的来历（实测左侧栏）：brandRow 56..110、项目/任务按钮底 98；
-   下一段「新会话」按钮 127..160 ⇒ 取 **110**（品牌行底）作为与 nav 对齐的基线。
-   用 `--corum-nav-brand-bottom` 暴露，宿主若改 nav 高度可覆盖。
+   ⚠️ 位置定调（2026-09-16 用户先否掉了「与左侧 nav 对齐」的 110px，指出「太靠下」，
+   改选「紧贴标题栏带(40px)下方」）：
+   实测 `.root` 顶在 y=1、标题栏带 = 0..40 ⇒ 线应落在 y=66
+   ⇒ `top = 66 − 1 = 65`（这里写的是**相对 .root 的偏移**，不是视口 y）。
+   这个数是**算出来的**，若将来标题栏带高度或会话列顶部偏移变了，请同步这个算式。
 
    颜色用设计稿既有的 1px `$glass-border`（浅 #FFFFFF / 深 #B98CFF2E），
    与设计稿里 `UlK61` / `pDeJY` 两条线同源。 */
 .emptyDivider {
   position: absolute;
-  top: var(--corum-nav-brand-bottom, 109px);
+  top: var(--corum-empty-divider-top, 65px);
   left: 0;
   right: 0;
   height: 1px;
