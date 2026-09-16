@@ -68,13 +68,18 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/analysis/HANDOFF-2026-09-16-card-batch-closeout-and-token-audit.md` — **最新交接入口**
-  （2026-09-16 凌晨：卡片 8 条缺陷全部收口 + **纠正上一份交接的事实错误**
-  （pen 画布态 ≠ 磁盘态，「设计稿已改完」其实是没落盘）+ 子任务被限流打断的判据
-  （看 `turn/end` 的 `reason.kind`）+ 全库设计 token 对账（12 个不存在的名字 / 硬编码 fallback 归零）
-  + 两份**可复跑声明式规格**进仓）；**下个 session 从这里开始。**
+- `docs/analysis/HANDOFF-2026-09-16-day-cards-empty-state-and-design-cleanup.md` — **最新交接入口**
+  （2026-09-16 日场，24 个提交：卡片 8 条缺陷收口 + 代码片段卡重设计（**照抄官方 token 级
+  流式增量高亮**）+ **空态与会话宽度解耦重构**（文件独立、两条不变式）+ 设计稿同步与过时件清理。
+  **六条教训**尤其值得先读：画布态≠磁盘态（附磁盘侧判据）、`turn/end` 的 `reason.kind` 判成败、
+  **CSS 自定义属性在声明它的元素上求值**（改上游 token 无效）、字体简写 token 不能当字族列表、
+  删掉的节点不能在同一次 `execute` 里再引用、`.md` 在编辑器里是预览故没有 `.monaco-editor`）；
+  **下个 session 从这里开始。**
 - `scripts/audit-dsw-tokens.py` — 设计 token 对账器（按官方 `design-platform.css` + corum
   `theme-layer.ts` 建权威表，列出「不存在的 token」与「多余 fallback」）。改 CSS token 前后各跑一次。
+- `docs/analysis/HANDOFF-2026-09-16-card-batch-closeout-and-token-audit.md` — 同日凌晨场交接
+  （卡片批次收口 + 纠正上一份交接的事实错误（pen 画布态 ≠ 磁盘态）+ 子任务被限流打断的判据
+  + 全库设计 token 对账（12 个不存在的名字 / 硬编码 fallback 归零）+ 两份可复跑声明式规格进仓）。
 - `docs/analysis/HANDOFF-2026-09-15-night-card-fidelity-isolation-and-settings.md` — 上一份交接
   （2026-09-15 夜场：卡片整改与设计稿对照 + 隔离漏洞补漏（父树未提交致静默失真 / 收口强制提交）
   + `llm-pi-ai` 段注册失败的根因（settings.yaml 里 `off` 被写成布尔 `false`）与两道防线
