@@ -186,7 +186,7 @@
 
 .codeText {
   font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   white-space: pre-wrap;
   word-break: break-word;

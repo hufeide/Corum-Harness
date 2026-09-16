@@ -97,7 +97,7 @@
 }
 
 .msg {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   line-height: 1.4;
   word-break: break-word;
@@ -107,7 +107,7 @@
 .time {
   flex: none;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
 }
