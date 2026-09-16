@@ -73,7 +73,7 @@
   justify-content: flex-start;
   appearance: none;
   box-sizing: border-box;
-  padding-left: 3px;
+  padding-left: calc(3px * var(--corum-density-scale, 1));
   border: 0;
   outline: none;
   background: linear-gradient(

@@ -36,7 +36,7 @@
   width: 320px;
   gap: calc(12px * var(--corum-density-scale, 1));
   /* Match cell padding-right: 8 so Time lines up with the trailing lane. */
-  margin-right: 8px;
+  margin-right: calc(8px * var(--corum-density-scale, 1));
 }
 
 .column {

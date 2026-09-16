@@ -106,7 +106,7 @@
 
 .swatch {
   display: inline-block;
-  margin-right: 6px;
+  margin-right: calc(6px * var(--corum-density-scale, 1));
   width: 8px;
   height: 8px;
   border-radius: 2px;

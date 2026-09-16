@@ -262,7 +262,7 @@
   line-height: 18px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
-  padding-top: 4px;
+  padding-top: calc(4px * var(--corum-density-scale, 1));
 }
 .settingRow {
   display: flex;
@@ -717,7 +717,7 @@
   display: flex;
   align-items: center;
   gap: calc(8px * var(--corum-density-scale, 1));
-  margin-bottom: 6px;
+  margin-bottom: calc(6px * var(--corum-density-scale, 1));
 }
 
 .candidateSearch {

@@ -6,11 +6,11 @@
 }
 
 .editor {
-  margin-top: 24px;
+  margin-top: calc(24px * var(--corum-density-scale, 1));
 }
 
 @media (max-width: 560px) {
   .editor {
-    margin-top: 20px;
+    margin-top: calc(20px * var(--corum-density-scale, 1));
   }
 }

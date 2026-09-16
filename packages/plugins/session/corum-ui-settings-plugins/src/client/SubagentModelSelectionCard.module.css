@@ -125,8 +125,8 @@
 }
 
 .modelGroup + .modelGroup {
-  margin-top: 4px;
-  padding-top: 10px;
+  margin-top: calc(4px * var(--corum-density-scale, 1));
+  padding-top: calc(10px * var(--corum-density-scale, 1));
   border-top: 0.5px solid var(--dsw-alias-border-l3);
 }
 
@@ -166,7 +166,7 @@
 }
 
 .route {
-  margin-top: 2px;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }

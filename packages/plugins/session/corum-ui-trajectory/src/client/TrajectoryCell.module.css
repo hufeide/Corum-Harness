@@ -103,7 +103,7 @@
 }
 
 .root[data-kind='subtool'] {
-  padding-left: 28px;
+  padding-left: calc(28px * var(--corum-density-scale, 1));
 }
 
 .text {

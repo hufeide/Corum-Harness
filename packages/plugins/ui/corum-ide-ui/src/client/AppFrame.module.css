@@ -675,7 +675,7 @@
 .colTopRow {
   flex: none;
   min-height: 0;
-  margin-bottom: 14px;
+  margin-bottom: calc(14px * var(--corum-density-scale, 1));
   border: 1px dashed var(--dsw-alias-label-dimmed);
   border-radius: 14px;
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
@@ -1068,7 +1068,7 @@
 
 .launcherHeader {
   text-align: center;
-  margin-bottom: 48px;
+  margin-bottom: calc(48px * var(--corum-density-scale, 1));
 }
 
 .launcherTitle {
@@ -1183,7 +1183,7 @@
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
   color: var(--dsw-alias-label-dimmed);
-  margin-top: 4px;
+  margin-top: calc(4px * var(--corum-density-scale, 1));
 }
 
 /* ── 空态区域（未注册的 slot 或插件未安装）── */
@@ -1273,8 +1273,8 @@
   display: flex;
   flex-direction: column;
   gap: calc(5px * var(--corum-density-scale, 1));
-  margin-top: 2px;
-  padding-top: 10px;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
+  padding-top: calc(10px * var(--corum-density-scale, 1));
   border-top: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
 .statusDetailAgentsHead {

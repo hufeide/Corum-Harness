@@ -127,6 +127,21 @@ def main():
         print('未知属性：%s' % ', '.join(sorted(unknown)))
         return 2
 
+    # ⚠️ 按**轴族**展开：用户写 `gap` 时应同时覆盖 `row-gap` / `column-gap`；
+    # 写 `padding` 时应覆盖四向；`margin` 同理。
+    # 这不展开会导致**极隐蔽的部分生效**：实测遗漏过 `column-gap: 10px`
+    # （因为过滤是 `prop not in props`，而 `column-gap` 不等于 `gap`）。
+    expanded = set()
+    families = {
+        'gap': ['gap', 'row-gap', 'column-gap'],
+        'padding': ['padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left'],
+        'margin': ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left'],
+        'font-size': ['font-size'],
+    }
+    for p in props:
+        expanded.update(families.get(p, [p]))
+    props = expanded
+
     total = 0
     touched = 0
     lines = []

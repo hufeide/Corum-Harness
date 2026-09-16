@@ -116,7 +116,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: calc(8px * var(--corum-density-scale, 1));
-  margin-bottom: 4px;
+  margin-bottom: calc(4px * var(--corum-density-scale, 1));
   padding: calc(7px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 8px;
   background: var(--dsw-alias-interactive-bg-hover-danger);
@@ -147,7 +147,7 @@
 }
 
 .group + .group {
-  margin-top: 4px;
+  margin-top: calc(4px * var(--corum-density-scale, 1));
 }
 
 .groupTitle {

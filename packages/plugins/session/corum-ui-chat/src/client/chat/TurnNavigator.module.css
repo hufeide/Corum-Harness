@@ -220,7 +220,7 @@
 }
 
 .previewResponse {
-  margin-top: 4px;
+  margin-top: calc(4px * var(--corum-density-scale, 1));
   /* fork（corum）⑤：响应文案降一档到 label-tertiary（官方用 label-caption）。 */
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12);

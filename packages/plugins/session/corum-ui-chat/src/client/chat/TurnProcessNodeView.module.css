@@ -17,7 +17,7 @@
 }
 
 .root:not([data-open]) {
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--corum-density-scale, 1));
 }
 
 .chevron {
@@ -25,7 +25,7 @@
   width: 16px;
   height: 16px;
   /* fork：卡内右缘内缩，替代原条外 6px。 */
-  margin-left: 2px;
+  margin-left: calc(2px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   transform: rotate(-90deg);
   transition: transform 100ms ease;

@@ -772,7 +772,7 @@
   align-items: center;
   gap: calc(6px * var(--corum-density-scale, 1));
   padding: calc(4px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
-  margin-bottom: 2px;
+  margin-bottom: calc(2px * var(--corum-density-scale, 1));
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
 .agentSelSearchIcon {
@@ -930,7 +930,7 @@
   gap: calc(5px * var(--corum-density-scale, 1));
   width: 100%;
   padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
-  margin-bottom: 2px;
+  margin-bottom: calc(2px * var(--corum-density-scale, 1));
   border: none;
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 0;

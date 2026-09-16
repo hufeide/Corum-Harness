@@ -112,7 +112,7 @@
   display: flex;
   justify-content: flex-end;
   gap: calc(6px * var(--corum-density-scale, 1));
-  padding-top: 4px;
+  padding-top: calc(4px * var(--corum-density-scale, 1));
 }
 
 .cancelBtn {

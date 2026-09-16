@@ -20,7 +20,7 @@
 .notice {
   width: 100%;
   max-width: var(--dsh-composer-card-max-width);
-  margin-bottom: 6px;
+  margin-bottom: calc(6px * var(--corum-density-scale, 1));
   padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 8px;
   background: var(--dsw-alias-interactive-bg-hover);
@@ -430,7 +430,7 @@
 }
 
 .retry {
-  margin-left: 8px;
+  margin-left: calc(8px * var(--corum-density-scale, 1));
   padding: calc(1px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: 1px solid currentColor;
   border-radius: 4px;

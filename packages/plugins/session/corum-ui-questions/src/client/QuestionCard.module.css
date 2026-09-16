@@ -180,7 +180,7 @@
   color: var(--dsw-alias-label-tertiary);
 }
 .custom[data-free] .customIcon {
-  margin-top: 2px;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
 }
 .customInput {
   flex: 1 1 auto;

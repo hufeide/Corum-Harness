@@ -66,11 +66,11 @@
 }
 
 .section {
-  margin-bottom: 16px;
+  margin-bottom: calc(16px * var(--corum-density-scale, 1));
 }
 
 .sectionLabel {
-  margin-bottom: 6px;
+  margin-bottom: calc(6px * var(--corum-density-scale, 1));
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   font-weight: 500;

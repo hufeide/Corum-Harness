@@ -29,7 +29,7 @@
 .headline {
   display: grid;
   grid-template-columns: 34px auto auto;
-  column-gap: 10px;
+  column-gap: calc(10px * var(--corum-density-scale, 1));
   align-items: center;
   justify-content: center;
   font-size: calc(26px * var(--corum-ui-font-scale, 1));
@@ -47,7 +47,7 @@
   grid-row: 1;
   grid-column: 3;
   align-self: start;
-  margin-top: 2px;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
   margin-left: -3px;
   padding: calc(1px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1)) 0;
   border: 1px solid var(--dsw-alias-interactive-bg-hover);
@@ -121,7 +121,7 @@
   align-items: center;
   min-width: 0;
   /* figma 75:8208 workspace row: px 8 above the card. */
-  padding-left: 8px;
+  padding-left: calc(8px * var(--corum-density-scale, 1));
 }
 
 /* Folder + label + chevron — transparent at rest; fill only on hover / open. */
@@ -201,7 +201,7 @@
 }
 
 .modalError {
-  margin-top: 8px;
+  margin-top: calc(8px * var(--corum-density-scale, 1));
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 18px;
   color: var(--dsw-alias-state-error-primary);

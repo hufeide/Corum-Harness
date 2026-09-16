@@ -23,7 +23,7 @@
 }
 
 .popout {
-  margin-top: 6px;
+  margin-top: calc(6px * var(--corum-density-scale, 1));
   align-self: flex-start;
   padding: calc(5px * var(--corum-density-scale, 1)) calc(11px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));

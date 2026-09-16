@@ -163,7 +163,7 @@
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
-  margin-right: 8px;
+  margin-right: calc(8px * var(--corum-density-scale, 1));
 }
 
 /* ── 提示文本 ──────────────────────────────────────────────────────── */
@@ -867,7 +867,7 @@
 
 .cardPreviewLabel {
   flex: none;
-  padding-top: 4px;
+  padding-top: calc(4px * var(--corum-density-scale, 1));
   font-family: 'Inter', -apple-system, sans-serif;
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
@@ -1113,7 +1113,7 @@
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
-  margin-top: 8px;
+  margin-top: calc(8px * var(--corum-density-scale, 1));
 }
 
 /* 编辑页小字段标签（设计稿 GHBvv lbl: 10px normal, label-tertiary, 无 margin） */
@@ -1168,7 +1168,7 @@
 }
 
 .fieldRow {
-  margin-top: 2px;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
 }
 
 .modalFooter {
@@ -1558,7 +1558,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   flex-direction: column;
   gap: calc(6px * var(--corum-density-scale, 1));
   /* 与 persona-row 的 trigger 列对齐（缩进 smile icon 宽 + gap） */
-  margin-left: 22px;
+  margin-left: calc(22px * var(--corum-density-scale, 1));
   width: 300px;
   box-sizing: border-box;
 }
@@ -2351,7 +2351,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  margin-bottom: calc(4px * var(--corum-density-scale, 1));
 }
 
 .backBtn {
@@ -2399,7 +2399,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   display: flex;
   align-items: center;
   gap: calc(10px * var(--corum-density-scale, 1));
-  padding-bottom: 6px;
+  padding-bottom: calc(6px * var(--corum-density-scale, 1));
 }
 
 .skillTitle {
@@ -2472,7 +2472,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   align-items: center;
   gap: calc(12px * var(--corum-density-scale, 1));
   padding: calc(10px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
-  margin-top: 4px;
+  margin-top: calc(4px * var(--corum-density-scale, 1));
   border-top: 1px solid var(--corum-glass-border);
 }
 

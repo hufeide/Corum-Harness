@@ -6,7 +6,7 @@
 }
 
 .root[data-open] {
-  padding-bottom: 4px;
+  padding-bottom: calc(4px * var(--corum-density-scale, 1));
 }
 
 .chevron {

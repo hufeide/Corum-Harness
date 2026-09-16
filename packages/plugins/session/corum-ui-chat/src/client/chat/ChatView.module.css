@@ -112,7 +112,7 @@
 }
 
 .turnStatusClock {
-  margin-left: 8px;
+  margin-left: calc(8px * var(--corum-density-scale, 1));
   font: var(--dsw-font-xs-13);
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));

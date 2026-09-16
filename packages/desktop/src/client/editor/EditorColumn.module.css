@@ -201,7 +201,7 @@
    是如实告知，不是错误 —— 用玻璃卡弱化底，不抢 diff 的注意力。 */
 .diffNote {
   flex: none;
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--corum-density-scale, 1));
   padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
@@ -217,7 +217,7 @@
   flex: none;
   justify-content: flex-end;
   gap: calc(6px * var(--corum-density-scale, 1));
-  padding-bottom: 6px;
+  padding-bottom: calc(6px * var(--corum-density-scale, 1));
 }
 
 .diffToggle {

@@ -3,7 +3,7 @@
 }
 
 .root[data-open] {
-  padding-bottom: 4px;
+  padding-bottom: calc(4px * var(--corum-density-scale, 1));
 }
 
 .root [data-disclosure-row]:focus-visible {
@@ -77,7 +77,7 @@
 
 .totalLabel,
 .details .totalValue {
-  padding-top: 6px;
+  padding-top: calc(6px * var(--corum-density-scale, 1));
   border-top: 1px solid var(--dsw-alias-border-l2);
   color: var(--dsw-alias-label-primary);
 }

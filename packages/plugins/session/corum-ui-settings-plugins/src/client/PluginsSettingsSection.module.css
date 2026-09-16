@@ -25,7 +25,7 @@
   align-items: flex-end;
   gap: calc(22px * var(--corum-density-scale, 1));
   border-bottom: 0.5px solid var(--dsw-alias-border-l2);
-  margin-top: 2px;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
 }
 
 .tab {
@@ -66,7 +66,7 @@
 
 .panel {
   min-width: 0;
-  padding-top: 2px;
+  padding-top: calc(2px * var(--corum-density-scale, 1));
 }
 
 .cards {

@@ -25,7 +25,7 @@
   display: flex;
   align-items: center;
   gap: calc(8px * var(--corum-density-scale, 1));
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--corum-density-scale, 1));
 }
 
 .agentAvatar {
@@ -91,7 +91,7 @@
 
 /* Finalized footer offset (figma 43:32997); chrome lives in MessageIconActions. */
 .actions {
-  margin-top: 16px;
+  margin-top: calc(16px * var(--corum-density-scale, 1));
   /* Optical align with 28px icon hit targets that pad 6px past the glyph. */
   margin-left: -6px;
 }

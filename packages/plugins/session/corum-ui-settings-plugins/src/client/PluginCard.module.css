@@ -75,7 +75,7 @@
 .body {
   border-top: 0.5px solid var(--dsw-alias-border-l2);
   margin: 0 calc(16px * var(--corum-density-scale, 1));
-  padding-bottom: 8px;
+  padding-bottom: calc(8px * var(--corum-density-scale, 1));
 }
 
 .readOnly {

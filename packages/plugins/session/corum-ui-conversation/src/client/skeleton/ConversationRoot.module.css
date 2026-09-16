@@ -167,7 +167,7 @@
   flex: none;
   align-items: center;
   gap: calc(8px * var(--corum-density-scale, 1));
-  margin-left: 20px;
+  margin-left: calc(20px * var(--corum-density-scale, 1));
 }
 
 .headerUtilities:empty {
@@ -180,8 +180,8 @@
   z-index: 1;
   display: flex;
   gap: calc(36px * var(--corum-density-scale, 1));
-  margin-top: 4px;
-  padding-left: 8px;
+  margin-top: calc(4px * var(--corum-density-scale, 1));
+  padding-left: calc(8px * var(--corum-density-scale, 1));
 }
 
 /* figma .Tab 34:11442: 13/16 text (figma wt510, rendered 500), gap 8 to the 2px bar. */
@@ -575,7 +575,7 @@
      8 above the card (its margin-top restores 12 under the hero chrome). */
   gap: calc(8px * var(--corum-density-scale, 1));
   /* Foot inside the centered box floats the stack a bit above true center. */
-  padding-bottom: 32px;
+  padding-bottom: calc(32px * var(--corum-density-scale, 1));
   /* Card cap + both clearances: the hero input card lands at exactly the same
      width as the docked composer at every viewport. */
   width: min(calc(var(--dsh-composer-card-max-width) + 2 * var(--dsh-composer-side-clearance)), 100%);
@@ -607,10 +607,10 @@
   align-items: center;
   gap: calc(2px * var(--corum-density-scale, 1));
   min-width: 0;
-  margin-top: 4px;
+  margin-top: calc(4px * var(--corum-density-scale, 1));
   /* figma drew px 8; nudged +12 so the chip's folder glyph lines up closer to
      the card's inner controls below. */
-  padding-left: 20px;
+  padding-left: calc(20px * var(--corum-density-scale, 1));
 }
 
 /* Hero: the composer sits inside the session scroll body; center there so
@@ -783,7 +783,7 @@
   align-items: center;
   gap: calc(5px * var(--corum-density-scale, 1));
   padding: calc(3px * var(--corum-density-scale, 1)) calc(5px * var(--corum-density-scale, 1)) calc(5px * var(--corum-density-scale, 1));
-  margin-bottom: 2px;
+  margin-bottom: calc(2px * var(--corum-density-scale, 1));
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
 .agentSelSearchIcon {

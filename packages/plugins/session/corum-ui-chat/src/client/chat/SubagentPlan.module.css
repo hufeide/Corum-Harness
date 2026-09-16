@@ -45,13 +45,13 @@
 
 .itemIcon {
   flex: none;
-  margin-top: 1px;
+  margin-top: calc(1px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
 .itemIconActive {
   flex: none;
-  margin-top: 1px;
+  margin-top: calc(1px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-brand-text);
 }
 

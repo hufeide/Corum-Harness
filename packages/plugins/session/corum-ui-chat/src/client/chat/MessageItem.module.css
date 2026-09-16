@@ -109,7 +109,7 @@
   place-items: center;
   width: calc(16px + var(--dsh-content-font-delta, 0px));
   height: calc(16px + var(--dsh-content-font-delta, 0px));
-  margin-right: 6px;
+  margin-right: calc(6px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -248,8 +248,8 @@
 .retryDetails {
   display: grid;
   gap: calc(2px * var(--corum-density-scale, 1));
-  margin-top: 3px;
-  padding-left: 14px;
+  margin-top: calc(3px * var(--corum-density-scale, 1));
+  padding-left: calc(14px * var(--corum-density-scale, 1));
   overflow-wrap: anywhere;
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(18px + var(--dsh-content-font-delta-secondary, 0px));
@@ -275,7 +275,7 @@
 }
 
 .turnErrorDot {
-  margin-top: 5px;
+  margin-top: calc(5px * var(--corum-density-scale, 1));
 }
 
 .turnErrorCopy {
@@ -284,7 +284,7 @@
 }
 
 .turnErrorTitle {
-  margin-right: 6px;
+  margin-right: calc(6px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-state-error-primary);
   font-weight: 600;
 }
@@ -299,7 +299,7 @@
 }
 
 .maxTokensTitle {
-  margin-right: 6px;
+  margin-right: calc(6px * var(--corum-density-scale, 1));
   color: var(--dsw-alias-state-warn-primary);
   font-weight: 600;
 }

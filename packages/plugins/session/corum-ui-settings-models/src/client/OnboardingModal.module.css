@@ -22,7 +22,7 @@
 }
 
 .body {
-  margin-top: 20px;
+  margin-top: calc(20px * var(--corum-density-scale, 1));
 }
 
 @media (max-width: 560px) {
