@@ -78,21 +78,55 @@ def css_files(root):
 
 
 def wrap_values(prop, value, var):
-    """Wrap every px value in one declaration value; skip if already wrapped.
+    """Wrap plain px value tokens; leave calc()/var() tokens untouched.
 
-    ⚠️ **值里含 `var(` 时整条跳过** —— 那些声明已由另一个轴驱动，例如
-    `font-size: var(--dsh-content-font-size, 14px)` 属「会话正文字号」轴，
-    若把它的 fallback 也乘上界面缩放，就会让两个本该独立的「面」互相污染。
+    ⚠️ **跳过判定的粒度必须是「单个值 token」，不是「整条声明」。**
+    早期版本写成「值里含 `var(` 就整条声明跳过」，对**单值**声明是对的
+    （如 `font-size: var(--dsh-content-font-size, 14px)` 必须整体不动），
+    但对**多值**声明过宽 —— 实测漏掉 7 处**有意混用**的声明，例如
+    `padding: 8px calc(var(--side-clearance) + 16px) 12px`：
+    其中 `8px` / `12px` 是普通间距（应随密度缩放），
+    中间的 `calc(var(...))` 是与布局相关的计算（不应缩放）。
+
+    规则：
+    - 值 token 是纯 `<N>px` → 包裹
+    - 值 token 含 `(`（calc / var 等）→ 原样保留
     """
-    if var in value or 'var(' in value:
+    if var in value:
         return value, 0
     count = [0]
 
-    def repl(match):
-        count[0] += 1
-        return 'calc(%spx * var(%s, 1))' % (match.group(1), var)
+    def repl_token(tok):
+        if '(' in tok:
+            return tok
+        def one(m):
+            count[0] += 1
+            return 'calc(%spx * var(%s, 1))' % (m.group(1), var)
+        return PX.sub(one, tok)
 
-    return PX.sub(repl, value), count[0]
+    # ⚠️ **必须按括号深度在顶层切分**，不能按空白切分：
+    # `var(--dsh-content-font-size, 14px)` 内部有空格，空白切分会被拆成
+    # `var(--dsh-content-font-size,` 与 `14px)` 两个 token ⇒ 后者不含 `(`
+    # ⇒ fallback 里的 14px 被包裹 ⇒ **把「会话正文字号」轴污染成随界面字号缩放**。
+    # 实测踩过这个坑，故改为深度感知的顶层切分。
+    out = []
+    depth = 0
+    buf = ''
+    for ch in value:
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+        if ch.isspace() and depth == 0:
+            if buf:
+                out.append(repl_token(buf))
+                buf = ''
+            out.append(ch)
+        else:
+            buf += ch
+    if buf:
+        out.append(repl_token(buf))
+    return ''.join(out), count[0]
 
 
 def rewrite(text, props):
