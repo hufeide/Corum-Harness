@@ -32,6 +32,7 @@
  * @module corum-ide-ui/client/settings/sections/SettingsDataSection
  */
 
+import type { ReactNode } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { Badge } from '../Badge.tsx'
@@ -39,6 +40,21 @@ import { GlassButton } from '../shared.tsx'
 import css from '../SettingsSections.module.css'
 
 /* ── 数据管理（PRD §4.8）───────────────────────────────────────────── */
+
+/**
+ * 本分区的注入 props：Shell 在注册本 section 时把子槽渲染器传进来。
+ *
+ * 用**内联键类型**而非 `PropsRenderSlots<'settings.data.item'>`，与
+ * `extensions` 分支的 `settings.plugins.tab` 同一写法（该键已在 corum 的
+ * `SlotMap` 增强块里登记，但此处保持与既有分支一致的形态）。
+ */
+export interface DataSectionProps {
+  /**
+   * 渲染「归档会话」子槽。缺失时不渲染该槽、页面其余部分照常
+   * （保持本组件可独立渲染，便于单测）。
+   */
+  renderSlot?: (key: 'settings.data.item', owner: Record<string, never>, opts?: { only?: string }) => ReactNode
+}
 
 /** 未上线 badge（PRD §6.1）。 */
 const OFFLINE = <Badge label="未上线" variant="offline" />
@@ -51,7 +67,7 @@ const UNKNOWN_SIZE = <span className={css.sizeLabel}>—</span>
  *
  * @returns the data settings section.
  */
-export function DataSection() {
+export function DataSection({ renderSlot }: DataSectionProps = {}) {
   return (
     <>
       <SettingGroup title="存储占用 · 待统计能力">
@@ -80,14 +96,12 @@ export function DataSection() {
         <SettingRow label="删除归档会话" desc="批量删除已归档的会话；破坏性操作，需输入式确认（PRD §9.1）。⚠️ 单会话级 API 已有，批量需新建。" badge={OFFLINE}>
           <GlassButton variant="danger" disabled>删除归档</GlassButton>
         </SettingRow>
-        <SettingRow
-          label="导入会话日志"
-          desc="从 ZIP 归档导入会话日志。⚠️ 实现已存在但**当前入口在「插件管理」的插件配置卡**；迁入本页需新增分区域子槽（见文件头说明）。"
-          badge={OFFLINE}
-          divider={false}
-        >
-          <GlassButton disabled>导入</GlassButton>
-        </SettingRow>
+        {/*
+          「导入会话日志」由 corum-session-archive 经 settings.data.item 子槽注册
+          （2026-09-16 自通用页迁入，PRD §4.8 DA5）。本页只负责渲染该槽 ——
+          行内文案 / 控件 / 写路径全部由注册方自带。
+        */}
+        {renderSlot?.('settings.data.item', {})}
       </SettingGroup>
     </>
   )

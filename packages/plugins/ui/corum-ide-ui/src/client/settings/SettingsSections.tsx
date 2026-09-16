@@ -69,8 +69,19 @@ export interface SectionDef {
   label: SettingsKey
   /** 归属分组（自声明）；缺省归 'extensions'（扩展）。 */
   navGroup?: SettingsNavGroup
-  /** section 组件；多数无 props，`extensions` 可收可选的 renderTabSlot。 */
-  Component: (props?: { renderTabSlot?: () => ReactNode }) => ReactNode}
+  /**
+   * section 组件；多数无 props。
+   *
+   * 声明了**子槽**的 section 会额外收到渲染器：
+   * - `extensions`（插件管理）收 `renderTabSlot`（`settings.plugins.tab`）
+   * - `data`（数据管理）收 `renderSlot`（`settings.data.item`）
+   *
+   * 两者合成一个可选 props 形 —— 组件各自只取自己需要的那个。
+   */
+  Component: (props?: {
+    renderTabSlot?: () => ReactNode
+    renderSlot?: (key: string, owner: object, opts?: { only?: string }) => ReactNode
+  }) => ReactNode}
 
 /**
  * 所有 section 定义（用于 index.tsx 批量注册）。

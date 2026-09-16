@@ -89,10 +89,13 @@ export function apply(ctx: ClientContext): void {
     dismissImport: () => { controller.dismissImport() },
   })
 
-  // P0-5（2026-09-14）迁回：settings.general.item 渲染点已修好
-  // （corum-ide-ui GeneralSection renderSlot 该槽），导入行恢复注册进该槽。
-  ctx.slots.inject('settings.general.item', () => ctx.slots.register({
-    name: 'settings.general.item',
+  // 2026-09-16 迁入「数据管理」（PRD §4.8 DA5）：
+  // 原先挂在 settings.general.item（通用页），但通用页按 M4 只渲染
+  // language / composer-enter ⇒ 该行在那里已不可达。
+  // 现改挂数据管理页的 settings.data.item 子槽 —— 该键必须先在
+  // corum-ide-ui 的 SlotMap 增强块里登记，否则类型系统拒绝（已登记）。
+  ctx.slots.inject('settings.data.item', () => ctx.slots.register({
+    name: 'settings.data.item',
     id: 'session-archive-import',
     order: 30,
     locale: NS,

@@ -61,6 +61,7 @@ import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx
 import { GeneralSection } from './SettingsGeneralSection.tsx'
 import { SECTION_DEFS } from './settings/SettingsSections.tsx'
 import { ExtensionsSection } from './settings/sections/SettingsExtensionsSection.tsx'
+import { DataSection } from './settings/sections/SettingsDataSection.tsx'
 import { CorumRpcContext, CorumSettingsContext, type CorumSettingsFace } from './settings/shared.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
@@ -125,6 +126,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.onboarding': { kind: 'list'; scope: 'root'; owner: SettingsOnboardingOwnerProps }
     /** Items inside the shell-owned General section. */
     'settings.general.item': { kind: 'list'; scope: 'root'; owner: SettingsGeneralItemOwnerProps }
+    /**
+     * Items inside the shell-owned Data-management section（数据管理页自己的子槽）。
+     *
+     * ⚠️ **必须在此登记键名**，否则 `children` 与 `slots.inject` 会被类型系统直接拒绝
+     * （实测 TS2769 / TS2345）。原因：槽键校验的是**全局 SlotMap 联合**，
+     * 它由本增强块与官方契约（`ui-settings/src/client/contract/slots.ts`）**合并**而成 ——
+     * 所以「新设置子槽不能只在注册处声明」。
+     *
+     * owner 复用 `SettingsGeneralItemOwnerProps`：两者都是**空标记**
+     * （行内文案 / 控件 / 写路径全部由注册方自带），无字段可传。
+     */
+    'settings.data.item': { kind: 'list'; scope: 'root'; owner: SettingsGeneralItemOwnerProps }
     // ── The shell's own region slots (corum.*) ──
     /** Left column: the session list (design.pen ① 会话列表, 280px). */
     'corum.sidebar': { kind: 'single'; scope: 'root'; owner: CorumSidebarOwnerProps }
@@ -518,6 +531,26 @@ export function apply(ctx: ClientContext): void {
       // plugins 的「插件配置」tab（含 Bash/Agent Loop/Web Search 三卡）与官方
       // plugin-inventory「插件列表」tab 都注册进此共享槽（官方 settings 底座声明）。
       // 重构 2 决策 2：去掉独立「插件」入口，其 tab 内容并入「插件管理」扩展 section。
+      // 「数据管理」section 声明 settings.data.item 子槽 ——
+      // 供 corum-session-archive 的「导入会话日志」行迁入（PRD §4.8 DA5）。
+      // ⚠️ 三件事缺一不可：① SlotMap 登记键名（见上方增强块）；
+      // ② 此处的 children 声明；③ 注册方改挂到该 key。
+      if (def.id === 'data') {
+        return ctx.slots.inject('settings.section', () => ctx.slots.register({
+          name: 'settings.section',
+          id: def.id,
+          order: def.order,
+          label: () => t(def.label),
+          locale: NS,
+          children: { 'settings.data.item': { kind: 'list', scope: 'root' } },
+        }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.data.item', owner: Record<string, never>, opts?: { only?: string }) => ReactNode }) => (
+          <CorumRpcContext.Provider value={corumRpc}>
+            <CorumSettingsContext.Provider value={corumSettings}>
+              <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} />} />
+            </CorumSettingsContext.Provider>
+          </CorumRpcContext.Provider>
+        )))
+      }
       if (def.id === 'extensions') {
         return ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
