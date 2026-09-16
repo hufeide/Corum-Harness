@@ -24,13 +24,14 @@
  * @module corum-ide-ui/client/settings/sections/SettingsAppearanceSection
  */
 
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
 import { Badge } from '../Badge.tsx'
 import { ColorChips } from '../ColorChips.tsx'
 import { CorumSettingsContext } from '../shared.tsx'
+import { ACCENT_OPTIONS, DEFAULT_ACCENT_ID, getAccentId, setAccentId, subscribeAccent } from '../../appearance-accent.ts'
 
 /* ── 外观（PRD §4.3）──────────────────────────────────────────────── */
 
@@ -82,6 +83,8 @@ export function AppearanceSection() {
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 当前强调色（同 bundle 内的轻量 store；改后 Shell 会重注册 token 覆盖层）。 */
+  const accent = useSyncExternalStore(subscribeAccent, getAccentId)
 
   if (settings === null) return <p style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>settings 服务未就绪。</p>
 
@@ -135,8 +138,16 @@ export function AppearanceSection() {
             onChange={id => { void apply(PREFERENCE_FIELD, id) }}
           />
         </SettingRow>
-        <SettingRow label="强调色" desc="高亮、链接与品牌元素使用的颜色" badge={OFFLINE}>
-          <ColorChips chips={[{ id: 'violet', color: '#5B21F5' }]} selectedId="violet" onChange={noop} />
+        <SettingRow
+          label="强调色"
+          desc="高亮、链接与品牌元素使用的颜色（品牌 token 层）。选后立即生效，随明暗主题自动取对应取值。"
+          badge={accent !== DEFAULT_ACCENT_ID ? <Badge label="已修改" /> : undefined}
+        >
+          <ColorChips
+            chips={ACCENT_OPTIONS.map(o => ({ id: o.id, color: o.light }))}
+            selectedId={accent}
+            onChange={id => setAccentId(id)}
+          />
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="字体与排版">

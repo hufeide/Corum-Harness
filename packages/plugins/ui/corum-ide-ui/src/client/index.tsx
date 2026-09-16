@@ -47,6 +47,7 @@ import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { ThemePresenter } from '@corum/corum-ui-base/client'
 import { GLASS_TOKENS } from './theme-layer.ts'
+import { accentTokens, subscribeAccent } from './appearance-accent.ts'
 import { TestModule } from './TestModule.tsx'
 import { registerSlot, getSlotMeta, drainPendingSlots } from '@corum/corum-ui-base/client'
 import type { SlotMeta, SlotRegistryFace } from '@corum/corum-ui-base/client'
@@ -223,6 +224,14 @@ export function apply(ctx: ClientContext): void {
     ;(window as unknown as { __corumSlotRegistry?: SlotRegistryFace }).__corumSlotRegistry = slotRegistryImpl
     drainPendingSlots(slotRegistryImpl)
     const disposeTokens = ctx.theme.overrideTokens('corum-glass', GLASS_TOKENS)
+    // 强调色：**独立一层** token 覆盖（source='corum-accent'），
+    // 与 corum-glass 分层叠加 —— 官方 overrideTokens 按 source 存多层，互不覆盖。
+    // 用户改色时先撤旧层再注册新层（effect 清理函数负责撤最后一层）。
+    let disposeAccent = ctx.theme.overrideTokens('corum-accent', accentTokens())
+    const offAccent = subscribeAccent(() => {
+      disposeAccent()
+      disposeAccent = ctx.theme.overrideTokens('corum-accent', accentTokens())
+    })
     const disposeRegistration = ctx.slots.register({
       name: 'root',
       children: {
@@ -270,6 +279,8 @@ export function apply(ctx: ClientContext): void {
     return () => {
       disposeRegistration()
       void disposeTokens()
+      offAccent()
+      void disposeAccent()
       void disposeService()
       void disposeRegistry()
     }
