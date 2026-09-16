@@ -65,7 +65,7 @@ import { GeneralSection } from './SettingsGeneralSection.tsx'
 import { SECTION_DEFS } from './settings/SettingsSections.tsx'
 import { ExtensionsSection } from './settings/sections/SettingsExtensionsSection.tsx'
 import { DataSection } from './settings/sections/SettingsDataSection.tsx'
-import { CorumRpcContext, CorumSettingsContext, type CorumSettingsFace } from './settings/shared.tsx'
+import { CorumRpcContext, CorumSettingsContext, NotificationPrefsContext, type CorumSettingsFace } from './settings/shared.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
@@ -211,7 +211,7 @@ export interface CorumSidebarOwnerProps {
 
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
-export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions']
+export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions', 'notifications']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -517,6 +517,22 @@ export function apply(ctx: ClientContext): void {
         revision,
       ),
     }
+    // 通知偏好面（PRD v2 §4.4）：从 ctx.notifications cordis 服务裁剪出偏好子面
+    // （本地能力接口收窄，红线 3——本 bundle 不 import desktop 实现包的类型）。
+    // ctx.notifications 由 corum-desktop provide，cordis root reflect.store 保证
+    // 跨 bundle 单例（红线 1 合规，非 window 全局）；经 inject 声明获取（红线 4，
+    // 不可未 inject 直接读）。故设置页的写入与 toast 栈的读取命中同一实例，
+    // 实时联动。服务缺席时置 null，通知 section 控件降级为禁用 + 未上线。
+    interface NotificationPrefsFaceLocal {
+      enabled: boolean
+      sound: boolean
+      dnd: boolean
+    }
+    const notificationsSvc = ctx.get('notifications') as {
+      getPrefs(): NotificationPrefsFaceLocal
+      setPrefs(patch: Partial<NotificationPrefsFaceLocal>): void
+      subscribePrefs(listener: () => void): () => void
+    } | undefined ?? null
     // fork（corum）：general section 也包 CorumSettingsContext.Provider——其「工作区」
     // 组（新工作区始终初始化 git 开关，2026-09-09 用户需求）是 GeneralSection 里第一个
     // 真实持久化项，需要 settings 面；此前 GeneralSection 单独注册未包 Provider（纯静态
@@ -600,7 +616,9 @@ export function apply(ctx: ClientContext): void {
       }, (props: SettingsSectionOwnerProps) => (
         <CorumRpcContext.Provider value={corumRpc}>
           <CorumSettingsContext.Provider value={corumSettings}>
-            <SettingsSectionHost {...props} render={def.Component} />
+            <NotificationPrefsContext.Provider value={notificationsSvc}>
+              <SettingsSectionHost {...props} render={def.Component} />
+            </NotificationPrefsContext.Provider>
           </CorumSettingsContext.Provider>
         </CorumRpcContext.Provider>
       )))

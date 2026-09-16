@@ -44,6 +44,34 @@ export function useCorumRpc(): CorumRpcCall | null {
   return useContext(CorumRpcContext)
 }
 
+/* ── 通知偏好面（PRD v2 §4.4；由 index.tsx 从 ctx.notifications 裁剪下发）────── */
+
+/**
+ * 通知偏好的本地能力接口（dev-conventions §2.4 红线 3：跨 bundle 窄化，不耦合
+ * desktop 实现包的 NotificationStore 全面）。值与 desktop `NotificationPrefs` 同形，
+ * 此处独立声明避免跨包 import 类型。
+ */
+export interface NotificationPrefsFace {
+  enabled: boolean
+  sound: boolean
+  dnd: boolean
+}
+
+/** 设置页消费的通知偏好写/读面。 */
+export interface NotificationPrefsService {
+  getPrefs(): NotificationPrefsFace
+  setPrefs(patch: Partial<NotificationPrefsFace>): void
+  subscribePrefs(listener: () => void): () => void
+}
+
+/** 通知偏好 Context（与 CorumSettingsContext 同构下发；仅通知 section 消费）。 */
+export const NotificationPrefsContext = createContext<NotificationPrefsService | null>(null)
+
+/** 取出通知偏好面；未 provide 时返回 null（控件降级为禁用 + 未上线）。 */
+export function useNotificationPrefs(): NotificationPrefsService | null {
+  return useContext(NotificationPrefsContext)
+}
+
 /* ── section 操作上下文（SettingsShell 经 owner props → Host 下发 openSection/close）── */
 
 /** 设置壳的 section 操作面：openSection 切换 section、close 关闭设置面板。 */

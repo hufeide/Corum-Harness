@@ -186,14 +186,19 @@ function publish(
   onOpen?: (() => void) | undefined,
 ): void {
   const previous = liveByKey.get(key)
-  if (previous !== undefined) store.dismiss(previous)
+  if (previous !== undefined) {
+    store.dismiss(previous)
+    liveByKey.delete(key)
+  }
   const id = store.notify({
     tone: input.tone,
     title: input.title,
     ...input.message === undefined ? {} : { message: input.message },
     ...onOpen === undefined ? {} : { onOpen },
   })
-  liveByKey.set(key, id)
+  // 偏好拦截期（勿扰/总开关关）notify 返回 ''：不登记 ⇒ 偏好恢复后同键
+  // 新事件不会被「撤旧条」逻辑误伤，也不会留下指向不存在通知的死登记。
+  if (id !== '') liveByKey.set(key, id)
 }
 
 /** `window.corumDesktop` 的窄化面（只用到系统通知两项；本地能力接口，红线 3）。 */

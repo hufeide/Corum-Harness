@@ -37,14 +37,16 @@ import { ExtensionsSection } from './sections/SettingsExtensionsSection.tsx'
 export {
   CorumRpcContext,
   CorumSettingsContext,
+  NotificationPrefsContext,
   SectionNavContext,
   useCorumRpc,
   useCorumSettings,
+  useNotificationPrefs,
   useSectionNav,
   GlassButton,
   InfoCard,
 } from './shared.tsx'
-export type { CorumSettingsFace, SectionActions } from './shared.tsx'
+export type { CorumSettingsFace, NotificationPrefsFace, NotificationPrefsService, SectionActions } from './shared.tsx'
 
 /* ── 导出 section 组件映射 ──────────────────────────────────────────── */
 

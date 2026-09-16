@@ -49,6 +49,26 @@ export interface CorumNotification {
   onOpen?: (() => void) | undefined
 }
 
+/**
+ * 通知偏好（PRD v2 §4.4 NO1/NO2/NO4）。
+ *
+ * 语义（与设置页一一对应）：
+ * - `enabled`：「任务完成时通知」总开关。关闭后**任何**通知都不进栈
+ *   （toast / bell / 通知中心 / 托盘未读数同源，故一处拦截全链路静默）。
+ * - `sound`：「通知声音」。通知到达时播放一声短提示音（WebAudio 合成，
+ *   无音频资源文件）。初始默认**关**——声音是侵入性反馈，未经用户开启
+ *   不应出声（与 PRD §6.1「不伪造状态」同原则：默认开会让用户在不知情
+ *   时被发声）。
+ * - `dnd`：「勿扰模式」。开启后不弹出任何通知（设计稿另有起止时段，
+ *   属后续增量；本期先兑现开关维度，见 PRD §4.4 NO4 的「设计稿比代码
+ *   多时段维度」裁定）。
+ */
+export interface NotificationPrefs {
+  enabled: boolean
+  sound: boolean
+  dnd: boolean
+}
+
 /** bell 吸附的屏幕边缘（决定圆角朝向与定位轴）。 */
 export type BellEdge = 'left' | 'right' | 'top' | 'bottom'
 
@@ -109,10 +129,27 @@ export interface NotificationStore {
   getBellPosition(): BellPosition
   /** 设置 bell 位置（拖动松手吸附后调用；内部持久化到 localStorage）。 */
   setBellPosition(position: BellPosition): void
+  /** 通知偏好快照（uSES 源；引用稳定——值不变时返回同一对象）。 */
+  getPrefs(): NotificationPrefs
+  /**
+   * 更新通知偏好（局部更新；内部持久化到 localStorage）。
+   *
+   * 写方是设置页（跨 bundle，经 `ctx.notifications` cordis 服务拿到同一
+   * 实例——root `reflect.store` 保证单例，红线 1 合规，非 window 全局）。
+   */
+  setPrefs(patch: Partial<NotificationPrefs>): void
+  /** 订阅偏好变化（设置页回显用；与 items / ui 两个订阅集并列）。 */
+  subscribePrefs(listener: () => void): () => void
 }
 
 /** bell 位置的持久化键（UI 偏好，不参与跨 bundle 共享状态）。 */
 const BELL_POSITION_KEY = 'corum.notifications.bell'
+
+/** 通知偏好的持久化键（PRD §4.4：通知开关此前**无任何持久化**，本期新建）。 */
+const PREFS_KEY = 'corum.notifications.prefs'
+
+/** 缺省偏好：通知开、声音关、勿扰关（理由见 NotificationPrefs 注释）。 */
+const DEFAULT_PREFS: NotificationPrefs = { enabled: true, sound: false, dnd: false }
 
 /** 缺省位置：右下角、距底 120px（与旧实现 `bottom: 120px` 视觉一致）。 */
 const DEFAULT_BELL_POSITION: BellPosition = { edge: 'right', offset: 120 }
@@ -134,13 +171,63 @@ function readBellPosition(): BellPosition {
   }
 }
 
+/** 读持久化的通知偏好（异常数据回退缺省值；逐字段校验，坏字段单独回退）。 */
+function readPrefs(): NotificationPrefs {
+  if (typeof localStorage === 'undefined') return DEFAULT_PREFS
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    if (raw === null) return DEFAULT_PREFS
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_PREFS
+    const { enabled, sound, dnd } = parsed as { enabled?: unknown; sound?: unknown; dnd?: unknown }
+    return {
+      enabled: typeof enabled === 'boolean' ? enabled : DEFAULT_PREFS.enabled,
+      sound: typeof sound === 'boolean' ? sound : DEFAULT_PREFS.sound,
+      dnd: typeof dnd === 'boolean' ? dnd : DEFAULT_PREFS.dnd,
+    }
+  } catch {
+    return DEFAULT_PREFS
+  }
+}
+
+/** 提示音的 AudioContext（懒建；浏览器要求用户手势后才能出声，故首次播放可能静默降级）。 */
+let audioCtx: AudioContext | null = null
+
+/**
+ * 播一声短提示音（WebAudio 合成正弦短音：880Hz、120ms、指数衰减包络）。
+ *
+ * 为什么不用 `<audio src>`：无音频资源文件可引，且 WebAudio 合成零资产、
+ * 零网络、可调参。自动播放策略下 `AudioContext` 可能处于 suspended ——
+ * 调 `resume()` 尝试恢复，失败静默（通知本身已弹出，声音只是增强）。
+ */
+function playChime(): void {
+  try {
+    audioCtx ??= new AudioContext()
+    if (audioCtx.state === 'suspended') void audioCtx.resume()
+    const osc = audioCtx.createOscillator()
+    const gain = audioCtx.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = 880
+    const now = audioCtx.currentTime
+    gain.gain.setValueAtTime(0.12, now)
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
+    osc.connect(gain).connect(audioCtx.destination)
+    osc.start(now)
+    osc.stop(now + 0.13)
+  } catch {
+    // 无声环境下静默降级（通知 UI 不受影响）。
+  }
+}
+
 /** 创建通知 store（单实例由桌面壳持有并暴露）。 */
 export function createNotificationStore(): NotificationStore {
   let items: readonly CorumNotification[] = []
   const listeners = new Set<() => void>()
   const uiListeners = new Set<() => void>()
+  const prefsListeners = new Set<() => void>()
   let panelOpen = false
   let bellPosition: BellPosition = readBellPosition()
+  let prefs: NotificationPrefs = readPrefs()
   // UI 快照引用稳定（值不变时返回同一对象；见 getUiSnapshot 的注释）。
   let uiSnapshot: NotificationUiSnapshot = { panelOpen, bell: bellPosition }
   const syncUi = (): void => { uiSnapshot = { panelOpen, bell: bellPosition } }
@@ -164,6 +251,16 @@ export function createNotificationStore(): NotificationStore {
       }
     }
   }
+  /** 偏好变化：独立订阅集（设置页回显只关心偏好，不随 items 重渲染）。 */
+  const emitPrefs = (): void => {
+    for (const listener of [...prefsListeners]) {
+      try {
+        listener()
+      } catch (error) {
+        console.error('[corum-desktop] notification prefs listener threw:', error)
+      }
+    }
+  }
   return {
     getSnapshot: () => items,
     subscribe: (listener) => {
@@ -175,6 +272,28 @@ export function createNotificationStore(): NotificationStore {
       return () => { uiListeners.delete(listener) }
     },
     getUiSnapshot: () => uiSnapshot,
+    getPrefs: () => prefs,
+    setPrefs: (patch) => {
+      const next: NotificationPrefs = {
+        enabled: patch.enabled ?? prefs.enabled,
+        sound: patch.sound ?? prefs.sound,
+        dnd: patch.dnd ?? prefs.dnd,
+      }
+      if (next.enabled === prefs.enabled && next.sound === prefs.sound && next.dnd === prefs.dnd) return
+      prefs = next
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(PREFS_KEY, JSON.stringify(next))
+        } catch {
+          // 持久化失败不影响本次会话内的偏好。
+        }
+      }
+      emitPrefs()
+    },
+    subscribePrefs: (listener) => {
+      prefsListeners.add(listener)
+      return () => { prefsListeners.delete(listener) }
+    },
     getBellPosition: () => bellPosition,
     setBellPosition: (position) => {
       if (bellPosition.edge === position.edge && bellPosition.offset === position.offset) return
@@ -195,6 +314,12 @@ export function createNotificationStore(): NotificationStore {
       emitUi()
     },
     notify: (input) => {
+      // 偏好拦截（PRD §4.4）：总开关关闭或勿扰开启时通知**不进栈**。
+      //
+      // 返回 ''（而非随机 id）：调用方拿 '' 调 dismiss/open 均为 no-op，语义安全。
+      // ⚠️ notification-bridge 的同键去重登记「键→id」，勿扰期间键不登记 ⇒
+      // 偏好恢复后同键新事件能正常发新条（不会卡在指向已消失旧条的死登记上）。
+      if (!prefs.enabled || prefs.dnd) return ''
       const id = `ntf-${crypto.randomUUID()}`
       const next: CorumNotification = {
         id,
@@ -208,6 +333,7 @@ export function createNotificationStore(): NotificationStore {
       }
       items = [...items, next]
       emit()
+      if (prefs.sound) playChime()
       return id
     },
     open: (id) => {
