@@ -1,6 +1,12 @@
 /* fork（corum）：终端卡（设计稿 qLyn3 sCrmX expanded / j8ZUL collapsed）。
    毛玻璃卡 r14 + 光边 + padding 12 + gap 8，头行 25px 高。 */
 
+/* ⚠️ 等宽字族**必须**用 `--ds-font-family-code`，别用 `--dsw-font-markdown-code-block`。
+   后者是**字体简写**（实测计算值 `11px/19px "SF Mono", …`，带字号+行高），喂给
+   `font-family` 是**无效声明** ⇒ 计算值阶段失效、静默回落到继承值（Inter），
+   不报错也不生效。本文件原有 5 处这种写法，靠字族 fallback 才没露馅（2026-09-16 收口，
+   与 CodeCard.module.css 的 `34b3ac6` 同一口径）。 */
+
 .card {
   display: flex;
   flex-direction: column;
@@ -53,7 +59,7 @@
   border-radius: 8px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   font-size: 12px;
 }
 
@@ -79,7 +85,7 @@
   border-radius: 8px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   font-size: 12px;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -151,7 +157,7 @@
 }
 
 .bodyLine {
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   font-size: 12.5px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -213,7 +219,7 @@
 .cmdText {
   flex: 1 1 auto;
   min-width: 0;
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   font-size: 12.5px;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -250,7 +256,7 @@
   border-radius: 8px;
   padding: 8px 10px;
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.62));
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   font-size: 12.5px;
   color: var(--dsw-alias-label-primary);
   white-space: pre-wrap;
