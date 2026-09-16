@@ -61,10 +61,10 @@ import type {
   SettingsOnboardingStep, SettingsRootInjected, SettingsSectionRow,
 } from './shell-contract.ts'
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
-import { GeneralSection } from './SettingsGeneralSection.tsx'
 import { SECTION_DEFS } from './settings/SettingsSections.tsx'
 import { ExtensionsSection } from './settings/sections/SettingsExtensionsSection.tsx'
 import { DataSection } from './settings/sections/SettingsDataSection.tsx'
+import { AppearanceSection } from './settings/sections/SettingsAppearanceSection.tsx'
 import { CorumRpcContext, CorumSettingsContext, FontPrefsContext, NotificationPrefsContext, type CorumSettingsFace } from './settings/shared.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
@@ -484,9 +484,9 @@ export function apply(ctx: ClientContext): void {
         'settings.close': { kind: 'single', scope: 'root' },
         'settings.section': { kind: 'list', scope: 'root' },
         'settings.onboarding': { kind: 'list', scope: 'root' },
-        // P0-5：settings.general.item 的子槽声明放在 General section 条目上
-        // （见下方 disposeGeneral 注册），不在 sidebar.settings occupant 重复
-        // 声明——slots 运行时禁止同一槽被声明两次（"already declared"）。
+        // settings.general.item 的子槽声明放在「外观」section 条目上（2026-09-16
+        // 重组：自原 general 分区迁入，见下方 appearance 分支），不在 sidebar.settings
+        // occupant 重复声明——slots 运行时禁止同一槽被声明两次（"already declared"）。
       },
       inject: shellInjected,
     }, SettingsShell))
@@ -549,26 +549,27 @@ export function apply(ctx: ClientContext): void {
     // 组（新工作区始终初始化 git 开关，2026-09-09 用户需求）是 GeneralSection 里第一个
     // 真实持久化项，需要 settings 面；此前 GeneralSection 单独注册未包 Provider（纯静态
     // 占位），导致 WorkspaceGitGroup 的 useContext(CorumSettingsContext) 拿 null 降级隐藏。
-    // P0-5（2026-09-14）：General section 条目是 `settings.general.item` 的渲染点。
-    // 形态照官方 ui-settings-general 的 General entry：children 里声明该子槽，
-    // 组件本身（GeneralSection）收 PropsRenderSlots 并 renderSlot('settings.general.item')。
-    // 官方契约（dsh-client-ui-settings contract/slots.d.ts）：行内文案/控件/写路径
-    // 全部由注册方自带，owner props 为空标记（SettingsGeneralItemOwnerProps）。
-    // 真实行来源（均已核实注册进该槽）：官方 ui-theme（appearance 10/font-size 11）、
-    // dsh-client-locale（language 0）、ui-permission-presets（permission -20）、
-    // corum-ui-conversation fork（composer-enter 20）、corum-ui-chat fork
-    // （transcript-view 12）、corum-session-archive（session-archive-import）。
-    const disposeGeneral = ctx.slots.inject('settings.section', () => ctx.slots.register({
+    // 2026-09-16 重组：「通用」页（general 分区）已拆散删除 ——
+    //   应用级项（界面语言 language / 忙碌时回车 composer-enter）经 settings.general.item
+    //   子槽迁入**外观页**（见下方 appearance 注册的 renderSlot 承接）；
+    //   Agent 语义组（改动审查保留 / Agent 执行阈值）迁入**智能体设置页**（general-groups.tsx）。
+    //   原 GeneralSection 的 settings.general.item 渲染点随之移到外观页——该槽的注册方
+    //   （官方 locale / conversation fork 等）不动，仅渲染点迁移。
+    //
+    // ⚠️ 外观单独注册且**必须在 SECTION_DEFS 批量之前**：slot 列表的导航投影按
+    //   「注册（装配）顺序」排序，order 字段不参与（实测：外观后注册时 order=5/200
+    //   都落到数据管理之后）。外观是 general 组首项，故在原 general 的位置先注册。
+    const disposeAppearance = ctx.slots.inject('settings.section', () => ctx.slots.register({
       name: 'settings.section',
-      id: 'general',
-      order: 0,
-      label: () => t('general.nav'),
+      id: 'appearance',
+      order: 10,
+      label: () => t('nav.appearance'),
       locale: NS,
       children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
-    }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.general.item', owner: {}, opts?: { only?: string }) => ReactNode }) => (
+    }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.general.item', owner: object, opts?: { only?: string }) => ReactNode }) => (
       <CorumRpcContext.Provider value={corumRpc}>
         <CorumSettingsContext.Provider value={corumSettings}>
-          <GeneralSection {...props} />
+          <SettingsSectionHost {...props} render={() => <AppearanceSection renderSlot={props.renderSlot} />} />
         </CorumSettingsContext.Provider>
       </CorumRpcContext.Provider>
     )))
@@ -639,8 +640,8 @@ export function apply(ctx: ClientContext): void {
     })
 
     return () => {
+      disposeAppearance()
       for (const dispose of disposeSections) dispose()
-      disposeGeneral()
       disposeClose()
       disposeHeader()
       disposeTrigger()

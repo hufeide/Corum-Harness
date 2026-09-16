@@ -12,7 +12,6 @@
  */
 import type { ReactNode } from 'react'
 import type { SettingsKey } from '../settings-locales.ts'
-import { AppearanceSection } from './sections/SettingsAppearanceSection.tsx'
 import { EditorSection } from './sections/SettingsEditorSection.tsx'
 import { NotificationsSection } from './sections/SettingsNotificationsSection.tsx'
 import { ShortcutsSection } from './sections/SettingsShortcutsSection.tsx'
@@ -93,7 +92,9 @@ export interface SectionDef {
  * （ExtensionsSection「插件管理」承接）。
  */
 export const SECTION_DEFS: SectionDef[] = [
-  { id: 'appearance', order: 10, label: 'nav.appearance', navGroup: 'general', Component: AppearanceSection },
+  // ⚠️ appearance（外观）不在此表：它需声明 settings.general.item 子槽承接应用级
+  //   通用项（2026-09-16 重组），renderSlot 是窄字面量类型（与本表 Component 的
+  //   key:string 宽类型逆变不兼容）⇒ 由 index.tsx 单独注册（同原 general 模式）。
   // ➕ M3 新建：编辑器分区（用户裁定 #1「要单独有一个编辑器的设置页面」；设计稿与本文件均为新增）。
   { id: 'editor', order: 15, label: 'nav.editor', navGroup: 'general', Component: EditorSection },
   { id: 'notifications', order: 20, label: 'nav.notifications', navGroup: 'general', Component: NotificationsSection },
@@ -137,13 +138,17 @@ export const SECTION_DEFS: SectionDef[] = [
  * 归属由 section 自声明，缺省归 'extensions'）。
  *
  * - 19 个壳自有 section：从 SECTION_DEFS 的 navGroup 自声明派生。
- * - `general`：由 index.tsx 单独注册（非 SECTION_DEFS），恒归 'general'。
  * - `models`：跨 bundle section（@corum/corum-ui-settings-models 注册），
  *   按 PLAN 映射表固定归 'agent'（现状同）。
  * - 其余跨 bundle section（artgen / ollama 等）未在此表 → 缺省归 'extensions'。
+ *
+ * ⚠️ 原 `general` 分区已于 2026-09-16 拆散删除（通用页回归应用级：
+ * 语言/忙碌时回车迁入外观页，Agent 语义组迁入智能体设置页）。
  */
 export const NAV_GROUP_BY_ID: Record<string, SettingsNavGroup> = {
-  general: 'general',
   ...Object.fromEntries(SECTION_DEFS.map(d => [d.id, d.navGroup ?? 'extensions'])),
+  // appearance 不在 SECTION_DEFS（index.tsx 单独注册），但归属仍是 general 组——
+  // 缺了这条它会落默认 extensions 组（实测导航跑到「数据管理」之后）。
+  appearance: 'general',
   models: 'agent',
 }

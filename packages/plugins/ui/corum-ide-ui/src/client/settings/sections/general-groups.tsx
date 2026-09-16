@@ -1,64 +1,26 @@
 /**
- * GeneralSection — the shell-owned General settings section.
+ * general-groups — 原「通用」页拆出的两个 Agent 语义设置组（2026-09-16 重组）。
  *
- * P0-5（2026-09-14）：该条目收编为 `settings.general.item` 的渲染点（子槽
- * children 声明由 index.tsx 的本 section 条目携带，照官方 ui-settings-general
- * 的 General entry 形态）。官方契约：section 列只负责堆叠各 feature 注册的
- * 偏好行，不传 owner props（SettingsGeneralItemOwnerProps 是空标记）；行内的
- * 标题/描述/控件/写路径全部由注册方自带。官方 ui-theme（外观/字号）、
- * dsh-client-locale（界面语言）、ui-permission-presets（权限档）、
- * ui-conversation fork（忙碌时回车）、ui-chat fork（轨迹视图）、
- * session-archive（导入会话日志）都注册进这个槽。
+ * ## 由来：通用页回归「应用级」
  *
- * 此前这里的六行自绘假行（界面语言/外观主题/忙碌时回车/默认预设/权限档/
- * 匿名统计）是全空 onChange + 固定 value 的静态占位，其中「忙碌时回车」还是
- * composer-enter 真行的死副本——真行挂不进来（无渲染点），假行占位还静默
- * 无效，违反 §13.1「禁止外观可用而静默无效」。P0-5 全部删除：官方真行
- * 会注册进同一槽（ui-theme 挂载、已核实其 client 源码 slots.register
- * 'settings.general.item' id appearance/font-size），由官方插件自己拥有。
+ * 用户裁定（2026-09-16）：「通用页没什么好设置的，反而都是 Agent 的」⇒
+ * **拆掉「通用」页**：应用级项（界面语言 / 忙碌时回车）迁入**外观页**，
+ * 而本文件里的两个 **Agent 语义**组（改动审查保留 / Agent 执行阈值）迁入
+ * **智能体设置页**。导航由 22 项收敛为 **21 项**（`general` 分区删除）。
  *
- * ReviewRetentionGroup / AgentStallGroup 是真实现（接 settings.mutate），保留。
+ * 本文件保留这两个组的实现（它们是真实现，接 `settings.mutate`），
+ * 以**纯导出组**形态供智能体设置页消费——不再是独立分区。
+ *
+ * - ReviewRetentionGroup：改动审查 · 轮次历史保留天数（`corum-review` ns）。
+ * - AgentStallGroup：Agent 执行 · 卡住自动恢复阈值（`corum-agent` ns）。
+ *
+ * 两者都只负责写设置；真正的 host 推送由订阅方完成（见各组注释）。
  */
 import { useContext, useEffect, useState } from 'react'
-import { SettingGroup } from './settings/SettingGroup.tsx'
-import { SettingRow } from './settings/SettingRow.tsx'
-import { SelectField } from './settings/SelectField.tsx'
-import { CorumSettingsContext } from './settings/shared.tsx'
-import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-
-/** Full section props: section owner share plus the item render share. */
-export type GeneralSectionComponentProps =
-  & PropsRenderSlots<'settings.general.item'>
-
-export function GeneralSection({ renderSlot }: GeneralSectionComponentProps) {
-  return (
-    <>
-      {/*
-        M4「双入口归一」（PRD §4.13 + 用户第三批裁定「只留外观页」）：
-        该槽共 7 个注册方，本页**只保留 2 个**，其余 5 个一律迁出（唯一入口在各自页面）：
-
-        | id | 注册方 | 处置 |
-        |---|---|---|
-        | `language` | 官方 locale | ✅ **保留** |
-        | `composer-enter` | 官方 ui-conversation / corum fork | ✅ **保留** |
-        | `appearance` | 官方 ui-theme | ➖ 迁出 → **外观页**（唯一入口） |
-        | `font-size` | 官方 ui-theme | ➖ 迁出 → **外观页**（= 会话正文字号） |
-        | `permission` | 官方 ui-permission-presets | ➖ 迁出 → **权限页** |
-        | `transcript-view` | 官方 ui-chat / corum fork | ➖ 迁出 → **高级页** |
-        | `session-archive-import` | corum fork session-archive | ➖ 迁出 → **数据管理页** |
-
-        ⚠️ **为什么用 `only` 过滤而不是删注册**：这些注册方多数是官方 plugin，本仓不能改；
-        而子槽「声明即独占」（官方 ui-slots 注释：Declaring is claiming），
-        别的分区也拿不到 renderSlot ⇒ **只能在本渲染点过滤**。若直接不过滤，
-        同一个键就还有两个可写入口，正是 M4 要消除的问题。
-      */}
-      {renderSlot('settings.general.item', {}, { only: 'language' })}
-      {renderSlot('settings.general.item', {}, { only: 'composer-enter' })}
-      <ReviewRetentionGroup />
-      <AgentStallGroup />
-    </>
-  )
-}
+import { SettingGroup } from '../SettingGroup.tsx'
+import { SettingRow } from '../SettingRow.tsx'
+import { SelectField } from '../SelectField.tsx'
+import { CorumSettingsContext } from '../shared.tsx'
 
 /** corum-review settings namespace（与 host corum-review.ts 注册同 namespace/schema）。 */
 const CORUM_REVIEW_NS = 'corum-review'
@@ -83,7 +45,7 @@ const RETENTION_OPTIONS = [
  * 只负责写设置；真正的 host 推送由 corum-ui-chat 订阅该 namespace 后调
  * `corumReview/setRetention`（host 侧没有 settings 读取面）。
  */
-function ReviewRetentionGroup() {
+export function ReviewRetentionGroup() {
   const settings = useContext(CorumSettingsContext)
   const [, force] = useState(0)
   useEffect(() => {
@@ -156,7 +118,7 @@ const STALL_OPTIONS = [
  * 重排队。项目制扫描与 task 泳道共用这一个值。
  * 太小会打断正常的长工具执行（bash 工具自身超时 300s），默认 10 分钟是经验值。
  */
-function AgentStallGroup() {
+export function AgentStallGroup() {
   const settings = useContext(CorumSettingsContext)
   const [, force] = useState(0)
   useEffect(() => {

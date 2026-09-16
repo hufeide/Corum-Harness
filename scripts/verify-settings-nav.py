@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """从源码解析 SECTION_DEFS + NAV_GROUP_BY_ID，模拟设置导航的实际投影顺序。
 
-用途：核验代码侧导航是否等于设计稿的「22 项 / 5 组」（2026-09-16 移除 profiles 后）。
+用途：核验代码侧导航是否等于设计稿的「21 项 / 5 组」（2026-09-16 移除 profiles + 拆散 general 后）。
 跨 bundle 分区（不由 SECTION_DEFS 注册）在此显式补入，取自各自源码实测值：
 - general  order 0   （corum-ide-ui/src/client/index.tsx）
 - models   order 10  （corum-ui-settings-models/src/client/index.ts，NAV_GROUP_BY_ID 固定归 agent）
@@ -21,9 +21,11 @@ defs = []
 for m in re.finditer(r"\{\s*id:\s*'([^']+)',\s*order:\s*(\d+),\s*label:\s*'([^']+)',\s*navGroup:\s*'([^']+)'", src):
     defs.append({'id': m.group(1), 'order': int(m.group(2)), 'label': m.group(3), 'group': m.group(4)})
 
-# 跨 bundle 分区（不在 SECTION_DEFS 里，来源见 docstring）
+# 跨 bundle / 单独注册分区（不在 SECTION_DEFS 里，来源见 docstring）
+# ⚠️ 2026-09-16：原 `general` 分区已拆散删除（通用页回归应用级），不再补入；
+#    `appearance` 因需窄类型 renderSlot 改由 index.tsx 单独注册（仍归 general 组），补入。
 defs += [
-    {'id': 'general', 'order': 0,   'label': 'general.nav',     'group': 'general'},
+    {'id': 'appearance', 'order': 10, 'label': '外观',            'group': 'general'},
     {'id': 'models',  'order': 10,  'label': '(models t(nav))', 'group': 'agent'},
     {'id': 'ollama',  'order': 195, 'label': 'Ollama',          'group': 'extensions'},
     {'id': 'artgen',  'order': 197, 'label': '本地文生图',        'group': 'extensions'},
@@ -57,7 +59,7 @@ print('合计：%d 项' % total)
 # ⚠️ 2026-09-16 用户裁定：profiles（配置档案）分区移除——本地「设置快照/切换」不做，
 #    未来走账号登录 + 云端保存。设计稿 design.pen 侧的「配置档案」节点同步待用户 ⌘S。
 TARGET = {
-    'general': ['general', 'appearance', 'editor', 'terminal', 'notifications', 'shortcuts'],
+    'general': ['appearance', 'editor', 'terminal', 'notifications', 'shortcuts'],
     'agent': ['models', 'agent-settings', 'memory', 'permissions', 'hooks', 'agent-presets'],
     'data': ['account', 'privacy', 'data'],
     'extensions': ['extensions', 'mcp', 'skills', 'ai-polish', 'ollama', 'artgen'],

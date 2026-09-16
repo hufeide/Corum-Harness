@@ -24,7 +24,7 @@
  * @module corum-ide-ui/client/settings/sections/SettingsAppearanceSection
  */
 
-import { useContext, useEffect, useState, useSyncExternalStore } from 'react'
+import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
@@ -69,13 +69,22 @@ interface ThemeView {
 }
 
 /**
- * 外观分区：主题 + 字体与排版。
+ * 外观分区：主题 + 字体与排版 + 应用级通用项（界面语言 / 忙碌时回车）。
  *
  * 外观主题与会话正文字号已接线 `ui-theme`；其余条目为新建真源，禁用并标注未上线。
  *
+ * 2026-09-16 重组：原「通用」页拆散，应用级项（界面语言 `language`、
+ * 忙碌时回车 `composer-enter`）经 `settings.general.item` 子槽 renderSlot 迁入本页
+ * （官方 locale / conversation fork 注册的行，本仓不能改注册方，故在本渲染点承接）。
+ *
+ * @param props - renderSlot（settings.general.item 子槽渲染器，index.tsx 声明下发）。
  * @returns the appearance settings section.
  */
-export function AppearanceSection() {
+export function AppearanceSection(_props?: {
+  renderTabSlot?: () => ReactNode
+  renderSlot?: (key: 'settings.general.item', owner: object, opts?: { only?: string }) => ReactNode
+}) {
+  const renderSlot = _props?.renderSlot
   const settings = useContext(CorumSettingsContext)
   const [, force] = useState(0)
   useEffect(() => {
@@ -207,6 +216,15 @@ export function AppearanceSection() {
           />
         </SettingRow>
       </SettingGroup>
+      {/* 应用级通用项（自原「通用」页迁入，2026-09-16 重组）：界面语言 + 忙碌时回车。
+          官方 locale / conversation fork 注册进 settings.general.item 槽的行，
+          本仓不能改注册方，故在本渲染点经 renderSlot 承接（only 过滤，唯一入口在本页）。 */}
+      {renderSlot !== undefined && (
+        <SettingGroup title="通用">
+          {renderSlot('settings.general.item', {}, { only: 'language' })}
+          {renderSlot('settings.general.item', {}, { only: 'composer-enter' })}
+        </SettingGroup>
+      )}
     </>
   )
 }

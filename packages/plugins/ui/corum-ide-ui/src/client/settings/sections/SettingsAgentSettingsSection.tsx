@@ -41,6 +41,7 @@ import { SelectField } from '../SelectField.tsx'
 import { Switch } from '../Switch.tsx'
 import { Badge } from '../Badge.tsx'
 import { useCorumSettings } from '../shared.tsx'
+import { ReviewRetentionGroup, AgentStallGroup } from './general-groups.tsx'
 import css from '../SettingsSections.module.css'
 
 /* ── 智能体设置（PRD §4.1）──────────────────────────────────────────── */
@@ -318,6 +319,11 @@ export function AgentSettingsSection() {
           />
         </SettingRow>
       </SettingGroup>
+
+      {/* 自原「通用」页迁入（2026-09-16 重组：通用页拆散，Agent 语义项归智能体）。
+          改动审查保留 + Agent 执行阈值——它们是 Agent 行为/留痕，不属于应用级通用。 */}
+      <ReviewRetentionGroup />
+      <AgentStallGroup />
     </>
   )
 }
