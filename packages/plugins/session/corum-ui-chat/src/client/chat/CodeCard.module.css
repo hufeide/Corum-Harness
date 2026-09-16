@@ -122,13 +122,13 @@
 }
 
 .btnLabel {
-  font-family: Inter, sans-serif;
+  font-family: var(--corum-ui-font-family, Inter, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
 
 .btnLabelSuccess {
-  font-family: Inter, sans-serif;
+  font-family: var(--corum-ui-font-family, Inter, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-success-primary);
 }
@@ -178,7 +178,7 @@
   flex: none;
   width: 20px;
   text-align: right;
-  font-family: Inter, sans-serif;
+  font-family: var(--corum-ui-font-family, Inter, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-dimmed);
   white-space: nowrap;

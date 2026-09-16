@@ -264,7 +264,7 @@
   background: var(--corum-glass-1);
   color: var(--dsw-alias-label-primary);
   font-size: calc(16px * var(--corum-ui-font-scale, 1));
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   outline: none;
   box-sizing: border-box;
 }
@@ -297,7 +297,7 @@
   background: var(--corum-glass-1);
   color: var(--dsw-alias-label-primary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   outline: none;
   box-sizing: border-box;
 }

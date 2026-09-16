@@ -10,7 +10,7 @@
   align-items: center;
   padding: calc(2px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1));
   border-radius: 6px;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   line-height: 1.4;

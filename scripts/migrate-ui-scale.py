@@ -150,6 +150,58 @@ def rewrite(text, props):
 def main():
     """Run the dry-run (or --apply) migration and report per-file counts."""
     apply = '--apply' in sys.argv
+
+    # ── 字族模式：`--family` ────────────────────────────────────────────
+    # 把「UI 字族栈」的整条值改为 `var(--corum-ui-font-family, <原栈>)`。
+    # ⚠️ **必须排除代码字族**（含 mono / Menlo / Consolas 的栈）——
+    # 它们属编辑器与终端两个「面」，混改会破坏那两处（四面独立）。
+    # ⚠️ 值必须保留为**整栈**（不能只留一个字族名），否则用户选到本机不存在的
+    # 字族时**没有回退候选**，会渲染成方框。
+    if '--family' in sys.argv:
+        fam_var = '--corum-ui-font-family'
+        fam_decl = re.compile(r'font-family\s*:\s*(?P<val>[^;{}]+);')
+        mono_markers = ('mono', 'menlo', 'consolas', 'courier')
+        total = 0
+        touched = 0
+        lines = []
+        for root in DEFAULT_ROOTS:
+            if not os.path.isdir(root):
+                continue
+            for path in css_files(root):
+                src = io.open(path, encoding='utf-8').read()
+                changes = []
+
+                def on_fam(match):
+                    val = match.group('val').strip()
+                    low = val.lower()
+                    if fam_var in val:
+                        return match.group(0)
+                    if any(m in low for m in mono_markers):
+                        return match.group(0)   # 代码字族：不属本面，跳过
+                    if 'var(' in val:
+                        return match.group(0)   # 已由 token 驱动，跳过
+                    changes.append('font-family: %s' % val)
+                    return 'font-family: var(%s, %s);' % (fam_var, val)
+
+                out = fam_decl.sub(on_fam, src)
+                if not changes:
+                    continue
+                total += len(changes)
+                touched += 1
+                lines.append('=== %s  (%d 处)' % (path, len(changes)))
+                lines.extend('  ' + c for c in changes)
+                if apply:
+                    io.open(path, 'w', encoding='utf-8').write(out)
+        print('模式：字族（%s）' % ('落盘' if apply else '干跑'))
+        print('合计：%d 处声明，涉及 %d 个 CSS 文件' % (total, touched))
+        if diff_out := (sys.argv[sys.argv.index('--diff-out') + 1] if '--diff-out' in sys.argv else None):
+            io.open(diff_out, 'w', encoding='utf-8').write('\n'.join(lines) + '\n')
+            print('清单已写入：%s（%d 行）' % (diff_out, len(lines)))
+        else:
+            for line in lines[:8]:
+                print(line)
+        return 0
+
     diff_out = None
     if '--diff-out' in sys.argv:
         diff_out = sys.argv[sys.argv.index('--diff-out') + 1]

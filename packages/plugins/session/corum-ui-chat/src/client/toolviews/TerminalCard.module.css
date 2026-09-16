@@ -43,7 +43,7 @@
 }
 
 .title {
-  font-family: Inter, sans-serif;
+  font-family: var(--corum-ui-font-family, Inter, sans-serif);
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -121,7 +121,7 @@
 }
 
 .btnLabel {
-  font-family: Inter, sans-serif;
+  font-family: var(--corum-ui-font-family, Inter, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
@@ -228,7 +228,7 @@
 }
 
 .collapsedHint {
-  font-family: Inter, sans-serif;
+  font-family: var(--corum-ui-font-family, Inter, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }

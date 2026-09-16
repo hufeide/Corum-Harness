@@ -73,7 +73,7 @@
 /* ── 共享内部元素 ─────────────────────────────────────────────────── */
 
 .title {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -85,7 +85,7 @@
 }
 
 .message {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -97,7 +97,7 @@
 }
 
 .warning {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-state-error-primary);
@@ -121,7 +121,7 @@
   border-radius: 8px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-primary);
@@ -138,7 +138,7 @@
   border-radius: 8px;
   background: var(--dsw-alias-state-error-primary);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--corum-label-on-brand);
@@ -150,7 +150,7 @@
   border-radius: 8px;
   background: var(--dsw-alias-brand-primary, var(--corum-state-running));
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--corum-label-on-brand);

@@ -38,7 +38,7 @@
   cursor: pointer;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   line-height: 22px;
 }
@@ -147,7 +147,7 @@
   outline: none;
   background: transparent;
   /* 设计稿: Inter 11px normal, label-tertiary */
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-primary);
@@ -175,7 +175,7 @@
 .navSecTitle {
   /* 设计稿: Inter 10px 700, label-dimmed */
   padding: calc(2px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   line-height: 1.4;
@@ -196,7 +196,7 @@
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   /* 设计稿: 12px normal/idle 600/active */
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
@@ -261,7 +261,7 @@
 
 .headerTitle {
   /* 设计稿: Inter 15px 700, label-primary */
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
@@ -297,7 +297,7 @@
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);

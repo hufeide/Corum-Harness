@@ -12,7 +12,7 @@
   border-radius: 13px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-primary);
@@ -47,7 +47,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 13px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   outline: none;
@@ -70,7 +70,7 @@
 }
 
 .searchPlaceholder {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -96,7 +96,7 @@
 }
 
 .cmdLine {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   line-height: 1.6;
@@ -132,7 +132,7 @@
 .memTxt {
   flex: 1;
   min-width: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   line-height: 1.5;
@@ -159,7 +159,7 @@
 /* ── 尺寸标签 ──────────────────────────────────────────────────────── */
 
 .sizeLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
@@ -169,7 +169,7 @@
 /* ── 提示文本 ──────────────────────────────────────────────────────── */
 
 .hintText {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   line-height: 1.6;
@@ -186,7 +186,7 @@
 }
 
 .topHint {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -275,7 +275,7 @@
 }
 
 .agentNickname {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
@@ -294,7 +294,7 @@
   border-radius: 6px;
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(9px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -303,7 +303,7 @@
 }
 
 .agentRole {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-brand-text);
@@ -319,7 +319,7 @@
 
 /* 座右铭（设计稿 motto：单行省略，11px tertiary，溢出 … 截断） */
 .agentMotto {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -331,7 +331,7 @@
 
 /* 经验行（设计稿 exp 10 dimmed；固定行高保证名片等高） */
 .agentExp {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
@@ -383,7 +383,7 @@
   border-radius: 5px;
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(9px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -400,7 +400,7 @@
   border-radius: 5px;
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(9px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
@@ -437,7 +437,7 @@
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -486,7 +486,7 @@
   border: none;
   background: transparent;
   outline: none;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
@@ -546,7 +546,7 @@
 }
 
 .officialGroupTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-dimmed);
@@ -594,7 +594,7 @@
 
 /* 设计稿 mjvEK label：12px normal（非 600）。 */
 .officialCardLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -607,14 +607,14 @@
   border-radius: 5px;
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-1);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(9px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
 }
 
 .officialCardDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
@@ -649,7 +649,7 @@
 }
 
 .cardTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
@@ -662,7 +662,7 @@
   border-radius: 7px;
   background: var(--dsw-alias-brand-primary);
   color: var(--corum-label-on-brand);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   /* 设计稿: 9px 700 */
   font-size: calc(9px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
@@ -675,13 +675,13 @@
   border-radius: 7px;
   background: var(--dsw-alias-state-success-primary);
   color: var(--corum-label-on-brand);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(9px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
 }
 
 .cardDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -699,7 +699,7 @@
   padding: calc(4px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
   border-radius: 7px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -782,7 +782,7 @@
 }
 
 .bindPickDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -818,7 +818,7 @@
 /* 字段下提示（设计稿 GHBvv hint: 10px dimmed） */
 .fieldHint {
   margin: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
@@ -868,7 +868,7 @@
 .cardPreviewLabel {
   flex: none;
   padding-top: calc(4px * var(--corum-density-scale, 1));
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
@@ -894,7 +894,7 @@
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-1);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -949,14 +949,14 @@
 }
 
 .serverName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .serverDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -969,7 +969,7 @@
 }
 
 .serverTools {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
@@ -998,14 +998,14 @@
 }
 
 .skillLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .skillDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -1016,7 +1016,7 @@
   padding: calc(3px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 7px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -1074,7 +1074,7 @@
 }
 
 .modalTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
@@ -1109,7 +1109,7 @@
 }
 
 .fieldLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -1118,7 +1118,7 @@
 
 /* 编辑页小字段标签（设计稿 GHBvv lbl: 10px normal, label-tertiary, 无 margin） */
 .fieldLabelSm {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -1131,7 +1131,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 8px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   outline: none;
@@ -1156,7 +1156,7 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   outline: none;
@@ -1193,7 +1193,7 @@
 }
 
 .trustLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -1205,7 +1205,7 @@
   border-radius: 5px;
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -1229,14 +1229,14 @@
 
 /* 编辑页子组小标签（设计稿 glbl: 10px 600, label-secondary） */
 .formSubLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 
 .formGroupTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -1285,7 +1285,7 @@
 }
 
 .avatarHint {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
@@ -1318,7 +1318,7 @@
 }
 
 .expReadText {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -1338,7 +1338,7 @@
 }
 
 .expNoteText {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -1356,7 +1356,7 @@
   border-radius: 7px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -1376,7 +1376,7 @@
   border-radius: 9px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
@@ -1402,7 +1402,7 @@
   border-radius: 10px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-state-error-primary);
@@ -1464,7 +1464,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   padding: 0;
   border: none;
   background: transparent;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
   color: var(--dsw-alias-label-secondary);
@@ -1487,7 +1487,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .promptCount {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
@@ -1502,7 +1502,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 7px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
@@ -1546,7 +1546,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 .personaCap {
   flex: 1;
   min-width: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -1581,7 +1581,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   background: transparent;
   outline: none;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
@@ -1592,14 +1592,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .personaCustomCount {
   flex: none;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
 .personaCustomNote {
   margin: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -1642,20 +1642,20 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .modelCardTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 
 .modelCardTip {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
 .modelCardTipActive {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-brand-text);
 }
@@ -1687,14 +1687,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .modelCardOverrideTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .modelCardOverrideHint {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -1756,7 +1756,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .stepperHint {
   min-width: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -1778,7 +1778,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .polishLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -1786,7 +1786,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .polishDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -1828,14 +1828,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .polishChoiceTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .polishChoiceDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -1852,7 +1852,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -1882,7 +1882,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .promptZoomTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -1913,7 +1913,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   padding: 0;
   border: none;
   background: transparent;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 1.6;
   color: var(--dsw-alias-label-primary);
@@ -1950,7 +1950,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 .listName {
   flex: 1;
   min-width: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
@@ -1976,7 +1976,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -2021,7 +2021,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .skillCardName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -2045,7 +2045,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .skillCardDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-dimmed);
@@ -2106,7 +2106,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .memoryState {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -2151,7 +2151,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 10px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
@@ -2197,7 +2197,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   justify-content: center;
   gap: calc(8px * var(--corum-density-scale, 1));
   padding: calc(6px * var(--corum-density-scale, 1)) 0 calc(2px * var(--corum-density-scale, 1));
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -2210,7 +2210,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   background: none;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
@@ -2245,7 +2245,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .detailName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
@@ -2259,7 +2259,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: 1px solid var(--corum-glass-border);
   border-radius: 6px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -2275,7 +2275,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .kvLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
@@ -2317,7 +2317,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   background: none;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -2363,7 +2363,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 10px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -2383,7 +2383,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);
@@ -2403,7 +2403,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .skillTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
@@ -2574,14 +2574,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .versionId {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .versionLabel {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -2591,7 +2591,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   padding: calc(3px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-radius: 7px;
   background: var(--dsw-alias-brand-primary);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--corum-label-on-brand);
@@ -2615,7 +2615,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
@@ -2624,7 +2624,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 .bindName {
   flex: 1;
   min-width: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -2633,7 +2633,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 /* 删除确认对话框警示文案（统一确认框外的局部复用） */
 .confirmWarn {
   margin: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
 }
@@ -2653,14 +2653,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .scanName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .scanNameDim {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-dimmed);
@@ -2669,14 +2669,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 .scanDesc {
   flex: 1;
   min-width: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
 .scanExists {
   flex: none;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-dimmed);
@@ -2700,7 +2700,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   flex-direction: column;
   gap: calc(14px * var(--corum-density-scale, 1));
   width: 100%;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
 }
 
 /* ── tabs h5Hckf：glass-2 / r10 / glass-border / p3 / gap4 ─────────────── */
@@ -2724,7 +2724,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   line-height: 18px;
@@ -2775,7 +2775,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   line-height: 20px;
@@ -2814,7 +2814,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   outline: none;
 }
@@ -2836,7 +2836,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 10px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-primary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
@@ -2868,7 +2868,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   text-align: left;
   cursor: pointer;
@@ -3017,7 +3017,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 13px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-primary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
@@ -3059,7 +3059,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
@@ -3106,7 +3106,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 .plgHint {
   flex: none;
   margin: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3114,7 +3114,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 .plgError {
   flex: none;
   margin: 0;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
   overflow-wrap: anywhere;
@@ -3147,7 +3147,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: var(--dsw-alias-brand-primary);
   color: var(--corum-label-on-brand);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
@@ -3182,7 +3182,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpIntroTip {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3196,7 +3196,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 13px;
   background: var(--dsw-alias-brand-primary);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--corum-label-on-brand);
@@ -3271,7 +3271,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpSrvName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
@@ -3289,14 +3289,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   border-radius: 7px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 
 .mcpSrvDesc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
@@ -3313,7 +3313,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .mcpSrvTools {
   flex: none;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3340,7 +3340,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 10px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
@@ -3364,7 +3364,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 10px;
   background: var(--dsw-alias-state-error-primary);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: #FFFFFF;
 }
@@ -3394,14 +3394,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpCardTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 
 .mcpCardTip {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3441,7 +3441,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpIdName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(18px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -3459,7 +3459,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   border-radius: 7px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: normal;
   color: var(--dsw-alias-label-tertiary);
@@ -3484,13 +3484,13 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .mcpKvKey {
   flex: none;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
 
 .mcpKvVal {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   text-align: right;
@@ -3500,14 +3500,14 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpKvValSuccess {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-success-primary);
   text-align: right;
 }
 
 .mcpKvValError {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-state-error-primary);
   text-align: right;
@@ -3558,7 +3558,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpToolName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -3617,7 +3617,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 /* 工具计数（卡片标题行右侧） */
 .mcpToolCount {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3639,7 +3639,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   background: none;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3666,7 +3666,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   height: 22px;
   border-radius: 11px;
   background: var(--corum-glass-3);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   overflow: hidden;
@@ -3681,7 +3681,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpBindName {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -3691,7 +3691,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .mcpBindState {
   flex: none;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3705,21 +3705,21 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border: none;
   border-radius: 7px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
 .mcpHintDim {
   width: 100%;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-dimmed);
 }
 
 /* ── C. 添加页：label 小字 10 tertiary + input 34 ── */
 .mcpFieldLbl {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3734,7 +3734,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: var(--corum-glass-2);
   box-sizing: border-box;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   outline: none;
@@ -3765,7 +3765,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
@@ -3780,7 +3780,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: var(--dsw-alias-brand-primary);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--corum-label-on-brand);
 }
@@ -3826,7 +3826,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpColLbl {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3841,7 +3841,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 8px;
   background: var(--corum-glass-2);
   box-sizing: border-box;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
   outline: none;
@@ -3869,7 +3869,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 13px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-primary);
 }
@@ -3883,7 +3883,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 13px;
   background: var(--dsw-alias-brand-primary);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--corum-label-on-brand);
 }
@@ -3939,7 +3939,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpConfirmTitle {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -3947,7 +3947,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .mcpConfirmMsg {
   width: 100%;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
 }
@@ -3961,7 +3961,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 
 .mcpConfirmBullet {
   width: 100%;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
@@ -3979,7 +3979,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 }
 
 .mcpConfirmWarnTxt {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 70%, #FFFFFF);
 }
@@ -3997,7 +3997,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   width: 100%;
   padding: calc(24px * var(--corum-density-scale, 1)) 0;
   text-align: center;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }

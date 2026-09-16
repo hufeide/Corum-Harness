@@ -20,7 +20,7 @@
   border-radius: 10px;
   background: var(--corum-glass-2);
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(16px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-primary);
@@ -101,7 +101,7 @@
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);
   text-align: left;
@@ -124,7 +124,7 @@
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);

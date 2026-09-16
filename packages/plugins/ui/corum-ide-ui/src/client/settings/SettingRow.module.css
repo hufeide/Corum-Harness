@@ -32,7 +32,7 @@
 
 /* 行标题（设计稿: Inter 13px 600, label-primary）*/
 .label {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -41,7 +41,7 @@
 
 /* 行描述（设计稿: Inter 11px normal, label-tertiary）*/
 .desc {
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-tertiary);

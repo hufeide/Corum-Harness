@@ -265,20 +265,20 @@
   background: var(--dsw-alias-state-warn-primary);
 }
 .dirtyText {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', system-ui, sans-serif);
   color: var(--dsw-alias-state-warn-primary);
 }
 /* 保存反馈（状态栏右侧）：保存中/已保存/失败。 */
 .savingText {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', system-ui, sans-serif);
   color: var(--dsw-alias-label-tertiary);
 }
 .savedText {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', system-ui, sans-serif);
   color: var(--dsw-alias-state-success-primary);
 }
 .saveFailedText {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', system-ui, sans-serif);
   color: var(--dsw-alias-state-error-primary);
   max-width: 240px;
   white-space: nowrap;
@@ -403,7 +403,7 @@
 
 /* 磁盘外部变更警告（watch 检测到已打开 tab 被外部修改且本地 dirty）。 */
 .externalChangedText {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', system-ui, sans-serif);
   color: var(--dsw-alias-state-warn-primary);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
 }

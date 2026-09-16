@@ -14,7 +14,7 @@
   border: 1px solid var(--corum-glass-border-active);
   border-radius: 6px;
   background: var(--corum-glass-2);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
   color: var(--dsw-alias-label-secondary);

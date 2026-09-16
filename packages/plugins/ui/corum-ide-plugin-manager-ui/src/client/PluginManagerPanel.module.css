@@ -210,7 +210,7 @@ body[data-ds-dark-theme] .panel {
   border: none;
   background: transparent;
   color: var(--pm-label-primary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   outline: none;
 }
@@ -235,7 +235,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 9px;
   background: var(--pm-glass-2);
   color: var(--pm-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
@@ -276,7 +276,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 7px;
   background: transparent;
   color: var(--pm-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   text-align: left;
   white-space: nowrap;
@@ -312,7 +312,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 7px;
   background: var(--pm-glass-2);
   color: var(--pm-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(10px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   line-height: 14px;
@@ -417,7 +417,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 10px;
   background: var(--pm-brand-primary);
   color: var(--pm-label-on-brand);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
@@ -572,7 +572,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 8px;
   background: var(--pm-brand-primary);
   color: var(--pm-label-on-brand);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
@@ -611,7 +611,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 8px;
   background: transparent;
   color: var(--pm-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
@@ -770,7 +770,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 8px;
   background: var(--pm-brand-primary);
   color: var(--pm-label-on-brand);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
@@ -800,7 +800,7 @@ body[data-ds-dark-theme] .panel {
   border-radius: 8px;
   background: transparent;
   color: var(--pm-label-secondary);
-  font-family: inherit;
+  font-family: var(--corum-ui-font-family, inherit);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
 }
