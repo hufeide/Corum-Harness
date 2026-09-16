@@ -316,6 +316,33 @@
   gap: var(--dsh-composer-stack-gap);
 }
 
+/* ── 空态标题栏分隔线（2026-09-16 用户定调，**只在空态**）──────────────────
+   背景：空态时会话顶栏被 `.headerHidden { display: none }` 收走，于是「标题栏带」
+   与「内容区」之间没有任何视觉分界。用户要求补一条 1px 线，且 **y 与左侧 nav 对齐**。
+
+   为什么必须是绝对定位：`.scrollBody` 是 `flex: 1` 且 `overflow-y: auto`，
+   `.composerHero` 又是 `align-self: center` —— 内容永远不贴顶，用盒子模型摆不出这条线
+   （实测：scrollBody 内容从 y=173 起）。以 `.root`（`position: relative`）为锚。
+   注意 `.scrollBody` 自身只高出 `.root` 1px（实测 root y=1 / scrollBody y=2），
+   故 `top: 110px` 落在视口 y=111。
+
+   110 的来历（实测左侧栏）：brandRow 56..110、项目/任务按钮底 98；
+   下一段「新会话」按钮 127..160 ⇒ 取 **110**（品牌行底）作为与 nav 对齐的基线。
+   用 `--corum-nav-brand-bottom` 暴露，宿主若改 nav 高度可覆盖。
+
+   颜色用设计稿既有的 1px `$glass-border`（浅 #FFFFFF / 深 #B98CFF2E），
+   与设计稿里 `UlK61` / `pDeJY` 两条线同源。 */
+.emptyDivider {
+  position: absolute;
+  top: var(--corum-nav-brand-bottom, 109px);
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--corum-glass-border, var(--dsw-alias-border-l2));
+  pointer-events: none;
+  z-index: 2;
+}
+
 /* ② 子 Agent 会话底部「返回父会话」条（设计稿 q0T81 稿②）：隐藏输入框后的替代
    座位。容器与 composer 输入框同宽（--dsh-composer-card-max-width 约束 + 居中），
    按钮撑满整宽——「宽度占原来输入框的宽度」（用户定调）。 */
@@ -492,6 +519,16 @@
 .composerHero {
   position: relative; /* .heroGlow positioning context */
   align-self: center;
+  /* ⚠️ 2026-09-16（用户报障①）：空态（hero 相位）**不吃用户拖出来的会话宽度**。
+     链子是 `--dsh-composer-card-max-width` ← `--dsh-chat-content-width`
+     ← `var(--dsh-chat-user-width, clamp(680px, 列宽*64%, 920px))`；其中
+     `--dsh-chat-user-width` 是**宽度手柄拖出来的那一档**（由 .root 发布）。
+     空态既没有正文列要靠它对齐（宽度手柄本身也只在 `phase === 'active'` 才渲染），
+     跟着它变只会让整块空态被拖窄（实测：user-width=450 ⇒ 744 → 514）。
+     ⇒ 这里把 `--dsh-chat-content-width` **重新定义为纯自适应项**（丢掉用户档），
+       于是空态宽度只随**列宽**走、不再随拖拽档走；输入框仍由本块的 width 规则约束。
+     （设计稿 `nes6F` 的 `center-stage` 满宽、`Chat Input` 固定 720 —— 方向一致。） */
+  --dsh-chat-content-width: clamp(680px, calc(var(--dsh-conversation-column-width, 0px) * 0.64), 920px);
   /* figma 75:8208 drew 12 between all three rows; the workspace row now sits
      8 above the card (its margin-top restores 12 under the hero chrome). */
   gap: 8px;
@@ -555,10 +592,17 @@
   flex-direction: column;
   align-items: center;
   gap: 36px; /* 设计稿 center-stage gap 36 */
+  /* ⚠️ 2026-09-16（用户报障①：「空态的宽度受 session 宽度左右调节的束缚」）：
+     这里原来写 `max-width: var(--dsh-composer-card-max-width, 720px)`，而那个变量是
+     `calc(var(--dsh-chat-content-width) + 32px)`、`--dsh-chat-content-width` 又取
+     `--dsh-chat-user-width`（**用户拖出来的会话宽度**）——于是标语/快捷项/输入框
+     整块跟着会话宽度一起被拖窄（实测：user-width=500px 时这里 712 → 532）。
+     设计稿 `nes6F` 的 `center-stage` 是**满宽**（`justify:center` + `pad:40`），
+     只有 `Chat Input` 是固定 720px。⇒ 故此处**去掉 max-width**，让标语与快捷指令卡
+     自然展开；**输入框仍由 .composerHero 的宽度规则单独约束**（与设计稿一致）。 */
   width: 100%;
-  max-width: var(--dsh-composer-card-max-width, 720px); /* 与 composer 同宽对齐 */
   margin: 0 auto;
-  padding: 40px 0; /* 设计稿 center-stage pad 40（水平 0，宽度由 max-width 约束） */
+  padding: 40px 0; /* 设计稿 center-stage pad 40 */
   text-align: center;
   box-sizing: border-box; /* padding 计入宽度，防溢出容器导致水平偏移 */
 }

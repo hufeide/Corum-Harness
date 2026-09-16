@@ -707,6 +707,14 @@ export function ConversationRoot({
   return (
     <div ref={rootResizeRef} className={css.root} data-phase={phase}>
       {sessionId === undefined ? null : renderSlot('conversation.session.header', {})}
+      {/* 空态标题栏分隔线（2026-09-16 用户定调）：空态时**会话顶栏被隐藏**
+          （`.headerHidden { display: none }`，blank 会话不占列空间），于是「标题栏带」
+          与「内容区」没有任何视觉分界。用户要求**只在空态**补一条 1px 分隔线，
+          且 **y 坐标与左侧 nav 对齐**（视觉规整）。有内容的会话不加——那时顶栏卡片
+          自己就是分界。 */}
+      {(sessionId === undefined || summaryBlank === true) && (
+        <div className={css.emptyDivider} data-empty-divider="" aria-hidden="true" />
+      )}
       <div className={css.scrollBody} data-conversation-scroll="">
         {sessionId === undefined ? null : renderSlot('conversation.session', {})}
         {composerSeat}
