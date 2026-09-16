@@ -29,7 +29,6 @@ import { McpSection } from './sections/SettingsMcpSection.tsx'
 import { SkillsSection } from './sections/SettingsSkillsSection.tsx'
 import { PolishSection } from './sections/SettingsPolishSection.tsx'
 import { AdvancedSection } from './sections/SettingsAdvancedSection.tsx'
-import { ProfilesSection } from './sections/SettingsProfilesSection.tsx'
 import { ExtensionsSection } from './sections/SettingsExtensionsSection.tsx'
 
 // 共享面 re-export（保持 SettingsShell.tsx / SettingsGeneralSection.tsx /
@@ -123,7 +122,12 @@ export const SECTION_DEFS: SectionDef[] = [
   // fork（corum）：AI 润色配置（2026-09-09 重建；导航 id 沿用历史值 ai-polish）。
   { id: 'ai-polish', order: 165, label: 'nav.aiPolish', navGroup: 'extensions', Component: PolishSection },
   { id: 'advanced', order: 170, label: 'nav.advanced', navGroup: 'advanced', Component: AdvancedSection },
-  { id: 'profiles', order: 180, label: 'nav.profiles', navGroup: 'advanced', Component: ProfilesSection },
+  // ➖ profiles（配置档案）分区已按用户裁定移除（2026-09-16）。
+  //   依据：本地「设置快照/切换/导入导出」机制不做——未来走**账号登录 + 云端保存**，
+  //   本地整文件覆盖 settings.yaml 的快照路径（PRD §15.5，与 settings-yaml-guard.ts
+  //   记录的 2026-09-15 写坏故障同源风险）被否决。
+  //   ⚠️ 不要恢复：本地 Profile 与云端账号是两套互斥方向，恢复会造成概念与实现双轨。
+  //   （档案 ≠ Agent 预设：预设 = 单 Agent 配置集合，与本次移除无关，仍保留。）
   // 扩展组次序按设计稿：插件管理 → MCP 与集成 → 技能 → AI 润色 → Ollama(195) → 本地文生图(197)。
   { id: 'extensions', order: 145, label: 'nav.extensions', navGroup: 'extensions', Component: ExtensionsSection },
 ]

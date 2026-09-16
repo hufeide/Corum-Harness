@@ -40,7 +40,6 @@ export const zh = {
   'nav.skills': '技能',
   'nav.aiPolish': 'AI 润色',
   'nav.advanced': '高级',
-  'nav.profiles': '配置档案',
   'nav.extensions': '插件管理',
 } satisfies Record<string, string>
 
@@ -78,6 +77,5 @@ export const en = {
   'nav.skills': 'Skills',
   'nav.aiPolish': 'AI Polish',
   'nav.advanced': 'Advanced',
-  'nav.profiles': 'Profiles',
   'nav.extensions': 'Plugins',
 } satisfies Record<SettingsKey, string>

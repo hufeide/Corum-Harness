@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """从源码解析 SECTION_DEFS + NAV_GROUP_BY_ID，模拟设置导航的实际投影顺序。
 
-用途：核验代码侧导航是否等于设计稿的「23 项 / 5 组」。
+用途：核验代码侧导航是否等于设计稿的「22 项 / 5 组」（2026-09-16 移除 profiles 后）。
 跨 bundle 分区（不由 SECTION_DEFS 注册）在此显式补入，取自各自源码实测值：
 - general  order 0   （corum-ide-ui/src/client/index.tsx）
 - models   order 10  （corum-ui-settings-models/src/client/index.ts，NAV_GROUP_BY_ID 固定归 agent）
@@ -54,12 +54,14 @@ print()
 print('合计：%d 项' % total)
 
 # 与设计稿目标对照
+# ⚠️ 2026-09-16 用户裁定：profiles（配置档案）分区移除——本地「设置快照/切换」不做，
+#    未来走账号登录 + 云端保存。设计稿 design.pen 侧的「配置档案」节点同步待用户 ⌘S。
 TARGET = {
     'general': ['general', 'appearance', 'editor', 'terminal', 'notifications', 'shortcuts'],
     'agent': ['models', 'agent-settings', 'memory', 'permissions', 'hooks', 'agent-presets'],
     'data': ['account', 'privacy', 'data'],
     'extensions': ['extensions', 'mcp', 'skills', 'ai-polish', 'ollama', 'artgen'],
-    'advanced': ['advanced', 'profiles'],
+    'advanced': ['advanced'],
 }
 print()
 print('=== 与设计稿目标对照 ===')

@@ -1023,19 +1023,7 @@
   white-space: nowrap;
 }
 
-/* ── 配置档案卡片 ──────────────────────────────────────────────────── */
-
-.profileCard {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: calc(12px * var(--corum-density-scale, 1));
-  padding: calc(14px * var(--corum-density-scale, 1));
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 16px;
-  background: var(--corum-glass-1);
-  box-sizing: border-box;
-}
+/* ── 配置档案卡片（profiles 分区已于 2026-09-16 按用户裁定移除：走账号+云端，本地快照不做）── */
 
 /* ── 新建预设弹窗 ──────────────────────────────────────────────────── */
 

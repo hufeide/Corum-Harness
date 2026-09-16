@@ -72,7 +72,6 @@ function navIcon(id: string): ReactNode {
     skills: <Star className={cls} size={14} />,
     'ai-polish': <Sparkles className={cls} size={14} />,
     advanced: <Wrench className={cls} size={14} />,
-    profiles: <User className={cls} size={14} />,
   }
   return map[id] ?? <SettingsIcon className={cls} size={14} />
 }
