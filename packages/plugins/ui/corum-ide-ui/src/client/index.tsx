@@ -50,6 +50,7 @@ import { GLASS_TOKENS } from './theme-layer.ts'
 import { accentTokens, subscribeAccent } from './appearance-accent.ts'
 import { applyUiFontScale, subscribeUiFontBase } from './ui-font-scale.ts'
 import { applyUiDensity, subscribeUiDensity } from './ui-density.ts'
+import { applyUiFontFamily, subscribeUiFontFamily } from './ui-font-family.ts'
 import { TestModule } from './TestModule.tsx'
 import { registerSlot, getSlotMeta, drainPendingSlots } from '@corum/corum-ui-base/client'
 import type { SlotMeta, SlotRegistryFace } from '@corum/corum-ui-base/client'
@@ -255,6 +256,10 @@ export function apply(ctx: ClientContext): void {
     // 界面密度：同款通道，写 --corum-density-scale（全仓 1287 处间距已改为消费它）。
     applyUiDensity()
     const offDensity = subscribeUiDensity(() => { applyUiDensity() })
+    // 界面字体：写 --corum-ui-font-family（194 处 UI 字族栈已改为消费它）。
+    // ⚠️ 写入的是完整字族栈，保证本机缺字时能回退（详见 ui-font-family.ts）。
+    applyUiFontFamily()
+    const offFontFamily = subscribeUiFontFamily(() => { applyUiFontFamily() })
     const disposeRegistration = ctx.slots.register({
       name: 'root',
       children: {
@@ -306,6 +311,7 @@ export function apply(ctx: ClientContext): void {
       void disposeAccent()
       offFontBase()
       offDensity()
+      offFontFamily()
       void disposeService()
       void disposeRegistry()
     }

@@ -34,6 +34,7 @@ import { CorumSettingsContext } from '../shared.tsx'
 import { ACCENT_OPTIONS, DEFAULT_ACCENT_ID, getAccentId, setAccentId, subscribeAccent } from '../../appearance-accent.ts'
 import { UI_FONT_BASE_DEFAULT_PX, UI_FONT_BASE_OPTIONS, getUiFontBase, setUiFontBase, subscribeUiFontBase } from '../../ui-font-scale.ts'
 import { UI_DENSITY_DEFAULT_ID, UI_DENSITY_OPTIONS, getUiDensityId, setUiDensity, subscribeUiDensity } from '../../ui-density.ts'
+import { UI_FONT_FAMILY_DEFAULT_ID, UI_FONT_FAMILY_OPTIONS, getUiFontFamilyId, setUiFontFamily, subscribeUiFontFamily } from '../../ui-font-family.ts'
 
 /* ── 外观（PRD §4.3）──────────────────────────────────────────────── */
 
@@ -91,6 +92,8 @@ export function AppearanceSection() {
   const uiFontBase = useSyncExternalStore(subscribeUiFontBase, getUiFontBase)
   /** 当前界面密度档；改后 Shell 会把密度乘数写到根元素。 */
   const uiDensity = useSyncExternalStore(subscribeUiDensity, getUiDensityId)
+  /** 当前界面字族档；改后 Shell 会把完整字族栈写到根元素。 */
+  const uiFontFamily = useSyncExternalStore(subscribeUiFontFamily, getUiFontFamilyId)
 
   if (settings === null) return <p style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>settings 服务未就绪。</p>
 
@@ -157,8 +160,16 @@ export function AppearanceSection() {
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="字体与排版">
-        <SettingRow label="界面字体" desc="整个软件 UI（菜单 / 列表 / 按钮 / 卡片）使用的字体" badge={OFFLINE}>
-          <SelectField value="inter" options={[{ id: 'inter', label: 'Inter' }]} onChange={noop} disabled />
+        <SettingRow
+          label="界面字体"
+          desc="整个软件 UI（菜单 / 列表 / 按钮 / 卡片）使用的字体。仅改界面，不影响对话正文、终端与编辑器。"
+          badge={uiFontFamily !== UI_FONT_FAMILY_DEFAULT_ID ? <Badge label="已修改" /> : undefined}
+        >
+          <SelectField
+            value={uiFontFamily}
+            options={UI_FONT_FAMILY_OPTIONS.map(o => ({ id: o.id, label: o.label }))}
+            onChange={id => setUiFontFamily(id)}
+          />
         </SettingRow>
         <SettingRow
           label="界面字号"
