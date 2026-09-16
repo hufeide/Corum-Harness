@@ -16,8 +16,14 @@ import css from './Badge.module.css'
 interface BadgeProps {
   /** 徽标文案。 */
   label: string
-  /** 徽标类型。 */
-  variant?: 'modified' | 'restart'
+  /**
+   * 徽标类型：
+   * - `modified` 已修改（用户覆盖过该键）
+   * - `restart` 重启后生效（宿主插件改动）
+   * - `soon` 即将上线（真源待建，占位展示）
+   * - `offline` 未上线（机制不存在；**必须与 `disabled` 控件成对出现**，PRD §6.1）
+   */
+  variant?: 'modified' | 'restart' | 'soon' | 'offline'
 }
 
 /**
@@ -26,9 +32,10 @@ interface BadgeProps {
  * @returns the badge element.
  */
 export function Badge({ label, variant = 'modified' }: BadgeProps) {
-  return (
-    <span className={variant === 'restart' ? css.restart : css.modified}>
-      {label}
-    </span>
-  )
+  const cls =
+    variant === 'restart' ? css.restart
+      : variant === 'soon' ? css.soon
+        : variant === 'offline' ? css.offline
+          : css.modified
+  return <span className={cls}>{label}</span>
 }

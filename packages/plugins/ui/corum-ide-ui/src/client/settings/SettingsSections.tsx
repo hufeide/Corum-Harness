@@ -18,7 +18,6 @@ import { ShortcutsSection } from './sections/SettingsShortcutsSection.tsx'
 import { TerminalSection } from './sections/SettingsTerminalSection.tsx'
 import { AgentLoopSection } from './sections/SettingsAgentLoopSection.tsx'
 import { PermissionsSection } from './sections/SettingsPermissionsSection.tsx'
-import { RulesSection } from './sections/SettingsRulesSection.tsx'
 import { MemorySection } from './sections/SettingsMemorySection.tsx'
 import { PrivacySection } from './sections/SettingsPrivacySection.tsx'
 import { DataSection } from './sections/SettingsDataSection.tsx'
@@ -84,7 +83,11 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'notifications', order: 20, label: 'nav.notifications', navGroup: 'general', Component: NotificationsSection },
   { id: 'shortcuts', order: 30, label: 'nav.shortcuts', navGroup: 'general', Component: ShortcutsSection },
   { id: 'permissions', order: 50, label: 'nav.permissions', navGroup: 'agent', Component: PermissionsSection },
-  { id: 'rules', order: 60, label: 'nav.rules', navGroup: 'agent', Component: RulesSection },
+  // ➖ rules（规则与指令）分区已按用户裁定移除（2026-09-16）。
+  //   依据：C1「自定义 Agent 预设已覆盖这个能力 …… 我的设计理念就是以 Agent 为单位
+  //   进行管控」+ B4「移除系统提示词前缀」⇒ 全局提示词注入不提供用户可写出口，
+  //   「全局自定义指令」与「人格 Personality」两个入口一并取消（PRD §4.1 / §6.4 / §11 C1）。
+  //   ⚠️ 不要恢复：本分区在设计与正确性上都已被 Agent 预设取代。
   { id: 'memory', order: 70, label: 'nav.memory', navGroup: 'agent', Component: MemorySection },
   { id: 'terminal', order: 80, label: 'nav.terminal', navGroup: 'agent', Component: TerminalSection },
   { id: 'hooks', order: 90, label: 'nav.hooks', navGroup: 'agent', Component: HooksSection },

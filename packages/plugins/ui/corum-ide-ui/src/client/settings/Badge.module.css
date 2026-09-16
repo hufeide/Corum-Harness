@@ -3,7 +3,9 @@
  */
 
 .modified,
-.restart {
+.restart,
+.soon,
+.offline {
   display: inline-flex;
   align-items: center;
   padding: 2px 7px;
@@ -26,4 +28,16 @@
 .restart {
   border: 1px solid var(--dsw-alias-state-warn-primary);
   color: var(--dsw-alias-state-warn-primary);
+}
+
+/* soon: 即将上线 —— 真源待建，先占位展示（PRD §6.3 档位） */
+.soon {
+  border: 1px solid var(--corum-glass-border);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* offline: 未上线 —— 机制不存在，控件同时置灰禁用（PRD §6.1 强制成对出现） */
+.offline {
+  border: 1px solid var(--corum-glass-border);
+  color: var(--dsw-alias-label-dimmed);
 }
