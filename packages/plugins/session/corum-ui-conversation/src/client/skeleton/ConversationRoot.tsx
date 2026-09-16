@@ -640,6 +640,17 @@ export function ConversationRoot({
       {(sessionId === undefined || summaryBlank === true) && (
         <div className={css.emptyDivider} data-empty-divider="" aria-hidden="true" />
       )}
+      {/* 空态拖窗带（2026-09-16 用户定调）：
+          用户口径「标题栏区高度 = 左侧那排按钮所在区域高度（40px），**只有这个区域才能拖动
+          窗口**，下方就是 session 区域」。主窗口标题栏浮层只覆盖到**侧栏右缘**
+          （AppFrame 的 `.titlebarRow` 显式 `style={{ right: 'auto', width: sidebarRight }}`，
+          注释写明「右侧（对话区/编辑器/终端上方）无浮层——纯内容区」）⇒
+          **对话区顶部的 40px 带子在空态下完全不可拖窗**（实测该处 `app-region` 全为 none）。
+          有内容的会话由会话顶栏卡片承担这段拖拽；空态没有它，故补一条**同高 40px** 的带子。
+          只在空态渲染，避免与顶栏卡片重复覆盖抢命中。 */}
+      {(sessionId === undefined || summaryBlank === true) && (
+        <div className={css.emptyDragBand} data-empty-drag-band="" aria-hidden="true" />
+      )}
       <div className={css.scrollBody} data-conversation-scroll="">
         {/* 空态与会话视图**平级**：同一时刻只会有一个非 null（相位互斥）。 */}
         {emptyState}
