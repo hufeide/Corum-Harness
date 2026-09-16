@@ -22,8 +22,11 @@
  * Plus: the layout store + the `ctx.layout` panel-action face (the official
  * ILayout exact semantics — toggleSidebar/openDetails/closeDetails — so
  * ui-conversation / app-shell resolve it unchanged), the
- * ThemePresenter (forked from ui-layout: body palette projection — official
- * ui-layout is disabled in IDE mode, so the shell owns this duty), the
+ * ThemePresenter (forked from ui-layout: body palette projection **+ the content
+ * font-size axis `--dsh-content-font-size`** — official ui-layout is disabled in
+ * IDE mode, so the shell owns this duty; the font-size axis was missing until
+ * 2026-09-16, which made the「会话正文字号」setting write-only, see
+ * `corum-ui-base/src/client/theme-presenter.ts`), the
  * `corum-glass` token override layer, and the glass CSS / ambient glow /
  * font stack / reduced-motion degradation (theme.css, inlined at build).
  */
