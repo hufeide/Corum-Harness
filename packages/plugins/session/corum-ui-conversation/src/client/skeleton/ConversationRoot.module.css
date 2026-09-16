@@ -522,13 +522,21 @@
   /* ⚠️ 2026-09-16（用户报障①）：空态（hero 相位）**不吃用户拖出来的会话宽度**。
      链子是 `--dsh-composer-card-max-width` ← `--dsh-chat-content-width`
      ← `var(--dsh-chat-user-width, clamp(680px, 列宽*64%, 920px))`；其中
-     `--dsh-chat-user-width` 是**宽度手柄拖出来的那一档**（由 .root 发布）。
-     空态既没有正文列要靠它对齐（宽度手柄本身也只在 `phase === 'active'` 才渲染），
-     跟着它变只会让整块空态被拖窄（实测：user-width=450 ⇒ 744 → 514）。
-     ⇒ 这里把 `--dsh-chat-content-width` **重新定义为纯自适应项**（丢掉用户档），
-       于是空态宽度只随**列宽**走、不再随拖拽档走；输入框仍由本块的 width 规则约束。
+     `--dsh-chat-user-width` 是**宽度手柄拖出来的那一档**（由 .root 以内联样式发布）。
+     空态没有正文列要靠它对齐（宽度手柄本身也只在 `phase === 'active'` 才渲染），
+     跟着它变只会让整块空态被拖窄（实测：pref=450 ⇒ 744 → 514）。
+
+     ❗ 这里**必须直接重定义 `--dsh-composer-card-max-width`**：只重定义
+     `--dsh-chat-content-width` **无效** —— 因为 `.root` 的那行
+     `--dsh-composer-card-max-width: calc(var(--dsh-chat-content-width) + 32px)`
+     是**在 .root 上求值**的（自定义属性在声明它的元素上完成替换），
+     子元素读到的是已解析好的 `calc(450px + 32px)`。实测坐实：
+     覆盖 `--dsh-chat-content-width` 后该 token 仍是 `calc(450px + 32px)`，
+     而本元素的 `width` 正由它算出 ⇒ 514。
+     ⇒ 故此处**重新定义被消费的那个 token 本身**，用纯自适应项（丢掉用户档），
+       于是空态宽度只随**列宽**走、不再随拖拽档走；输入框仍由本块 width 规则约束。
      （设计稿 `nes6F` 的 `center-stage` 满宽、`Chat Input` 固定 720 —— 方向一致。） */
-  --dsh-chat-content-width: clamp(680px, calc(var(--dsh-conversation-column-width, 0px) * 0.64), 920px);
+  --dsh-composer-card-max-width: calc(clamp(680px, calc(var(--dsh-conversation-column-width, 0px) * 0.64), 920px) + 32px);
   /* figma 75:8208 drew 12 between all three rows; the workspace row now sits
      8 above the card (its margin-top restores 12 under the hero chrome). */
   gap: 8px;
