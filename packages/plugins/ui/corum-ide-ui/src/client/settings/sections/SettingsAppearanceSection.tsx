@@ -33,6 +33,7 @@ import { ColorChips } from '../ColorChips.tsx'
 import { CorumSettingsContext } from '../shared.tsx'
 import { ACCENT_OPTIONS, DEFAULT_ACCENT_ID, getAccentId, setAccentId, subscribeAccent } from '../../appearance-accent.ts'
 import { UI_FONT_BASE_DEFAULT_PX, UI_FONT_BASE_OPTIONS, getUiFontBase, setUiFontBase, subscribeUiFontBase } from '../../ui-font-scale.ts'
+import { UI_DENSITY_DEFAULT_ID, UI_DENSITY_OPTIONS, getUiDensityId, setUiDensity, subscribeUiDensity } from '../../ui-density.ts'
 
 /* ── 外观（PRD §4.3）──────────────────────────────────────────────── */
 
@@ -88,6 +89,8 @@ export function AppearanceSection() {
   const accent = useSyncExternalStore(subscribeAccent, getAccentId)
   /** 当前界面基准字号（px）；改后 Shell 会把乘数写到根元素。 */
   const uiFontBase = useSyncExternalStore(subscribeUiFontBase, getUiFontBase)
+  /** 当前界面密度档；改后 Shell 会把密度乘数写到根元素。 */
+  const uiDensity = useSyncExternalStore(subscribeUiDensity, getUiDensityId)
 
   if (settings === null) return <p style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>settings 服务未就绪。</p>
 
@@ -180,8 +183,17 @@ export function AppearanceSection() {
             onChange={id => { void apply(FONT_SIZE_FIELD, Number(id)) }}
           />
         </SettingRow>
-        <SettingRow label="界面密度" desc="列表与控件的纵向留白" badge={OFFLINE} divider={false}>
-          <SelectField value="comfortable" options={[{ id: 'comfortable', label: '舒适' }]} onChange={noop} disabled />
+        <SettingRow
+          label="界面密度"
+          desc="列表与控件的间距（内边距 / 间隙）紧凑程度。只改留白，不改任何字号。"
+          badge={uiDensity !== UI_DENSITY_DEFAULT_ID ? <Badge label="已修改" /> : undefined}
+          divider={false}
+        >
+          <SelectField
+            value={uiDensity}
+            options={UI_DENSITY_OPTIONS.map(o => ({ id: o.id, label: o.label }))}
+            onChange={id => setUiDensity(id)}
+          />
         </SettingRow>
       </SettingGroup>
     </>

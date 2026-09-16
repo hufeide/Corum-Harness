@@ -49,6 +49,7 @@ import { ThemePresenter } from '@corum/corum-ui-base/client'
 import { GLASS_TOKENS } from './theme-layer.ts'
 import { accentTokens, subscribeAccent } from './appearance-accent.ts'
 import { applyUiFontScale, subscribeUiFontBase } from './ui-font-scale.ts'
+import { applyUiDensity, subscribeUiDensity } from './ui-density.ts'
 import { TestModule } from './TestModule.tsx'
 import { registerSlot, getSlotMeta, drainPendingSlots } from '@corum/corum-ui-base/client'
 import type { SlotMeta, SlotRegistryFace } from '@corum/corum-ui-base/client'
@@ -251,6 +252,9 @@ export function apply(ctx: ClientContext): void {
     // 先立即应用一次（覆盖刷新后的已持久化值），再订阅变更。
     applyUiFontScale()
     const offFontBase = subscribeUiFontBase(() => { applyUiFontScale() })
+    // 界面密度：同款通道，写 --corum-density-scale（全仓 1287 处间距已改为消费它）。
+    applyUiDensity()
+    const offDensity = subscribeUiDensity(() => { applyUiDensity() })
     const disposeRegistration = ctx.slots.register({
       name: 'root',
       children: {
@@ -301,6 +305,7 @@ export function apply(ctx: ClientContext): void {
       offAccent()
       void disposeAccent()
       offFontBase()
+      offDensity()
       void disposeService()
       void disposeRegistry()
     }
