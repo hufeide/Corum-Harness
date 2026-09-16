@@ -24,6 +24,7 @@ export const zh = {
   'group.advanced': '高级',
   // section 导航标签（SECTION_DEFS 的 label key）
   'nav.appearance': '外观',
+  'nav.editor': '编辑器',
   'nav.notifications': '通知',
   'nav.shortcuts': '快捷键',
   'nav.permissions': '权限',
@@ -61,6 +62,7 @@ export const en = {
   'group.extensions': 'Extensions',
   'group.advanced': 'Advanced',
   'nav.appearance': 'Appearance',
+  'nav.editor': 'Editor',
   'nav.notifications': 'Notifications',
   'nav.shortcuts': 'Shortcuts',
   'nav.permissions': 'Permissions',

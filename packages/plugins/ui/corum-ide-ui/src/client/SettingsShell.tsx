@@ -21,7 +21,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import {
-  Archive, Bell, Box, Brain, ChevronDown, Command, Cpu, Layers,
+  Archive, Bell, Box, Brain, ChevronDown, Code, Command, Cpu, Layers,
   Lock, Plug, Search, Settings as SettingsIcon, Shield, Sparkles,
   Star, Sun, Terminal, Trash2, User, Webhook, Repeat, Wrench, X,
 } from 'lucide-react'
@@ -52,6 +52,7 @@ function navIcon(id: string): ReactNode {
   const map: Record<string, ReactNode> = {
     general: <SettingsIcon className={cls} size={14} />,
     appearance: <Sun className={cls} size={14} />,
+    editor: <Code className={cls} size={14} />,
     notifications: <Bell className={cls} size={14} />,
     shortcuts: <Command className={cls} size={14} />,
     models: <Cpu className={cls} size={14} />,

@@ -13,6 +13,7 @@
 import type { ReactNode } from 'react'
 import type { SettingsKey } from '../settings-locales.ts'
 import { AppearanceSection } from './sections/SettingsAppearanceSection.tsx'
+import { EditorSection } from './sections/SettingsEditorSection.tsx'
 import { NotificationsSection } from './sections/SettingsNotificationsSection.tsx'
 import { ShortcutsSection } from './sections/SettingsShortcutsSection.tsx'
 import { TerminalSection } from './sections/SettingsTerminalSection.tsx'
@@ -79,6 +80,8 @@ export interface SectionDef {
  */
 export const SECTION_DEFS: SectionDef[] = [
   { id: 'appearance', order: 10, label: 'nav.appearance', navGroup: 'general', Component: AppearanceSection },
+  // ➕ M3 新建：编辑器分区（用户裁定 #1「要单独有一个编辑器的设置页面」；设计稿与本文件均为新增）。
+  { id: 'editor', order: 15, label: 'nav.editor', navGroup: 'general', Component: EditorSection },
   { id: 'notifications', order: 20, label: 'nav.notifications', navGroup: 'general', Component: NotificationsSection },
   { id: 'shortcuts', order: 30, label: 'nav.shortcuts', navGroup: 'general', Component: ShortcutsSection },
   { id: 'permissions', order: 65, label: 'nav.permissions', navGroup: 'agent', Component: PermissionsSection },
