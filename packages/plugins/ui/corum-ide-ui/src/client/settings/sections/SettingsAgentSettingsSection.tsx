@@ -345,7 +345,7 @@ function ModelPairField({ value, disabled, onChange }: {
   const [provider, setProvider] = useState(value?.provider ?? '')
   const [model, setModel] = useState(value?.model ?? '')
   return (
-    <div className={css.selectStack}>
+    <div className={`${css.selectStack} ${css.selectStackControl}`}>
       <input
         className={css.textInput}
         value={provider}

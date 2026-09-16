@@ -1435,6 +1435,20 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   min-width: 0;
 }
 
+/* SettingRow 右侧控件形态（智能体设置 · 模型对）：selectStack 默认 width:100% 会
+ * 占满整行、把行内 meta（label+desc，flex:1）挤成 0 宽 → 标签逐字竖排（实测）。
+ * 此处改为内容自适应 + 上限，meta 恢复弹性；Agent 预设页的嵌套 form 列仍用默认 100%。 */
+.selectStackControl {
+  width: auto;
+  flex: none;
+  max-width: calc(360px * var(--corum-density-scale, 1));
+}
+
+.selectStackControl > * {
+  flex: 1;
+  min-width: 0;
+}
+
 /* 文本域容器（设计稿 GHBvv area: glass-2 底, radius 8, padding 10, 内 gap 3；按钮/统计在容器内底部行） */
 .promptArea {
   display: flex;
