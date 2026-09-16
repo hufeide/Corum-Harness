@@ -33,7 +33,27 @@ export type GeneralSectionComponentProps =
 export function GeneralSection({ renderSlot }: GeneralSectionComponentProps) {
   return (
     <>
-      {renderSlot('settings.general.item', {})}
+      {/*
+        M4「双入口归一」（PRD §4.13 + 用户第三批裁定「只留外观页」）：
+        该槽共 7 个注册方，本页**只保留 2 个**，其余 5 个一律迁出（唯一入口在各自页面）：
+
+        | id | 注册方 | 处置 |
+        |---|---|---|
+        | `language` | 官方 locale | ✅ **保留** |
+        | `composer-enter` | 官方 ui-conversation / corum fork | ✅ **保留** |
+        | `appearance` | 官方 ui-theme | ➖ 迁出 → **外观页**（唯一入口） |
+        | `font-size` | 官方 ui-theme | ➖ 迁出 → **外观页**（= 会话正文字号） |
+        | `permission` | 官方 ui-permission-presets | ➖ 迁出 → **权限页** |
+        | `transcript-view` | 官方 ui-chat / corum fork | ➖ 迁出 → **高级页** |
+        | `session-archive-import` | corum fork session-archive | ➖ 迁出 → **数据管理页** |
+
+        ⚠️ **为什么用 `only` 过滤而不是删注册**：这些注册方多数是官方 plugin，本仓不能改；
+        而子槽「声明即独占」（官方 ui-slots 注释：Declaring is claiming），
+        别的分区也拿不到 renderSlot ⇒ **只能在本渲染点过滤**。若直接不过滤，
+        同一个键就还有两个可写入口，正是 M4 要消除的问题。
+      */}
+      {renderSlot('settings.general.item', {}, { only: 'language' })}
+      {renderSlot('settings.general.item', {}, { only: 'composer-enter' })}
       <ReviewRetentionGroup />
       <AgentStallGroup />
     </>

@@ -1,39 +1,165 @@
 /**
- * SettingsAppearanceSection — 从 SettingsSections.tsx 拆出的独立 section 文件（重构 2）。
+ * SettingsAppearanceSection — 外观分区（PRD v2 §4.3）。
+ *
+ * ## M4「双入口归一」：本页成为字体与主题的**唯一入口**
+ *
+ * 用户第三批裁定「**只留外观页**」⇒ 通用页（`settings.general.item` 槽）里
+ * 官方 `ui-theme` 注册的两行（`appearance` / `font-size`）已从通用页移除，
+ * **唯一入口 = 本页**（PRD §4.13 GE-b、§11 C2）。
+ *
+ * ## 四个「面」中的两个面在本页（PRD §4.3.1）
+ *
+ * | 面 | 条目 | 真源 | 状态 |
+ * |---|---|---|---|
+ * | UI | 界面字体 | ➕ 新建 | 未上线 |
+ * | UI | 界面字号 | ➕ 新建（用户 `#9`） | 未上线 |
+ * | 会话 | **会话正文字号** | ✅ `ui-theme.fontSize`（默认 **14**，范围 12~17） | **已接线** |
+ * | — | **外观主题** | ✅ `ui-theme.preference`（`light`/`dark`/`system`，默认 `system`） | **已接线** |
+ *
+ * ⚠️ 终端字体在「终端」页、编辑器字体在「编辑器」页 —— **四面相互独立，不共用默认等宽**（用户 `#1`/`#9`）。
+ * ⚠️ **本页原先的「代码字体」已删除**（`#1` 把它拆到编辑器页 E1 与终端页 T10）；
+ * 原先「界面字号」硬编码为 `13` 是**错的**（`ui-theme.fontSize` 的默认值是 **14**），
+ * 且它当时实际是「会话正文字号」的语义 —— 现按 `#9` 拆成两项，各归其位。
+ *
+ * @module corum-ide-ui/client/settings/sections/SettingsAppearanceSection
  */
 
+import { useContext, useEffect, useState } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
 import { Badge } from '../Badge.tsx'
 import { ColorChips } from '../ColorChips.tsx'
-import css from '../SettingsSections.module.css'
+import { CorumSettingsContext } from '../shared.tsx'
 
-/* ── 外观 ──────────────────────────────────────────────────────────── */
+/* ── 外观（PRD §4.3）──────────────────────────────────────────────── */
 
+/** 官方主题插件拥有的设置 namespace（`ui-theme`）。 */
+const UI_THEME_NS = 'ui-theme'
+
+/** 主题偏好字段（`THEME_PREFERENCE_FIELD`）。 */
+const PREFERENCE_FIELD = 'preference'
+/** 会话正文字号字段（`FONT_SIZE_FIELD`）。 */
+const FONT_SIZE_FIELD = 'fontSize'
+
+/** 内置主题偏好（`THEME_PREFERENCES`；默认 `system`）。 */
+const THEME_OPTIONS = [
+  { id: 'light', label: '浅色' },
+  { id: 'dark', label: '深色' },
+  { id: 'system', label: '跟随系统' },
+]
+
+/** 会话正文字号候选（`FONT_SIZE_MIN`=12 .. `FONT_SIZE_MAX`=17，默认 14）。 */
+const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17].map(n => ({ id: String(n), label: String(n) }))
+
+/** 未上线 badge（PRD §6.1：未就绪条目一律「禁用 + 标注未生效」）。 */
+const OFFLINE = <Badge label="未上线" variant="offline" />
+
+/** 空回调：未上线控件均 `disabled`，此函数不可达，仅满足控件 props 必填。 */
+const noop = () => { /* 控件已禁用，不可达 */ }
+
+/** `ui-theme` 的用户层形。 */
+interface ThemeView {
+  preference?: string
+  fontSize?: number
+}
+
+/**
+ * 外观分区：主题 + 字体与排版。
+ *
+ * 外观主题与会话正文字号已接线 `ui-theme`；其余条目为新建真源，禁用并标注未上线。
+ *
+ * @returns the appearance settings section.
+ */
 export function AppearanceSection() {
+  const settings = useContext(CorumSettingsContext)
+  const [, force] = useState(0)
+  useEffect(() => {
+    if (settings === null) return undefined
+    void settings.describe.ensure()
+    return settings.describe.subscribe(() => { force(v => v + 1) })
+  }, [settings])
+
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (settings === null) return <p style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>settings 服务未就绪。</p>
+
+  const snapshot = settings.describe.getSnapshot()
+  const ns = snapshot.view?.namespaces.find(n => n.ns === UI_THEME_NS)
+  const user = (ns?.user ?? {}) as ThemeView
+  const resolved = (ns?.value ?? {}) as ThemeView
+  const writable = snapshot.view?.writable === true
+  const loading = snapshot.status === 'loading' || snapshot.status === 'idle'
+  const disabled = !writable || busy || loading
+
+  // 真源默认值（`theme-settings.ts`）：preference=system，fontSize=14。
+  const preference = user.preference ?? resolved.preference ?? 'system'
+  const fontSize = user.fontSize ?? resolved.fontSize ?? 14
+  /** 该键是否被用户覆盖过（决定「已修改」badge）。 */
+  const overridden = (field: keyof ThemeView): boolean => user[field] !== undefined
+
+  /**
+   * 写入 `ui-theme` 的单键。
+   *
+   * @param field - `preference` 或 `fontSize`。
+   * @param value - 新值。
+   */
+  const apply = async (field: string, value: unknown): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await settings.mutate(UI_THEME_NS, [{ op: 'set' as const, path: [field], value }], ns?.revision)
+      if (!res.ok) setError(res.error?.message ?? '写入失败')
+      else if (res.value !== undefined) settings.describe.acceptView(res.value)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <>
+      {error !== null && <p style={{ color: 'var(--dsw-alias-state-error-primary)', fontSize: 12 }}>{error}</p>}
       <SettingGroup title="主题">
-        <SettingRow label="外观主题" desc="浅色 / 深色 / 跟随系统" badge={<Badge label="已修改" />}>
-          <SelectField value="system" options={[{id:'light',label:'浅色'},{id:'dark',label:'深色'},{id:'system',label:'跟随系统'}]} onChange={() => {}} />
+        <SettingRow
+          label="外观主题"
+          desc="浅色 / 深色 / 跟随系统。真源 ui-theme.preference，默认跟随系统。"
+          badge={overridden('preference') ? <Badge label="已修改" /> : undefined}
+        >
+          <SelectField
+            value={preference}
+            options={THEME_OPTIONS}
+            disabled={disabled}
+            onChange={id => { void apply(PREFERENCE_FIELD, id) }}
+          />
         </SettingRow>
-        <SettingRow label="强调色" desc="高亮、链接与品牌元素使用的颜色">
-          <ColorChips chips={[{id:'violet',color:'#5B21F5'},{id:'pink',color:'#F5276C'},{id:'green',color:'#0BA57C'},{id:'orange',color:'#E07A00'}]} selectedId="violet" onChange={() => {}} />
+        <SettingRow label="强调色" desc="高亮、链接与品牌元素使用的颜色" badge={OFFLINE}>
+          <ColorChips chips={[{ id: 'violet', color: '#5B21F5' }]} selectedId="violet" onChange={noop} />
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="字体与排版">
-        <SettingRow label="UI 字体" desc="界面与菜单使用的字体">
-          <SelectField value="inter" options={[{id:'inter',label:'Inter'},{id:'system',label:'系统默认'}]} onChange={() => {}} />
+        <SettingRow label="界面字体" desc="整个软件 UI（菜单 / 列表 / 按钮 / 卡片）使用的字体" badge={OFFLINE}>
+          <SelectField value="inter" options={[{ id: 'inter', label: 'Inter' }]} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="代码字体" desc="编辑器与终端使用的等宽字体">
-          <SelectField value="jbm" options={[{id:'jbm',label:'JetBrains Mono'},{id:'mono',label:'Menlo'}]} onChange={() => {}} />
+        <SettingRow label="界面字号" desc="整个软件 UI 的基准字号（独立真源，不再复用会话字号）" badge={OFFLINE}>
+          <SelectField value="14" options={[{ id: '14', label: '14' }]} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="界面字号" desc="界面文字基准字号（px）">
-          <SelectField value="13" options={[{id:'12',label:'12'},{id:'13',label:'13'},{id:'14',label:'14'},{id:'16',label:'16'}]} onChange={() => {}} />
+        <SettingRow
+          label="会话正文字号"
+          desc="对话区正文字号（≠ 界面字号）。真源 ui-theme.fontSize，默认 14，范围 12–17。"
+          badge={overridden('fontSize') ? <Badge label="已修改" /> : undefined}
+        >
+          <SelectField
+            value={String(fontSize)}
+            options={FONT_SIZE_OPTIONS}
+            disabled={disabled}
+            onChange={id => { void apply(FONT_SIZE_FIELD, Number(id)) }}
+          />
         </SettingRow>
-        <SettingRow label="界面密度" desc="列表与控件的纵向留白" divider={false}>
-          <SelectField value="comfortable" options={[{id:'compact',label:'紧凑'},{id:'comfortable',label:'舒适'}]} onChange={() => {}} />
+        <SettingRow label="界面密度" desc="列表与控件的纵向留白" badge={OFFLINE} divider={false}>
+          <SelectField value="comfortable" options={[{ id: 'comfortable', label: '舒适' }]} onChange={noop} disabled />
         </SettingRow>
       </SettingGroup>
     </>
