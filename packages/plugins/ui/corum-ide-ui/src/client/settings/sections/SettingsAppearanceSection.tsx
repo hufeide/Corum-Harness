@@ -32,6 +32,7 @@ import { Badge } from '../Badge.tsx'
 import { ColorChips } from '../ColorChips.tsx'
 import { CorumSettingsContext } from '../shared.tsx'
 import { ACCENT_OPTIONS, DEFAULT_ACCENT_ID, getAccentId, setAccentId, subscribeAccent } from '../../appearance-accent.ts'
+import { UI_FONT_BASE_DEFAULT_PX, UI_FONT_BASE_OPTIONS, getUiFontBase, setUiFontBase, subscribeUiFontBase } from '../../ui-font-scale.ts'
 
 /* ── 外观（PRD §4.3）──────────────────────────────────────────────── */
 
@@ -85,6 +86,8 @@ export function AppearanceSection() {
   const [error, setError] = useState<string | null>(null)
   /** 当前强调色（同 bundle 内的轻量 store；改后 Shell 会重注册 token 覆盖层）。 */
   const accent = useSyncExternalStore(subscribeAccent, getAccentId)
+  /** 当前界面基准字号（px）；改后 Shell 会把乘数写到根元素。 */
+  const uiFontBase = useSyncExternalStore(subscribeUiFontBase, getUiFontBase)
 
   if (settings === null) return <p style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>settings 服务未就绪。</p>
 
@@ -154,8 +157,16 @@ export function AppearanceSection() {
         <SettingRow label="界面字体" desc="整个软件 UI（菜单 / 列表 / 按钮 / 卡片）使用的字体" badge={OFFLINE}>
           <SelectField value="inter" options={[{ id: 'inter', label: 'Inter' }]} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="界面字号" desc="整个软件 UI 的基准字号（独立真源，不再复用会话字号）" badge={OFFLINE}>
-          <SelectField value="14" options={[{ id: '14', label: '14' }]} onChange={noop} disabled />
+        <SettingRow
+          label="界面字号"
+          desc={`整个软件 UI 的基准字号（菜单 / 列表 / 按钮 / 卡片），默认 ${UI_FONT_BASE_DEFAULT_PX}。与会话正文字号**相互独立**。`}
+          badge={uiFontBase !== UI_FONT_BASE_DEFAULT_PX ? <Badge label="已修改" /> : undefined}
+        >
+          <SelectField
+            value={String(uiFontBase)}
+            options={UI_FONT_BASE_OPTIONS.map(n => ({ id: String(n), label: String(n) }))}
+            onChange={id => setUiFontBase(Number(id))}
+          />
         </SettingRow>
         <SettingRow
           label="会话正文字号"
