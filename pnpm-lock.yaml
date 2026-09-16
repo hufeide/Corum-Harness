@@ -1550,6 +1550,9 @@ importers:
 
   packages/plugins/session/corum-session-archive:
     dependencies:
+      '@corum/corum-ide-ui':
+        specifier: workspace:*
+        version: link:../../ui/corum-ide-ui
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
@@ -1593,6 +1596,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
 
   packages/plugins/session/corum-session-queue-revert:
     dependencies:

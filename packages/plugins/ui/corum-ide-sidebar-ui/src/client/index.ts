@@ -249,6 +249,33 @@ export function apply(ctx: ClientContext): void {
           deleteWorkspace: async (workspaceId) => {
             await ctx.workspaces.delete(workspaceId)
           },
+          // 保存会话日志到…（2026-09-16 用户定调：入口从会话头部右上角搬进会话行右键菜单）。
+          //
+          // **为什么用 ctx.reflect.get 而不是 inject 声明**：保存能力的实现在
+          // `corum-session-archive`，它是**可选**插件（发行版组合可无）。cordis 的
+          // `inject` 没有「可选依赖」形态（`Inject = (keyof M)[] | {...}`，声明即硬依赖、
+          // fiber 会等它装配）⇒ 若把 sessionArchive 写进本插件顶层 `inject`，未装存档
+          // 插件时**整个侧栏都装不起来**（拿不到保存能力不该让会话列表消失）。
+          // 官方 `reflect.get` 的文档语义正是这个场景：「Read a service from the store
+          // **without the inject requirement**」，未装配时返回 undefined。
+          // ⇒ 缺席即不渲染菜单项（`saveSession: undefined`），不留死按钮。
+          //
+          // ⚠️ **本字段是「解析器」不是「动作」**（每次渲染调用一次）。原因：槽的
+          // inject 面结果被 ui-renderer **按 entry 永久缓存**（scoped-slots.tsx 的
+          // `rootInjectCache` 只跑一次 `runInject`）。若在这里直接算成常量，一旦存档
+          // 插件**晚于**侧栏装配（或经插件中心动态启用），这里会永久冻结成 undefined
+          // ⇒ 菜单项永远不出现。返回访问器即可每次拿到「此刻是否已有该服务」。
+          //
+          // 类型面用**局部能力接口**收窄（红线 3：官方基座类型不含该服务，corum 运行时
+          // 是超集），不 import 实现包、不在编译期耦合 ui 组 → session 组。
+          resolveSaveSession: () => {
+            const archive = (ctx.reflect as unknown as {
+              get: (name: string) => { save: (id: SessionId) => Promise<void> } | undefined
+            }).get('sessionArchive')
+            if (archive === undefined) return undefined
+            // 绑定实例方法（与上面 wsList 同一坑：类实例方法作裸引用会丢 this）。
+            return (sessionId: SessionId) => archive.save(sessionId)
+          },
           }
         },
       },

@@ -6,9 +6,11 @@ import { type SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// shell.overlay 槽的声明方（corum-ide-ui）：type-only 拉进 SlotMap 行，
+// 与上面 ui-conversation / ui-settings 同一姿势（声明方不由本包渲染）。
+import type {} from '@corum/corum-ide-ui/client'
 import { SessionArchiveController } from './controller.ts'
-import { SessionArchiveHeaderAction } from './HeaderAction.tsx'
-import type { SessionArchiveSaveInjected } from './SaveDialog.tsx'
+import { SessionArchiveSaveDialogHost, type SessionArchiveSaveDialogInjected } from './SaveDialogHost.tsx'
 import { SessionArchiveImportRow, type SessionArchiveImportInjected } from './ImportRow.tsx'
 import { en, NS, zh, type SessionArchiveKey } from './locales.ts'
 
@@ -34,14 +36,19 @@ export type {
 export const inject = ['slots', 'locale']
 
 /**
- * Provide the archive controller and mount the Session Header save action
- * plus the General-settings import row.
+ * Provide the archive controller and mount the save-result modal plus the
+ * General-settings import row.
  *
- * P0-2（2026-09-14）恢复范围（用户裁决）：
- * - 恢复「保存到…」：挂 `conversation.session.header.utilities`（会话插件声明、
- *   有渲染点的 list 子槽，corum-ide-ui 的轨迹按钮同槽）。
- * - 恢复「导入会话日志」：挂 `settings.general.item`（P0-5 修好渲染点后从
- *   `settings.section` 临时形态迁回，见下方注册处的标记）。
+ * 2026-09-16 入口搬运（用户定调）：
+ * - 「保存到…」的**入口**从会话头部右上角搬到**会话栏会话行右键菜单**
+ *   （实现在 corum-ide-sidebar-ui 的 SessionsPane；它经本包 provide 的
+ *   cordis 服务 `sessionArchive` 拿保存能力）。
+ * - **结果反馈弹窗仍归本包**（文案/locale/状态机都在此处），改挂根级
+ *   `shell.overlay` 槽，与触发它的菜单解耦（见 SaveDialogHost.tsx 头注）。
+ *
+ * P0-2（2026-09-14）恢复范围（用户裁决，仍然有效）：
+ * - 「保存到…」能力保留（本次只换入口位置，不是删能力）。
+ * - 「导入会话日志」：挂 `settings.general.item`。
  * - 不恢复「删除会话」按钮：733d3b70 定调移除不可逆入口的裁决对它仍成立；
  *   controller.deleteSession 保留为程序化 API。
  * @param ctx - browser context carrying slots and locale services.
@@ -52,18 +59,28 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => async () => { await controller.dispose() }, 'session-archive: bridge operation lifecycle')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'session-archive: dictionaries')
 
-  const saveInjected = (): SessionArchiveSaveInjected => ({
+  // 「保存到…」入口已搬到**会话行右键菜单**（2026-09-16 用户定调，见
+  // corum-ide-sidebar-ui 的 SessionsPane 与下方 saveDialogInjected）。原
+  // `conversation.session.header.utilities` 的头部按钮注册**已移除**——
+  // 本次是「把入口搬走」，不是「删掉能力」（P0-2 裁决恢复的「保存到…」仍可用，
+  // 只是入口换位置；「删除会话」按钮的裁决不受影响，仍未恢复）。
+  //
+  // 结果反馈 Modal 改为挂在根级 `shell.overlay`（corum-ide-ui 声明、AppFrame 渲染的
+  // frame 内浮层），与触发它的菜单解耦：菜单选中即关闭，弹窗照常出现。
+  // 会话 id 由控制器 publish 的状态自带（bySession 按 id 索引），不依赖槽的
+  // session 作用域 —— 故本槽用 root 作用域即可（saveDialogInjected 反查最近一次
+  // 有 open 态的那个会话）。
+  const saveDialogInjected = (): SessionArchiveSaveDialogInjected => ({
     hooks: { sessionArchive: controller.store },
-    save: (sessionId: SessionId) => controller.save(sessionId),
     dismiss: (sessionId: SessionId) => { controller.dismissSave(sessionId) },
   })
 
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    id: 'session-archive-save',
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'session-archive-save-dialog',
     locale: NS,
-    inject: saveInjected,
-  }, SessionArchiveHeaderAction))
+    inject: saveDialogInjected,
+  }, SessionArchiveSaveDialogHost))
 
   const importInjected = (): SessionArchiveImportInjected => ({
     hooks: { sessionArchive: controller.store },
@@ -83,5 +100,6 @@ export function apply(ctx: ClientContext): void {
   }, SessionArchiveImportRow))
 }
 
-export type { SessionArchiveSaveInjected, SessionArchiveSaveDialogProps } from './SaveDialog.tsx'
+export type { SessionArchiveSaveDialogProps } from './SaveDialog.tsx'
+export type { SessionArchiveSaveDialogHostProps, SessionArchiveSaveDialogInjected } from './SaveDialogHost.tsx'
 export type { SessionArchiveImportInjected, SessionArchiveImportRowProps } from './ImportRow.tsx'

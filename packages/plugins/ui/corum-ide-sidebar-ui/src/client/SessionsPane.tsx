@@ -20,7 +20,7 @@ import { createPortal } from 'react-dom'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  Archive, ChevronRight, Folder, FolderOpen, GitFork, LoaderCircle,
+  Archive, ChevronRight, Download, Folder, FolderOpen, GitFork, LoaderCircle,
   MessageSquarePlus, MoreHorizontal, Pencil, Plus, Search, SlidersHorizontal,
   Sparkles, X,
 } from 'lucide-react'
@@ -58,6 +58,21 @@ export interface SessionsPaneInjected {
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /** uiSession.pendingInteractions 快照（0.1.2 起「等待操作」pending 在此，SessionId keyed）。 */
   pendingInteractions: ObservableSnapshot<ReadonlyMap<string, { kind: string }>>
+  /**
+   * 保存会话日志到…（2026-09-16 用户定调把入口从右上角搬进本菜单）。
+   *
+   * 能力面由 `corum-session-archive` 的 cordis 服务 `sessionArchive` 提供
+   * （该包 `index.ts` 的 `ctx.provide('sessionArchive', controller)`）。这里用
+   * **局部能力接口**收窄、不 import 实现包 —— 与红线 3 同思路（官方基座类型面
+   * 不含该服务，corum 运行时是超集；编译期类型保障、零运行时改动、不强耦合实现包）。
+   *
+   * ⚠️ **是「解析器」而不是「动作本身」**：调用它（每次渲染一次）才拿到保存函数；
+   * 返回 `undefined` = 存档插件缺席 ⇒ 菜单项**不渲染**（不留死按钮）。之所以要多这
+   * 一层，是因为槽的 inject 面被 ui-renderer **按 entry 永久缓存**（只求值一次），
+   * 若把服务查找写进 inject 面内部算成常量，就会在「存档插件晚于侧栏装配」时永久
+   * 冻结成缺席（插件中心可动态启停插件，这不是假想情况）。
+   */
+  resolveSaveSession?: (() => ((sessionId: SessionId) => Promise<void>) | undefined) | undefined
 }
 
 /** 相对时间标签（2026-08-28 用户定调：中文「N 分钟/N 小时/N 天」）。 */
@@ -314,6 +329,31 @@ export function SessionsPane(props: SessionsPaneInjected) {
   const [renamingId, setRenamingId] = useState<SessionId | null>(null)
   const [renameError, setRenameError] = useState<string | null>(null)
 
+  /**
+   * 保存会话日志到…（2026-09-16 用户定调：入口从会话头部右上角搬进会话行右键菜单）。
+   *
+   * 保存能力**不属于本插件**：实现在 `corum-session-archive`（它经 cordis 服务
+   * `sessionArchive` 暴露 save）。本插件只做**菜单入口**，故走能力面
+   * `props.resolveSaveSession`（收窄接口，不 import 实现包）。
+   *
+   * 每次渲染解析一次（**不能**提到组件外或用 useMemo 缓存 —— 服务可能晚于本侧栏装配，
+   * 见该字段的注释）；解析不到 ⇒ undefined ⇒ 菜单项不渲染（不留死按钮）。
+   *
+   * 反馈沿用存档插件原有的结果 Modal（保存路径/错误）：它挂在根级 `shell.overlay` 槽
+   * （见该包 SaveDialogHost.tsx），与本菜单解耦 —— 菜单关闭后弹窗照常出现。
+   * 取消原生对话框时 controller 静默 resolve（不弹窗），故这里无需分支处理。
+   */
+  const saveSession = props.resolveSaveSession?.()
+  const saveRow = saveSession === undefined
+    ? undefined
+    : (sessionId: SessionId): void => {
+        void saveSession(sessionId).catch((err: unknown) => {
+          // controller 内部已把错误 publish 到 store（经弹窗呈现），此处只兜底打日志，
+          // 避免「保存失败但控制台全无痕迹」。
+          console.error('[SessionsPane] save session failed:', err)
+        })
+      }
+
   const visibleResults = results?.filter(item => isTaskSessionId(item.sessionId)) ?? null
   // 搜索态双重防护：query 已清空（<2 字）时即使 results 因迟到写回也不进搜索分支。
   const searching = query.trim().length >= 2 && visibleResults !== null
@@ -526,6 +566,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onCancelRename={() => { setRenamingId(null) }}
                 onForkRow={(id) => { void props.fork(id).catch(() => { /* 错误经列表 store 投影 */ }) }}
                 onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
+                onSaveRow={saveRow}
                 pendings={pendings}
               />
             ))
@@ -542,6 +583,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onCancelRename={() => { setRenamingId(null) }}
                 onFork={() => { void props.fork(row.id).catch(() => {}) }}
                 onArchive={() => { void props.archive(row.id).catch(() => {}) }}
+                onSave={saveRow === undefined ? undefined : () => { saveRow(row.id) }}
                 pendings={pendings}
               />
             ))
@@ -582,7 +624,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
 }
 
 /** 一个工作区分组（design d-*：组行 + 组内会话行）。 */
-function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, pendings }: {
+function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, onSaveRow, pendings }: {
   group: { key: string; workspace: WorkspaceView | null; sessions: readonly SessionSummary[] }
   collapsed: boolean
   /** 组内是否已「展开其余 N 个会话」（与整组 `collapsed` 正交，见调用方注释）。 */
@@ -600,6 +642,8 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
   onCancelRename: () => void
   onForkRow: (id: SessionId) => void
   onArchiveRow: (id: SessionId) => void
+  /** 保存会话日志到…（可选：存档插件缺席时不传 ⇒ 菜单项不渲染）。 */
+  onSaveRow?: ((id: SessionId) => void) | undefined
   pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -695,6 +739,7 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
                 onCancelRename={onCancelRename}
                 onFork={() => { onForkRow(row.id) }}
                 onArchive={() => { onArchiveRow(row.id) }}
+                onSave={onSaveRow === undefined ? undefined : () => { onSaveRow(row.id) }}
                 pendings={pendings}
               />
             ))}
@@ -726,7 +771,7 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
  * (Enter submits, Escape cancels, blur submits) backed by the injected
  * rename RPC.
  */
-function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, pendings }: {
+function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, onSave, pendings }: {
   row: SessionSummary
   active: boolean
   nested?: boolean
@@ -737,6 +782,8 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   onCancelRename: () => void
   onFork: () => void
   onArchive: () => void
+  /** 保存会话日志到…（可选：存档插件缺席时不传 ⇒ 菜单项不渲染）。 */
+  onSave?: (() => void) | undefined
   pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const [draft, setDraft] = useState(rowTitle(row))
@@ -855,6 +902,12 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         { id: 'rename', label: '重命名', icon: <Pencil size={14} strokeWidth={2} /> },
         { id: 'archive', label: '归档', icon: <Archive size={14} strokeWidth={2} /> },
         { id: 'fork', label: '分叉会话', icon: <GitFork size={14} strokeWidth={2} /> },
+        // 保存会话日志到…（2026-09-16 用户定调：入口从会话头部右上角搬进本菜单）。
+        // 放在分隔线**之前**、与其它「会话级动作」同组 —— 它是常规动作而非占位项。
+        // 存档插件缺席（onSave undefined）时整项不渲染（不留死按钮）。
+        ...(onSave === undefined
+          ? []
+          : [{ id: 'save', label: '保存到…', icon: <Download size={14} strokeWidth={2} /> }]),
         { type: 'separator', id: 'distill-sep' },
         { id: 'distill', label: '提炼经验', icon: <Sparkles size={14} strokeWidth={2} />, disabled: true },
       ]}
@@ -863,6 +916,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         if (id === 'rename') onStartRename()
         else if (id === 'archive') onArchive()
         else if (id === 'fork') onFork()
+        else if (id === 'save') onSave?.()
         // distill：占位禁用（语义待定义），不响应。
       }}
       anchor={rowEl}
