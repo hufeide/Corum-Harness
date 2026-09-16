@@ -214,15 +214,64 @@ const OFFICIAL_MODE_META: Record<string, { label: string; desc: string }> = {
   cordis: { label: '创造模式', desc: '用于创建自定义 Agent preset' },
 }
 
-function OfficialModeCard({ id }: { id: string }) {
+/** 官方基础模式的只读详情（介绍 + 能力面）。数据为静态说明（模式是模板，不挂可配 skill/mcp）。 */
+const OFFICIAL_MODE_DETAIL: Record<string, { label: string; intro: string; capabilities: string[] }> = {
+  standard: {
+    label: '标准模式',
+    intro: '功能完整的编码 Agent，覆盖日常开发的大多数场景：读写文件、执行命令、检索代码、调用技能。是大多数内置角色（研发 / 产品 / 测试等）的默认基础。',
+    capabilities: ['文件编辑（read / write / edit）', 'Shell 命令执行', '代码检索与检索工具', 'Skills 技能调用', 'MCP 服务器接入'],
+  },
+  conductor: {
+    label: '指挥模式',
+    intro: '只编排、不亲手执行的模式：把任务拆解并分派给子 Agent / 团队，跟踪进度并回收结果。本身不写代码、不跑命令，适合作多 Agent 团队的统筹入口。',
+    capabilities: ['任务拆解与派发（orchestrate）', '子 Agent / 团队调度', '进度跟踪与结果回收', '不直接执行文件 / Shell 写操作'],
+  },
+  ptc: {
+    label: 'PTC 模式',
+    intro: '标准模式之上叠加 Code Mode SDK 的多步操作能力：面向需要跨多步、带中间状态的工具编排场景（如复杂的代码变换流水线）。',
+    capabilities: ['标准模式全部能力', 'Code Mode SDK 多步操作', 'tool-presentation（ptc 模式）'],
+  },
+  minimal: {
+    label: '极简模式',
+    intro: '只保留最小写面：持久 bash + 文件系统双工具。适合受限环境或对工具面做最小化裁剪的场景。',
+    capabilities: ['persona 人格', 'persistent-shell', 'filesystem（write / edit）', '无检索 / 无 Skills / 无 MCP'],
+  },
+  cordis: {
+    label: '创造模式',
+    intro: '用于创建自定义 Agent preset 的模式：引导你定义新 Agent 的人格、模型、技能与工具组合，并把它保存为可复用的预设。',
+    capabilities: ['预设创建向导（preset-author）', '人格 / 提示词定义', '模型与工具面配置', '保存为自定义 Agent preset'],
+  },
+}
+
+/** 官方基础模式只读详情页（2026-09-16：卡片可点击进详情，模式是模板不可编辑）。 */
+function OfficialModeDetailView({ modeId, onBack }: { modeId: string; onBack: () => void }) {
+  const detail = OFFICIAL_MODE_DETAIL[modeId] ?? { label: modeId, intro: '', capabilities: [] }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', height: '100%', minHeight: 0, overflowY: 'auto' }}>
+      <button type="button" className={css.backRowGhost} onClick={onBack}>
+        <ChevronLeft size={14} />返回 Agent 预设
+      </button>
+      <div className={css.formGroupTitle}>{detail.label}</div>
+      <p className={css.hintText}>{detail.intro}</p>
+      <div className={css.formGroupTitle}>能力面</div>
+      <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {detail.capabilities.map(c => <li key={c} className={css.hintText}>{c}</li>)}
+      </ul>
+      <p className={css.hintText}>官方基础模式是新建 / 编辑 Agent 时的继承模板（baseMode），不可直接选中、不可编辑。</p>
+    </div>
+  )
+}
+
+function OfficialModeCard({ id, onClick }: { id: string; onClick: () => void }) {
   const meta = OFFICIAL_MODE_META[id] ?? { label: id, desc: '' }
   return (
-    <div className={css.officialCard}>
+    <div className={css.officialCard} onClick={onClick} role="button">
       <div className={css.officialCardHead}>
         <Box size={13} className={css.officialCardIcon} />
         <span className={css.officialCardLabel}>{meta.label}</span>
         <span className={css.officialBadge}>官方</span>
-        <span className={css.agentInheritTag}>继承自</span>
+        {/* 2026-09-16：基础模式卡**就是模式本身**，不再显示冗余的「继承自」徽标。 */}
+        <ChevronRight size={14} className={css.agentChevron} />
       </div>
       <span className={css.officialCardDesc}>{meta.desc}</span>
     </div>
@@ -353,6 +402,7 @@ function PlaceholderCard() {
 type PresetsView =
   | { kind: 'home' }
   | { kind: 'edit'; profile: AgentProfileSummary | 'new' }
+  | { kind: 'official-detail'; modeId: string }
 
 export function AgentPresetsSection() {
   const rpc = useCorumRpc()
@@ -387,6 +437,10 @@ export function AgentPresetsSection() {
         onSaved={() => { setView({ kind: 'home' }); void reload() }}
       />
     )
+  }
+
+  if (view.kind === 'official-detail') {
+    return <OfficialModeDetailView modeId={view.modeId} onBack={() => setView({ kind: 'home' })} />
   }
 
   const corumProfiles = (profiles ?? []).filter(p => p.source === 'corum')
@@ -454,17 +508,14 @@ export function AgentPresetsSection() {
       {officialProfiles.length > 0 && (
         <div className={css.officialGroup}>
           {/* 2026-09-12 用户定调：这 5 个官方模式不再是可直接选中的 Agent，只作
-              新建/编辑 Agent 时的继承模板（baseMode）——所以标题点明「继承模板」。 */}
+              新建/编辑 Agent 时的继承模板（baseMode）——所以标题点明「继承模板」。
+              2026-09-16：渲染**全部**（原先 slice(0,2)/slice(2,4) 硬编码四卡，
+              第 5 个 cordis/创造模式被截断丢失）；卡片可点击进只读详情。 */}
           <span className={css.officialGroupTitle}>官方基础模式（继承模板，不可直接选中）</span>
           <div className={css.officialGrid}>
-            <div className={css.officialRow}>
-              {officialProfiles.slice(0, 2).map(p => <OfficialModeCard key={p.id} id={p.id} />)}
-            </div>
-            {officialProfiles.length > 2 && (
-              <div className={css.officialRow}>
-                {officialProfiles.slice(2, 4).map(p => <OfficialModeCard key={p.id} id={p.id} />)}
-              </div>
-            )}
+            {officialProfiles.map(p => (
+              <OfficialModeCard key={p.id} id={p.id} onClick={() => setView({ kind: 'official-detail', modeId: p.id })} />
+            ))}
           </div>
         </div>
       )}
