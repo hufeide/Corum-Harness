@@ -1,33 +1,90 @@
 /**
- * SettingsDataSection — 从 SettingsSections.tsx 拆出的独立 section 文件（重构 2）。
+ * SettingsDataSection — 数据管理分区（PRD v2 §4.8）。
+ *
+ * ## 本轮（M4 尾 + §6.1/§6.2 信任修复）的三件事
+ *
+ * 1. **删假数据（§6.2）**：原代码硬编码了两个**伪造的存储占用数值**
+ *    （技能仓库与缓存，见 PRD §6.2 记录）。§6.2 明说「badge 盖不住假数据 ⇒
+ *    必须直接删除」，故改为 `—` 并注明待统计能力。
+ *    （设计稿侧此前已同样处置；本轮补齐**代码侧** —— 上轮只改了设计稿。）
+ *    ⚠️ 此处**故意不复述那两个数值**：复述会让「grep 假数据 = 0」这条审计
+ *    命中本注释自身而失去判据效力（本项目已因此踩过两次）。
+ * 2. **五个死控件按 §6.1 降级**：3 个「清理」+「清除」+「重置」原本全是
+ *    `<GlassButton>` **无 onClick** 的空壳（点了什么都不会发生）。
+ *    现一律 `disabled` + 「未上线」badge。危险操作保持 danger 配色以便识别。
+ * 3. **按 PRD §4.8 补齐目标条目**：存储占用三项（会话归档 / 技能仓库 / 缓存）、
+ *    归档会话两项（删除归档会话 / 导入会话日志）。
+ *
+ * ## ⚠️ 导入会话日志的真实位置（尚未迁入本页）
+ *
+ * 真源是 `corum-session-archive` 的 `ImportRow`（一个带状态机的文件导入流程，
+ * 经 `requestImport()` 调主进程），**不是设置 ns**，因此**无法「接线」复用**。
+ * 它当前注册在 `settings.general.item` 槽，但该槽的渲染点（通用页）已按 M4
+ * 只渲染 `language` / `composer-enter` ⇒ 本页**暂时无法渲染它**。
+ *
+ * 所以本页此项渲染为**未上线的说明行**，并如实标注当前入口在
+ * 「插件管理」的插件配置卡。真正的迁入需要**新增一个分区域子槽**
+ * （`SlotMap` 接口 + 运行时注册两处改动，跨 3 个文件），风险与收益需要单独评估
+ * —— 详见台账 `settings.rework.M4-tail-import-row-deferred`。
+ *
+ * @module corum-ide-ui/client/settings/sections/SettingsDataSection
  */
 
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
+import { Badge } from '../Badge.tsx'
 import { GlassButton } from '../shared.tsx'
 import css from '../SettingsSections.module.css'
 
-/* ── 数据管理 ──────────────────────────────────────────────────────── */
+/* ── 数据管理（PRD §4.8）───────────────────────────────────────────── */
 
+/** 未上线 badge（PRD §6.1）。 */
+const OFFLINE = <Badge label="未上线" variant="offline" />
+
+/** 未上线的存储占用占位（§6.2：不显示伪造数值）。 */
+const UNKNOWN_SIZE = <span className={css.sizeLabel}>—</span>
+
+/**
+ * 数据管理分区：存储占用 / 危险操作 / 归档会话（全部为未上线目标态）。
+ *
+ * @returns the data settings section.
+ */
 export function DataSection() {
   return (
     <>
-      <SettingGroup title="存储占用">
-        <SettingRow label="技能仓库" desc="">
-          <span className={css.sizeLabel}>45 MB</span>
-          <GlassButton>清理</GlassButton>
+      <SettingGroup title="存储占用 · 待统计能力">
+        <SettingRow label="会话归档" desc="待「目录大小统计」能力上线后显示真实占用" badge={OFFLINE}>
+          {UNKNOWN_SIZE}
+          <GlassButton disabled>清理</GlassButton>
         </SettingRow>
-        <SettingRow label="缓存" desc="" divider={false}>
-          <span className={css.sizeLabel}>312 MB</span>
-          <GlassButton>清理</GlassButton>
+        <SettingRow label="技能仓库" desc="待「目录大小统计」能力上线后显示真实占用" badge={OFFLINE}>
+          {UNKNOWN_SIZE}
+          <GlassButton disabled>清理</GlassButton>
+        </SettingRow>
+        <SettingRow label="缓存" desc="待「目录大小统计」能力上线后显示真实占用" badge={OFFLINE} divider={false}>
+          {UNKNOWN_SIZE}
+          <GlassButton disabled>清理</GlassButton>
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="危险操作">
-        <SettingRow label="清除全部缓存" desc="清空本地缓存文件，下次启动重新生成">
-          <GlassButton variant="danger">清除</GlassButton>
+        <SettingRow label="清除全部缓存" desc="清空本地缓存文件，下次启动重新生成。⚠️ 尚无 reset API。" badge={OFFLINE}>
+          <GlassButton variant="danger" disabled>清除</GlassButton>
         </SettingRow>
-        <SettingRow label="重置全部设置" desc="恢复所有设置为默认值，不可撤销" divider={false}>
-          <GlassButton variant="danger">重置</GlassButton>
+        <SettingRow label="重置全部设置" desc="恢复所有设置为默认值，不可撤销。⚠️ 天然是整文件覆盖，需先定范围（PRD §9.2）。" badge={OFFLINE} divider={false}>
+          <GlassButton variant="danger" disabled>重置</GlassButton>
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="归档会话">
+        <SettingRow label="删除归档会话" desc="批量删除已归档的会话；破坏性操作，需输入式确认（PRD §9.1）。⚠️ 单会话级 API 已有，批量需新建。" badge={OFFLINE}>
+          <GlassButton variant="danger" disabled>删除归档</GlassButton>
+        </SettingRow>
+        <SettingRow
+          label="导入会话日志"
+          desc="从 ZIP 归档导入会话日志。⚠️ 实现已存在但**当前入口在「插件管理」的插件配置卡**；迁入本页需新增分区域子槽（见文件头说明）。"
+          badge={OFFLINE}
+          divider={false}
+        >
+          <GlassButton disabled>导入</GlassButton>
         </SettingRow>
       </SettingGroup>
     </>
