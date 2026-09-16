@@ -71,16 +71,18 @@
 
 /* 语言 chip 文字 → brand-text（等宽：语言名天然适合等宽）。 */
 .chipLang {
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   color: var(--dsw-alias-brand-text);
 }
 
-/* 行数 chip 文字 —— **取色照用户选中的 `mFsfQ`**（= 折叠 deck `wUNO8` 六张卡统一口径：
-   `$brand-text`）。用户 2026-09-16 提醒「注意 dark 和 light 是不一样的」：`$brand-text`
-   在 corum 主题里就是**分深浅**的（浅 `#5B21F5` 电紫 / 深 `#4DE3FF` 霓虹青），
-   所以这里必须用主题变量而不是写死颜色，否则浅色主题下会串成深色值。
-   （字号/字重仍按用户上一条要求与编辑读写卡的 chip 对齐：11px / 600。） */
+/* 行数 chip 文字 —— 取色与**字族**都照用户选中的 `mFsfQ`（= 折叠 deck `wUNO8` 六张卡
+   的统一口径：`$brand-text` + JetBrains Mono 12）。
+   用户 2026-09-16 提醒「注意 dark 和 light 是不一样的」：`$brand-text` 在 corum 主题里
+   就是**分深浅**的（浅 `#5B21F5` 电紫 / 深 `#4DE3FF` 霓虹青），所以必须用主题变量而
+   不能写死颜色，否则换主题就串色。用户随后确认「字族也要跟设计稿」⇒ 换成等宽。
+   注：字号/字重仍按上一条要求与编辑读写卡的 chip 对齐（11 / 600）。 */
 .chipLines {
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   color: var(--dsw-alias-brand-text);
 }
 
@@ -183,7 +185,7 @@
 }
 
 .codeText {
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   font-size: 12.5px;
   color: var(--dsw-alias-label-primary);
   white-space: pre-wrap;
@@ -199,7 +201,7 @@
 }
 
 .summaryText {
-  font-family: var(--dsw-font-markdown-code-block, 'JetBrains Mono', monospace);
+  font-family: var(--ds-font-family-code, 'JetBrains Mono', ui-monospace, monospace);
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);
   white-space: pre-wrap;
