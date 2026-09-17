@@ -213,6 +213,18 @@ async function copyDesktopArtifacts() {
   if (!forkSource.includes('Closest places in the file')) {
     throw new Error('pack-macos: the host closure resolved dsh-fs-local to the OFFICIAL package, not @corum/corum-fs-local — check pnpm-workspace.yaml overrides (link:) and rebuild the fork')
   }
+  // fork #16（@corum/corum-tools）在闭包里必须带上：官方 `errorMessage`/`toolErrorResult` 是模块
+  // 私有、不可装饰，fork 靠 `'@deepseek-ai/dsh-tools': link:...` 生效。闭包退回官方会让工具失败
+  // 的「无 message 对象」又退化成 [object Object]——打包期报出来，别留给用户发现。
+  const stagedTools = join(HOST_DIR, 'node_modules', '@deepseek-ai', 'dsh-tools')
+  const toolsIndex = join(stagedTools, 'lib', 'index.js')
+  if (!existsSync(toolsIndex)) {
+    throw new Error(`pack-macos: @deepseek-ai/dsh-tools missing from the host closure at ${toolsIndex} — build @corum/corum-tools and keep the pnpm-workspace.yaml link: override`)
+  }
+  const toolsSource = readFileSync(toolsIndex, 'utf8')
+  if (!toolsSource.includes('JSON.stringify(error)')) {
+    throw new Error('pack-macos: the host closure resolved dsh-tools to the OFFICIAL package, not @corum/corum-tools — check pnpm-workspace.yaml overrides (link:) and rebuild the fork')
+  }
   // Shipped agent-presets: stage both roots beside the host runtime so the
   // boot-time resolver finds them by the same relative anchors in the app.
   await rm(SHIPPED_PRESETS_DIR, { recursive: true, force: true })

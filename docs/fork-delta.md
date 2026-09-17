@@ -1,6 +1,6 @@
 # corum 会话域 fork 差异台账 + 升级 runbook
 
-> 架构整改 **C4** 交付物。本文档把会话域 6 个 fork 包（fork 自官方 `@deepseek-ai/dsh-client-ui-*`）相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。**当前 fork 总数 15**（最新：§17 第 15 个 `@corum/corum-session-queue-revert`，2026-09-14）。
+> 架构整改 **C4** 交付物。本文档把会话域 6 个 fork 包（fork 自官方 `@deepseek-ai/dsh-client-ui-*`）相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。**当前 fork 总数 16**（最新：§18 第 16 个 `@corum/corum-tools`，2026-09-16）。
 >
 > - 生成方式：`diff -r packages/plugins/session/<pkg>/src /Users/kukucai/dsh/packages/client/<官方包>/src` + 逐文件 diff 分类（脚本统计，非印象）。
 > - 官方基线版本：`0.1.2-alpha.2`（`/Users/kukucai/dsh/packages/client/*/package.json` 的 `version`）。⚠️ corum 各 fork 的 `dependencies` 仍锁 `^0.1.2-alpha.1`——**源码对照的是 alpha.2、依赖锁 alpha.1，双向差一代**（审计 B 群 P1，见 §3.4）。
@@ -1975,3 +1975,57 @@ cancelled）、`dsh-agent consumed-work.js:64-69`（`droppedUnrun` 置位）。�
 `updateQueue`（vendor 重拷 diff）与 `agent.ts` 两个 guard，再核三处私有面是否仍可达
 （fail-loud 会在 boot 直接告诉你）；client 侧 wire 补丁随 chat 包走，不与官方 client 源码耦合。
 
+
+## 18. 第 16 个 fork 包：`@corum/corum-tools`（2026-09-16，工具失败错误归一化）
+
+| 项 | 值 |
+|---|---|
+| 官方对照包 | `@deepseek-ai/dsh-tools` |
+| 官方基线 | 0.1.3-alpha.1（源码基线 = dsh 检出 `packages/core/tools`） |
+| 文件数 | 10 官方模块整拷（`src/index.ts` / `invariant.ts` / `json-schema.ts` / `presentation.ts` / `ptc.ts` / `py-types.ts` / `schema.ts` / `testing.ts` / `ts-types.ts` / `types.ts`） |
+| 逐字节相同 | 除 `index.ts` 外的 **9 个模块**（**守卫 §16b 断言**——增量不许扩散到这 9 个文件） |
+| 实质修改 | `src/index.ts`（仅 `errorMessage` 函数加一段「无 message 对象走 JSON.stringify」分支；其余逐字节同官方） |
+| corum 新增 | 无（增量全部内联在 `index.ts` 的 `errorMessage`） |
+| rebase 风险 | **中**（`index.ts` 是 1937 行的注册+执行管线主文件，官方升级时按 §5 第 3 步三方合并 `errorMessage` 一处即可，但单文件大、合并面比 fs-local 大） |
+
+**动机（todo.error.opaque-object-stringification）**：工具执行失败、且失败原因是**无 string
+`message` 字段的普通对象**（如 `{code:'RATE_LIMIT',detail:'quota'}`）时，官方 `errorMessage`
+（`packages/core/tools/src/index.ts:601-615`）走 `String(error)` 退化成 **`[object Object]`**——
+用户完全看不懂发生了什么（2026-09-09 用户主 Agent 提交失败时真实撞到）。该 message 被
+`toolErrorResult` 拼成 `Error: [object Object]` 显示，**9 处失败路径**都走它。
+
+**为什么不能靠装饰/上游，只能整包 fork**：`errorMessage`/`toolErrorResult` 是**模块私有**
+（未导出，官方 `grep export.*errorMessage` 零命中），且 `toolErrorResult` 深度内联在调度管线
+（9 处调用点）——cordis 服务/装饰无法在不 fork 的前提下拦截其 message 组装；corum 侧只能在
+每个 UI 渲染点二次修补，治标不治本。
+
+**增量**（`errorMessage` 一处）：在 `String(error)` 之前加一段——`typeof error === 'object' &&
+!== null` 时先试 `JSON.stringify(error)`（非空且非 `'{}'` 才采纳，截断 500 字符避免巨型对象
+刷屏），让结构化错误呈现为 `{"code":...}` 而非 `[object Object]`；循环引用等不可序列化回落
+`String()`。Error 实例 / 有 message 字段的对象 / 原始类型行为不变（对拍验证：old=`[object
+Object]` → new=`{"code":"RATE_LIMIT","detail":"quota"}`）。
+
+**装配（与 fork #14 同型的「解析面」）**：`@deepseek-ai/dsh-tools` 的消费方众多
+（`corum-tool-subagent` / `corum-orchestration` / `corum-subagent` / `corum-agent` /
+`corum-ui-chat` / `corum-ui-trajectory`），都是**库消费者**、不是可 swap 的行 ⇒ fork 靠
+pnpm override 生效：
+
+```yaml
+# pnpm-workspace.yaml（overrides）
+'@deepseek-ai/dsh-tools': 'link:packages/plugins/agent/corum-tools'
+```
+
+**失败会静默**（本 fork 最该守的地方，与 fork #14 同）：override 被改回版本钉 / fork 没构建
+（lib 缺）/ 闭包丢包，三者都不会让编译或构建报错，只是「工具失败对象悄悄退回官方
+`[object Object]`」。
+
+**验证**：
+- `tsc -b` 绿（10 模块整拷官方，类型面零破坏）；`tsdown` 出 4 个 entry（`index`/`invariant`/
+  `types`/`presentation`，inline 内部模块、external 9 个 dsh 依赖）。
+- bundle 实测 `errorMessage` 函数体含增量（`JSON.stringify(error)` + `json.length > 500`）；
+  新旧逻辑对拍（结构化对象 → JSON、Error/message 字段/原始类型不变）。
+- 消费方 `@corum/corum-tool-subagent` typecheck 绿。
+- 常驻守卫 `scripts/verify-fork-drift.sh` §16b（与 §15b 同型）：9 个官方模块逐字节一致 /
+  `index.ts` 的 `errorMessage` 含 JSON.stringify 增量 / `pnpm-workspace.yaml` 的 link override
+  在位 / `desktop-host/package.json` 登记 / `pack-macos.mjs` 含闭包断言
+  （`JSON.stringify(error)` 必须在闭包那份里，缺失或退回官方即打包失败）。

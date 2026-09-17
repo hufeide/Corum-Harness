@@ -172,9 +172,9 @@ code_has_r() { # code_has_r <needle> <dir>…
 #     section() 输出与跳过分区逻辑完全不介入，行为与加 CLI 之前逐字节一致。
 #   • 未知 --only token 必须**响亮失败**（非 0 退出 + 列出合法 token），
 #     否则「跑零个分区 + 打印通过」会把 typo 伪装成全绿。
-SECTION_TOKENS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 15b 16 17 18)
+SECTION_TOKENS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 15b 16 16b 17 18)
 # --fast 选区（选区理由与警告见文件头注释，两处必须同步）。
-FAST_LANE_SECTIONS="8 11 12 13 15b 18"
+FAST_LANE_SECTIONS="8 11 12 13 15b 16b 18"
 # --only 选区（空格分隔的 token 串，便于 case 匹配）；空串 = 未启用筛选。
 ONLY_SELECTED=" "
 FAST_LANE=0
@@ -235,7 +235,7 @@ usage() {
   -h, --help        打印本帮助。
 
 合法分区 token（即分区标题方括号里的标识）：
-  [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15] [15b] [16] [17] [18]
+  [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15] [15b] [16] [16b] [17] [18]
   写法：--only 8（选中 [8]）、--only 15b（选中 [15b]）。
   未知 token 会立即以非 0 退出并列出上面的清单（不会静默跑零个分区）。
 
@@ -245,6 +245,7 @@ usage() {
   [12]  GPU 合成默认开启（CORUM_DISABLE_GPU 显式回退）
   [13]  打包闭包版本一致性（pnpm overrides 逐个钉 + pack 时断言）
   [15b] fork #14（corum-fs-local）：edit 定位提示 + 解析面 override
+  [16b] fork #16（corum-tools）：errorMessage 归一化 + 解析面 override
   [18]  corum-cdp-verify 技能：打包副本 == 仓库脚本（逐字节）
 
 ⚠⚠ 快速通道（--only / --fast）只供开发迭代，不能作为验收依据 ⚠⚠
@@ -972,6 +973,50 @@ fi
 #   ③ cwd 缺省路径必须仍是「继承父会话 cwd」（官方语义）；
 #   ④ 两个入口（one-shot start / continuable）都必须做 assertChildCwd。
 fi  # ← select_section 15b
+
+# ── 16b. fork #16（@corum/corum-tools）：工具失败错误归一化 + 解析面 ──────────
+# 官方 `errorMessage`/`toolErrorResult` 是模块私有（未导出），不可经 cordis 服务/装饰覆盖，
+# 只能整包 fork（10 模块整拷官方 + 只改 errorMessage 一处）。本节的**关键**与 15b 同：
+# 「解析面」——corum-tool-subagent / corum-orchestration / corum-subagent / corum-agent /
+# corum-ui-chat 都 import `@deepseek-ai/dsh-tools`，fork 必须经 pnpm-workspace.yaml 的
+# link: override 生效，否则 fork 编好、测试全绿、应用里却一行都没跑到（静默失效）。
+if select_section 16b; then
+section "[16b] fork #16（@corum/corum-tools）：errorMessage 归一化 + 解析面 override"
+TOOLS_FORK="$REPO_ROOT/packages/plugins/agent/corum-tools"
+OFFICIAL_TOOLS="$DSH_CHECKOUT/packages/core/tools"
+if [ -f "$OFFICIAL_TOOLS/src/index.ts" ]; then
+  # 官方文件（除 index.ts 外的 9 个模块）不得被改动：增量只在 index.ts 的 errorMessage。
+  for official_file in invariant.ts json-schema.ts presentation.ts ptc.ts py-types.ts schema.ts testing.ts ts-types.ts types.ts; do
+    if cmp -s "$TOOLS_FORK/src/$official_file" "$OFFICIAL_TOOLS/src/$official_file"; then
+      pass "src/$official_file 与官方逐字节一致"
+    else
+      fail "src/$official_file 与官方有差异——增量必须只在 index.ts 的 errorMessage"
+    fi
+  done
+else
+  skip "官方检出缺 packages/core/tools（跳过逐字节断言）"
+fi
+if code_has 'JSON.stringify(error)' "$TOOLS_FORK/src/index.ts" && code_has 'json.length > 500' "$TOOLS_FORK/src/index.ts"; then
+  pass "index.ts 的 errorMessage 对无 message 对象走 JSON.stringify（不再 [object Object]）"
+else
+  fail "index.ts 的 errorMessage 缺 JSON.stringify 增量——工具失败对象会退回官方 [object Object]"
+fi
+if code_has_re "^  '@deepseek-ai/dsh-tools': 'link:packages/plugins/agent/corum-tools'" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  pass "pnpm-workspace.yaml 把 dsh-tools 解析到 fork（消费方共用它）"
+else
+  fail "pnpm-workspace.yaml 缺 dsh-tools 的 link: override——fork 不会在应用里生效（消费方仍加载官方包）"
+fi
+if code_has '"@corum/corum-tools"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+  pass "desktop-host 闭包登记 fork（deploy 物化为真实目录）"
+else
+  fail "desktop-host/package.json 缺 @corum/corum-tools——正式包闭包里它只会是软链"
+fi
+if code_has 'JSON.stringify(error)' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos 会断言闭包里的 dsh-tools 是 fork（缺失/退回官方即打包失败）"
+else
+  fail "pack-macos.mjs 缺 dsh-tools 闭包断言——fork 没进闭包时会静默发行"
+fi
+fi  # ← select_section 16b
 if select_section 16; then
 section "[16] fork #9（corum-subagent）：增量 opt-in（官方 preset 行为等价）"
 SUBAGENT_FORK="$REPO_ROOT/packages/plugins/agent/corum-subagent"

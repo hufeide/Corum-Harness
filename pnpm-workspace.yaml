@@ -22,6 +22,7 @@ onlyBuiltDependencies:
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': true
+  esbuild: set this to true or false
   fs-ext: true
   koffi: true
   node-pty: true
@@ -233,7 +234,13 @@ overrides:
   '@deepseek-ai/dsh-tool-todo': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-tool-web': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-tool-workflow': '0.1.3-alpha.1'
-  '@deepseek-ai/dsh-tools': '0.1.3-alpha.1'
+  # fork #16（@corum/corum-tools）：官方 dsh-tools 的 corum 版。这里**不是**版本钉，
+  # 而是指向工作区里的 fork —— 官方 `errorMessage`/`toolErrorResult` 是模块私有（未导出），
+  # 无法经 cordis 服务/装饰覆盖，只能整包 fork 让 `@deepseek-ai/dsh-tools` 解析到本包，
+  # 才能让「工具失败对象不再退化成 [object Object]」在真实链路上生效
+  # （corum-tool-subagent / corum-orchestration / corum-subagent / corum-agent / corum-ui-chat 等都 import 它）。
+  # 升级 runbook：官方 dsh-tools 升级时按 docs/fork-delta.md §5 第 3 步三方合并本 fork 的 index.ts。
+  '@deepseek-ai/dsh-tools': 'link:packages/plugins/agent/corum-tools'
   '@deepseek-ai/dsh-typert-loader': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-typert-protocol': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-typert-registry': '0.1.3-alpha.1'

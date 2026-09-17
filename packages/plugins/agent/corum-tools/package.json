@@ -1,0 +1,66 @@
+{
+  "name": "@corum/corum-tools",
+  "version": "0.1.0",
+  "description": "corum 定制版工具注册与执行管线（fork 官方 dsh-tools 0.1.3-alpha.1）：唯一增量 = 工具失败错误归一化 `errorMessage` 对「无 string message 字段的普通对象」改走 JSON.stringify（截断 500 字符），不再退化成 `[object Object]`（todo.error.opaque-object-stringification / 2026-09-09 用户主 Agent 提交失败撞到过）。其余源码与官方逐字节一致（官方基线 d347e70390 = dsh-v0.1.3-alpha.1，10 个模块整拷）。注意：`errorMessage`/`toolErrorResult` 是模块私有（未导出），无法经 cordis 服务/装饰覆盖，只能整包 fork + pnpm override 让 `@deepseek-ai/dsh-tools` 解析到本包（见根 pnpm-workspace.yaml 的 overrides）。升级 runbook：官方 dsh-tools 升级时按 docs/fork-delta.md §5 第 3 步三方合并本 fork 的 index.ts。",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./types": {
+      "types": "./lib/types/types.d.ts",
+      "default": "./lib/types/types.js"
+    },
+    "./presentation": {
+      "types": "./lib/types/presentation.d.ts",
+      "default": "./lib/presentation.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-brand": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-util-values": "0.1.3-alpha.1",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-code-runtime": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-invariants": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-llm": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-scope": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-user-approval": "0.1.3-alpha.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-code-runtime": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-invariants": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-llm": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-scope": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-session-projection": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.3-alpha.1",
+    "@deepseek-ai/dsh-user-approval": "0.1.3-alpha.1",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "@types/node": "^22.20.0"
+  }
+}

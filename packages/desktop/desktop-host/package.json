@@ -28,6 +28,7 @@
     "@corum/corum-skill-manager": "workspace:*",
     "@corum/corum-subagent": "workspace:*",
     "@corum/corum-tool-subagent": "workspace:*",
+    "@corum/corum-tools": "workspace:*",
     "@corum/corum-ui-approval": "workspace:*",
     "@corum/corum-ui-chat": "workspace:*",
     "@corum/corum-ui-conversation": "workspace:*",
