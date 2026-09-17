@@ -205,7 +205,9 @@ function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSum
       <span className={css.agentExp}>{profile.experience ?? ''}</span>
       <div className={css.agentModelRow}>
         <Cpu size={11} className={css.agentModelIcon} />
-        <span className={css.agentInheritTag}>继承自 {baseModeLabel(profile.baseMode ?? (profile.source === 'official' ? profile.id : 'standard'))}</span>
+        {/* 2026-09-16 用户定调：「继承自 X」从名片移除（放进详情/编辑页看——继承自下拉
+            与提示已在编辑页 :938-947）⇒ 名片底部行只留「模型名 + 维度」，简介/座右铭
+            不再被「继承自 标准模式（完整编码能力）」挤压截断。 */}
         <span className={css.agentModelName}>{profile.model.model}</span>
         <span className={css.agentDimTag}>{dim}</span>
       </div>
