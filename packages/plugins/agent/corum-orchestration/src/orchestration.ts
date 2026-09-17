@@ -33,6 +33,10 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
+// fork（corum）：git 机制归一到 git-core 核心插件（用户 2026-09-16 策略「所有 git 管理
+// 收进一个独立插件」）——收口强制提交的底层原语 settleCommit 由 git-core 提供，
+// 本包不再自实现 `git add/commit`（消除与 corumCommitWorktreeOnSettle 的重复实现）。
+import { settleCommit as gitCoreSettleCommit } from '@corum/corum-git-core/git-primitives'
 
 /**
  * `subagent/end` 载荷的**局部窄化形**（只取本包用到的两个字段）。
@@ -503,31 +507,17 @@ export function corumCommitWorktreeOnSettle(
   worktreePath: string,
   slug: string,
 ): CorumSettleCommitFailure | undefined {
-  if (!existsSync(worktreePath)) return undefined
-  if (!corumWorktreeHasUncommitted(worktreePath)) return undefined
-  const run = (args: string[]): { code: number; stderr: string } => {
-    try {
-      execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' })
-      return { code: 0, stderr: '' }
-    } catch (error: unknown) {
-      const stderr = (error as { stderr?: Buffer | string }).stderr
-      return { code: 1, stderr: stderr === undefined ? String(error) : String(stderr) }
-    }
-  }
-  const added = run(['add', '-A'])
-  if (added.code !== 0) return { slug, path: worktreePath, reason: `git add failed: ${added.stderr.trim()}` }
-  // `--no-verify`：机制提交不该被宿主的钩子拦下（钩子失败会让「必须提交」失效）。
-  const committed = run([
-    'commit',
-    '--no-verify',
-    '-m',
-    CORUM_AUTO_COMMIT_SUBJECT,
-    '-m',
-    `Isolated worktree ${slug} still had uncommitted changes at settle; the mechanism committed them` +
+  // fork（corum）：实现委托给 git-core 核心插件的 settleCommit 原语（用户 2026-09-16 策略
+  // 「所有 git 管理收进一个独立插件」）——本包不再自跑 git add/commit，只把 worktree 语境
+  // （slug 溯源 + 提交信息）适配到原语；返回值保持 { slug, path, reason } 兼容既有调用方。
+  const failure = gitCoreSettleCommit(
+    worktreePath,
+    CORUM_AUTO_COMMIT_SUBJECT +
+      `\n\nIsolated worktree ${slug} still had uncommitted changes at settle; the mechanism committed them` +
       ' so that no isolated work can be lost (user rule 2026-09-15: a work round must end committed).',
-  ])
-  if (committed.code === 0) return undefined
-  return { slug, path: worktreePath, reason: `git commit failed: ${committed.stderr.trim()}` }
+  )
+  if (failure === undefined) return undefined
+  return { slug, path: worktreePath, reason: failure.reason }
 }
 
 /**
