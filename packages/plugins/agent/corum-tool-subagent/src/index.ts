@@ -958,6 +958,19 @@ export function apply(ctx: Context, config: Config): void {
       return
     }
     corumNotifySettleCommitFailures(parent, failures, ctx.logger)
+
+    // 不变式④（invariant.merge-strategy，用户 2026-09-16）：**单发异步后台子 Agent 的分支
+    // 由主 Agent 合并**——settle 后若有待集成隔离分支，同样注入 pending-integration 通知
+    // （告知主 Agent「分支未合并 + 用 subagent {integrate:true} 收尾」）。原先 corumNotifyPendingIntegration
+    // 只在编排（orchestrate）结果处触发，单发后台路径不报 ⇒ 主 Agent 可能永不合并（工作不丢但
+    // 永不进主树，UI 只报 finished）。这里对所有产生隔离分支的 settle 统一补发，让单发后台与
+    // 编排同样「不可静默」。编排路径仍会发自己的通知（两处通知幂等合并——同键去重）。
+    if (parent !== undefined) {
+      const pendingAfter = corumPendingIntegration(orchestration.entriesOf(String(parent.session.id)))
+      if (pendingAfter.length > 0) {
+        corumNotifyPendingIntegration(parent, pendingAfter.map(entry => entry.branch), ctx.logger)
+      }
+    }
   }) as never, { global: true })
 
   // fork（corum）：全局设置的 RPC 面（「子 Agent」设置 section 读写；
@@ -1910,7 +1923,17 @@ export function apply(ctx: Context, config: Config): void {
                 // 调用方，收尾走显式动作 subagent {integrate:true}。旧口径把合并交给模型记性
                 // （全库 12 个会话里 9 个分支从未合并），autoIntegrate 这个开关更是个 footgun
                 // ——模型 10 次提及里 10 次设 false 却不回来做。见 BUG-29。
-                if (merge === undefined || !corumAutoIntegrate(merge)) {
+                //
+                // 不变式④（invariant.merge-strategy，用户 2026-09-16）：**编排模式必须由最后的
+                // 合并节点（集成者）合并并汇报，无可选项**——merge 缺省也按「声明了空 merge」走
+                // 集成流水线（pending.length===0 时本就已静默跳过，故默认化的真实影响面只是
+                // 「产生了隔离分支的编排不再允许跳过集成者」）。单发异步后台子 Agent 不属编排，
+                // 其合并见 continuation.ts 的 pending-integration 通知 + 主 Agent 收口。
+                if (merge === undefined) {
+                  // merge 缺省 ⇒ 按空 merge 走机制流水线（探测式 checks 兜底，与声明空 merge 同径）。
+                  merge = {}
+                }
+                if (!corumAutoIntegrate(merge)) {
                   return { pendingBranches: branches, integrated: false }
                 }
                 // fork（corum）：integrate 结果**必须**被检查（2026-09-09 事故 RC4）
