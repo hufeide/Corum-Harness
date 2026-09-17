@@ -202,3 +202,51 @@ export function settleCommit(path: string, subject: string): SettleCommitFailure
   if (committed.code === 0) return undefined
   return { path, reason: `git commit failed: ${committed.stderr.trim()}` }
 }
+
+/**
+ * 目录是否处于**未结清的合并/重放中**（`MERGE_HEAD` 存在）。
+ *
+ * 由来（2026-09-16 实机）：集成门禁把 persona 改成「先 `git merge --no-commit` 合、验完再提交」
+ * 以后，verify 失败被拒时主树会**停在一个未结清的合并现场**——`fatal: You have not concluded
+ * your merge (MERGE_HEAD exists)` 会让后续**每一次** merge/commit 失败，包括下一轮 orchestrate
+ * 的集成者与 turn-end 收口。这既毒化后续判定，也让「保留现场」变成「卡死工作区」。
+ *
+ * 判据只用 git 自己的状态文件语义（`git rev-parse --verify -q MERGE_HEAD`），不猜、不看输出文案；
+ * 非 git / 目录不存在 / 无合并 → false。
+ * @param path - 目标 git 目录（主树）。
+ */
+export function mergeInProgress(path: string): boolean {
+  if (!existsSync(path)) return false
+  try {
+    return runGitSync(path, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']).code === 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * **放弃未结清的合并**（`git merge --abort`）——把工作区从「合并中」态解出来。
+ *
+ * ## 为什么这是**安全**的（与 persona 那条破坏性 git 禁令不冲突）
+ *
+ * persona 明禁 `git reset --hard` / `git checkout .` / `git clean -fd` / `git stash`：那些会
+ * **丢掉主树里与本轮无关的在制品**。`git merge --abort` 的语义不同——它只回退**本次合并**
+ * 引入的暂存/工作区改动，把它们还原到合并前状态；合并前的未提交在制品不被丢弃。
+ *
+ * ## 何时调用（调用方纪律）
+ *
+ * 只在**集成已被机制拒绝**时调用，且**必须**在「本轮的改动已经不可能靠这次合并落地」之后：
+ * 被拒的分支提交仍在分支上（唯一副本，分支从未删除），所以放弃这次未结清的合并**不会丢工作**
+ * ——它只是把「半合进去但没提交」的暂存态还原，让工作区回到可继续操作的状态。反之，把
+ * `MERGE_HEAD` 留着会让后续每一条 merge/commit 都失败（实测）。
+ *
+ * @param path - 目标 git 目录（主树）。
+ * @returns `undefined` = 成功或本就无合并；否则为失败原因。
+ */
+export function abortMerge(path: string): SettleCommitFailure | undefined {
+  if (!existsSync(path)) return undefined
+  if (!mergeInProgress(path)) return undefined
+  const aborted = runGitSync(path, ['merge', '--abort'])
+  if (aborted.code === 0) return undefined
+  return { path, reason: `git merge --abort failed: ${aborted.stderr.trim()}` }
+}

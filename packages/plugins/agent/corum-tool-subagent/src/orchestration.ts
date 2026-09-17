@@ -13,6 +13,7 @@
 
 export {
   CorumOrchestration,
+  CorumIntegrateRejected,
   corumBranchIntegrated,
   corumBranchMerged,
   corumCleanupLedgerEntries,
@@ -27,6 +28,11 @@ export {
   corumGitHead,
   corumGitStatusPorcelain,
   corumIntegrationFailure,
+  // fork（corum）2026-09-16：机制侧 verify 门禁（git 实况 ∧ 声明式 verify 退出码）。
+  corumIntegrationVerdict,
+  corumRunIntegrateVerify,
+  corumVerifyFailureNotice,
+  corumResolveRejectedIntegration,
   corumDirtyOwnershipLines,
   corumIntegrationTruth,
   corumIntegratorPersona,
@@ -52,6 +58,7 @@ export {
   corumShouldIsolate,
   corumCommitWorktreeOnSettle,
   CORUM_AUTO_COMMIT_SUBJECT,
+  CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
   corumDirtyParentRefusal,
   corumVisibleToolNames,
   corumWorktreeHasUncommitted,
@@ -62,6 +69,7 @@ export type {
   CorumCleanupOptions,
   CorumSettleCommitFailure,
   CorumIntegrationTruth,
+  CorumVerifyResult,
   CorumWorktreeEntry,
   CorumWorktreeLedgerFrame,
   CorumLedgerRecord,

@@ -20,7 +20,7 @@
  * @module @corum/corum-orchestration/orchestration
  */
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -36,7 +36,7 @@ import { z } from 'zod'
 // fork（corum）：git 机制归一到 git-core 核心插件（用户 2026-09-16 策略「所有 git 管理
 // 收进一个独立插件」）——收口强制提交的底层原语 settleCommit 由 git-core 提供，
 // 本包不再自实现 `git add/commit`（消除与 corumCommitWorktreeOnSettle 的重复实现）。
-import { settleCommit as gitCoreSettleCommit } from '@corum/corum-git-core/git-primitives'
+import { settleCommit as gitCoreSettleCommit, abortMerge as gitCoreAbortMerge, mergeInProgress as gitCoreMergeInProgress } from '@corum/corum-git-core/git-primitives'
 
 /**
  * `subagent/end` 载荷的**局部窄化形**（只取本包用到的两个字段）。
@@ -1221,6 +1221,239 @@ export function corumIntegrationFailure(
   return lines.join('\n')
 }
 
+// ── 机制侧 verify 门禁（2026-09-16 根因修复）─────────────────────────────────
+
+/**
+ * fork（corum）：机制侧 verify 的默认超时（10 分钟）。
+ *
+ * 为什么必须有界：verify 是调用方声明的 shell 命令（`pnpm -r typecheck` 这类可以跑很久），
+ * 但机制会**同步等它**；无界等待会把一次 orchestrate 挂死成「永远运行中」。超时判**失败**
+ * （不是成功）：拿不到退出码 0 就不该签收，宁可让调用方看到「verify 超时」再决定。
+ */
+export const CORUM_INTEGRATE_VERIFY_TIMEOUT_MS = 600_000
+
+/** 机制侧 verify 的单次执行结果（结构化，供报告与工具结果寻址）。 */
+export interface CorumVerifyResult {
+  /** 原样执行的命令（调用方声明的那条字符串）。 */
+  readonly command: string
+  /** 退出码 0 才算通过；超时/启动失败恒 false。 */
+  readonly ok: boolean
+  /** 进程退出码；超时或未能启动时为 -1。 */
+  readonly code: number
+  /** 是否因超时被杀（ok=false 的一个**具体**原因，与「命令自己失败」区分）。 */
+  readonly timedOut: boolean
+  /** stdout+stderr 尾部（截断；报告用，不做完整日志搬运）。 */
+  readonly output: string
+  /** 实际耗时（毫秒）。 */
+  readonly durationMs: number
+}
+
+/**
+ * fork（corum）：**集成被机制拒绝**的结构化错误（2026-09-16）。
+ *
+ * 为什么需要类型而不是一条 Error 文本：两种拒绝形态的**现状与出路完全不同**，调用方
+ * 必须能分辨，否则会照着错误前提去修、或发出与事实不符的通知：
+ *   · `'unmerged'` —— 分支**没进** HEAD（工作只存在于分支上）。出路：修合并/再集成；
+ *     此时「分支未合并」的 pending 通知是**准确**的。
+ *   · `'verify'`   —— 分支**已在** HEAD（集成者的合并提交本身就在主树里），但声明的
+ *     验收没过。出路：修问题后再验，或显式丢弃。此时发「分支未合并」的通知是**错的**
+ *     （`corumReconcileIntegrated` 下一次读台账就会按 git 实况把条目翻成 integrated，
+ *     因为它判的是「工作进没进主树」，与验收与否是两个正交的轴）。
+ *
+ * 另外：`pendingBranches` 随错误携带，因为抛出后 `entriesOf` 会对账翻转那些条目，
+ * 调用方**无法**再从台账还原「本次被拒的是哪几条」。
+ */
+export class CorumIntegrateRejected extends Error {
+  /** 拒绝形态（决定调用方该发哪种通知、报告该怎么读）。 */
+  readonly kind: 'unmerged' | 'verify'
+  /** 给主 Agent 的完整报告文本（已含现状、出路、保留现场说明）。 */
+  readonly notice: string
+  /** 本次被拒的分支名（抛出时快照，不受后续台账对账影响）。 */
+  readonly pendingBranches: readonly string[]
+  constructor(kind: 'unmerged' | 'verify', notice: string, pendingBranches: readonly string[]) {
+    super(notice)
+    this.name = 'CorumIntegrateRejected'
+    this.kind = kind
+    this.notice = notice
+    this.pendingBranches = pendingBranches
+  }
+}
+
+/**
+ * fork（corum）：**机制侧 verify 门禁** —— 机制自己跑调用方声明的 verify，取它的退出码。
+ *
+ * ## 为什么必须有（2026-09-16 根因修复，用户实测的「verify 失败居然没拦住」）
+ *
+ * 事故形态（会话 `corum-task-b7122dc0`，`/tmp/corum-bugb2`）：`merge.verify = test -f u1.md
+ * && test -f u2.md && test -f zzz.md`（`zzz.md` 不存在）。集成者合并两个分支后**如实**跑了
+ * verify、拿到 exit 1、按 persona 纪律**没有额外提交**——但 `git merge` 产生的**合并提交本身
+ * 就是提交**：分支工作已经进了 HEAD，于是只判 git 实况的 {@link corumIntegrationTruth} 报
+ * `integrated === true`，机制对外宣告「merged + committed into the main tree」——**verify 的
+ * 失败被彻底忽略**。同样形态在会话 `corum-task-d0a24b08` 却被正确拦住，差别只在集成者那次
+ * 恰好用了 `git merge --no-commit`（分支 tip 没进 HEAD，真值门禁兜住了）——**成败取决于子
+ * Agent 偶然选了哪条 git 命令**，这正是红线「机制优先于提示词」禁止的形态：verify 是否被
+ * 执行、退出码是否被检查，此前**完全托付给集成者的自觉**（persona 里那句 "commit only when
+ * all pass"），机制侧没有任何断言。
+ *
+ * ⇒ 修法：机制自己跑一遍声明，**退出码非 0 即判集成未通过**（与真值门禁并列的第二道闸门）。
+ * 命令在**主树**执行（合并后的真实状态才是 verify 的对象），经 shell 解释（声明是
+ * shell 表达式，如 `a && b`，不能按 argv 拆词）。
+ *
+ * 边界：只跑**声明的**那条 verify。探测式 `corumDetectIntegrateChecks` 的结果仍是集成者的
+ * 指令（「最低门槛」），不进机制门禁——它们可能是 `pnpm -r typecheck` 这种分钟级命令，机制
+ * 强制跑会把一次编排的成本与超时风险都放大一档（契约见 dev-conventions「Declarative
+ * verification」：声明的强制执行，探测的只是兜底）。
+ *
+ * @param cwd - 主树工作目录（verify 的执行目录）。
+ * @param command - 调用方声明的 verify 原文。
+ * @param timeoutMs - 超时上限（默认 {@link CORUM_INTEGRATE_VERIFY_TIMEOUT_MS}）。
+ * @returns 结构化结果（**不抛**：门禁的失败也是一条要报给调用方的事实）。
+ */
+export function corumRunIntegrateVerify(
+  cwd: string,
+  command: string,
+  timeoutMs: number = CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
+): CorumVerifyResult {
+  const started = Date.now()
+  const run = (file: string, args: string[]): ReturnType<typeof spawnSync> =>
+    spawnSync(file, args, {
+      cwd,
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+      env: { ...process.env, NO_COLOR: '1', TERM: 'dumb', PAGER: 'cat', GIT_PAGER: 'cat' },
+    })
+  // 平台 shell 口径与工具面一致：win32 是 pwsh（corum preset 装载的 shell），POSIX 是 bash
+  // （`bash` 工具同款）；bash 缺失的镜像（精简容器）回落 POSIX `sh`。
+  let result = process.platform === 'win32'
+    ? run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', command])
+    : run('bash', ['-c', command])
+  if (process.platform !== 'win32' && (result.error as { code?: string } | undefined)?.code === 'ENOENT') {
+    result = run('sh', ['-c', command])
+  }
+  const stdout = typeof result.stdout === 'string' ? result.stdout : ''
+  const stderr = typeof result.stderr === 'string' ? result.stderr : ''
+  const merged = [stdout, stderr].filter(part => part.trim() !== '').join('\n').trim()
+  // 超时判定：spawnSync 把超时收成 error.code='ETIMEDOUT' 并杀掉子进程（此时 status 为 null、
+  // signal 为 SIGTERM）。「启动失败」（ENOENT 等）同样是 status=null，但 error 是另一种码——
+  // 故不按「status 为空」泛判，避免把「shell 不存在」误报成超时。
+  const errorCode = (result.error as { code?: string } | undefined)?.code
+  const timedOut = errorCode === 'ETIMEDOUT'
+    || (errorCode === undefined && result.status === null && result.signal !== null && result.signal !== undefined)
+  const code = typeof result.status === 'number' ? result.status : -1
+  return {
+    command,
+    ok: code === 0,
+    code,
+    timedOut,
+    output: merged.length > 4000 ? `…(truncated)\n${merged.slice(-4000)}` : merged,
+    durationMs: Date.now() - started,
+  }
+}
+
+/**
+ * fork（corum）：**集成总判定** —— git 实况 **与** 声明式 verify **都**通过才算集成成功。
+ *
+ * 单一入口的理由：这两道闸门曾各自为政（真值门禁只判 git，verify 只写在 persona 里），
+ * 于是「分支进了 HEAD 但 verify 失败」的形态被判成成功（2026-09-16 事故，见
+ * {@link corumRunIntegrateVerify}）。把「成功」收成一个函数，任何调用方都无法只取一半。
+ *
+ * @param cwd - 主树工作目录。
+ * @param entries - 待集成的台账条目。
+ * @param dirtyBefore - 集成前的 `git status --porcelain` 原文（dirtyDelta 基线）。
+ * @param declared - 调用方声明的 verify；缺省 = 无声明式闸门（探测式检查不进机制）。
+ * @param timeoutMs - verify 超时上限。
+ * @returns 真值 + verify 结果 + 合取后的 `integrated`。
+ */
+export function corumIntegrationVerdict(
+  cwd: string,
+  entries: readonly CorumWorktreeEntry[],
+  dirtyBefore: string,
+  declared: string | undefined,
+  timeoutMs?: number,
+): { truth: CorumIntegrationTruth; verify?: CorumVerifyResult; integrated: boolean } {
+  const truth = corumIntegrationTruth(cwd, entries, dirtyBefore)
+  // 真值没过就不必跑 verify：主树还没到「该验收」的状态，跑它是误导性的额外成本。
+  if (!truth.integrated) return { truth, integrated: false }
+  if (declared === undefined || declared.trim() === '') return { truth, integrated: true }
+  const verify = corumRunIntegrateVerify(cwd, declared, timeoutMs)
+  return { truth, verify, integrated: verify.ok }
+}
+
+/**
+ * fork（corum）：**被拒集成后的现场解卡**（2026-09-16 实机补）。
+ *
+ * ## 为什么必须有
+ *
+ * 门禁把 persona 改成「先 `git merge --no-commit` 合、验完再提交」以后（为了消掉「合并即提交」
+ * 让 verify 失败被盖过的那条路），verify 失败被拒时主树会**停在一个未结清的合并现场**：
+ * `MERGE_HEAD` 存在 ⇒ 后续**每一次** merge/commit 都被 git 拒绝
+ * （`fatal: You have not concluded your merge`），包括下一轮 orchestrate 的集成者与 turn-end
+ * 收口。实测（`corum-task-78da6133`）：那一轮的 `integration.error` 里因此同时出现
+ * 「分支未进 HEAD」与「A u1.md」两条证据——工作区被半合的暂存态污染了。
+ *
+ * ## 为什么放弃合并是安全的
+ *
+ * 被拒的分支**从未被删除**（门禁纪律：失败保留现场），其提交仍在分支上、是工作的唯一副本；
+ * `git merge --abort` 只回退**本次合并**引入的暂存/工作区改动，不碰合并前的在制品
+ * （与 persona 明禁的 `reset --hard` / `checkout .` / `clean -fd` / `stash` 语义不同）。
+ * ⇒ 解卡不丢工作，只把「半合进去但没提交」还原成「干净可继续」。
+ *
+ * 只在**被拒**时调用；调用方把返回的原因写进日志（解卡失败不掩盖原始失败，只多一行 fact）。
+ * @param cwd - 主树工作目录。
+ * @returns `undefined` = 无需解卡或解卡成功；否则为失败原因（调用方记日志，不抛）。
+ */
+export function corumResolveRejectedIntegration(cwd: string): string | undefined {
+  if (!gitCoreMergeInProgress(cwd)) return undefined
+  const failure = gitCoreAbortMerge(cwd)
+  return failure === undefined ? undefined : failure.reason
+}
+
+/**
+ * fork（corum）：**声明式 verify 拒绝集成**的报告（2026-09-16 根因修复配套）。
+ *
+ * 与 {@link corumIntegrationFailure} 并列的第二种失败形态——两者必须说清区别，
+ * 否则主 Agent 会照着错误的前提去修。关键差异：真值失败 = 「分支还没进 HEAD」（工作只存在
+ * 于分支上，**现场与分支都必须保留**，那是唯一副本）；verify 失败 = 「分支**已经**进了 HEAD，
+ * 但声明的验收没过」——工作**没有丢**（合并提交就在主树历史里），机制**不**替调用方回滚历史。
+ *
+ * ⚠️ **不能承诺「现场已保留」**（2026-09-16 实机纠正）：本形态下分支已并入 HEAD，于是台账
+ * 对账（`corumReconcileIntegrated`）与安全清理会**正常回收** worktree + 分支（清理安全阀
+ * 只保护「未并入 HEAD」的分支——这里恰好不满足）。实机（`corum-task-4e821e74`）观测到：
+ * 报告写着 PRESERVED，而 `git branch` 已只剩 main。⇒ 报告如实说清「工作已进历史、现场可能
+ * 已回收」，出路给「在**主树**里修 + 重跑 verify」，而不是「重跑 integrate」（那会因为
+ * 没有 pending 条目而短路）。
+ * @param verify - 机制跑出来的 verify 结果（命令/退出码/输出/耗时）。
+ * @param truth - 集成真值（取 HEAD 前后对照）。
+ * @param headBefore - 集成前的主树 HEAD。
+ * @param entries - 被拒的台账条目（报告里给 slug@branch -> path 供溯源）。
+ */
+export function corumVerifyFailureNotice(
+  verify: CorumVerifyResult,
+  truth: CorumIntegrationTruth,
+  headBefore: string,
+  entries: readonly CorumWorktreeEntry[],
+): string {
+  const lines: string[] = [
+    'integrate REJECTED by the declared verification — every pending branch IS in the main tree, but the verification you declared did not pass.',
+    `declared verify: ${verify.command}`,
+    `exit code: ${verify.code}${verify.timedOut ? ` (KILLED after ${CORUM_INTEGRATE_VERIFY_TIMEOUT_MS / 1000}s timeout — no exit code was produced)` : ''} · took ${verify.durationMs}ms`,
+    `main tree HEAD: ${headBefore === '' ? '(unknown)' : headBefore.slice(0, 12)} -> ${truth.head === '' ? '(unknown)' : truth.head.slice(0, 12)}`,
+  ]
+  if (verify.output !== '') lines.push(`verify output (tail):\n${verify.output}`)
+  lines.push(
+    'This is NOT the same failure as "branches did not land": their merge commits ARE in HEAD, so the WORK IS NOT LOST and the mechanism does NOT rewrite main-tree history to undo it.',
+    // 2026-09-16 实机纠正（corum-task-4e821e74）：此前这里写「Worktrees and branches are
+    // PRESERVED」——**与事实不符**。本形态下分支已并入 HEAD，台账对账 + 安全清理会正常回收
+    // worktree/分支（安全阀只保护「未并入 HEAD」的分支，这里恰好不满足），实测报告说保留、
+    // 而 `git branch` 已只剩 main。报告的每一句都要能在现场复核，故如实写。
+    'The integration is NOT accepted. The isolated worktrees/branches may already be RECLAIMED (their commits are in the main tree, so the branch copy is redundant and nothing is lost by that) — do not expect to re-run `integrate` for them.',
+    'Next: fix the cause IN THE MAIN TREE and run the verification again yourself, then commit with `git commit` (the mechanism does not re-verify a round it already rejected).',
+    `Entries this verdict was about: ${entries.map(entry => `${entry.slug}@${entry.branch} -> ${entry.path}`).join('; ')}`,
+  )
+  return lines.join('\n')
+}
+
 /**
  * fork（corum）：探测式默认 integrateChecks——按父 cwd 仓库形态生成核查命令。
  * 显式 config（preset 的 integrateChecks）恒优先，本函数不参与。
@@ -1264,8 +1497,9 @@ export function corumIntegratorPersona(
     + '\nChecks (run every one; commit only when all pass):\n'
     + checkLines
     + '\nIf any check or declared verification step fails, report and leave the tree dirty — do NOT commit.\n'
+    + '\nIf you leave the tree with an UNCONCLUDED merge (e.g. you merged with `--no-commit` and then the verification failed), say so explicitly and finish it (`git merge --abort` if the merge should not land): a lingering `MERGE_HEAD` makes every later merge/commit in this tree fail.\n'
     + '\nNever run destructive git commands on the main tree (git reset --hard, git checkout ., git clean -fd, git stash): it may contain unrelated uncommitted work that is not yours to discard. If the tree is dirty in a way that blocks the merge, report it instead of wiping it.\n'
-    + 'The mechanism independently verifies afterwards that every listed branch really landed in HEAD; a report that does not match git will be rejected.\n'
+    + 'The mechanism independently verifies afterwards that every listed branch really landed in HEAD AND re-runs the declared verification itself; a report that does not match git will be rejected.\n'
     + (merger === 'merger'
       ? 'You are a dedicated integration specialist: after completing the merge and verification, report a per-branch summary (merged/conflicts/verification results) as your final answer.'
       : 'Report the integration outcome (merge result, verification output, and anything that looks off) so the delegating agent can make the final acceptance call against the original goal.')

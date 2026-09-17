@@ -38,6 +38,9 @@ export function apply(ctx: Context): void {
 
 export {
   CorumOrchestration,
+  // fork（corum）2026-09-16：集成被机制拒绝的**类型化**错误——调用方据 `kind` 区分
+  // 「分支没进 HEAD」与「进了 HEAD 但声明式 verify 没过」（两者的通知与出路相反）。
+  CorumIntegrateRejected,
   corumBranchIntegrated,
   corumBranchMerged,
   corumCleanupLedgerEntries,
@@ -50,6 +53,13 @@ export {
   corumGitStatusPorcelain,
   corumDirtyOwnershipLines,
   corumIntegrationFailure,
+  // fork（corum）2026-09-16：机制侧 verify 门禁——集成总判定 = git 实况 ∧ 声明式 verify
+  // 退出码（根因：真值门禁只判 git，verify 失败被「合并提交进了 HEAD」盖过）。
+  corumIntegrationVerdict,
+  corumRunIntegrateVerify,
+  corumVerifyFailureNotice,
+  corumResolveRejectedIntegration,
+  CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
   corumMutationToolsForPlatform,
   corumAutoIntegrate,
   corumReapRestoredEntries,
@@ -89,6 +99,7 @@ export type {
   CorumWorktreeChildOptions,
   CorumCleanupOptions,
   CorumIntegrationTruth,
+  CorumVerifyResult,
   CorumWorktreeEntry,
   CorumWorktreeLedgerFrame,
   CorumLedgerRecord,

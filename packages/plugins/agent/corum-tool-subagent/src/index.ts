@@ -65,6 +65,14 @@ import {
   corumGitStatusPorcelain,
   corumIntegrationFailure,
   corumIntegrationTruth,
+  CorumIntegrateRejected,
+  // fork（corum）2026-09-16：机制侧 verify 门禁——「集成成功」= git 实况 ∧ 声明式 verify
+  // 退出码 0（根因：真值门禁只判 git，集成者用 `git merge` 时合并提交自己就进了 HEAD，
+  // verify 失败被盖过，机制对外报「merged + committed」）。
+  corumIntegrationVerdict,
+  corumVerifyFailureNotice,
+  corumResolveRejectedIntegration,
+  CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
   corumPortPendingBranches,
   corumIntegratorPersona,
   corumIsGitRepo,
@@ -521,6 +529,60 @@ function corumNotifyPendingIntegration(
 }
 
 /**
+ * fork（corum）：**被拒集成后的现场解卡**（2026-09-16 实机补，两道门禁的失败路径共用）。
+ *
+ * 由来：门禁要求集成者「先 `git merge --no-commit` 合、验完再提交」（为了消掉「合并即提交」
+ * 让 verify 失败被盖过那条路）。副作用是**被拒时主树停在未结清的合并现场**：`MERGE_HEAD`
+ * 存在会让后续**每一次** merge/commit 都失败（`fatal: You have not concluded your merge`），
+ * 包括下一轮 orchestrate 的集成者与 turn-end 收口——实测 `corum-task-78da6133` 那一轮的
+ * `integration.error` 里因此同时出现「分支未进 HEAD」与「A u1.md」两条证据。
+ *
+ * 安全性见 `corumResolveRejectedIntegration`：被拒分支从未删除（提交仍在分支上），
+ * `git merge --abort` 只回退本次合并引入的暂存/工作区改动，**不丢工作、不碰在制品**。
+ * 解卡失败只记日志——不能让它掩盖原始失败原因。
+ */
+function corumUnblockRejectedMerge(cwd: string, logger: { warn: (message: string) => void }): void {
+  const failure = corumResolveRejectedIntegration(cwd)
+  if (failure !== undefined) {
+    logger.warn(`integrate rejected: could not unblock the in-progress merge in the main tree (${failure})`)
+  }
+}
+
+/**
+ * fork（corum）：**声明式 verify 拒绝集成**的通知（2026-09-16 根因修复配套）。
+ *
+ * 为什么不能复用 `corumNotifyPendingIntegration`：那条通知的第一句是「are NOT merged into
+ * the main tree」——在 verify 拒绝的形态下**那是假的**。实测事故（`corum-task-b7122dc0`）里
+ * 集成者的 `git merge` 合并提交**已经进了主树**，分支是合了的，失败的只是验收；照抄那条
+ * 通知会把主 Agent 引去重做合并（它读到「分支未合并」会再派一次集成者）。
+ *
+ * @param parent - 委派方 Agent（注入目标）。
+ * @param report - 机制产出的 verify 失败报告（含命令、退出码、输出尾部、现状与出路）。
+ * @param logger - 注入失败时的告警出口。
+ */
+function corumNotifyVerifyRejected(
+  parent: Agent,
+  report: string,
+  logger: { warn: (message: string) => void },
+): void {
+  try {
+    parent.inject(createUserMessage({
+      content: [{
+        type: 'text',
+        text: `[corum] the declared verification REJECTED this integration — the branches ARE merged into the main tree, but the verification did not pass, so the mechanism did not accept the round.\n\n${report}`,
+      }],
+      source: {
+        kind: 'subagent-settled',
+        form: 'notice',
+        summary: boundContextSummary('integrate rejected by declared verification'),
+      } as unknown as MessageSource,
+    }))
+  } catch (error: unknown) {
+    logger.warn(`verify-rejection notice was not delivered to its parent: ${String(error)}`)
+  }
+}
+
+/**
  * fork（corum）：前台子 Agent 的最终汇报以「settlement notice」形态注入父会话。
  *
  * 2026-09-09 用户实机反馈「子 Agent 结束后反馈没有注入主 Agent」：汇报本来就在
@@ -834,6 +896,11 @@ export {
   corumPortPendingBranches,
   corumMergeBase,
   corumIntegrationTruth,
+  corumIntegrationVerdict,
+  corumRunIntegrateVerify,
+  corumVerifyFailureNotice,
+  corumResolveRejectedIntegration,
+  CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
   corumIntegratorPersona,
   corumIsGitRepo,
   corumIsolationBoundaryNotice,
@@ -1370,6 +1437,8 @@ export function apply(ctx: Context, config: Config): void {
           throw new Error('no isolated worktrees to integrate')
         }
         const parentCwd = parent.session.header.cwd ?? process.cwd()
+        // 拒绝时随错误带出的分支快照（抛出后 `entriesOf` 会按 git 实况对账翻转这些条目）。
+        const corumPendingBranchNames = pending.map(entry => entry.branch)
         const effectiveChecks = corumIntegrateChecks ?? corumDetectIntegrateChecks(parentCwd)
         const declaredVerify = typeof args.verify === 'string' && args.verify.trim() !== '' ? args.verify : undefined
         const corumIntegrateRequest = {
@@ -1400,11 +1469,11 @@ export function apply(ctx: Context, config: Config): void {
         // 集成者自称「已 merge + verify 通过」→ 机制无条件写 integrated 并
         // `worktree remove --force` + `branch -D` → 子任务 commit 变 unreachable、
         // 文件从主树消失（docs/TODO.md 高优先项）。此处按 git 实况判定：
-        //   ① 每个待集成分支必须已并入 HEAD（祖先或 patch 等价）；
-        //   ② 其 worktree 不得残留未提交改动（写了没提交 = 未持久化）。
-        // 未达标 → 抛错（附「集成者自述 vs git 实况」对照）+ **保留 worktree 与分支**
-        // + 台账保持 settled（PLAN 不变量「失败不 commit、保留现场」的机制化）。
-        const corumTruth = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
+        //   ① 每个待集成分支必须已并入 HEAD（祖先或 patch 等价）；未达标 → 抛错
+        //      （附「集成者自述 vs git 实况」对照）+ **保留 worktree 与分支**
+        //      + 台账保持 settled（PLAN 不变量「失败不 commit、保留现场」的机制化）；
+        //   ②（2026-09-16）声明式 verify 的退出码见下方 `corumIntegrationVerdict`。
+        let corumTruth = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
         // 排障日志（2026-09-16）：integrate 真值判定结果写主日志——verify 失败是否被拦住、
         // 分支并入与否，此前只能从 throw 反推（「merged+committed 但 verify 失败」无从定位）。
         runtimeCtx.logger.info(
@@ -1425,23 +1494,68 @@ export function apply(ctx: Context, config: Config): void {
               runtimeCtx.logger.info(
                 `integrate: applied ${landed.length}/${ports.length} unmerged branch diff(s) onto the dirty main tree (${landed.map(p => p.branch).join(', ')})`,
               )
+            } else if (ports.length > 0) {
+              // 排障日志（2026-09-16）：一条都没落盘时把逐条原因写主日志——此前只有
+              // 「port failed」的汇总行，warn 分支在 `failed.length > 0` 之前还会漏掉
+              // 「全部 applied=false 但都无 error」的形态。
+              runtimeCtx.logger.warn(
+                `integrate: branch diff port applied 0/${ports.length} (${ports.map(p => `${p.branch}: ${p.error ?? 'no reason reported'}`).join('; ')})`,
+              )
             }
             const failed = ports.filter(port => !port.applied)
-            if (failed.length > 0) {
+            if (failed.length > 0 && landed.length > 0) {
               runtimeCtx.logger.warn(
                 `integrate: branch diff port failed for ${failed.map(p => `${p.branch} (${p.error ?? 'no reason reported'})`).join('; ')}`,
               )
             }
           }
-          const corumTruthAfterPort = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
-          if (!corumTruthAfterPort.integrated) {
+          corumTruth = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
+          if (!corumTruth.integrated) {
             orchestration.emitFrame(sessionId)
-            throw new Error(corumIntegrationFailure(
-              corumTruthAfterPort,
-              corumHeadBefore,
-              pending,
-              outputValueText(outcome.output),
-            ))
+            corumUnblockRejectedMerge(parentCwd, runtimeCtx.logger)
+            throw new CorumIntegrateRejected(
+              'unmerged',
+              corumIntegrationFailure(
+                corumTruth,
+                corumHeadBefore,
+                pending,
+                outputValueText(outcome.output),
+              ),
+              corumPendingBranchNames,
+            )
+          }
+        }
+        // fork（corum）：集成总判定——**两道闸门合取**（2026-09-16 根因修复）。
+        //
+        // 事故（用户实测，会话 corum-task-b7122dc0）：声明 `merge.verify = test -f u1.md &&
+        // … && test -f zzz.md`（zzz.md 不存在），集成者如实跑了、拿到 exit 1、也按 persona
+        // 没再提交——但 `git merge` 的**合并提交自己就是提交**，分支工作已进 HEAD，于是上面
+        // 只判 git 实况的真值门禁报 integrated=true，机制对外宣告「merged + committed」，
+        // **verify 的失败被完全忽略**。同一形态在 corum-task-d0a24b08 却被拦住，唯一差别是
+        // 那次集成者用了 `git merge --no-commit`（分支 tip 没进 HEAD，真值兜住了）——
+        // 成败取决于子 Agent 偶然选了哪条 git 命令。verify 是否执行、退出码是否被检查，
+        // 此前**只写在 persona 提示词里**，违反「机制优先于提示词」红线。
+        //
+        // 现在：机制自己跑一遍声明并取退出码，非 0 ⇒ 抛错（保留现场、不翻转台账、不清理），
+        // 与真值失败并列成第二种**可辨识**的失败形态（报告区分「分支没进 HEAD」与
+        // 「进了 HEAD 但验收没过」，后者不替调用方回滚主树历史）。
+        const corumVerdict = corumIntegrationVerdict(parentCwd, pending, corumDirtyBefore, declaredVerify)
+        corumTruth = corumVerdict.truth
+        if (corumVerdict.verify !== undefined) {
+          const corumVerify = corumVerdict.verify
+          // 排障日志（2026-09-16）：verify 门禁的退出码写主日志——此前的日志只有「verify 传了
+          // 什么」，没有「跑出来是什么」，正是本次根因被漏掉的那一格。
+          runtimeCtx.logger.info(
+            `integrate verify gate: command=${JSON.stringify(corumVerify.command)} exit=${corumVerify.code} ok=${corumVerify.ok} timedOut=${corumVerify.timedOut} took=${corumVerify.durationMs}ms`,
+          )
+          if (!corumVerdict.integrated) {
+            orchestration.emitFrame(sessionId)
+            corumUnblockRejectedMerge(parentCwd, runtimeCtx.logger)
+            throw new CorumIntegrateRejected(
+              'verify',
+              corumVerifyFailureNotice(corumVerify, corumTruth, corumHeadBefore, pending),
+              corumPendingBranchNames,
+            )
           }
         }
         // fork（corum）2026-09-12：**部分集成**不再判死整次 fan-in。旧口径把
@@ -1822,6 +1936,13 @@ export function apply(ctx: Context, config: Config): void {
                       // 集成失败的错误信息（Bug B：真值门禁失败时 runIntegrate 不再 throw 顶替
                       // 整个结果，而是把错误并入 integration.error——per-task results 不丢）。
                       error: { type: 'string' },
+                      // fork（corum）2026-09-16：**拒绝形态**——`'unmerged'`（分支没进 HEAD）与
+                      // `'verify'`（进了 HEAD 但声明的验证没过）的现状与出路相反，调用方要能分辨。
+                      // ⚠️ 本字段必须同时声明在 schema 里：输出校验是 `additionalProperties: false`，
+                      // 少声明一个字段会让 harness 用 `INVALID_TOOL_OUTPUT` **顶替整个 payload**
+                      // ——那会把 results + integration 一起吞掉，正是 Bug B 的反向形态
+                      // （2026-09-16 实机复现抓到：只加了返回值、漏了 schema）。
+                      rejected: { type: 'string', enum: ['unmerged', 'verify'] },
                     },
                   },
                   /**
@@ -1845,7 +1966,7 @@ export function apply(ctx: Context, config: Config): void {
                   results?: Array<{ index: number; label?: string; ok: boolean; aborted?: boolean; output?: string; error?: string }>
                   script?: { name: string; agentsStarted: number; value?: unknown }
                   /** `childSessionId` = 集成者子会话（合并成功时才有；卡片「进入会话」按钮用）。 */
-                  integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string }
+                  integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string; rejected?: 'unmerged' | 'verify' }
                   /** 跑在父主工作区（没隔离）的任务序号与判据（见上）。 */
                   parentTreeTasks?: { indexes: number[]; boundary: 'parent-tree' | 'skipped-non-git' }
                 }
@@ -1878,6 +1999,7 @@ export function apply(ctx: Context, config: Config): void {
                     integrated: out.integration.integrated,
                     ...(out.integration.childSessionId !== undefined ? { childSessionId: out.integration.childSessionId } : {}),
                     ...(out.integration.error !== undefined ? { error: out.integration.error } : {}),
+                    ...(out.integration.rejected !== undefined ? { rejected: out.integration.rejected } : {}),
                   }
                 }
                 if (out.parentTreeTasks !== undefined && out.parentTreeTasks.indexes.length > 0) {
@@ -2115,18 +2237,35 @@ export function apply(ctx: Context, config: Config): void {
               // 这里捕获 integrate 错误：results（已算好）与 `integration: { integrated:false,
               // error }` 一起返回——**集成失败仍 fail-loud**（结果里带错误标记 + pending 通知），
               // 但 per-task results 不丢。
-              let integration: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string }
+              let integration: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string; rejected?: 'unmerged' | 'verify' }
               try {
                 integration = await runIntegrate(args.merge as { verify?: string } | undefined)
               } catch (integrateError: unknown) {
-                const pendingOnError = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
+                // fork（corum）2026-09-16：拒绝形态由类型携带（`CorumIntegrateRejected`）——
+                // 分支快照也随错误带出，因为抛出后 `entriesOf` 会按 git 实况对账：「合并提交已在
+                // 主树」的条目下一次读台账就被翻成 integrated，调用方**再也还原不出**本次被拒的
+                // 是哪几条（verify 失败正是这种形态，实测两者只差集成者选的 git 命令）。
+                const rejected = integrateError instanceof CorumIntegrateRejected ? integrateError : undefined
+                const pendingOnError = rejected !== undefined
+                  ? [...rejected.pendingBranches]
+                  : corumPendingIntegration(orchestration.entriesOf(parent.session.id)).map(entry => entry.branch)
                 integration = {
-                  pendingBranches: pendingOnError.map(entry => entry.branch),
+                  pendingBranches: pendingOnError,
                   integrated: false,
                   error: integrateError instanceof Error ? integrateError.message : String(integrateError),
+                  ...rejected !== undefined ? { rejected: rejected.kind } : {},
                 }
               }
-              if (!integration.integrated) corumNotifyPendingIntegration(parent, integration.pendingBranches, runtimeCtx.logger)
+              // 通知形态必须与事实一致：`verify` 拒绝时那批分支**已经在主树里**，发
+              // 「are NOT merged into the main tree」是谎报（会把主 Agent 引去重做合并）。
+              // 两种形态都不可静默，只是各说各的真相。
+              if (!integration.integrated) {
+                if (integration.rejected === 'verify') {
+                  corumNotifyVerifyRejected(parent, integration.error ?? 'the declared verification failed', runtimeCtx.logger)
+                } else {
+                  corumNotifyPendingIntegration(parent, integration.pendingBranches, runtimeCtx.logger)
+                }
+              }
               return {
                 mode: 'tasks' as const,
                 results,
