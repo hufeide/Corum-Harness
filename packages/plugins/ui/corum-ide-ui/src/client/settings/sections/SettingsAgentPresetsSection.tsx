@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Box, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Database, Ghost, Globe, Info, Layers, Lock, Maximize2, Minimize2, Minus, Plus, Search, Server, Smile, Sparkles, Star, Trash2, Upload, X } from 'lucide-react'
+import { Box, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Database, Ghost, Globe, Info, Languages, Layers, Lock, Maximize2, Minimize2, Minus, Plus, Search, Server, Smile, Sparkles, Star, Trash2, Upload, X } from 'lucide-react'
 import { SelectField } from '../SelectField.tsx'
 import { Switch } from '../Switch.tsx'
 import { ConfirmDialog } from '../ConfirmDialog.tsx'
@@ -59,6 +59,44 @@ function usePolishSetting(rpc: CorumRpcCall | null): {
     }
   }
   return { polish, polishing, error }
+}
+
+/**
+ * 「AI 翻译」按钮的共享实现（设置页提示词区，与 usePolishSetting 同型）。
+ *
+ * 翻译是给**预设 Agent 提示词**用的（用户 2026-09-16：「翻译是给预设 Agent 提示词用的」）
+ * ——中英互译自动判向（中→英 / 英→中 / 其它→中），接宿主 `corumAgent/translatePrompt`。
+ * 与润色的差异：润色走 polishConversation（可带上下文），翻译走 translatePrompt（单文本）。
+ * @param rpc - corum RPC 调用面（null 时按钮禁用）。
+ * @returns 翻译动作、进行中标志与最后一次错误。
+ */
+function useTranslateSetting(rpc: CorumRpcCall | null): {
+  translate: (text: string) => Promise<string | null>
+  translating: boolean
+  error: string | null
+} {
+  const [translating, setTranslating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const translate = async (text: string): Promise<string | null> => {
+    if (rpc === null || translating || text.trim() === '') return null
+    setTranslating(true)
+    setError(null)
+    try {
+      const r = await rpc<{ translated?: string }>('corumAgent', 'translatePrompt', { text })
+      const translated = r?.translated
+      if (typeof translated !== 'string' || translated.trim() === '') {
+        setError('翻译未返回内容')
+        return null
+      }
+      return translated
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+      return null
+    } finally {
+      setTranslating(false)
+    }
+  }
+  return { translate, translating, error }
 }
 
 /* ── Agent 预设（名片式 + 筛选 + 详情编辑）────────────────────────────── */
@@ -604,6 +642,7 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
   const [confirmDel, setConfirmDel] = useState(false)
   // 人格 / 提示词两处的 AI 润色（接宿主真实现，替代原 disabled 占位）。
   const { polish, polishing } = usePolishSetting(rpc)
+  const { translate, translating } = useTranslateSetting(rpc)
   const sectionNav = useSectionNav()
   const developerMode = useDeveloperMode()
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -981,6 +1020,19 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                 }}
               >
                 <Sparkles size={11} className={css.btnPolishIcon} />{polishing ? '润色中…' : 'AI 润色'}
+              </button>
+              {/* 「AI 翻译」（2026-09-16 用户定调：翻译是给预设 Agent 提示词用的）——
+                  中英互译自动判向，与「AI 润色」同位（提示词文本域内底部行）。 */}
+              <button
+                type="button"
+                className={css.btnPolish}
+                disabled={translating || draft.prompt.trim() === ''}
+                title={draft.prompt.trim() === '' ? '先填写提示词' : '中英互译这段提示词（自动判向）'}
+                onClick={() => {
+                  void translate(draft.prompt).then(next => { if (next !== null) set('prompt', next) })
+                }}
+              >
+                <Languages size={11} className={css.btnPolishIcon} />{translating ? '翻译中…' : 'AI 翻译'}
               </button>
             </div>
           </div>
