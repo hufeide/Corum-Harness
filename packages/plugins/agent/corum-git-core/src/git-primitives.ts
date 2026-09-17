@@ -20,7 +20,8 @@
  * @module corum-git-core/git-primitives
  */
 
-import { realpathSync, existsSync } from 'node:fs'
+import { realpathSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
 
 /** 在目录下跑一个 git 子命令；exit code / stdout / stderr 全回（不抛）。 */
@@ -62,6 +63,35 @@ export async function isGitRepo(path: string): Promise<boolean> {
 }
 
 /**
+ * 保证 `.gitignore` 含 `.corum-worktrees/`（机制运行时产物的 ignore）。
+ *
+ * 为什么机制必须自己写（2026-09-16 用户定调）：orchestrate 的隔离 worktree 建在
+ * `<cwd>/.corum-worktrees/` 下，若该目录未被 ignore，第二个并行任务的
+ * `corumDirtyParentRefusal` 会把 `?? .corum-worktrees/`（任务 1 刚建的 worktree）
+ * 当成「父树未提交改动」而**拒绝隔离**——导致「第二个并行任务从未 spawn」（Bug A）。
+ * 靠 LLM 每次手动 ignore（e2e-a 的 `5580492`）不可持续 ⇒ 机制在 init 时**默认写好**。
+ *
+ * 幂等：.gitignore 已含该行（任意位置，含无尾换行的文件末尾）则不动；
+ * 不存在则新建、存在但缺该行则**追加**（不覆盖用户既有内容）。
+ *
+ * @param dir - 已 realpath 归一的目录。
+ */
+function ensureWorktreeGitignore(dir: string): void {
+  const file = join(dir, '.gitignore')
+  const line = '.corum-worktrees/'
+  if (existsSync(file)) {
+    const content = readFileSync(file, 'utf8')
+    // 已含该行（精确匹配整行，避免误配 `.corum-worktrees-foo/` 之类）。
+    if (content.split('\n').some(l => l.trim() === line)) return
+    // 追加（保证前一行有换行；空文件/无尾换行都安全）。
+    const prefix = content === '' || content.endsWith('\n') ? '' : '\n'
+    writeFileSync(file, `${content}${prefix}${line}\n`)
+    return
+  }
+  writeFileSync(file, `# corum 编排隔离 worktree 的运行时产物（机制自动写入，勿入库）\n${line}\n`)
+}
+
+/**
  * 初始化 git 仓库：`git init` + 一个空初始 commit。
  *
  * 必须带初始 commit：worktree/分支需要至少一个 commit 才能创建（空仓库
@@ -79,6 +109,15 @@ export async function initRepo(path: string): Promise<{ initialized: boolean; al
   const initResult = await runGit(dir, ['init'])
   if (initResult.code !== 0) {
     throw new Error(`git init failed (exit ${initResult.code}): ${initResult.stderr || 'no stderr'}`)
+  }
+  // 机制默认写 .gitignore（.corum-worktrees/）——否则第二个并行任务会被判脏拒掉（Bug A）。
+  // 在初始 commit **之前**写，让 ignore 进首个 commit（自身不会成为未提交改动）。
+  ensureWorktreeGitignore(dir)
+  // 初始 commit 顺带把 .gitignore 收进去（`--allow-empty` 是空 commit，不会自动 add；
+  // 先 add .gitignore 再 commit，让 worktree 产物从第一个 commit 起就被 ignore）。
+  const addResult = await runGit(dir, ['add', '.gitignore'])
+  if (addResult.code !== 0) {
+    throw new Error(`git add .gitignore failed (exit ${addResult.code}): ${addResult.stderr || 'no stderr'}`)
   }
   const commitResult = await runGit(dir, [
     '-c', 'user.name=corum',
