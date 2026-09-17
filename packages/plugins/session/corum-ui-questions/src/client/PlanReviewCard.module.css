@@ -1,0 +1,126 @@
+/* PlanReviewCard —— 「计划待审」决定卡（对齐 QuestionCard 的 token 与壳）。
+   全部走 --corum-* 与 --dsw-alias-* 变量，dark/light 自适应，零硬编码 hex。 */
+
+/* 容器：与 QuestionCard 同宽轴（composer 卡宽），glass-1 + border + r16 + vertical */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width, 720px);
+  margin-inline: auto;
+  padding: calc(14px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border-radius: 16px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  box-sizing: border-box;
+}
+
+/* strip：横排 ai=center gap 10 */
+.head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  width: 100%;
+}
+.qIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(1, 205, 254, 0.1);
+  color: var(--dsw-alias-state-business-primary);
+}
+.headTx {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.qGroup {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+}
+.qTitle {
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 计划正文：限高滚动，二级底 */
+.body {
+  max-height: calc(320px * var(--corum-density-scale, 1));
+  overflow-y: auto;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border-radius: 12px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 操作行 */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  width: 100%;
+}
+.feedback {
+  margin-right: auto;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-error-primary);
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.btnGhost,
+.btnOutline,
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.btnGhost {
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.btnGhost:hover:not(:disabled) {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+.btnOutline {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border-color: var(--corum-glass-border, var(--dsw-alias-border-l1));
+  color: var(--dsw-alias-label-primary);
+}
+.btnOutline:hover:not(:disabled) {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-border-l2));
+}
+.btnPrimary {
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-on-brand, #fff);
+}
+.btnPrimary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.btnGhost:disabled,
+.btnOutline:disabled,
+.btnPrimary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

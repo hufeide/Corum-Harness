@@ -448,6 +448,11 @@ function EditCard({ input, t }: { input: CardInput; t: TFunc }) {
       if (model !== undefined) return <MissCard model={model} input={input} t={t} />
       return <DegradedMissCard input={input} t={t} />
     }
+    // FS_NOT_OBSERVED「未读先改」：与未命中同级的**轻提示**（非红色失败档）——
+    // 这个文件本轮还没读过，先读再改即可（2026-09-16，todo.edit-card.not-observed-state）。
+    if (input.errorCode === 'FS_NOT_OBSERVED') {
+      return <NotObservedCard input={input} t={t} />
+    }
     return <FailureCard icon={FileX} title={t('fileCard.title.edit')} input={input} foot={t('fileCard.foot.editFailed')} openInEditor t={t} />
   }
   // 成功态用落盘 diff；运行中用 intended diff（官方 intendedDiff 的 edit 分支同口径）。
@@ -497,6 +502,37 @@ function DegradedMissCard({ input, t }: { input: CardInput; t: TFunc }) {
         ? <div className={css.fallbackText} data-file-card-raw="">{input.errorText ?? ''}</div>
         : undefined}
       note={expanded ? <Note tone="muted" text={t('editMiss.footnote.anchorMiss')} /> : undefined}
+    />
+  )
+}
+
+/* ── 子态 4b：edit 未读先改（FS_NOT_OBSERVED）轻提示卡 ────────────────── */
+
+/**
+ * 未读先改轻提示卡（todo.edit-card.not-observed-state，2026-09-16）：
+ * `FS_NOT_OBSERVED`（官方文案 `cannot modify "<path>": file has not been read — read the
+ * file, then retry`）不是「编辑失败」，而是「先读文件」的前置提醒——与未命中同级，
+ * 用 warn 调轻提示而非红色失败档。壳结构与 DegradedMissCard 同款（默认折叠 + 可点开
+ * 跳文件），文案换成「先读一遍再编辑」。
+ */
+function NotObservedCard({ input, t }: { input: CardInput; t: TFunc }) {
+  const [expanded, setExpanded] = useState(false)
+  const onOpenPath = openFailureHandler(input) ?? openHandler(input)
+  return (
+    <Shell
+      icon={FilePen}
+      tone="brand"
+      title={t('editMiss.notObserved.title')}
+      path={input.displayPath}
+      pathTitle={t('fileCard.openFile')}
+      {...onOpenPath === undefined ? {} : { onOpenPath }}
+      stateChip={<StateChip t={t} label={t('editMiss.notObserved.state')} tone="warn" dot="warning" />}
+      trailingChip={<Chip className={css.chipFlag}>{t('fileCard.edit.noChanges')}</Chip>}
+      action={<ExpandAction open={expanded} onToggle={() => { setExpanded(value => !value) }} t={t} />}
+      content={expanded
+        ? <div className={css.fallbackText} data-file-card-raw="">{input.errorText ?? ''}</div>
+        : undefined}
+      note={expanded ? <Note tone="muted" text={t('editMiss.notObserved.footnote')} /> : undefined}
     />
   )
 }

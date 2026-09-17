@@ -189,6 +189,10 @@ export const zh = {
   'editMiss.footnote.anchorMissMulti': '编辑没有应用——这是一段 {n} 行的锚点，请整体复制上方候选块的原文重试（只替换其中一行可能改错位置）；文件未受任何影响。',
   'editMiss.footnote.noPrevious': '取不到该文件的改动前内容，无法给出候选位置；请重新读取文件后再编辑，文件未受任何影响。',
   'editMiss.footnote.insufficient': '文件较大或没有足够相近的内容，给不出候选位置；请先读取目标区域、复制确切原文再编辑，文件未受任何影响。',
+  // ── 未读先改（FS_NOT_OBSERVED）轻提示卡（2026-09-16）──
+  'editMiss.notObserved.title': '编辑前未读文件',
+  'editMiss.notObserved.state': '未读先改',
+  'editMiss.notObserved.footnote': '编辑没有应用——这个文件本轮还没有读取过；先用「读取」工具读一遍目标文件，再重新编辑即可，文件未受任何影响。',
   // ── 文件工具卡（2026-09-14）：read / edit / write 三类调用共用同一套毛玻璃卡 ──
   'fileCard.title.read': '读取',
   'fileCard.title.edit': '编辑',
@@ -436,6 +440,10 @@ export const en = {
   'editMiss.footnote.anchorMissMulti': 'The edit was not applied — this is a {n}-line anchor; copy a whole candidate block above (replacing only one line can edit the wrong place). The file is untouched.',
   'editMiss.footnote.noPrevious': 'The pre-edit content of this file is unavailable, so no candidates can be shown. Re-read the file and edit again; the file is untouched.',
   'editMiss.footnote.insufficient': 'The file is large or nothing is close enough to suggest candidates. Read the target region, copy the exact text, and edit again; the file is untouched.',
+  // ── Edit-before-read (FS_NOT_OBSERVED) light card (2026-09-16) ──
+  'editMiss.notObserved.title': 'Edit before read',
+  'editMiss.notObserved.state': 'Not read yet',
+  'editMiss.notObserved.footnote': 'The edit was not applied — this file has not been read in this turn. Read the target file with the read tool first, then edit again; the file is untouched.',
   'fileCard.title.read': 'Read',
   'fileCard.title.edit': 'Edit',
   'fileCard.title.write': 'Write',

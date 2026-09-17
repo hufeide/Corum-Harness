@@ -38,6 +38,46 @@ function settlePendingComposer(settle: () => void, failureMessage: string): Prom
   }
 }
 
+/** 一个可渲染的 plan-review（官方 PlanReview 同形）。 */
+export interface PlanReview {
+  /** 回显到答案里的问题 id。 */
+  readonly id: string
+  /** 卡片可及名（问题文本）。 */
+  readonly question: string
+  /** 待审的计划 markdown。 */
+  readonly plan: string
+  /** 批准该计划的选项。 */
+  readonly approve: { readonly label: string; readonly description?: string }
+  /** 拒绝该计划的选项（无则缺省）。 */
+  readonly decline?: { readonly label: string; readonly description?: string }
+}
+
+/**
+ * 把请求窄化成可渲染的 plan-review；否则返回 undefined 走通用提问流。
+ * 官方 `planReviewOf` 同形移植（corum 删 PlanReviewPanel 时一并删了它——
+ * todo.questions.plan-review.renderer-missing）：单问题 + 声明 plan-review intent +
+ * 带 detail（计划正文）+ 单选 + 至多一个 approve 之外的选项。
+ */
+export function planReviewOf(questions: readonly AskUserQuestionItem[]): PlanReview | undefined {
+  if (questions.length !== 1) return undefined
+  const question = questions[0] as AskUserQuestionItem
+  const intent = question.intent
+  if (intent?.kind !== 'plan-review' || question.detail === undefined) return undefined
+  if (question.multiSelect === true) return undefined
+  const options = question.options ?? []
+  if (options.length > 2) return undefined
+  const approve = options.find(option => option.label === intent.approve)
+  if (approve === undefined) return undefined
+  const decline = options.find(option => option.label !== intent.approve)
+  return {
+    id: question.id,
+    question: question.question,
+    plan: question.detail,
+    approve,
+    ...(decline === undefined ? {} : { decline }),
+  }
+}
+
 /** One answerable Client presentation of a pending Host waterfall. */
 export class PendingQuestion {
   /** Presentation discriminator used by Session pending-interaction consumers. */
@@ -64,7 +104,7 @@ export class PendingQuestion {
     nextQuestionKey += 1
     this.key = `question:${String(nextQuestionKey)}`
     this.questions = questions
-    this.kind = 'question'
+    this.kind = planReviewOf(questions) === undefined ? 'question' : 'plan-review'
     const completion = Promise.withResolvers<QuestionAnswer>()
     this.result = completion.promise
     this.#resolve = completion.resolve

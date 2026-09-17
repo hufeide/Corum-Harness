@@ -25,8 +25,9 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 // type-only：拉入 corum-ui-conversation 的 SlotMap 声明（conversation.input.dock
 // 槽由它声明），让本插件的 dock 注册通过类型检查（TS 模块合并全局生效）。
 import type {} from '@corum/corum-ui-conversation/client'
-import { PendingQuestion } from './contract.ts'
+import { PendingQuestion, planReviewOf } from './contract.ts'
 import { QuestionCard } from './QuestionCard.tsx'
+import { PlanReviewCard } from './PlanReviewCard.tsx'
 import { en, zh, NS } from './locales.ts'
 
 export { PendingQuestion } from './contract.ts'
@@ -94,6 +95,12 @@ function QuestionDock({ sessionId, pendingInteractions }: {
     return null
   })
   if (pending === null) return null
+  // plan-review 分流（todo.questions.plan-review.renderer-missing）：
+  // 窄化出 review → 渲染「计划待审」决定卡（含计划正文）；否则走通用提问卡。
+  if (pending.kind === 'plan-review') {
+    const review = planReviewOf(pending.questions)
+    if (review !== undefined) return <PlanReviewCard pending={pending} review={review} />
+  }
   return <QuestionCard pending={pending} />
 }
 
