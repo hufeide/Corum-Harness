@@ -1924,16 +1924,12 @@ export function apply(ctx: Context, config: Config): void {
                 // （全库 12 个会话里 9 个分支从未合并），autoIntegrate 这个开关更是个 footgun
                 // ——模型 10 次提及里 10 次设 false 却不回来做。见 BUG-29。
                 //
-                // 不变式④（invariant.merge-strategy，用户 2026-09-16）：**编排模式必须由最后的
-                // 合并节点（集成者）合并并汇报，无可选项**——merge 缺省也按「声明了空 merge」走
-                // 集成流水线（pending.length===0 时本就已静默跳过，故默认化的真实影响面只是
-                // 「产生了隔离分支的编排不再允许跳过集成者」）。单发异步后台子 Agent 不属编排，
-                // 其合并见 continuation.ts 的 pending-integration 通知 + 主 Agent 收口。
-                if (merge === undefined) {
-                  // merge 缺省 ⇒ 按空 merge 走机制流水线（探测式 checks 兜底，与声明空 merge 同径）。
-                  merge = {}
-                }
-                if (!corumAutoIntegrate(merge)) {
+                // 不变式④（invariant.merge-strategy，用户 2026-09-16 澄清）：**默认 merge（声明
+                // verify 即自动集成），除非 LLM 自主 opt-out（omit merge）**——omit 是合法的
+                // 「我自己收尾」路径，由 pending-integration 通知兜底（不可静默，见下方 settle 钩子
+                // 对单发异步后台同样补发通知）。⚠️ 不要把 omit 也强制集成：那会堵死 LLM 自主
+                // opt-out 的合法路径（我一度误改成那样，已回滚）。
+                if (merge === undefined || !corumAutoIntegrate(merge)) {
                   return { pendingBranches: branches, integrated: false }
                 }
                 // fork（corum）：integrate 结果**必须**被检查（2026-09-09 事故 RC4）
