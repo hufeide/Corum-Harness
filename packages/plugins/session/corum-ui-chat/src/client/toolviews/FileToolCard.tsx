@@ -451,7 +451,7 @@ function EditCard({ input, t }: { input: CardInput; t: TFunc }) {
     // FS_NOT_OBSERVED「未读先改」：与未命中同级的**轻提示**（非红色失败档）——
     // 这个文件本轮还没读过，先读再改即可（2026-09-16，todo.edit-card.not-observed-state）。
     if (input.errorCode === 'FS_NOT_OBSERVED') {
-      return <NotObservedCard input={input} t={t} />
+      return <NotObservedCard input={input} t={t} icon={FilePen} title={t('editMiss.notObserved.title')} footnote={t('editMiss.notObserved.footnote')} />
     }
     return <FailureCard icon={FileX} title={t('fileCard.title.edit')} input={input} foot={t('fileCard.foot.editFailed')} openInEditor t={t} />
   }
@@ -515,14 +515,21 @@ function DegradedMissCard({ input, t }: { input: CardInput; t: TFunc }) {
  * 用 warn 调轻提示而非红色失败档。壳结构与 DegradedMissCard 同款（默认折叠 + 可点开
  * 跳文件），文案换成「先读一遍再编辑」。
  */
-function NotObservedCard({ input, t }: { input: CardInput; t: TFunc }) {
+function NotObservedCard({ input, t, icon, title, footnote }: {
+  input: CardInput
+  t: TFunc
+  /** 图标与文案按工具区分（edit=FilePen「编辑前未读」/ write=FilePlus「写入前未读」）。 */
+  icon: LucideIcon
+  title: string
+  footnote: string
+}) {
   const [expanded, setExpanded] = useState(false)
   const onOpenPath = openFailureHandler(input) ?? openHandler(input)
   return (
     <Shell
-      icon={FilePen}
+      icon={icon}
       tone="brand"
-      title={t('editMiss.notObserved.title')}
+      title={title}
       path={input.displayPath}
       pathTitle={t('fileCard.openFile')}
       {...onOpenPath === undefined ? {} : { onOpenPath }}
@@ -532,7 +539,7 @@ function NotObservedCard({ input, t }: { input: CardInput; t: TFunc }) {
       content={expanded
         ? <div className={css.fallbackText} data-file-card-raw="">{input.errorText ?? ''}</div>
         : undefined}
-      note={expanded ? <Note tone="muted" text={t('editMiss.notObserved.footnote')} /> : undefined}
+      note={expanded ? <Note tone="muted" text={footnote} /> : undefined}
     />
   )
 }
@@ -542,6 +549,11 @@ function NotObservedCard({ input, t }: { input: CardInput; t: TFunc }) {
 /** write 卡：成功档 = 整文件 diff（新建 / 覆盖 由 head 的 mode 徽标区分）。 */
 function WriteCard({ input, t }: { input: CardInput; t: TFunc }) {
   if (input.state === 'error' || input.state === 'stopped') {
+    // FS_NOT_OBSERVED「写入前未读」（corum-fs-local fsio.ts:505/512 cannot overwrite...without
+    // reading first）：与 edit 侧同级的轻提示卡（todo.edit-card.not-observed-state 收尾）。
+    if (input.errorCode === 'FS_NOT_OBSERVED') {
+      return <NotObservedCard input={input} t={t} icon={FilePlus} title={t('editMiss.notObserved.writeTitle')} footnote={t('editMiss.notObserved.writeFootnote')} />
+    }
     return <FailureCard icon={ShieldAlert} title={t('fileCard.title.write')} input={input} foot={t('fileCard.foot.writeFailed')} t={t} />
   }
   const args = writeCallArgs(input.argsRaw)

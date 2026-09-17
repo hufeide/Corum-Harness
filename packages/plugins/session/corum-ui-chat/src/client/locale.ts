@@ -193,6 +193,8 @@ export const zh = {
   'editMiss.notObserved.title': '编辑前未读文件',
   'editMiss.notObserved.state': '未读先改',
   'editMiss.notObserved.footnote': '编辑没有应用——这个文件本轮还没有读取过；先用「读取」工具读一遍目标文件，再重新编辑即可，文件未受任何影响。',
+  'editMiss.notObserved.writeTitle': '写入前未读文件',
+  'editMiss.notObserved.writeFootnote': '写入没有应用——要覆盖的这个文件本轮还没有读取过；先用「读取」工具读一遍目标文件，再重新写入即可，文件未受任何影响。',
   // ── 文件工具卡（2026-09-14）：read / edit / write 三类调用共用同一套毛玻璃卡 ──
   'fileCard.title.read': '读取',
   'fileCard.title.edit': '编辑',
@@ -444,6 +446,8 @@ export const en = {
   'editMiss.notObserved.title': 'Edit before read',
   'editMiss.notObserved.state': 'Not read yet',
   'editMiss.notObserved.footnote': 'The edit was not applied — this file has not been read in this turn. Read the target file with the read tool first, then edit again; the file is untouched.',
+  'editMiss.notObserved.writeTitle': 'Write before read',
+  'editMiss.notObserved.writeFootnote': 'The write was not applied — the file to overwrite has not been read in this turn. Read the target file with the read tool first, then write again; the file is untouched.',
   'fileCard.title.read': 'Read',
   'fileCard.title.edit': 'Edit',
   'fileCard.title.write': 'Write',

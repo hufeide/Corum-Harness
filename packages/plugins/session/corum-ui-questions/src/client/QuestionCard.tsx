@@ -26,6 +26,8 @@ interface Draft {
   multi: readonly string[]
   /** 自由文本 / 自定义补充。 */
   text: string
+  /** 已跳过本题（官方逐题 skip 语义：selected 为空、计入「已答」，不取消整组）。 */
+  skipped?: boolean
 }
 
 const EMPTY_DRAFT: Draft = { multi: [], text: '' }
@@ -86,9 +88,10 @@ export function QuestionCard({ pending }: QuestionCardProps) {
     return draft.text.trim() !== ''
   }, [current, draft])
 
-  /** 是否全部题都已作答（决定可发送整组）。 */
+  /** 是否全部题都已作答或跳过（决定可发送整组；官方：answered || skipped）。 */
   const allAnswered = useMemo(() => questions.every((q, i) => {
     const d = drafts[i] ?? EMPTY_DRAFT
+    if (d.skipped === true) return true
     const kind = kindOf(q)
     if (kind === 'single') return d.single !== undefined || d.text.trim() !== ''
     if (kind === 'multi') return d.multi.length > 0 || d.text.trim() !== ''
@@ -103,6 +106,8 @@ export function QuestionCard({ pending }: QuestionCardProps) {
       // 单选 selected 一个 label；多选 selected 多个；自由文本/自定义补充进 custom。
       const answers = questions.map((q, i) => {
         const d = drafts[i] ?? EMPTY_DRAFT
+        // 已跳过的题 selected 为空（官方 skip 语义：该题不计答案、不取消整组）。
+        if (d.skipped === true) return { id: q.id, selected: [] }
         const kind = kindOf(q)
         const selected = kind === 'multi' ? [...d.multi] : (d.single === undefined ? [] : [d.single])
         const custom = d.text.trim()
@@ -122,6 +127,16 @@ export function QuestionCard({ pending }: QuestionCardProps) {
     if (busy) return
     setBusy(true)
     try { await pending.cancel() } finally { setBusy(false) }
+  }
+
+  /**
+   * 跳过本题（官方逐题 skip 语义，todo.questions.skip-wired-to-cancel）：
+   * 把当前题草稿标 skipped（提交时 selected 为空、计入「已答」）并前进到下一题；
+   * **不取消整组**——原先错连到 cancel()（放弃全部问题），与官方逐题 skip 不符。
+   */
+  const skipCurrent = (): void => {
+    setDrafts(prev => prev.map((d, i) => (i === index ? { ...d, skipped: true } : d)))
+    if (index < total - 1) setIndex(index + 1)
   }
 
   if (current === undefined) return null
@@ -203,7 +218,7 @@ export function QuestionCard({ pending }: QuestionCardProps) {
               </div>
             )}
             <span className={css.sp} />
-            <button type="button" className={css.skipBtn} disabled={busy} onClick={() => { void cancel() }}>跳过本题</button>
+            <button type="button" className={css.skipBtn} disabled={busy} onClick={skipCurrent}>跳过本题</button>
             <button type="button" className={css.submitBtn} disabled={busy || !allAnswered} onClick={() => { void submitAll() }}>
               {busy ? '提交中…' : '提交'}
             </button>
