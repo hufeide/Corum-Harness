@@ -68,13 +68,22 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/analysis/HANDOFF-2026-09-16-day-cards-empty-state-and-design-cleanup.md` — **最新交接入口**
-  （2026-09-16 日场，24 个提交：卡片 8 条缺陷收口 + 代码片段卡重设计（**照抄官方 token 级
-  流式增量高亮**）+ **空态与会话宽度解耦重构**（文件独立、两条不变式）+ 设计稿同步与过时件清理。
-  **六条教训**尤其值得先读：画布态≠磁盘态（附磁盘侧判据）、`turn/end` 的 `reason.kind` 判成败、
+- `docs/HANDOFF-2026-09-16-verify-gate-enforcement.md` — **最新交接入口**
+  （2026-09-16 verify 门禁场：接续上一份的 §2 遗留项并**收口**。根因 = 声明式 verify **从未进机制
+  门禁**——`corumIntegrationTruth` 只判「分支是否进 HEAD」，而集成者用普通 `git merge` 时
+  **合并提交自己就进了 HEAD**，故 verify 的 exit 1 被完全忽略；对照会话只因集成者恰好用了
+  `--no-commit` 才被拦住 ⇒ 成败取决于子 Agent 偶然选的 git 命令。修法：机制自己跑声明并取退出码 +
+  总判定收成「git 实况 ∧ verify exit 0」一个函数 + 拒绝形态类型化 + 通知不得说谎 + 被拒后解卡。
+  **三条教训尤其值得先读**：加 orchestrate 结果字段**必须同步输出 schema**（漏了会被
+  `INVALID_TOOL_OUTPUT` 整块吞掉 results，Bug B 的反向形态）、报告里**不许写与现场不符的承诺**
+  （「PRESERVED」实测已被回收）、改 persona 前先想它会不会制造**新的卡死形态**
+  （`--no-commit` 留下 `MERGE_HEAD` 毒化后续每一轮）。**下个 session 从这里开始。**）
+- `docs/analysis/HANDOFF-2026-09-16-day-cards-empty-state-and-design-cleanup.md` — 同日日场交接
+  （卡片 8 条缺陷收口 + 代码片段卡重设计（**照抄官方 token 级流式增量高亮**）+ **空态与会话宽度
+  解耦重构**（文件独立、两条不变式）+ 设计稿同步与过时件清理。
+  **六条教训**：画布态≠磁盘态（附磁盘侧判据）、`turn/end` 的 `reason.kind` 判成败、
   **CSS 自定义属性在声明它的元素上求值**（改上游 token 无效）、字体简写 token 不能当字族列表、
-  删掉的节点不能在同一次 `execute` 里再引用、`.md` 在编辑器里是预览故没有 `.monaco-editor`）；
-  **下个 session 从这里开始。**
+  删掉的节点不能在同一次 `execute` 里再引用、`.md` 在编辑器里是预览故没有 `.monaco-editor`）。
 - `scripts/audit-dsw-tokens.py` — 设计 token 对账器（按官方 `design-platform.css` + corum
   `theme-layer.ts` 建权威表，列出「不存在的 token」与「多余 fallback」）。改 CSS token 前后各跑一次。
 - `docs/analysis/HANDOFF-2026-09-16-card-batch-closeout-and-token-audit.md` — 同日凌晨场交接

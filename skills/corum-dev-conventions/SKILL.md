@@ -46,6 +46,18 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
 - **官方 preset 的本地副本会被包内置版本静默遮蔽** → `boot.ts` 必须带 `includeShippedRoot: false`（守卫 §17 断言）。
 - **技能根只有一处**：corum 只读 `<CORUM_HOME>/skills/<绑定名>`，不读项目 `.dsh/skills`、`.agents/skills`、`~/.agents/skills`、打包内置根（`includeDefaultRoots: false`）。技能进 corum 只有一条路：设置 → 技能 → 导入技能。
 - **沙箱内访问 `127.0.0.1:9222` 会被拦**（Operation not permitted）——CDP 脚本需要相应权限；报错是策略拦截，不是脚本 bug。
+- **「写在 persona 里的强制」不是机制**（2026-09-16）：orchestrate 声明 `merge.verify` 失败却报
+  `merged + committed`——因为**真值门禁只判「分支是否进 HEAD」，从不看 verify 的退出码**，而集成者用
+  普通 `git merge` 时**合并提交自己就进了 HEAD**；换个 session 只因集成者恰好用了 `--no-commit`
+  就被拦住 ⇒ **成败取决于子 Agent 偶然选的 git 命令**。修法：机制**自己跑**声明并取退出码
+  （`corumRunIntegrateVerify`），把「集成成功」收成**一个**函数（`corumIntegrationVerdict` = git 实况
+  ∧ verify exit 0），拒绝形态**类型化**（`CorumIntegrateRejected.kind`：`unmerged` / `verify`——
+  两者的通知与出路相反，发错通知就是谎报）。见 `docs/LESSONS.md` §6.28。
+- **给 orchestrate 结果加字段必须同步输出 schema**：那处是 `additionalProperties: false`，漏声明的
+  字段会让 harness 用 `INVALID_TOOL_OUTPUT` **顶替整个 payload**（`results` 与 `integration` 一起被吞
+  ——是 Bug B 的反向形态，错误里连任务成败都不提）。同理：**报告里不许写与现场不符的承诺**
+  （「PRESERVED」实测分支已被回收）、**改 persona 前先想它会不会制造新的卡死形态**
+  （`--no-commit` 会留下 `MERGE_HEAD`，毒化后续每一轮 merge/commit）。
 
 ## 4. 证据标准（做完凭什么说完成）
 
