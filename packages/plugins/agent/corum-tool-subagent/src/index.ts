@@ -1405,6 +1405,11 @@ export function apply(ctx: Context, config: Config): void {
         // 未达标 → 抛错（附「集成者自述 vs git 实况」对照）+ **保留 worktree 与分支**
         // + 台账保持 settled（PLAN 不变量「失败不 commit、保留现场」的机制化）。
         const corumTruth = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
+        // 排障日志（2026-09-16）：integrate 真值判定结果写主日志——verify 失败是否被拦住、
+        // 分支并入与否，此前只能从 throw 反推（「merged+committed 但 verify 失败」无从定位）。
+        runtimeCtx.logger.info(
+          `integrate truth check: integrated=${corumTruth.integrated} unmerged=[${corumTruth.unmerged.join(',')}] uncommitted=[${corumTruth.uncommitted.join(',')}] head=${corumTruth.head}`,
+        )
         if (!corumTruth.integrated) {
           // fork（corum）2026-09-14 用户同意 B：**脏主树/未提交场景的集成 diff 口**。
           // 集成者按纪律不许动主树里与本轮无关的在制品（persona 明禁
@@ -1950,6 +1955,11 @@ export function apply(ctx: Context, config: Config): void {
                 if (merge === undefined || !corumAutoIntegrate(merge)) {
                   return { pendingBranches: branches, integrated: false }
                 }
+                // 排障日志（2026-09-16）：runIntegrate 的 verify 传入与分支清单写主日志——
+                // verify 是否被传给集成者、传的是什么命令，verify 失效排查的关键一手。
+                runtimeCtx.logger.info(
+                  `runIntegrate: verify=${merge.verify === undefined ? '(omitted, fallback to detected checks)' : JSON.stringify(merge.verify)} branches=[${branches.join(',')}]`,
+                )
                 // fork（corum）：integrate 结果**必须**被检查（2026-09-09 事故 RC4）
                 // ——此前 `await spawnOne(...)` 丢弃返回值，集成没落地时任务结果照样
                 // 逐条报 `[task N] done`，主 Agent 据此以为全部完成。integrate 恒前台
@@ -2082,6 +2092,9 @@ export function apply(ctx: Context, config: Config): void {
                   // fork（corum）：按权威 stopReason 区分「手动终止」与「失败」。
                   // settleForegroundRun 把 SubagentResult.stopReason 挂到 Error 上；
                   // 此处读它，不靠错误串匹配。
+                  // 排障日志（2026-09-16）：orchestrate 任务失败写主日志——此前 catch 只把错误
+                  // 写进结果行，主日志零痕迹，「任务 2 从未 spawn」这类失败只能靠现场反推。
+                  runtimeCtx.logger.warn(`orchestrate task ${index} failed: ${String(error)}`)
                   if ((error as { stopReason?: SubagentResult['stopReason'] }).stopReason === 'aborted') {
                     return { ...base, ok: false, aborted: true, error: String(error) }
                   }
