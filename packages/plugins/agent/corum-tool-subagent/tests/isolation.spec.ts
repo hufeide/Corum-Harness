@@ -97,8 +97,21 @@ describe('corumShouldIsolate — fork（corum）隔离触发', () => {
     expect(corumShouldIsolate('write-tasks', false, false)).toBe(false)
   })
   it('off 不隔离；readonlyResearch 恒不隔离', () => {
-    expect(corumShouldIsolate('off', true, false)).toBe(false)
+    // 不变式③（2026-09-16）：off **只对单发前台生效**（非并发才不隔离）——本行缺省
+    // concurrent=true（后台/并发场景），故恒隔离；单发前台（concurrent=false）时 off 才不隔离。
+    expect(corumShouldIsolate('off', true, false, false)).toBe(false)
     expect(corumShouldIsolate('always', true, true)).toBe(false)
+  })
+  it('不变式③：后台/并发写任务恒隔离（覆盖 off 与任务级 isolation:off）', () => {
+    // 后台/并发（concurrent=true，含缺省）时无论 mode 是什么都隔离——off 不能绕过。
+    expect(corumShouldIsolate('off', true, false, true)).toBe(true)
+    expect(corumShouldIsolate('off', true, false)).toBe(true) // 缺省 concurrent=true
+    expect(corumShouldIsolate('write-tasks', true, false, true)).toBe(true)
+    expect(corumShouldIsolate('always', true, false, true)).toBe(true)
+    // 单发前台（concurrent=false）才不按 off/write-tasks 判定：off 不隔离、write-tasks 不隔离、always 仍隔离。
+    expect(corumShouldIsolate('off', true, false, false)).toBe(false)
+    expect(corumShouldIsolate('write-tasks', true, false, false)).toBe(false)
+    expect(corumShouldIsolate('always', true, false, false)).toBe(true)
   })
   it('并发感知（2026-09-09 用户实机反馈）：无并发不隔离、有并发才隔离', () => {
     // 单发前台写任务：没有并发 → 不建 worktree（用户报的正是这条）。

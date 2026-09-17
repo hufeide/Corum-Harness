@@ -242,14 +242,14 @@ export function AgentSettingsSection() {
       </SettingGroup>
 
       <SettingGroup title="子 Agent · 隔离与并行">
-        <SettingRow label="隔离模式" desc="可能并发的子 Agent 写任务隔离到独立 git worktree；单发前台写任务直接在主工作区改。需 git 工作区。">
+        <SettingRow label="隔离模式" desc="可能并发的子 Agent 写任务隔离到独立 git worktree；单发前台写任务直接在主工作区改。需 git 工作区。⚠️ 机制不变式：后台/并发写任务**恒隔离**（任何模式下都不落父树），下方 off 仅对单发前台生效。">
           <SelectField
             value={subUser.isolationMode ?? ''}
             options={[
               { id: '', label: `默认（${subResolved.isolationMode ?? 'write-tasks'}）` },
               { id: 'write-tasks', label: 'write-tasks · 并发写任务隔离' },
               { id: 'always', label: 'always · 凡召唤必隔离' },
-              { id: 'off', label: 'off · 不隔离' },
+              { id: 'off', label: 'off · 仅单发前台不隔离（后台并发恒隔离）' },
             ]}
             disabled={disabled}
             onChange={v => { void apply(SUBAGENT_NS, 'isolationMode', v === '' ? undefined : v) }}

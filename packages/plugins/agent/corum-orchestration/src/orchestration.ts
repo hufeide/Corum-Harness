@@ -876,6 +876,11 @@ export function corumShouldIsolate(
   concurrent = true,
 ): boolean {
   if (readonlyResearch) return false
+  // 不变式③（invariant.background-parallel-isolated，用户 2026-09-16）：**后台/并发写任务
+  // 恒隔离**——这是最高优先级，覆盖 mode='off' 与任务级 isolation:'off' 的绕过（否则后台
+  // 并行写会落父树、丢隔离/集成能力）。「单发前台可不走隔离」是另一条：只有非并发
+  // （单发前台）时 mode 才参与判定。
+  if (concurrent && isWriteTask) return true
   if (mode === 'always') return true
   if (mode === 'off') return false
   return isWriteTask && concurrent
