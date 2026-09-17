@@ -1814,6 +1814,9 @@ export function apply(ctx: Context, config: Config): void {
                       integrated: { type: 'boolean' },
                       // 集成者子会话 id（编排卡「进入会话」按钮用；合并成功时才有）。
                       childSessionId: { type: 'string' },
+                      // 集成失败的错误信息（Bug B：真值门禁失败时 runIntegrate 不再 throw 顶替
+                      // 整个结果，而是把错误并入 integration.error——per-task results 不丢）。
+                      error: { type: 'string' },
                     },
                   },
                   /**
@@ -1837,30 +1840,45 @@ export function apply(ctx: Context, config: Config): void {
                   results?: Array<{ index: number; label?: string; ok: boolean; aborted?: boolean; output?: string; error?: string }>
                   script?: { name: string; agentsStarted: number; value?: unknown }
                   /** `childSessionId` = 集成者子会话（合并成功时才有；卡片「进入会话」按钮用）。 */
-                  integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string }
+                  integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string }
                   /** 跑在父主工作区（没隔离）的任务序号与判据（见上）。 */
                   parentTreeTasks?: { indexes: number[]; boundary: 'parent-tree' | 'skipped-non-git' }
                 }
-                const parts: string[] = []
+                // 全结构化（用户 2026-09-16 选定 B）：orchestrate 结果**不再展平成文本投影**，
+                // 直接返回 JSON 对象——`results[].ok`/`error`/`output`、`integration.integrated`/
+                // `error` 都是**可寻址字段**（文本投影下模型只能读 `[task N] done` 反推成败，
+                // 看不到 `results[].ok`/`integration.error`，实测 dev 两次「没收到结构化结果」）。
+                // 注：ContentBlock 只有 text/image 两型，故结构化对象经 JSON.stringify 进 text——
+                // 模型读到规整 JSON（字段可寻址），而非纯文本投影。
+                const structured: Record<string, unknown> = { mode: out.mode }
                 if (out.mode === 'script' && out.script !== undefined) {
-                  parts.push(`[script · ${out.script.name}] ${out.script.agentsStarted} child agent(s) settled\nReturn value:\n${JSON.stringify(out.script.value, null, 2)}`)
+                  structured.script = {
+                    name: out.script.name,
+                    agentsStarted: out.script.agentsStarted,
+                    ...(out.script.value !== undefined ? { value: out.script.value } : {}),
+                  }
                 } else {
-                  parts.push((out.results ?? [])
-                    .map(r => `[task ${r.index}${r.label !== undefined ? ` · ${r.label}` : ''}] ${r.ok ? 'done' : r.aborted === true ? `aborted: ${r.error ?? ''}` : `failed: ${r.error ?? ''}`}\n${r.output ?? ''}`)
-                    .join('\n\n'))
+                  structured.results = (out.results ?? []).map(r => ({
+                    index: r.index,
+                    ...(r.label !== undefined ? { label: r.label } : {}),
+                    ok: r.ok,
+                    ...(r.aborted === true ? { aborted: true } : {}),
+                    ...(r.output !== undefined ? { output: r.output } : {}),
+                    ...(r.error !== undefined ? { error: r.error } : {}),
+                  }))
                 }
                 if (out.integration !== undefined) {
-                  parts.push(out.integration.integrated
-                    ? `[corum integration] merged + committed into the main tree${out.integration.childSessionId === undefined ? '' : ` · child ${out.integration.childSessionId}`}`
-                    : `[corum integration] ${out.integration.pendingBranches.length} branch(es) pending: ${out.integration.pendingBranches.join(', ')} — call \`subagent\` with integrate: true to merge, or discard them yourself`)
+                  structured.integration = {
+                    pendingBranches: out.integration.pendingBranches,
+                    integrated: out.integration.integrated,
+                    ...(out.integration.childSessionId !== undefined ? { childSessionId: out.integration.childSessionId } : {}),
+                    ...(out.integration.error !== undefined ? { error: out.integration.error } : {}),
+                  }
                 }
-                // fork（corum）：没隔离的任务其改动**已经在父主工作区里**（无分支、不会被
-                // merge）——单独一行告知，别让父 Agent 以为还有分支等着集成。
                 if (out.parentTreeTasks !== undefined && out.parentTreeTasks.indexes.length > 0) {
-                  const { indexes, boundary } = out.parentTreeTasks
-                  parts.push(`[corum isolation] ${indexes.length} of ${out.results?.length ?? indexes.length} task(s) ran in the PARENT working tree (not isolated${boundary === 'skipped-non-git' ? ': the workspace is not a git repository' : ': a lone foreground write task works in place'}): ${indexes.map(i => `#${i}`).join(', ')} — their edits are ALREADY in your tree and no branch carries them.`)
+                  structured.parentTreeTasks = out.parentTreeTasks
                 }
-                return [{ type: 'text', text: parts.filter(p => p !== '').join('\n\n') }]
+                return [{ type: 'text', text: JSON.stringify(structured, null, 2) }]
               },
             },
             // fork（corum）：Phase 3 编排结果面板——presentCall 显示任务清单概要
@@ -2076,12 +2094,30 @@ export function apply(ctx: Context, config: Config): void {
               // 由 merge.verify 声明（原样注入集成者 persona）；未声明回落探测式默认。
               // 若任务均未隔离（isolation:off / research），台账无待集成条目——
               // 静默跳过 integrate（结果已由任务直接产出，无需 fan-in）。
-              const integration = await runIntegrate(args.merge as { verify?: string } | undefined)
+              //
+              // Bug B 修复（2026-09-16）：runIntegrate 的真值门禁失败会 **throw**（`:1434`
+              // `integrate did not persist into the main tree`）——若不捕获，这个 throw 向上
+              // 顶替整个 orchestrate 结果 ⇒ **`results`（每个任务的 ok/error/output）被整块
+              // 吞掉**，模型只看到 integrate 错误、看不到「某个任务为什么失败」的真相。
+              // 这里捕获 integrate 错误：results（已算好）与 `integration: { integrated:false,
+              // error }` 一起返回——**集成失败仍 fail-loud**（结果里带错误标记 + pending 通知），
+              // 但 per-task results 不丢。
+              let integration: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string }
+              try {
+                integration = await runIntegrate(args.merge as { verify?: string } | undefined)
+              } catch (integrateError: unknown) {
+                const pendingOnError = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
+                integration = {
+                  pendingBranches: pendingOnError.map(entry => entry.branch),
+                  integrated: false,
+                  error: integrateError instanceof Error ? integrateError.message : String(integrateError),
+                }
+              }
               if (!integration.integrated) corumNotifyPendingIntegration(parent, integration.pendingBranches, runtimeCtx.logger)
               return {
                 mode: 'tasks' as const,
                 results,
-                ...integration.pendingBranches.length > 0 || integration.integrated ? { integration } : {},
+                ...integration.pendingBranches.length > 0 || integration.integrated || integration.error !== undefined ? { integration } : {},
                 ...parentTreeTasks.length === 0 ? {} : {
                   parentTreeTasks: {
                     indexes: parentTreeTasks.map(t => t.index),

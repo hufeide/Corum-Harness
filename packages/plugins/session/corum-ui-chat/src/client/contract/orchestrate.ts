@@ -103,16 +103,47 @@ export interface OrchestrateChatData {
  *  `aborted` = 主 Agent 手动终止该分支（与 `failed:` 前缀并列，同样解析风格）。 */
 const TASK_LINE = /^\[task (\d+)(?: · ([^\]]*))?\] (done|aborted|failed)(?::\s*(.*))?$/u
 
+/** 全结构化结果的形状（2026-09-16 render 改 JSON 后：`results[]` 的各项）。 */
+interface StructuredOutcomeItem {
+  index?: unknown
+  ok?: unknown
+  aborted?: unknown
+  error?: unknown
+}
+
 /**
  * 解析工具结果正文里的任务终态。
  *
- * 兼容 `failed:<error>`（旧前缀）与 `aborted:<error>`（手动终止前缀）；
+ * **双格式兼容（2026-09-16 render 改全结构化 JSON）**：
+ * - 优先按**结构化 JSON**解析（新 render：`{mode, results:[{index,ok,aborted,error}], integration}`）；
+ * - 回落**正则文本行**（旧 render / 历史会话的 `[task N · label] done|failed` 投影）。
  * 旧会话的 `failed:` 结果仍可解析。
  * @param text - `tool/result` 的正文（宿主 render 的输出）。
  * @returns 下标 → 终态。
  */
 export function parseOutcomes(text: string): ReadonlyMap<number, OrchestrateTaskOutcome> {
   const out = new Map<number, OrchestrateTaskOutcome>()
+  // ① 结构化 JSON（新 render 全结构化格式）。
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { results?: unknown }).results)) {
+      for (const item of (parsed as { results: StructuredOutcomeItem[] }).results) {
+        const index = typeof item.index === 'number' ? item.index : NaN
+        if (!Number.isSafeInteger(index)) continue
+        if (item.aborted === true) {
+          out.set(index, { kind: 'aborted' })
+        } else if (item.ok === true) {
+          out.set(index, { kind: 'done' })
+        } else {
+          out.set(index, { kind: 'failed', error: typeof item.error === 'string' ? item.error : '' })
+        }
+      }
+      if (out.size > 0) return out
+    }
+  } catch {
+    // 非 JSON（旧文本投影格式）→ 回落正则解析。
+  }
+  // ② 正则文本行（旧 render 投影 / 历史会话）。
   for (const rawLine of text.split('\n')) {
     const matched = TASK_LINE.exec(rawLine.trim())
     if (matched === null) continue
@@ -146,7 +177,22 @@ export function parseOutcomes(text: string): ReadonlyMap<number, OrchestrateTask
  */
 export function parseWorktreeSlugs(text: string): ReadonlyMap<number, string> {
   const out = new Map<number, string>()
-  // 按 `[task N …]` 分段：split 后奇数位是段头、偶数位是段体。
+  // ① 结构化 JSON（新 render）：从 results[].output 里按任务取下标取 slug。
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { results?: unknown }).results)) {
+      for (const item of (parsed as { results: Array<{ index?: unknown; output?: unknown }> }).results) {
+        const taskIndex = typeof item.index === 'number' ? item.index : NaN
+        if (!Number.isSafeInteger(taskIndex) || typeof item.output !== 'string') continue
+        const matched = /\.corum-worktrees\/(wt-[0-9a-z]+)/u.exec(item.output)
+        if (matched !== null) out.set(taskIndex, matched[1])
+      }
+      if (out.size > 0) return out
+    }
+  } catch {
+    // 非 JSON → 回落文本分段。
+  }
+  // ② 文本分段（旧 render 投影 / 历史会话）：按 `[task N …]` 分段。
   const parts = text.split(/\[task (\d+)(?: · [^\]]*)?\]/u)
   for (let index = 1; index + 1 < parts.length; index += 2) {
     const taskIndex = Number(parts[index])
@@ -162,10 +208,35 @@ const INTEGRATION_LINE = /^\[corum integration\] (.+)$/u
 
 /**
  * 解析集成阶段状态。
+ *
+ * **双格式兼容（2026-09-16 render 改全结构化 JSON）**：优先读 JSON 的
+ * `integration` 对象（`{integrated, childSessionId?, error?, pendingBranches}`），
+ * 回落 `[corum integration] …` 文本行（旧投影 / 历史会话）。
  * @param text - `tool/result` 的正文。
  * @returns 集成状态，无该行时 undefined。
  */
 export function parseIntegration(text: string): OrchestrateIntegration | undefined {
+  // ① 结构化 JSON（新 render 全结构化格式）。
+  try {
+    const parsed: unknown = JSON.parse(text)
+    const integration = (parsed as { integration?: { integrated?: unknown; childSessionId?: unknown; error?: unknown; pendingBranches?: unknown } } | null)?.integration
+    if (integration !== undefined && integration !== null && typeof integration === 'object') {
+      // error 在场 = 集成失败（Bug B：runIntegrate 不再 throw，错误并入 integration.error）。
+      if (typeof integration.error === 'string' && integration.error !== '') {
+        const branches = Array.isArray(integration.pendingBranches) ? integration.pendingBranches.filter((b): b is string => typeof b === 'string') : []
+        return { kind: 'pending', reason: integration.error, branches }
+      }
+      if (integration.integrated === true) {
+        const child = typeof integration.childSessionId === 'string' ? integration.childSessionId : undefined
+        return child === undefined ? { kind: 'integrated' } : { kind: 'integrated', childSessionId: child }
+      }
+      const branches = Array.isArray(integration.pendingBranches) ? integration.pendingBranches.filter((b): b is string => typeof b === 'string') : []
+      return { kind: 'pending', reason: branches.length > 0 ? `${branches.length} 个分支待集成` : '待集成', branches }
+    }
+  } catch {
+    // 非 JSON → 回落文本行解析。
+  }
+  // ② 文本行（旧 render 投影 / 历史会话）。
   for (const rawLine of text.split('\n')) {
     const matched = INTEGRATION_LINE.exec(rawLine.trim())
     if (matched === null) continue
