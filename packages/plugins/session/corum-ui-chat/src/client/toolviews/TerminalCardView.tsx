@@ -149,9 +149,8 @@ function TerminalCardBody({ model, t }: { model: NonNullable<ReturnType<typeof t
       */}
       <div className={css.cmdRow} data-corum-terminal-cmd="">
         <span className={css.cmdText} title={model.command}>{`$ ${model.command}`}</span>
-        {!expanded && outputLines > 0 && (
-          <span className={css.collapsedHint}>{t('terminalCard.outputCollapsed', { n: outputLines })}</span>
-        )}
+        {/* 2026-09-16 用户定调：移除折叠态的「输出已折叠 · 点卡片展开看全部 N 行」小字
+            （折叠/展开已由右上 chevron 表达，这行小字是冗余噪音）。 */}
       </div>
       {expanded && (
         <div className={css.body} data-corum-terminal-body="">
