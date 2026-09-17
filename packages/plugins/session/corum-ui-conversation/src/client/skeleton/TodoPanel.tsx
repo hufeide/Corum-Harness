@@ -70,13 +70,24 @@ function connectorTone(index: number, activeIndex: number): 'done' | 'idle' {
  */
 function ProgressLine({ todos }: { todos: readonly TodoItem[] }) {
   const activeIndex = todos.findIndex(item => item.status === 'in_progress')
+  // 滑动窗口（用户 2026-09-16 定调，todo.todo-panel.dense-progress-line）：
+  // ① 最多 10 个圆点；② 超过 10 个时已完成的前缀被裁掉——第 1 个执行完显示 2–11、
+  // 再完一个显示 3–12……**任何时刻恒显示 10 个**（不足 10 个显示实际数）。
+  // 窗口起点 = max(0, activeIndex - 9)，让进行中的任务尽量在窗口内（已完成的
+  // 前缀随进度逐步滚出视野）。
+  const MAX_DOTS = 10
+  const startIndex = todos.length <= MAX_DOTS
+    ? 0
+    : Math.max(0, (activeIndex === -1 ? todos.length - MAX_DOTS : Math.min(activeIndex, todos.length - MAX_DOTS)))
+  const windowTodos = todos.slice(startIndex, startIndex + MAX_DOTS)
   return (
     <div className={css.line} aria-hidden="true">
-      {todos.map((item, index) => {
+      {windowTodos.map((item, windowIndex) => {
+        const index = startIndex + windowIndex
         const tone = dotTone(item.status)
         return (
           <Fragment key={item.content}>
-            {index > 0 && (
+            {windowIndex > 0 && (
               <span
                 className={css.connector}
                 data-tone={connectorTone(index - 1, activeIndex)}
