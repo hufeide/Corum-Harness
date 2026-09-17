@@ -232,6 +232,18 @@
     - id: corum-session-queue-revert
       name: '@corum/corum-session-queue-revert'
 
+    # git-core（corum 核心插件，**不可卸载**）：承载全部 git 管理机制（用户
+    # 2026-09-16 策略）。① 工作区 git 侦测/初始化（ensureRepo/isRepo/init，
+    # 能力自 desktop host 的 corum-git.ts 迁入）；② 不变式①「工作区必须有 git
+    # 参考」的 host 创建入口强制前置（assertGitWorkspace 门禁——corum-agent 的
+    # createAgentForTask / corumProject 的 openProject 等入口经 ctx.gitCore 同进程
+    # 直调，失败 fail-loud 阻断创建，不再依赖 UI 层自觉）；后续承接 worktree/settle
+    # 强制提交 / 集成真值 / 隔离判定 / 合并链（四条不变式统一由本插件能力完成）。
+    # **行序必须在 corum-agent / corumProject 装配之前**（它们 inject ctx.gitCore）。
+    # ⚠️ 本插件不可卸载：插件管理器按包名 @corum/corum-git-core 过滤启停/卸载入口。
+    - id: corum-git-core
+      name: '@corum/corum-git-core'
+
     # Fork #9 完整 seam 服务（取代上方禁用的官方 subagent 行）：
     # 服务名 'subagents' 不变（fork 的 SubagentRuntime super(ctx,'subagents')
     # 与官方一致），官方 provider 行（spawn/fork）与 tool-subagent-control

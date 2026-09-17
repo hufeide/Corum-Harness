@@ -106,8 +106,8 @@ import { describeSuspiciousYamlKeys, scanSuspiciousYamlKeys } from './settings-y
 
 export const name = 'agent'
 
-/** 运行时依赖的服务（boot 后即就绪）。 */
-export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt']
+/** 运行时依赖的服务（boot 后即就绪；gitCore = 不变式①创建前置门禁，git-core 核心插件）。 */
+export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt', 'gitCore']
 
 /**
  * `corum-agent` settings namespace（C4：卡住自动恢复阈值可配置）。

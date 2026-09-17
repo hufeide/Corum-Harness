@@ -106,6 +106,10 @@ import { stopReasonOfTurnEnd, type SubagentStopReason, type SubagentTodoItem, ty
 // （corum-agent 在 compile.ts 里把 dsh-tool-todo 编进工具表，但 TS 不会自动
 // 拉取其类型增强——这里显式 import 只触发 declare module 合并，无运行时开销）。
 import type {} from '@deepseek-ai/dsh-tool-todo'
+// 模块增强：加载 @corum/corum-git-core 的 `gitCore` Context 合并声明
+// （不变式①的创建前置门禁——本服务在 createAgentForTask/openProject 等入口调
+// this.ctx.gitCore.assertGitWorkspace；显式 import 只触发 declare module 合并）。
+import type {} from '@corum/corum-git-core'
 
 // 再导出：保持既有消费方（index.ts / project-service.ts / runtime.ts /
 // contract/agent.ts）的 import 面不变——包内拆分对外的稳定锚。
@@ -406,7 +410,7 @@ export interface AgentLaneDescriptor {
 }
 
 export class CorumAgentService extends TypertRemoteService {
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt']
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore']
 
   /** 已创建的角色 root Agent（按 profile id）。 */
   private readonly agents = new Map<string, Agent>()
@@ -1550,6 +1554,13 @@ export class CorumAgentService extends TypertRemoteService {
     // 目录 realpath 归一：workspace.attachSession 硬要求 realpath(cwd) === ws.path，
     // 否则抛错 → 会话落「未分组」（macOS /tmp→/private/tmp 一类 symlink 会踩）。
     const root = realpathSync(cwd)
+
+    // 不变式①（invariant.workspace-git-required）的机制门禁：创建任务泳道**之前**
+    // 强制「探测，没有就初始化」——不再依赖 UI 层自觉调 ensureRepo（旧缺口的根因：
+    // 新目录建任务可经 RPC/直调绕过 UI 直命中本入口）。git-core 是 corum 核心插件
+    // （不可卸载）；此处同进程直调 assertGitWorkspace，失败（目录不可写/git 缺失）
+    // fail-loud 阻断创建，不静默降级。
+    await this.ctx.gitCore.assertGitWorkspace(root)
 
     // 复用目标工作区里已有的 blank task 泳道（官方 connectWorkspace 语义）：
     // 连点「新建任务」不该堆一串空会话。

@@ -1,0 +1,33 @@
+{
+  "name": "@corum/corum-git-core",
+  "version": "0.1.0",
+  "description": "git 管理核心机制（corum 核心插件，**不可卸载**）。承载 corum 全部 git 机制：工作区 git 侦测/初始化（ensureRepo/isRepo/init）+ 不变式①「工作区必须有 git 参考」的 host 创建入口强制前置（assertGitWorkspace 门禁）；后续承接 worktree/settle 强制提交 / 集成真值 / 隔离判定 / 合并链（四条不变式统一由本插件能力完成）。能力自 desktop host 的 corum-git.ts 迁入（desktop 不再手动 new）。cordis.patch.yml 的 insert 段挂载（# core: non-removable）；插件管理器按包名过滤不显示启停/卸载。",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.3-alpha.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.3-alpha.1",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
