@@ -20,8 +20,8 @@
  * @module corum-git-core/git-primitives
  */
 
-import { realpathSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { realpathSync, existsSync } from 'node:fs'
+import { spawn, execFileSync } from 'node:child_process'
 
 /** 在目录下跑一个 git 子命令；exit code / stdout / stderr 全回（不抛）。 */
 function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -103,4 +103,63 @@ export async function initRepo(path: string): Promise<{ initialized: boolean; al
  */
 export async function ensureRepo(path: string): Promise<{ initialized: boolean; alreadyRepo: boolean }> {
   return await initRepo(path)
+}
+
+/* ── 不变式②原语：收口强制提交（commit-after-modification）────────────── */
+
+/** 同步跑一个 git 子命令（execFileSync；exit 0 回 stdout，否则带 stderr/code）。 */
+function runGitSync(cwd: string, args: string[]): { code: number; stdout: string; stderr: string } {
+  try {
+    const stdout = execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf8' })
+    return { code: 0, stdout: stdout.trim(), stderr: '' }
+  } catch (error: unknown) {
+    const stderr = (error as { stderr?: Buffer | string }).stderr
+    return { code: 1, stdout: '', stderr: stderr === undefined ? String(error) : String(stderr) }
+  }
+}
+
+/** 目录是否有未提交改动（`git status --porcelain` 非空；非 git/目录不存在返回 false）。 */
+export function hasUncommittedChanges(path: string): boolean {
+  if (!existsSync(path)) return false
+  try {
+    return runGitSync(path, ['status', '--porcelain']).stdout !== ''
+  } catch {
+    return false
+  }
+}
+
+/** 强制提交失败的结构化原因（供上层注入通知/阻断）。 */
+export interface SettleCommitFailure {
+  path: string
+  reason: string
+}
+
+/**
+ * 不变式②的核心原语：**收口强制提交**——把目录里未提交的改动就地提交
+ * （`git add -A` + `git commit --no-verify`）。
+ *
+ * 与 orchestration 的 `corumCommitWorktreeOnSettle`（隔离 worktree 专用）同源，但
+ * **不绑定 worktree**——任意 git 目录可用：主 Agent 在父树直接改 / 单发前台写任务
+ * 在父树写，turn-end 收口时同样强制提交（用户 2026-09-15 裁定「每次工作结束必须
+ * 提交，机制保证而非 Agent 自觉」对所有 Agent 生效，不只隔离 worktree）。
+ *
+ * 提交用 `-c user.name/email` 一次性身份（不写用户的 global/local config）；
+ * `--no-verify` 防宿主钩子拦下（钩子失败会让「必须提交」失效）。
+ *
+ * @param path - 目标 git 目录（父树主工作区）。
+ * @param subject - 提交信息首行（含溯源，如 `wip(<scope>): auto-commit on settle`）。
+ * @returns `undefined` = 成功或无需提交（干净/目录不存在/非 git）；否则为失败原因。
+ */
+export function settleCommit(path: string, subject: string): SettleCommitFailure | undefined {
+  if (!existsSync(path)) return undefined
+  if (!hasUncommittedChanges(path)) return undefined
+  const added = runGitSync(path, ['add', '-A'])
+  if (added.code !== 0) return { path, reason: `git add failed: ${added.stderr.trim()}` }
+  const committed = runGitSync(path, [
+    '-c', 'user.name=corum',
+    '-c', 'user.email=corum@localhost',
+    'commit', '--no-verify', '-m', subject,
+  ])
+  if (committed.code === 0) return undefined
+  return { path, reason: `git commit failed: ${committed.stderr.trim()}` }
 }

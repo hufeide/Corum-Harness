@@ -22,7 +22,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import { ensureRepo, initRepo, isGitRepo } from './git-primitives.ts'
+import { ensureRepo, initRepo, isGitRepo, settleCommit, type SettleCommitFailure } from './git-primitives.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -76,6 +76,21 @@ export class GitCoreService extends TypertRemoteService {
    */
   async assertGitWorkspace(path: string): Promise<void> {
     await ensureRepo(path)
+  }
+
+  /**
+   * 不变式②的机制面：**turn-end 收口强制提交**（host 钩子同进程直调）。
+   *
+   * 主 Agent（含单发前台写任务，它在父树直写）turn 结束时调用——把父树主工作区
+   * 未提交的改动就地提交，让「每次工作结束必须提交」对**所有** Agent 生效（不只
+   * 隔离 worktree）。`--no-verify` 防宿主钩子拦下。
+   *
+   * @param path - 父树主工作区目录。
+   * @param scope - 溯源标签（进提交信息，如会话/任务标识）。
+   * @returns 失败原因；`undefined` = 成功或无需提交（干净/非 git）。
+   */
+  settleCommitOnTurnEnd(path: string, scope: string): SettleCommitFailure | undefined {
+    return settleCommit(path, `wip(${scope}): auto-commit on turn end`)
   }
 }
 

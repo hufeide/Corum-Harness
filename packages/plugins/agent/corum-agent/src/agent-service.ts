@@ -606,6 +606,20 @@ export class CorumAgentService extends TypertRemoteService {
      * 未活动条目（防长进程多 delegation 累积）。
      */
     ctx.on('session/event', (session, event) => {
+      // 不变式②（invariant.commit-after-modification）：主会话（非 subagent）turn/end
+      // 收口时强制提交父树改动——主 Agent 在主工作区直接改 / 单发前台写任务在父树写，
+      // turn 结束必须提交（机制保证，非 Agent 自觉）。git-core 核心插件原语，失败
+      // fail-loud 记日志（提交失败不阻断 turn 完成，但绝不能静默）。
+      if (session.header.origin !== 'subagent' && event.type === 'turn/end') {
+        const cwd = session.header.cwd
+        if (typeof cwd === 'string' && cwd !== '') {
+          const failure = this.ctx.gitCore.settleCommitOnTurnEnd(cwd, `turn-${String(session.id).slice(-8)}`)
+          if (failure !== undefined) {
+            this.ctx.logger.warn(`corum-agent: turn-end auto-commit FAILED for ${cwd}: ${failure.reason}`)
+          }
+        }
+        return
+      }
       if (session.header.origin !== 'subagent') return
       const sid = String(session.id)
       const frame = this.foldSubagentProgress(sid, event)
