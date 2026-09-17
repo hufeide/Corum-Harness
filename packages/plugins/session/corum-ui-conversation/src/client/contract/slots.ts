@@ -293,6 +293,12 @@ export interface ConversationInjected {
    */
   polishDraft: (sessionId: string, text: string) => Promise<string>
   /**
+   * fork（corum）：提示词中英互译（corumAgent/translatePrompt，中文→英文 / 英文→
+   * 中文 / 其它→中文，方向自动判定），供 InputBar 的翻译按钮调用——与 `polishDraft`
+   * 同型下发（owner 提供 RPC 面，occupant 不反向依赖 RPC）。
+   */
+  translateDraft?: (text: string) => Promise<string>
+  /**
    * 「新建任务表单」打开信号面（侧栏顶部「新会话」按钮 → 空态联动）。
    * 实现桥到 ctx.layout 的 grid actions（AppFrame 持有监听者集与 pending
    * 标记）：已挂载时 onOpen 监听者被直推；未挂载（在会话视图）时
@@ -444,12 +450,16 @@ export interface ComposerBarOwnerProps {
    * 访问模式选择器之后、`conversation.input.left` 槽之前。官方 0.1.3 删除了
    * leftItems owner prop，corum 以此增量字段保留工具栏内定制（不改官方字段）。
    *  注：AI 润色按钮**不在**此处——设计稿唯一入口是输入区右上角的 sparkle
-   *  （InputBar 自渲染），润色实现经下方 `polishDraft` 下发（2026-09-09 去重）。 */
+   *  （InputBar 自渲染），润色实现经下方 `polishDraft` 下发（2026-09-09 去重）。
+   *  翻译按钮与润色同位（输入区右上角，sparkle 旁），实现经 `translateDraft` 下发。 */
   toolbarLeading?: ReactNode
   /** fork（corum）：会话内提示词润色（corumAgent/polishConversation + 最近 6 条
    *  user/AI 最终输出），供 InputBar 的 sparkle 按钮调用——设计稿里润色只有这一个
    *  入口，实现由 owner（ConversationRoot）下发，避免 occupant 反向依赖 RPC 面。 */
   polishDraft?: (sessionId: string, text: string) => Promise<string>
+  /** fork（corum）：提示词中英互译（corumAgent/translatePrompt，方向自动判定），
+   *  供 InputBar 的翻译按钮调用（与 polishDraft 同型下发）。 */
+  translateDraft?: ((text: string) => Promise<string>) | undefined
 }
 
 /** Package-private operations injected into the resident composer bar. */

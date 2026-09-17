@@ -570,6 +570,16 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           return out.polished
         }
       })(),
+      // 提示词中英互译（corumAgent/translatePrompt，方向自动判定）——单段文本，
+      // 不需会话历史，与 polishDraft 同型下发供 InputBar 翻译按钮调用。
+      translateDraft: (() => {
+        const connection = ctx.get('connection') as ConnectionHandle
+        const call = makeCorumRpcCall(connection)
+        return async (text: string) => {
+          const out = await call<{ translated: string }>('corumAgent', 'translatePrompt', { text })
+          return out.translated
+        }
+      })(),
       // 「新建任务表单」打开信号面：桥到 ctx.layout 的 grid actions（AppFrame
       // 持有的监听者集 + pending 标记）。grid actions 尚未 attach（AppFrame
       // 首渲染前）时退化为 no-op——空态此时也不可能已挂载，调用方无可损失。

@@ -45,7 +45,7 @@ export const InputBar = memo(function InputBar({
   renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory, toolbarLeading, polishDraft,
+  placeholder, accessory, toolbarLeading, polishDraft, translateDraft,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -376,6 +376,27 @@ export const InputBar = memo(function InputBar({
     }
   }, [polishDraft, sessionId, inputActions, draft, polishing])
 
+  // fork（corum）：提示词中英互译（与润色同位，输入区右上角 sparkle 旁）——
+  // 方向自动判定（中→英 / 英→中 / 其它→中），实现由 apply.ts 经 `translateDraft`
+  // 下发（corumAgent/translatePrompt），结果写回草稿。空草稿/翻译中禁用。
+  const [translating, setTranslating] = useState(false)
+  const canTranslate = translateDraft !== undefined && !locked && !translating && draft.trim() !== ''
+  const runTranslate = useCallback(async (): Promise<void> => {
+    if (translateDraft === undefined || inputActions === undefined) return
+    const text = draft.trim()
+    if (text === '' || translating) return
+    setTranslating(true)
+    try {
+      const translated = await translateDraft(text)
+      if (translated.trim() !== '') inputActions.setDraft(translated)
+    } catch (error) {
+      // 翻译失败不静默：草稿保持不变，错误留给 console（与润色同口径）。
+      console.error('[conversation] translate failed', error)
+    } finally {
+      setTranslating(false)
+    }
+  }, [translateDraft, inputActions, draft, translating])
+
   // Claim ghost hint: rendered by CSS as generated content after the last
   // paragraph while the claim's args are blank (a hint implies a single-line
   // token draft). The translated per-command hint wins over the claim's own.
@@ -480,23 +501,44 @@ export const InputBar = memo(function InputBar({
           {/* 设计稿 sparkle 图标（提示词优化按钮，输入区右上角）：19×19。
               fork（corum）：接真实现（polishDraft → 写回草稿），空草稿/润色中禁用。 */}
           {!workspaceTrigger && (
-            <button
-              type="button"
-              className={css.sparkleIcon}
-              aria-label="优化提示词"
-              aria-busy={polishing ? 'true' : undefined}
-              title={polishing ? '润色中…' : 'AI 润色（结合对话上下文优化本次提问）'}
-              disabled={!canPolish}
-              onClick={() => { void runPolish() }}
-            >
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                <path d="M5 3v4" />
-                <path d="M19 17v4" />
-                <path d="M3 5h4" />
-                <path d="M17 19h4" />
-              </svg>
-            </button>
+            <>
+              <button
+                type="button"
+                className={css.sparkleIcon}
+                aria-label="优化提示词"
+                aria-busy={polishing ? 'true' : undefined}
+                title={polishing ? '润色中…' : 'AI 润色（结合对话上下文优化本次提问）'}
+                disabled={!canPolish}
+                onClick={() => { void runPolish() }}
+              >
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                  <path d="M5 3v4" />
+                  <path d="M19 17v4" />
+                  <path d="M3 5h4" />
+                  <path d="M17 19h4" />
+                </svg>
+              </button>
+              {/* fork（corum）：翻译按钮（与润色同位，中英互译自动判向）。 */}
+              <button
+                type="button"
+                className={css.sparkleIcon}
+                aria-label="翻译提示词"
+                aria-busy={translating ? 'true' : undefined}
+                title={translating ? '翻译中…' : 'AI 翻译（中 ⇄ 英，自动判向）'}
+                disabled={!canTranslate}
+                onClick={() => { void runTranslate() }}
+              >
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m5 8 6 6" />
+                  <path d="m4 14 6-6 2-3" />
+                  <path d="M2 5h12" />
+                  <path d="M7 2h1" />
+                  <path d="m22 22-5-10-5 10" />
+                  <path d="M14 18h6" />
+                </svg>
+              </button>
+            </>
           )}
         </div>
         {/* 设计稿 htxWi toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送，gap 6 */}

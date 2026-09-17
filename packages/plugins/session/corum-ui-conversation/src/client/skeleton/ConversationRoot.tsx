@@ -137,7 +137,7 @@ function WidthHandle(props: {
 export function ConversationRoot({
   sessionId, useSession, useSessions, useSessionPendingInteraction,
   useWorkspaces, useConversation, useInput, useComposerBlock, inputActions,
-  renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, polishDraft, t,
+  renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, polishDraft, translateDraft, t,
 }: ConversationRootProps) {
   // 当前主题（深/浅）：空态大 logo 选图（big_brand_dark/light）。DARK_ATTRIBUTE
   // 是 corum-ui-base theme-presenter 写到 body 的标记。
@@ -480,6 +480,8 @@ export function ConversationRoot({
     // fork（corum）：polishDraft 随 props 下发给 InputBar——提示词润色的唯一入口是
     // 输入区右上角的 sparkle 按钮（此处不再另挂 Wand2 按钮，避免同屏两个）。
     polishDraft,
+    // 翻译按钮与润色同位（sparkle 旁）：translateDraft 同型下发给 InputBar。
+    translateDraft,
     // corum 工具栏扩展（Agent 选择）走 corum 增量字段 toolbarLeading
     //（官方 0.1.3 删除了 overlay/leftItems/rightItems/footer owner props，槽由
     // InputBar 自渲染；corum 工具栏内定制经 toolbarLeading 渲染在 accessSelect 后）。
