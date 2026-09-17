@@ -106,7 +106,6 @@ interface AgentProfileSummary {
   id: string
   nickname?: string
   title?: string
-  domain?: string
   dimension?: string
   experience?: string
   persona?: string
@@ -222,7 +221,6 @@ function AgentCardPreview({ draft }: { draft: EditDraft }) {
     id: draft.name || 'new-agent',
     ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
     ...(draft.title !== '' ? { title: draft.title } : {}),
-    ...(draft.domain !== '' ? { domain: draft.domain } : {}),
     ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
     ...(draft.experience !== '' ? { experience: draft.experience } : {}),
     ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
@@ -324,7 +322,6 @@ interface EditDraft {
   name: string
   nickname: string
   title: string
-  domain: string
   dimension: string
   experience: string
   personaPreset: string
@@ -359,7 +356,7 @@ interface EditDraft {
 
 function emptyDraft(): EditDraft {
   return {
-    name: '', nickname: '', title: '', domain: '', dimension: '研发', experience: '',
+    name: '', nickname: '', title: '', dimension: '研发', experience: '',
     personaPreset: DEFAULT_PERSONA_PRESET, personaCustom: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
@@ -374,7 +371,6 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     name: p.id,
     nickname: p.nickname ?? '',
     title: p.title ?? '',
-    domain: p.domain ?? '',
     dimension: p.dimension ?? inferDimension(p),
     experience: p.experience ?? '',
     // 人格预设回填：无预设时按 legacy persona 文本兜底判为「自定义」，避免丢失旧数据。
@@ -750,7 +746,6 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
           id,
           ...(draft.nickname.trim() !== '' ? { nickname: draft.nickname.trim() } : {}),
           ...(draft.title.trim() !== '' ? { title: draft.title.trim() } : {}),
-          ...(draft.domain.trim() !== '' ? { domain: draft.domain.trim() } : {}),
           dimension: draft.dimension,
           ...(draft.experience.trim() !== '' ? { experience: draft.experience.trim() } : {}),
           personaPreset: draft.personaPreset,
@@ -914,13 +909,9 @@ function EditPresetView({ profile, rpc, onBack, onSaved }: {
                   <SelectField value={draft.dimension} options={DIMENSION_OPTIONS} onChange={v => set('dimension', v)} variant="fill" />
                 </div>
               </div>
-              {/* 专业领域（覆盖模式组装进 persona：「You are an expert in the {domain} field」） */}
-              <div className={css.formCols}>
-                <div className={css.formCol} style={{ gap: 4 }}>
-                  <label className={css.fieldLabelSm}>专业领域</label>
-                  <input className={css.fieldInputSm} value={draft.domain} onChange={e => set('domain', e.target.value)} placeholder="如：软件开发 / 制造业 / 工程项目管理" />
-                </div>
-              </div>
+              {/* 2026-09-16 用户定调：「专业领域」条目过时，全面移除（含数据与代码）——
+                  它实际只进存储、不进 persona 组装（compile.ts 用的是 title；UI 注释
+                  「组装进 persona」不实），仅名片/技术栈映射用的自由文本。 */}
             </div>
           </div>
           <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
