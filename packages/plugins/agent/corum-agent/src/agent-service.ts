@@ -15,7 +15,7 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
@@ -70,6 +70,7 @@ import { loadProject, findProjectByCwd } from './project-store.ts'
 // 见 session-index.ts 的文件头（两套旧索引键空间不同构，不可机械合并）。
 import { findSessionByLane, readSessionIndex, registerSession } from './session-index.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
+import { agentRecreateWarning, lifecycleDiagPath, noteAgentRecreate } from './agent-lifecycle-guard.ts'
 import type { PolishConfig } from './profile-store.ts'
 import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensurePmProfile, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID } from './builtin-profiles.ts'
 import { extractHeader, summarizeText, simplifyEventData } from './event-projection.ts'
@@ -733,6 +734,60 @@ export class CorumAgentService extends TypertRemoteService {
    * 今天就有同样的缺口。卡片走父会话日志（durable）不受影响；花名册由本表经
    * `getChildSessionProgress` 的冷启动补标拿到（与 stopReason 的种子同一条路）。
    */
+  /**
+   * 同一 profile 的**在飞创建**（并发去重；见 `createAgent`）。
+   */
+  private readonly agentCreationsInFlight = new Map<string, Promise<CreateAgentResult>>()
+  /**
+   * profile → 最近创建时刻（ms），用于重建风暴护栏与取证（见 `agent-lifecycle-guard.ts`）。
+   */
+  private readonly agentCreationTimes = new Map<string, readonly number[]>()
+
+  /**
+   * 记录一次 agent 创建；窗口内反复重建同一 profile ⇒ warn + 调用栈（点名驱动者）。
+   *
+   * 为什么必须有：打包实例上实测「整套 MCP 每秒重启一次、持续 10+ 分钟」，而 MCP 的启动
+   * 完全由 agent 创建驱动 —— 没有这条日志，风暴期间从外部只能看到 MCP 在刷，看不到是谁在重建。
+   */
+  private noteAgentCreated(profileId: string): void {
+    const stack = new Error().stack
+    const verdict = noteAgentRecreate(this.agentCreationTimes.get(profileId) ?? [], Date.now())
+    this.agentCreationTimes.set(profileId, verdict.recent)
+    this.appendLifecycleDiag({ kind: 'created', profileId, count: verdict.recent.length, stack })
+    if (verdict.warn) this.ctx.logger.warn(agentRecreateWarning(profileId, verdict.recent.length, stack))
+  }
+
+  /**
+   * 把生命周期事件落到 `<home>/logs/agent-lifecycle.jsonl`（理由见 `lifecycleDiagPath`）。
+   *
+   * 只写**罕见但严重**的形态（重建风暴 + 每次销毁）——不是常规日志通道；写失败只吞掉
+   * （诊断不能反过来影响会话）。
+   */
+  private appendLifecycleDiag(record: Record<string, unknown>): void {
+    try {
+      const file = lifecycleDiagPath(process.env.CORUM_HOME ?? process.env.DSH_HOME)
+      if (file === undefined) return
+      mkdirSync(dirname(file), { recursive: true })
+      appendFileSync(file, JSON.stringify({ at: Date.now(), ...record }) + '\n')
+    } catch { /* 诊断落盘失败不影响会话 */ }
+  }
+
+  /**
+   * 记录一次 agent 销毁（三处销毁点都会调）。
+   *
+   * 销毁本身是合法的（保存/删除 profile、重启自检），但**每次销毁都会让下一次使用重建整套
+   * MCP** —— 实测 `saveProfile` 就会 `agents.delete`，所以「有人在循环保存 profile」会直接
+   * 放出一模一样的进程风暴。这里连同调用栈记一条 info，让「销毁 → 重建」的配对在日志里可见。
+   *
+   * @param profileId - 被销毁的 agent 所属 profile。
+   * @param where - 销毁点标识（saveProfile / deleteProfile / verify）。
+   */
+  private noteAgentTeardown(profileId: string, where: string): void {
+    const stack = new Error().stack ?? ''
+    this.ctx.logger.info(`corum-agent: agent torn down (${where}) for profile "${profileId}" — 下次使用会重建并重启其 MCP`)
+    this.appendLifecycleDiag({ kind: 'torn-down', profileId, where, stack })
+  }
+
   private readonly subagentRoles = new Map<string, 'worker' | 'research' | 'fork'>()
   /** childSessionId → 父会话 id（中断广播的通知跳转目标；来自 `corum/subagent/child` 帧）。 */
   private readonly subagentParents = new Map<string, string>()
@@ -989,6 +1044,29 @@ export class CorumAgentService extends TypertRemoteService {
     const existing = this.agents.get(profileId)
     if (existing !== undefined) return { agent: existing, presetId: profileId }
 
+    // ① 并发去重（2026-09-18 护栏）：同一 profile 的创建在飞时复用同一个 promise。
+    // 风暴形态是「销毁 → 重建」的串行循环，但并发请求也会把同一个 profile 建出多份、
+    // 各挂一套 MCP；去重让「一份 profile 一个 agent」这条不变式在并发下也成立。
+    const inFlight = this.agentCreationsInFlight.get(profileId)
+    if (inFlight !== undefined) return inFlight
+    const task = this.createAgentUncached(profileId, extraSetup)
+    this.agentCreationsInFlight.set(profileId, task)
+    try {
+      return await task
+    } finally {
+      this.agentCreationsInFlight.delete(profileId)
+    }
+  }
+
+  /**
+   * 创建（或复用）一个 root Agent 的**未去重实现**（`createAgent` 负责并发去重与风暴护栏）。
+   *
+   * ⚠️ 不要直接调用本方法：绕过 `createAgent` 就等于绕过去重与护栏。
+   */
+  private async createAgentUncached(
+    profileId: string,
+    extraSetup?: (agentCtx: Context) => void,
+  ): Promise<CreateAgentResult> {
     const profile = loadProfile(profileId)
     if (profile === undefined) {
       throw new Error(`dev-agent: profile "${profileId}" not found`)
@@ -1040,6 +1118,7 @@ export class CorumAgentService extends TypertRemoteService {
 
     this.agents.set(profileId, handle.agent)
     this.ctx.logger.info(`corum-agent: root agent created for profile "${profileId}" — ${sessionId}`)
+    this.noteAgentCreated(profileId)
     return { agent: handle.agent, presetId: profile.id }
   }
 
@@ -1396,6 +1475,7 @@ export class CorumAgentService extends TypertRemoteService {
     this.persistProfileAndRecompile(profile)
 
     // 清掉旧 Agent 使下次重建
+    this.noteAgentTeardown(input.id, 'saveProfile')
     this.agents.delete(input.id)
     const saved = loadProfile(input.id)!
     return {
@@ -1500,6 +1580,7 @@ export class CorumAgentService extends TypertRemoteService {
     if (existing?.trust === 'system') {
       throw new Error(`corum-agent: profile "${id}" 是系统级预置 Agent，不可删除`)
     }
+    this.noteAgentTeardown(id, 'deleteProfile')
     this.agents.delete(id)
     deleteProfile(id)
     return { ok: true }
@@ -2985,6 +3066,7 @@ export class CorumAgentService extends TypertRemoteService {
     // 编译并落盘 agent.cordis.yml + preset.yml
     this.writeAgentDir(loadProfile(profile.id)!, agentDirPath(profile.id))
     // 清掉旧 Agent 使下次重建
+    this.noteAgentTeardown(profile.id, 'verify')
     this.agents.delete(profile.id)
   }
 
