@@ -211,6 +211,18 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(stripComments(raw)).not.toContain('no writable profile')
   })
 
+  it('★ 续跑必须带路线覆盖（不带 = 用刚失败的坏模型再跑一遍，用户的「是」被浪费）', () => {
+    // 为什么必需：失败的 continuable 子 Agent 已被 dispose ⇒ 这次投递走 coldResume，
+    // 默认按持久化 descriptor 重建路由 = 刚失败的那个坏模型。
+    const call = between('await (appCtx.subagents.sendMessage as unknown as CorumRouteAwareSendMessage)(', 'appCtx.logger.info')
+    expect(call).toContain('agentOptions:')
+    expect(call).toContain('asked.route.provider')
+    expect(call).toContain('asked.route.model')
+    // 红线 3：类型面用本地窄接口收窄（官方类型没有 agentOptions，直接调会 TS2353）。
+    expect(SRC).toContain('interface CorumRouteAwareDelivery')
+    expect(SRC).toContain('as unknown as CorumRouteAwareSendMessage')
+  })
+
   it('★ 提示词不再宣告「机制会自动重试」（改版后这句话是假的）', () => {
     const prompt = between('Child model routing is NOT yours to choose', '\n')
     expect(prompt).not.toContain('automatically retries')

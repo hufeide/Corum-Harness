@@ -350,6 +350,31 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
 export const CORUM_ASK_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
+ * fork（corum）2026-09-18：**可带路线覆盖的续跑**所需的最小能力面。
+ *
+ * 为什么需要（红线 3）：本包编译期解析的是**官方** `@deepseek-ai/dsh-subagent` 的
+ * `SubagentSendMessageOptions`（该包被 tsdown external，类型面是官方基线），而运行期
+ * `subagents` 服务实例来自 **fork #9** `@corum/corum-subagent`（`cordis.patch.yml` 的
+ * `corum-subagent` 行取代了官方行，服务名同为 `subagents`）。fork 给该 options 增了
+ * `agentOptions`（按次路线覆盖），官方类型里没有 ⇒ 直接用会 TS2353。
+ * 按红线 3 的做法：**本地声明窄的能力接口**，不 import fork 实现包（那会把 fork 源码
+ * 内联进本 bundle）。
+ */
+interface CorumRouteAwareDelivery {
+  readonly signal: AbortSignal
+  /** 本次投递的 LLM 路线覆盖（按次、不落盘；仅冷恢复路径 honoring）。 */
+  readonly agentOptions?: { provider: string; model: string; reasoningEffort?: ReasoningEffortId }
+}
+
+/** fork #9 的 `subagents.sendMessage`（带路线覆盖版）；运行期实例即 fork，安全。 */
+type CorumRouteAwareSendMessage = (
+  sender: Agent,
+  targetId: never,
+  content: ContentBlock[],
+  options: CorumRouteAwareDelivery,
+) => Promise<unknown>
+
+/**
  * fork（corum）：委派工具名 → 角色（UI 图标/小标）。**与
  * `@corum/corum-api-remotes` 的 `subagentDelegationRoleOf` 同表**——本包的编译
  * 程序里看不到 api-remotes（fork 包各自声明，见下），故在此镜像一份；
@@ -1200,14 +1225,30 @@ export function apply(ctx: Context, config: Config): void {
       // **能 continue**：子会话上下文还在 ⇒ 带着「用主 Agent 模型接着做完」的指令
       // **续跑同一个子会话**（而不是新开一个——那会丢掉它已掌握的上下文，等于让用户
       // 为一次模型故障多付一遍钱）。
-      await appCtx.subagents.sendMessage(
+      //
+      // ★ 路线覆盖是**必需**的（2026-09-18）：失败的 continuable 子 Agent 以
+      // `stopReason:'error'` 终结时已被 DISPOSED（dispose 在 `subagent/end` 之前），
+      // 故这次投递会走 `coldResume`；而 coldResume 默认按**持久化 descriptor** 重建路由
+      // —— 那正是刚刚失败的那个坏模型。不传 `agentOptions` 就等于「用同一个坏模型再跑
+      // 一遍」，用户的「是」会被静默浪费掉。故这里显式带上主 Agent 路由
+      // （per-delivery、不落盘；descriptor 保持权威，见 corum-subagent 的 seam 注释）。
+      await (appCtx.subagents.sendMessage as unknown as CorumRouteAwareSendMessage)(
         parent,
         childId as never,
         [{
           type: 'text',
           text: "[corum] The model configured for this subagent was unavailable, and the user approved continuing on the main Agent's model. Resume and FINISH the task you were given, using the main Agent's model from now on. Do not restart from scratch — keep whatever work and context you already have.",
         }],
-        { signal: AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS) },
+        {
+          signal: AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS),
+          agentOptions: {
+            provider: asked.route.provider,
+            model: asked.route.model,
+            ...asked.route.reasoningEffort !== undefined
+              ? { reasoningEffort: asked.route.reasoningEffort as ReasoningEffortId }
+              : {},
+          },
+        },
       )
       appCtx.logger.info(`subagent (${facts.label}): re-drove continuable child ${childId} after the user approved the fallback`)
     } catch (error: unknown) {
