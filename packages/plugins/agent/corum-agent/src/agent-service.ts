@@ -1452,7 +1452,13 @@ export class CorumAgentService extends TypertRemoteService {
     if (live === undefined) {
       throw new Error(`corum-agent: applySubagentModelForSession — session "${sessionId}" 不是本进程存活的 Agent 会话`)
     }
-    const projections = (this.ctx as unknown as { sessionProjections?: AgentPresetProjections }).sessionProjections
+    // ⚠️ 必须用 `ctx.get('sessionProjections')` 而**不是** `(this.ctx as …).sessionProjections`：
+    // 本服务的 `static inject` 里**没有** sessionProjections，而 cordis 对**属性访问**在
+    // 未 inject 时直接抛 `cannot get property "sessionProjections" without inject`
+    // （vendor/cordis/src/reflect.ts:144）；`get(name)` 则无此门禁（同文件 233-243）。
+    // 2026-09-18 实机：永久档第一次点「跟随主 Agent」就是死在这个抛错上——而它被
+    // 上游 catch 成一句含糊的「保存失败」，靠改进错误文案才定位到真因。
+    const projections = this.ctx.get('sessionProjections' as never) as AgentPresetProjections | undefined
     const presetId = projections?.stateOf(live.agent.session, 'agentPreset') ?? undefined
     if (presetId === undefined || presetId === null || presetId === '') {
       throw new Error(`corum-agent: applySubagentModelForSession — 解析不到会话 "${sessionId}" 的 Agent 预设（agentPreset 投影为空）`)

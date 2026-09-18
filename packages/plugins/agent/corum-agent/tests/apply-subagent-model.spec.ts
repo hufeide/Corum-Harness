@@ -83,11 +83,36 @@ function registerSession(svc: CorumAgentService, sessionId: string, presetId: st
   }
   const agent = { session } as unknown as Agent
   ;(svc as unknown as { taskAgents: Map<string, unknown> }).taskAgents.set(sessionId, { agent, sessionId, cwd: '/tmp/x', profileId: presetId })
+  // mock ctx 必须**同时**提供 `get()`——真实 cordis ctx 上是 `ctx.get(name)` 取服务
+  // （未 inject 的属性访问会抛 `cannot get property "…" without inject`，见
+  // vendor/cordis/src/reflect.ts:144；get 无此门禁，同文件 233-243）。
+  // 生产代码走 `ctx.get('sessionProjections')`，故 mock 少了 get 就会
+  // `this.ctx.get is not a function`——那是 mock 失真，不是实现错。
   ;(svc as unknown as { ctx: unknown }).ctx = {
     sessionProjections: projections,
+    get: (name: string): unknown => (name === 'sessionProjections' ? projections : undefined),
     logger: { warn: (): void => {}, info: (): void => {}, error: (): void => {} },
   }
 }
+
+describe('★ 服务取用纪律（2026-09-18 实机事故的回归门禁）', () => {
+  it('sessionProjections 必须走 ctx.get()——属性访问在未 inject 时抛 cannot get … without inject', () => {
+    // 实机事故：永久档第一次点「跟随主 Agent」死在
+    // `cannot get property "sessionProjections" without inject`
+    // （corum-agent 的 static inject 里没有它；vendor/cordis/src/reflect.ts:144）。
+    // 修法 = 改用 `ctx.get('sessionProjections')`（get 无 inject 门禁，同文件 233-243）。
+    const src = readFileSync(join(import.meta.dirname, '../src/agent-service.ts'), 'utf8')
+    // 切到下一个顶层成员（`\n  private ` / `\n  @Remote` / `\n}`）为止——不能拿
+    // `persistProfileAndRecompile(` 当终点（它在文件里定义在本方法**之前**，会切出空串）。
+    const start = src.indexOf('applySubagentModelForSession(')
+    expect(start).toBeGreaterThan(-1)
+    const rest = src.slice(start)
+    const endMatch = /\n  (?:private |public |@Remote|\})/.exec(rest.slice(1))
+    const body = endMatch === null ? rest : rest.slice(0, endMatch.index + 1)
+    expect(body).toContain("this.ctx.get('sessionProjections'")
+    expect(body).not.toMatch(/\.sessionProjections\b\s*(\?\?)?\s*[;,\n]/)
+  })
+})
 
 describe('applySubagentModelForSession — 委派机制模型永久切换', () => {
   it("(a) worker 写 subagentModel 且预设其他字段全部保留（saveProfile 部分保存陷阱防线）", () => {
@@ -175,9 +200,16 @@ describe('applySubagentModelForSession — 委派机制模型永久切换', () =
     writeProfile(p)
     const svc = makeService()
     registerSession(svc, 'sess-d2', p.id)
-    // 把投影换掉：agentPreset 恒 undefined（agentPreset 投影缺席/为空形态）
-    const svcWithEmptyProjection = svc as unknown as { ctx: { sessionProjections: { stateOf: () => undefined } } }
-    svcWithEmptyProjection.ctx.sessionProjections = { stateOf: (): undefined => undefined }
+    // 把投影换掉：agentPreset 恒 undefined（agentPreset 投影缺席/为空形态）。
+    // ⚠️ 必须把属性与 `get()` 一起换——生产代码走 `ctx.get('sessionProjections')`
+    // （未 inject 的属性访问在真实 cordis 上会抛错），只换属性会让本用例
+    // 测到 mock 的旧闭包而不是被测行为。
+    const empty = { stateOf: (): undefined => undefined }
+    const svcWithEmptyProjection = svc as unknown as {
+      ctx: { sessionProjections: unknown; get: (name: string) => unknown }
+    }
+    svcWithEmptyProjection.ctx.sessionProjections = empty
+    svcWithEmptyProjection.ctx.get = (name: string): unknown => (name === 'sessionProjections' ? empty : undefined)
 
     expect(() => svc.applySubagentModelForSession('sess-d2', 'worker', { provider: 'pi-ai', model: 'glm-5.3' }))
       .toThrowError(/sess-d2/)
