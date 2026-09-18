@@ -293,6 +293,67 @@ async function topUpOfficialPackagesFromWorkspace() {
   return added
 }
 
+/**
+ * 用 **desktop-host 声明的 `@corum/*` 工作区包**补齐闭包，并断言「闭包 ⊇ desktop-host 的
+ * `@corum/*` 生产依赖集合」。
+ *
+ * ## 为什么（2026-09-19 实测：打包宿主 boot 时模块解析被劫持到工作区旧版）
+ *
+ * `pnpm deploy --prod` 对 `workspace:*` 依赖的物化**不可靠**：desktop-host 声明的 33 个
+ * `@corum/*` 包里，实测只有 25 个被物化进闭包，另外 10 个（`corum-agent`、`corum-ui-chat`
+ * 等）整条缺失。后果在 boot 时爆发：app-boot 的 `healProfilesModuleFallback` 会按 host
+ * `package.json` 的依赖声明 BFS，把 profile `node_modules` 里每个包软链到「它第一次解析到的
+ * 目录」——闭包缺的 `@corum/corum-ui-chat` 就顺着 `workspace:*` 声明解析到**仓库里的插件
+ * 源码目录**，于是 `dsh-commands` 这类官方包被软链到 `corum-ui-chat/node_modules` 下的
+ * **registry 旧编译**（无 `registerFileReceiptResolver`、无 `settingsNamespace` …），把闭包里
+ * 正确的官方源码版整个劫持掉，boot 即 `ctx.commands.registerFileReceiptResolver is not a
+ * function` / `does not provide an export named 'settingsNamespace'`。
+ *
+ * ## 规则
+ *
+ * 与官方包补齐同一判据：「dev 能解析到什么，闭包就带什么」。desktop-host `package.json` 里
+ * 声明为 `workspace:*` 的 `@corum/*` 包，缺什么从工作区拷什么（解引用、剔除内层
+ * `node_modules`——闭包已含全部官方包，嵌套副本只会再制造「两份模块实例」）。补完仍缺 ⇒
+ * 打包失败（宁可不出包）。
+ *
+ * @returns 补齐的包数。
+ */
+async function topUpCorumPackagesFromWorkspace() {
+  const hostPkgPath = join(DEPLOY_ROOT, 'package.json')
+  const hostPkg = JSON.parse(await readFile(hostPkgPath, 'utf8'))
+  const declared = Object.entries({
+    ...hostPkg.dependencies,
+    ...hostPkg.devDependencies,
+  }).filter(([name, spec]) => name.startsWith('@corum/') && typeof spec === 'string' && spec.startsWith('workspace:'))
+  const top = join(HOST_DIR, 'node_modules')
+  let added = 0
+  const missing = []
+  for (const [name] of declared) {
+    const dest = join(top, name)
+    if (existsSync(dest)) continue
+    // 从 desktop-host 自己的安装目录解析（它是 workspace 链接，dereference 物化）。
+    const src = join(DEPLOY_ROOT, 'node_modules', name)
+    if (!existsSync(join(src, 'package.json'))) {
+      missing.push(`${name}（desktop-host 未安装；先 pnpm install --filter corum-desktop-host）`)
+      continue
+    }
+    // 与官方包补齐同理：不能给 cp 传「按 node_modules 段过滤」的 filter（目标路径也含该段）。
+    // 但 @corum 包的 node_modules 全是官方包（闭包已齐），整棵带进去只会再产嵌套副本 ⇒
+    // 这里按「顶层目录逐项、跳过 node_modules」复制。
+    await mkdir(dest, { recursive: true })
+    for (const entry of await readdir(src)) {
+      if (entry === 'node_modules') continue
+      await cp(join(src, entry), join(dest, entry), { recursive: true, dereference: true })
+    }
+    added += 1
+  }
+  if (added > 0) console.log(`[pack-macos] closure top-up: +${added} @corum package(s) from the workspace install`)
+  if (missing.length > 0) {
+    throw new Error(`pack-macos: 闭包仍缺 ${missing.length} 个 @corum 包（boot 时模块解析会被劫持到工作区）：${missing.slice(0, 10).join(', ')}`)
+  }
+  return added
+}
+
 async function deployHost() {
   await rm(HOST_DIR, { recursive: true, force: true })
   await mkdir(HOST_DIR, { recursive: true })
@@ -339,6 +400,7 @@ async function deployHost() {
     await cp(join(deployTmp, 'node_modules'), join(HOST_DIR, 'node_modules'), { recursive: true, dereference: true })
     await rm(deployTmp, { recursive: true, force: true })
     await topUpOfficialPackagesFromWorkspace()
+    await topUpCorumPackagesFromWorkspace()
   await dedupeClosureNodeModules()
   console.log('[pack-macos] host closure materialized from registry')
   } finally {
