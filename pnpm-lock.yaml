@@ -902,6 +902,9 @@ importers:
       '@deepseek-ai/dsh-tool-pwsh':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(6e2b34478e549d42462800e51265fe4f)
+      '@deepseek-ai/dsh-tool-pwsh-persistent':
+        specifier: 0.1.3-alpha.1
+        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-agent@0.1.3-alpha.1(eb09d173d06181cbf96553bdc24de360))(@deepseek-ai/dsh-terminal@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-agent@0.1.3-alpha.1(eb09d173d06181cbf96553bdc24de360))(@deepseek-ai/dsh-brand@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))(@deepseek-ai/dsh-timeout@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-tools@packages+plugins+agent+corum-tools)
       '@deepseek-ai/dsh-tool-ralph':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(7da1c907e63a183677989299bd2865b9)
@@ -4604,6 +4607,15 @@ packages:
       '@deepseek-ai/dsh-llm': 0.1.3-alpha.1
       '@deepseek-ai/dsh-output-retention': 0.1.3-alpha.1
       '@deepseek-ai/dsh-system-prompt': 0.1.3-alpha.1
+      '@deepseek-ai/dsh-tools': ^0.1.3-alpha.1
+
+  '@deepseek-ai/dsh-tool-pwsh-persistent@0.1.3-alpha.1':
+    resolution: {integrity: sha512-EVn/Qzn3uZufE0jQrQ7gbRmkvUGXOeW8jllXYsz/PT2d8sDnD7SlgWq3vP9yeo2EqXWb47y1sB1W5rkwUf/QAA==}
+    peerDependencies:
+      '@deepseek-ai/cordis': 4.0.2
+      '@deepseek-ai/dsh-agent': 0.1.3-alpha.1
+      '@deepseek-ai/dsh-terminal': 0.1.3-alpha.1
+      '@deepseek-ai/dsh-timeout': 0.1.3-alpha.1
       '@deepseek-ai/dsh-tools': ^0.1.3-alpha.1
 
   '@deepseek-ai/dsh-tool-pwsh@0.1.3-alpha.1':
@@ -11412,6 +11424,15 @@ snapshots:
       '@deepseek-ai/dsh-llm': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-output-retention': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-system-prompt': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-llm@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
+      '@deepseek-ai/dsh-tools': link:packages/plugins/agent/corum-tools
+      '@deepseek-ai/schemastery': 3.18.2
+
+  '@deepseek-ai/dsh-tool-pwsh-persistent@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-agent@0.1.3-alpha.1(eb09d173d06181cbf96553bdc24de360))(@deepseek-ai/dsh-terminal@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-agent@0.1.3-alpha.1(eb09d173d06181cbf96553bdc24de360))(@deepseek-ai/dsh-brand@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))(@deepseek-ai/dsh-timeout@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-tools@packages+plugins+agent+corum-tools)':
+    dependencies:
+      '@deepseek-ai/cordis': 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
+      '@deepseek-ai/dsh-agent': 0.1.3-alpha.1(eb09d173d06181cbf96553bdc24de360)
+      '@deepseek-ai/dsh-terminal': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-agent@0.1.3-alpha.1(eb09d173d06181cbf96553bdc24de360))(@deepseek-ai/dsh-brand@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))
+      '@deepseek-ai/dsh-timeout': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-tools': link:packages/plugins/agent/corum-tools
       '@deepseek-ai/schemastery': 3.18.2
 

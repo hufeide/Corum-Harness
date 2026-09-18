@@ -18,7 +18,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const root = resolve(import.meta.dirname, '..', '..', '..')
@@ -226,6 +226,73 @@ async function dedupeClosureNodeModules() {
   return removed
 }
 
+/**
+ * 用**工作区实际安装的官方包**补齐闭包，并断言「闭包 ⊇ 工作区官方包集合」。
+ *
+ * ## 为什么（2026-09-18 实测：打包版 agent 起不来的真正根因）
+ *
+ * `deploy --legacy` 物化出的闭包**系统性缺官方包**：实测 208 个工作区官方 dsh 包里缺 **35 个**
+ * （`dsh-agent-loop`（`createScope` 所在！）、`dsh-tool-bash`、`dsh-mcp-client`、`dsh-subagent` …）。
+ * 这些包在官方侧多为 **peerDependency 或 devDependency**（例如 `dsh-agent-loop` 到处都是 devDep），
+ * 而 deploy 用的是 `--config.auto-install-peers=false --prod` ⇒ 谁都不是谁的「生产依赖」⇒ 不装。
+ * 后果分两种环境：
+ *   - **开发机**：`.app` 在仓库里，Node 逐级向上把缺的包从**工作区**解析到 ⇒ 能跑，但**两棵树的模块
+ *     实例混用**（agent-loop 用工作区那份 `dsh-scope`，agent-presets 用闭包那份）⇒ symbol 不同 ⇒
+ *     `agent-presets: refusing to compose an unscoped context`（实测；也就是「MCP 每秒重启」风暴的因）。
+ *   - **干净机器**：直接 `Cannot find package`，agent 根本起不来。
+ *
+ * ## 规则
+ *
+ * 「**dev 能解析到什么，闭包就带什么**」——以工作区已安装的 `@deepseek-ai/*`（dsh 运行面 + cordis +
+ * schemastery）为准，缺什么从工作区拷什么（同版本、解引用、剔除内层 node_modules 避免再引入副本）。
+ * 补完仍然缺 ⇒ 打包失败（宁可不出包）。
+ *
+ * @returns 补齐的包数。
+ */
+async function topUpOfficialPackagesFromWorkspace() {
+  const wsPnpm = join(root, 'node_modules', '.pnpm')
+  if (!existsSync(wsPnpm)) throw new Error('pack-macos: 工作区未安装（缺 node_modules/.pnpm），无法据实补齐闭包')
+  const top = join(HOST_DIR, 'node_modules')
+  // ① 工作区已安装的官方包（名字 → 包目录）
+  const wanted = new Map()
+  // 排除**测试工具包**：它们只服务工作区开发，不进发行闭包（`dsh-agent-loop-testkit` 实测在
+  // workspace 里是 alpha.2、与闭包的 alpha.1 不一致，会撞 assertUniformDshVersions；与其为测试
+  // 工具钉版，不如不让它上船）。
+  const isTestTooling = (name) => /-testkit$/.test(name)
+  for (const entry of await readdir(wsPnpm)) {
+    const m = /^@deepseek-ai\+([a-z0-9-]+)@/.exec(entry)
+    if (m === null) continue
+    const name = `@deepseek-ai/${m[1]}`
+    if (isTestTooling(name)) continue
+    const dir = join(wsPnpm, entry, 'node_modules', '@deepseek-ai', m[1])
+    if (existsSync(join(dir, 'package.json'))) wanted.set(name, dir)
+  }
+  // ② 缺什么补什么
+  let added = 0
+  for (const [name, src] of wanted) {
+    const dest = join(top, name)
+    if (existsSync(dest)) continue
+    await mkdir(dirname(dest), { recursive: true })
+    // ⚠️ 不能给 cp 传「按 node_modules 段过滤」的 filter：Node 的 filter 对**目标路径**同样生效，
+    // 而目标路径本身含 `node_modules` 段 ⇒ 会把整棵复制过滤掉（实测：37 个包一个都没进去、断言随即报缺）。
+    // 内层副本由随后的 dedupeClosureNodeModules() 负责清理（同版本嵌套副本一律删）。
+    await cp(src, dest, { recursive: true, dereference: true })
+    added += 1
+  }
+  if (added > 0) console.log(`[pack-macos] closure top-up: +${added} official package(s) from the workspace install`)
+  // ③ 断言：闭包必须覆盖工作区官方包集合
+  const have = new Set()
+  for (const entry of await readdir(top)) {
+    if (entry !== '@deepseek-ai') continue
+    for (const n of await readdir(join(top, entry))) have.add(`@deepseek-ai/${n}`)
+  }
+  const missing = [...wanted.keys()].filter(n => !have.has(n))
+  if (missing.length > 0) {
+    throw new Error(`pack-macos: 闭包仍缺 ${missing.length} 个官方包（打包版会有「从别处解析」的隐患）：${missing.slice(0, 10).join(', ')}`)
+  }
+  return added
+}
+
 async function deployHost() {
   await rm(HOST_DIR, { recursive: true, force: true })
   await mkdir(HOST_DIR, { recursive: true })
@@ -271,7 +338,8 @@ async function deployHost() {
     await cleanupBrokenSymlinks(join(deployTmp, 'node_modules'))
     await cp(join(deployTmp, 'node_modules'), join(HOST_DIR, 'node_modules'), { recursive: true, dereference: true })
     await rm(deployTmp, { recursive: true, force: true })
-    await dedupeClosureNodeModules()
+    await topUpOfficialPackagesFromWorkspace()
+  await dedupeClosureNodeModules()
   console.log('[pack-macos] host closure materialized from registry')
   } finally {
     // 副本用完即弃（含它自己的 node_modules）：可能上 GB，别留在 /tmp 里。
