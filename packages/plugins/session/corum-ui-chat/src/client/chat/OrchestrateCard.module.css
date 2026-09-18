@@ -247,6 +247,21 @@
 .branchNode[data-tone='idle'] { color: var(--orch-idle); }
 
 /* 分支卡（设计稿 brX-card：r8 + 半透明底 + label/sub + chip + goto）。 */
+/* 详情卡跳转按钮「在会话里定位这张卡」的高亮态（data-reveal 由 ChatView 置位、
+   约 1.6s 后撤销）。与 SubagentCard 的 .card[data-reveal] 同一视觉语言：
+   边框 + 轻微背景脉冲，提示用户「就是这一条」。 */
+.branchCard[data-reveal],
+.mergeCard[data-reveal] {
+  border: 1px solid var(--corum-glass-border-active, #01CDFE);
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  animation: orchestrateReveal 1.6s ease-out;
+}
+
+@keyframes orchestrateReveal {
+  0% { box-shadow: 0 0 0 0 rgba(1, 205, 254, 0.5); }
+  100% { box-shadow: 0 0 0 12px rgba(1, 205, 254, 0); }
+}
+
 .branchCard {
   flex: 1;
   min-width: 0;

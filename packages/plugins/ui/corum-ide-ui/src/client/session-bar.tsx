@@ -498,11 +498,13 @@ function RevealCardButton({ childSessionId, label, revealCard, fallback }: {
       className={css.statusDetailAgentJump}
       data-jump
       disabled={busy}
-      title="在会话里定位这张卡（不切换会话）"
+      title="在会话里定位这张卡（不切换会话，只在当前页面滚动并高亮）"
       aria-label={`在会话里定位 ${label}`}
       onClick={onClick}
     >
-      ⌖
+      {/* 与行尾 `→`（进入子会话）区分开的「定位」字形：靶心。本文件的图标惯例是文本字形
+          （`⑂` 工作树 / `▸` 折叠），不引入图标库；`⌖` 实测渲染得像加号、紧挨 `→` 会误读。 */}
+      ◎
     </button>
   )
 }

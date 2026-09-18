@@ -280,7 +280,9 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
       <span className={css.branchNode} data-tone={chip.tone}>
         {state === 'done' ? <Check size={9} /> : state === 'failed' ? <X size={9} /> : state === 'aborted' ? <Ban size={9} /> : <Loader size={9} />}
       </span>
-      <div className={css.branchCard}>
+      {/* ★ 锚点（2026-09-18）：分支行就是该子会话在瀑布里的「卡片」——详情卡的跳转按钮按
+          `data-child-session-id` 定位，缺了它就只对 SubagentCard 生效、对编排模式失效。 */}
+      <div className={css.branchCard} data-child-session-id={child || undefined}>
         <span className={css.branchTx}>
           <span className={css.branchLabel}>{task.label}</span>
           <span className={css.branchSub}>{branchSubtitle(task, worktrees, slugFallback)}</span>
@@ -459,6 +461,7 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                     ③ 跑过但没落地 = 待集成（含原因与分支数），这才是需要人/主 Agent
                        插手的状态（`pending` 的 reason 由折叠器给出，如「2 个分支待集成」）。 */}
                 <div className={css.mergeCard} data-integrator
+                  data-child-session-id={integratorChild || undefined}
                   data-state={integrating
                     ? 'integrating'
                     : integrationFailed

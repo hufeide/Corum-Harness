@@ -373,8 +373,15 @@ export function ChatView({
       const settle = (): Promise<void> => new Promise<void>((resolveSettle) => {
         requestAnimationFrame(() => { requestAnimationFrame(() => { resolveSettle() }) })
       })
+      /**
+       * 落到目标并高亮。
+       *
+       * ⚠️ **瞬时滚动**（`behavior: 'auto'`），刻意不用 smooth：距离是无界的，实测一个
+       * 编排卡在 7522px 之外时，smooth 动画要跑**数秒**才到位，而高亮 1.6s 就撤销 ——
+       * 用户会看到「闪了一下但屏幕没动」，判定成「点了没反应」。定位手势要的是**立刻到**。
+       */
       const land = (card: HTMLElement): void => {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        card.scrollIntoView({ block: 'center' })
         card.setAttribute('data-reveal', '')
         setTimeout(() => { card.removeAttribute('data-reveal') }, REVEAL_HIGHLIGHT_MS)
       }
