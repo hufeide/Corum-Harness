@@ -305,6 +305,19 @@
     # 解析（desktop deps 已链）。官方 base 的 tool-subagent 行保留：官方
     # subagent_fork / codex / claude-code 实例与 workflow 只读 fan-out 继续走它。
     # invariant 不挂（官方组合未挂 subagent-invariant，fork 对齐同纪律）。
+    #
+    # ⚠️ **但 settings namespace 必须 boot 常驻**（2026-09-18 修复，用户报障驱动）：
+    # `corum-subagent` ns 原先只在上面那些"按会话 apply"的工具实例里注册 ⇒ **冷启动
+    # （不建任何 corum 会话）时该 ns 不存在**，实测 `settings/describe` 里没有它，后果：
+    # ① 设置→智能体 那两个「子 Agent 默认模型」显示为**空**（settings.yaml 里明明有值）；
+    # ② 写入报 `settings namespace "corum-subagent" is not registered`；
+    # ③ **新建预设的模板预填读不到值**（该配置项的全部意义就是当模板）。
+    # 对照：同类 ns `subagent-model-selection-settings` 在官方 web-app bundle 里**有 host
+    # 行**，故它冷启动即在册。本行就是给 `corum-subagent` 补上同样的时机。
+    # 行序在 tool-subagent 的 preset apply 之前 ⇒ 本行先注册；工具实例侧走
+    # `acquireCorumSubagentSettingsScope`（容忍"已被注册"，官方 register 对重复注册抛错）。
+    - id: corum-subagent-settings
+      name: '@corum/corum-tool-subagent/settings-registrar'
 
     # Native-only directory picker (the desktop always sits on the host
     # display); replaces the disabled auto row above. The `-auto` row would

@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
@@ -13,7 +14,10 @@
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
     },
-    "./package.json": "./package.json"
+    "./settings-registrar": {
+      "types": "./lib/types/settings-registrar.d.ts",
+      "default": "./lib/settings-registrar.js"
+    }
   },
   "scripts": {
     "build": "tsc -b && tsdown",

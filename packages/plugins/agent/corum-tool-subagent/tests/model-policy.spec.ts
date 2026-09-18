@@ -152,6 +152,27 @@ describe('策略② 失败回退：模型调用出错 ⇒ 退回主 Agent 路由
 })
 
 describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
+  it('★ settings ns 必须 boot 常驻：registrar 入口存在且不再只靠按会话 apply 注册', () => {
+    // 2026-09-18 bug：`corum-subagent` ns 原先只在按会话 apply 的工具实例里注册 ⇒
+    // 冷启动（不建 corum 会话）时该 ns 不存在，设置页读到空值、新建预设的模板预填失效。
+    // 修法是加 boot 常驻行（package.json 的 ./settings-registrar + cordis.patch.yml 的行）。
+    // 这里钉住三处：入口文件存在、声明抽到共享模块、patch.yml 有该行。
+    const registrar = readFileSync(join(import.meta.dirname, '../src/settings-registrar.ts'), 'utf8')
+    expect(registrar).toContain('acquireCorumSubagentSettingsScope')
+    const nsModule = readFileSync(join(import.meta.dirname, '../src/settings-namespace.ts'), 'utf8')
+    expect(nsModule).toContain("'corum-subagent'")
+    // 官方 register 对重复注册抛错 ⇒ 必须走容忍"已注册"的共享 helper。
+    expect(nsModule).toContain('is already registered')
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '../package.json'), 'utf8')) as { exports: Record<string, unknown> }
+    expect(Object.keys(pkg.exports)).toContain('./settings-registrar')
+    const patch = readFileSync(
+      join(import.meta.dirname, '../../../../desktop/cordis.patch.yml'),
+      'utf8',
+    )
+    expect(patch, 'corum-subagent settings 的 boot 注册行被删了（冷启动该 ns 将不存在）')
+      .toContain("name: '@corum/corum-tool-subagent/settings-registrar'")
+  })
+
   it('★ worker 与 research 由同一 config 工厂生成（策略③：同一套策略）', () => {
     expect(COMPILE_SRC).toContain("corumSubagentConfig('worker', profile, mcpDenyNames)")
     expect(COMPILE_SRC).toContain("corumSubagentConfig('research', profile, mcpDenyNames)")

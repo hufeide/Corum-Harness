@@ -190,68 +190,27 @@ export interface Config {
   model?: { provider: string; model: string; reasoningEffort?: string }
 }
 
-// ── fork（corum）：corum-subagent 全局设置面（三级配置第一级）──────────────────
+// ── fork（corum）：`corum-subagent` 全局设置面（三级配置第一级）──────────────────
+//
+// 2026-09-18：声明（namespace + 形 + schema）与「取 scope」逻辑抽到
+// `settings-namespace.ts`，供**两个装配时机**共用——`settings-registrar.ts`（boot 常驻行）
+// 与下面的 `apply()`（按会话挂载的工具实例）。抽出的必要性见该文件头注释（避免把 100KB
+// 工具实现内联进 registrar、避免模块级单例被复制成两份）。
+import {
+  acquireCorumSubagentSettingsScope,
+  CORUM_SUBAGENT_SETTINGS_NAMESPACE,
+  CORUM_SUBAGENT_SETTINGS_SCHEMA,
+  type CorumSettingsProviderFace,
+  type CorumSubagentGlobalSettings,
+  type CorumSubagentGlobalSettingsScope,
+} from './settings-namespace.ts'
 
-/** host settings namespace（settings.yaml 的 corum-subagent 段）。 */
-export const CORUM_SUBAGENT_SETTINGS_NAMESPACE = 'corum-subagent'
-
-/** 全局默认配置形（与 preset config 逐键同名；全部可选——未设置的键由实例默认兜底）。 */
-export interface CorumSubagentGlobalSettings {
-  /** 隔离模式（`off` 已于 2026-09-16 清除，见 `isolation.mode` 的说明）。 */
-  readonly isolationMode?: 'always' | 'write-tasks'
-  readonly worktreeRoot?: string
-  readonly branchPrefix?: string
-  readonly autoCleanup?: boolean
-  readonly denyDirectFs?: boolean
-  readonly maxParallelChildren?: number
-  readonly integrateChecks?: string[]
-  readonly merger?: 'parent' | 'merger'
-  /**
-   * **新建预设的模板值**（worker 子 Agent 模型）——**不是**运行期兜底档。
-   *
-   * 用户 2026-09-18 澄清：「全局页面的配置只是说你**创建一个新预设的时候默认使用这套
-   * 配置**，如果新的预设自己覆盖了就按预设的配置，**始终是两档**（预设配的模型 / 跟随
-   * 主 Agent）」。故该键**只在预设编辑器创建草稿时被预填**，运行期的子 Agent 路由解析
-   * **不读它**（见 `corumEffectiveModel = config.model`）。
-   */
-  readonly defaultModel?: { provider: string; model: string; reasoningEffort?: string }
-  /** 同 {@link defaultModel}，面向 research 子 Agent（新建预设时的模板）。 */
-  readonly defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
-}
-
-/** schemastery schema（全键可选；保持 omission 语义——设置面只写用户显式改的键）。 */
-// schemastery 的 z<T> 与 default 宽化在嵌套可选键上推断冲突——schema 段单独标注
-// 宽接口，运行时行为由 default(undefined) 保证 omission。
-// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
-export const CORUM_SUBAGENT_SETTINGS_SCHEMA: z<CorumSubagentGlobalSettings & {
-  defaultModel?: { provider: string; model: string; reasoningEffort?: string }
-  defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
-}> = z.object({
-  isolationMode: z.union([z.const('always' as const), z.const('write-tasks' as const)]).default(undefined as unknown as 'always' | 'write-tasks'),
-  worktreeRoot: z.string().default(undefined as unknown as string),
-  branchPrefix: z.string().default(undefined as unknown as string),
-  autoCleanup: z.boolean().default(undefined as unknown as boolean),
-  denyDirectFs: z.boolean().default(undefined as unknown as boolean),
-  maxParallelChildren: z.number().step(1).min(1).default(undefined as unknown as number),
-  integrateChecks: z.array(z.string()).default(undefined as unknown as string[]),
-  merger: z.union([z.const('parent' as const), z.const('merger' as const)]).default(undefined as unknown as 'parent' | 'merger'),
-  defaultModel: z.object({
-    provider: z.string(),
-    model: z.string(),
-    reasoningEffort: z.string().min(1).default(undefined as unknown as string),
-  }).default(undefined as unknown as { provider: string; model: string; reasoningEffort: string }),
-  defaultResearchModel: z.object({
-    provider: z.string(),
-    model: z.string(),
-    reasoningEffort: z.string().min(1).default(undefined as unknown as string),
-  }).default(undefined as unknown as { provider: string; model: string; reasoningEffort: string }),
-})
-
-/** SettingsScope 的消费面（读+写；跨 bundle 模块级单例）。 */
-interface CorumSubagentGlobalSettingsScope {
-  get(): CorumSubagentGlobalSettings
-  update(patch: object): Promise<void>
-}
+// 保持对外导出面不变（此前这些名字直接定义在本文件，外部/测试可能引用）。
+export {
+  CORUM_SUBAGENT_SETTINGS_NAMESPACE,
+  CORUM_SUBAGENT_SETTINGS_SCHEMA,
+  type CorumSubagentGlobalSettings,
+} from './settings-namespace.ts'
 
 /** 双实例共享的全局设置 scope（先注册者持有；模块级单例防同 namespace 重复注册）。 */
 let corumGlobalSettingsScope: CorumSubagentGlobalSettingsScope | undefined
@@ -1032,16 +991,19 @@ export function apply(ctx: Context, config: Config): void {
 
   // fork（corum）：host settings namespace `corum-subagent`（三级配置第一级：
   // 全局默认；「子 Agent」设置 section 读写此面，preset config 逐键覆盖）。
-  // settings.register 返回的 SettingsScope 承载 settings.yaml 的 corum-subagent
-  // 段（不存在时回落 schema 默认）；每个实例 apply 都会注册一次——cordis 对同
-  // namespace 重复注册抛错，所以 worker/research 双实例只有一个能持有注册：
-  // 用 registration 单例守卫（先注册者持有，后注册者共享同一 scope 读取）。
+  //
+  // 2026-09-18 修复「冷启动该 ns 不存在」：正常路径下**本包不再负责注册**——boot 常驻行
+  // `settings-registrar.ts` 已在更早的行序注册它（该 ns 是全局配置，与有无 corum 会话无关；
+  // 只在按会话 apply 时注册会导致冷启动进设置页读到空值、模板预填失效）。
+  // 这里保留**兜底**：registrar 缺席时（其它组合/其它部署）仍能注册。两侧共用
+  // `acquireCorumSubagentSettingsScope`，它容忍「已被注册」（官方 register 对重复注册抛错）。
+  // worker/research 双实例共享模块级单例，避免第二次 apply 重复注册。
   if (corumGlobalSettingsScope === undefined) {
     ctx.inject(['settings'], (settingsCtx) => {
-      corumGlobalSettingsScope = settingsCtx.settings.register(
-        CORUM_SUBAGENT_SETTINGS_NAMESPACE,
-        CORUM_SUBAGENT_SETTINGS_SCHEMA,
-      ) as unknown as CorumSubagentGlobalSettingsScope
+      if (corumGlobalSettingsScope !== undefined) return
+      corumGlobalSettingsScope = acquireCorumSubagentSettingsScope(
+        settingsCtx.settings as unknown as CorumSettingsProviderFace,
+      )
     })
   }
 
