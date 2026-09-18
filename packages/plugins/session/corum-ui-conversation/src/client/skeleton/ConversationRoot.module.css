@@ -580,9 +580,28 @@
      width as the docked composer at every viewport. */
   width: min(calc(var(--dsh-composer-card-max-width) + 2 * var(--dsh-composer-side-clearance)), 100%);
   z-index: 1;
-  /* 裁掉 heroGlow 光斑——absolute 的 glow（449 高）超出容器会被算进 scrollBody
-     的 scrollHeight，把空态撑出滚动条（2026-08-30 用户走查：空态元素应都在
-     视口内，右侧不该出现滚动条）。glow 是装饰，裁掉不影响视觉主体。 */
+}
+
+/* 裁掉 heroGlow 光斑——absolute 的 glow（449 高）超出容器会被算进 scrollBody
+   的 scrollHeight，把空态撑出滚动条（2026-08-30 用户走查：空态元素应都在
+   视口内，右侧不该出现滚动条）。glow 是装饰，裁掉不影响视觉主体。
+
+   ❗ 2026-09-18（用户报障）：这条裁剪**必须只作用于真有 glow 的那个 hero**，
+   不能无条件挂在 `.composerHero` 上。`.composerHero` 同时服务**两种** hero：
+     · `!hasSession`（EmptyStateHero）——**只有它**渲染 `HeroGlow`，裁剪是它的诉求；
+     · `summaryBlank === true`（NewSessionHero）——**没有 glow**（HeroGlow 的渲染条件
+       是 `!hasSession`），却白挨一刀：composer 工具栏里的 Agent 二级选择面板是
+       `position:absolute; bottom: calc(100% + 8px)` **向上展开**的，面板
+       `max-height:320px` 远高于它所在的 chip（27px）——
+       实测面板 320 高、栈高仅 213（top 471 / bottom 684），面板顶（272）被这条
+       `overflow:hidden` 齐平裁掉，只剩「C++ 工程师…/嵌入式工程师…」两条尾巴可见
+       （用户截图即此形态：菜单高度看着"只有输入框那么高"）。
+   用 `:has()` 把裁剪收敛到**真的含 glow 的那棵树**（glow 是 composerStack 的直接
+   子元素）：空态（有 glow）行为与 2026-08-30 完全一致；blank 会话（无 glow）不再
+   裁任何东西 ⇒ 向上展开的面板（Agent 选择器、模型选择器）能完整画出容器。
+   同款 `:has()` 收敛在本文件 `.scrollBody:has([data-conversation-composer-overlay])`
+   已有先例。 */
+.composerHero:has(> .heroGlow) {
   overflow: hidden;
 }
 
