@@ -2974,7 +2974,14 @@ describe('continuable errors', () => {
   })
 
   it('ignores the route override for an already-resident child', async () => {
-    const { ctx, parent } = await setup([textResponse('first'), textResponse('still resident')])
+    // Hold the child's first turn open so the override-carrying delivery lands
+    // while the Activation is resident, then release and let both turns run.
+    const release = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('first'), gate: release.promise },
+      { chunks: textResponse('still resident') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
     const started = await ctx.subagents.startContinuable(startSpec(parent))
     const resident = await vi.waitFor(() => {
       const found = ctx.agents.get(started.childId)
@@ -2986,13 +2993,18 @@ describe('continuable errors', () => {
       signal: testSignal,
       agentOptions: { provider: 'alt', model: 'alt-model' },
     })
-    await vi.waitFor(() => {
-      expect(adapterOf(ctx).requests.filter(request => request.sessionId === started.childId)).toHaveLength(2)
-    })
-    // No teardown: the same resident Agent keeps its descriptor route.
-    expect(ctx.agents.get(started.childId)).toBe(resident)
-    expect(resident.options).toMatchObject({ provider: 'mock', model: 'mock' })
+    release.resolve(undefined)
     await waitNoActivation(ctx, started.childId)
+
+    // No teardown-and-cold-resume: both turns ran on the SAME resident Agent
+    // with the descriptor route; the override changed nothing observable.
+    expect(adapter.requests.filter(request => request.sessionId === started.childId))
+      .toMatchObject([
+        { provider: 'mock', model: 'mock' },
+        { provider: 'mock', model: 'mock' },
+      ])
+    expect(ctx.agents.get(started.childId)).toBeUndefined()
+    expect(resident.options.model).toBe('mock')
   })
 
   it('unloading the manager drains its live activations', async () => {
