@@ -432,14 +432,16 @@ type ForegroundToolResult = {
   readonly runId: SubagentRun['id']
   readonly output: JsonValue[]
   /**
-   * fork（corum）：本次委派的隔离落点——**只在没隔离时**由 `spawnOne` 附上
-   * （`parent-tree` / `skipped-non-git`），由工具的 render 渲染成一行给父 Agent 的
-   * 事实说明（见 `corumIsolationBoundaryNotice`）。2026-09-13 用户定调「先做可见性」。
+   * fork（corum）：本次委派的**隔离落点**——由 `spawnOne` 附上，工具 render 渲染成一行
+   * 事实说明给父 Agent（文本单一事实源 = `corumIsolationBoundaryNotice`）。
+   *
+   * ⚠️ 2026-09-18 反向修正：此前**只在「没隔离」时**才附（注释原话「worktree 是常规路径、
+   * 无需提醒」）。那个假设是错的——隔离成功恰恰是**唯一需要模型采取行动**的情形：改动在
+   * 分支上，**只有 `integrate: true` 能把它并进主树**；不提醒就等于把「分支已提交、模型
+   * 以为完事」当默认结局，工作静默搁浅（作者本人 2026-09-18 就这么中招：两次隔离委派都
+   * 没被提醒，手工 cherry-pick 收尾，机制台账从未翻成 integrated）。故现在**两档都报**。
    */
-  /**
-   * 隔离落点（2026-09-16 不变式⑤：写委派恒隔离 ⇒ 只剩「非 git 工作区降级」一种没隔离）。
-   */
-  readonly isolationBoundary?: 'skipped-non-git'
+  readonly isolationBoundary?: 'worktree' | 'skipped-non-git'
 }
 
 /**
@@ -1304,18 +1306,26 @@ export function apply(ctx: Context, config: Config): void {
     // ⚠️ 必须在这里投递，不能在 `settleFromEnd` 里 throw —— emitter 的 per-listener
     // 容错会**吞掉**抛错（本文件上方注释已记过 `parentAgent.session.id` 抛错被吞的先例）。
     // 有 parent 时按会话精确取走；拿不到 parent 时兜底取走全部，避免失败在实例里累积。
+    // ⚠️ 这两件事**必须各自独立判定**：`failures`（收口提交失败）与 `pendingAfter`
+    // （有分支待集成）互不蕴含。此处早先是 `if (failures.length === 0) return`，
+    // 于是**只有收口提交也失败时**才会发出下面的「待集成」通知——正常情况下
+    // （提交没失败）那条通知**永远发不出去**（2026-09-18 定位：作者同一场会话里
+    // 两次前台隔离委派都没收到提示，只好手工 cherry-pick 集成；机制台账因此从未翻成
+    // integrated、autoCleanup 也没跑，worktrees 堆到 2.4GB/13 个）。
+    // 修法：把「收口失败」的处理收窄进它自己的分支，**别拦后面的通知**。
     const failures = orchestration.drainSettleCommitFailures(
       parent === undefined ? undefined : String(parent.session.id),
     )
-    if (failures.length === 0) return
-    if (parent === undefined) {
-      ctx.logger.warn(
-        `settle auto-commit failed for ${failures.length} worktree(s) but no parent Agent was reachable,`
-          + ` so the model was not told: ${failures.map(failure => `${failure.slug}: ${failure.reason}`).join('; ')}`,
-      )
-      return
+    if (failures.length > 0) {
+      if (parent === undefined) {
+        ctx.logger.warn(
+          `settle auto-commit failed for ${failures.length} worktree(s) but no parent Agent was reachable,`
+            + ` so the model was not told: ${failures.map(failure => `${failure.slug}: ${failure.reason}`).join('; ')}`,
+        )
+      } else {
+        corumNotifySettleCommitFailures(parent, failures, ctx.logger)
+      }
     }
-    corumNotifySettleCommitFailures(parent, failures, ctx.logger)
 
     // 不变式④（invariant.merge-strategy，用户 2026-09-16）：**单发异步后台子 Agent 的分支
     // 由主 Agent 合并**——settle 后若有待集成隔离分支，同样注入 pending-integration 通知
@@ -1666,17 +1676,18 @@ export function apply(ctx: Context, config: Config): void {
        * 主工作区里了**。此前这件事只写在给子 Agent 的提示词里，父侧从结果读不出来，
        * 于是 2026-09-12 的探针把「没隔离」当成了「隔离了」。
        *
-       * `worktree` 不发给父侧（那是常规路径、无需提醒；集成结果另有报告），只报
-       * 「没隔离」的落点。
+       * ⚠️ 2026-09-18 修正：**两档都要报**。此前只报「没隔离」那一档，理由是「worktree 是
+       * 常规路径、无需提醒」——但隔离成功时模型**必须**做一件事（`integrate: true`）才能把
+       * 改动并进主树，不报就等于让它以为交完活了（作者 2026-09-18 实测中招：两次隔离委派都
+       * 没收到任何提示，工作卡在分支上）。「无需提醒」把最需要提醒的一档给省掉了。
        *
-       * **2026-09-16 不变式⑤**：写委派恒隔离 ⇒ git 工作区下**不再有**「直落父树」这一档；
-       * 唯一残留的「没隔离」是**非 git 工作区**的自动降级（worktree 建不出来），故只剩
-       * `'skipped-non-git'`。枚举随 `corumIsolationBoundaryNotice` 一并收窄。
+       * **2026-09-16 不变式⑤**：写委派恒隔离 ⇒ git 工作区下不再有「直落父树」这一档；
+       * 唯一残留的「没隔离」是**非 git 工作区**的自动降级（worktree 建不出来）。
        */
-      const corumIsolationBoundary: 'skipped-non-git' | undefined =
+      const corumIsolationBoundary: 'worktree' | 'skipped-non-git' | undefined =
         !corumIsWrite || effReadonlyResearch
           ? undefined
-          : !corumIsolate && corumIsolationSkipped ? 'skipped-non-git' : undefined
+          : corumIsolate ? 'worktree' : (corumIsolationSkipped ? 'skipped-non-git' : undefined)
 
       // fork（corum）：机制追加的 deny 必须收敛到「本 preset 真正注册的工具名」——
       // `tools.restrict()` 对未知名 fail-loud，而 corum 的写工具名单是平台硬编码
@@ -2219,11 +2230,14 @@ export function apply(ctx: Context, config: Config): void {
                   runId: { type: 'string', required: true },
                   output: { type: 'array', required: true, items: { type: 'json' } },
                   /**
-                   * fork（corum）：本次委派的隔离落点（只在**没隔离**时出现，见
-                   * `corumIsolationBoundaryNotice`）。父 Agent 据此知道改动已经在自己的
-                   * 主工作区里、没有分支代管。
+                   * fork（corum）：本次委派的隔离落点（**两档都出现**，见
+                   * `corumIsolationBoundaryNotice`）：`worktree` = 改动在隔离分支上、
+                   * 必须 `integrate: true` 才进主树；`skipped-non-git` = 没隔离，改动已在
+                   * 父树里。⚠️ 本 schema 声明了 `additionalProperties: false`，故新增字段
+                   * **必须**同步在这里，否则整个结果会被 INVALID_TOOL_OUTPUT 吞掉
+                   * （本仓已付过这个学费，见 HANDOFF-2026-09-16 §教训）。
                    */
-                  isolationBoundary: { type: 'string', enum: ['skipped-non-git'] },
+                  isolationBoundary: { type: 'string', enum: ['worktree', 'skipped-non-git'] },
                 },
               },
             ],
@@ -2638,7 +2652,12 @@ export function apply(ctx: Context, config: Config): void {
                   notifyParent: false,
                 }, subagentProvider).then((outcome) => {
                   if (outcome.kind === 'foreground') {
-                    if (outcome.isolationBoundary !== undefined) {
+                    // ⚠️ orchestrate 的 `parentTreeTasks` 语义是「**没**隔离、改动直接落在父树
+                    // 的那几个任务」（它是异常档，用于提示父 Agent「这些改动已在你的树里」）。
+                    // 2026-09-18 起 `isolationBoundary` 变成两档都填（`'worktree'` 也要报，
+                    // 因为隔离的才需要 integrate）——故这里必须**显式排除 `'worktree'`**，
+                    // 否则每个正常任务都会被误记成「父树任务」，该档位失去意义。
+                    if (outcome.isolationBoundary !== undefined && outcome.isolationBoundary !== 'worktree') {
                       parentTreeTasks.push({ index, boundary: outcome.isolationBoundary })
                     }
                     return { ...base, ok: true, output: outputValueText(outcome.output) }

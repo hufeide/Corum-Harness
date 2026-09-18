@@ -1566,15 +1566,21 @@ export function corumIntegratorPersona(
  * 不存在「写委派直落父树」的形态。唯一「没隔离」的落点是**非 git 工作区**的自动降级
  * （worktree 建不出来），故枚举收窄为两档，让不可达状态在类型上就不可表示。
  * @param branch - `worktree` 时的分支名（缺省时只报「已隔离」）。
- * @returns 一行说明；`worktree` 且带分支时也返回（供调用方决定是否显示），
- *   调用方对 `worktree` 可选择性省略。
+ * @returns 一行说明。**2026-09-18：两档都必须报**（此前调用方对 `worktree` 「可选择性省略」，
+ *   实际就是省略掉了——而那一档恰恰是唯一需要模型采取动作的情形，见下方 `worktree` 分支文本）。
  */
 export function corumIsolationBoundaryNotice(
   boundary: 'worktree' | 'skipped-non-git',
   branch?: string,
 ): string {
   if (boundary === 'worktree') {
-    return `[corum isolation] this delegation ran in an ISOLATED worktree${branch === undefined || branch === '' ? '' : ` (branch ${branch})`} — its edits are on that branch and only reach your tree through integrate.`
+    // 2026-09-18：这句必须**点明动作**（`subagent { integrate: true }`），不能只说 "through
+    // integrate"——实测（作者本场会话）模型没收到任何提示时手工 cherry-pick 收尾，机制台账
+    // 因此从未翻成 integrated、autoCleanup 没跑，worktrees 堆到 2.4GB/13 个。孤立分支上
+    // 的提交是那份工作的**唯一副本**，且 verify/集成门禁只在 integrate 路径上生效 ⇒
+    // 让模型记住「还要 integrate」是这条提示的全部意义。
+    return `[corum isolation] this delegation ran in an ISOLATED worktree${branch === undefined || branch === '' ? '' : ` (branch ${branch})`} — its commits exist ONLY on that branch and are NOT in your working tree yet. `
+      + 'You MUST finish it yourself with `subagent { integrate: true }` (merge + verify + commit); until you do, the work is invisible to everything else and the worktree is never reclaimed. Do not merge or cherry-pick the branch by hand — that bypasses the verify gate and leaves the mechanism ledger stale.'
   }
   return '[corum isolation] this delegation ran in the PARENT working tree (not isolated): the workspace is not a git repository, so isolation was skipped — its edits are ALREADY in your tree and nothing will merge them.'
 }

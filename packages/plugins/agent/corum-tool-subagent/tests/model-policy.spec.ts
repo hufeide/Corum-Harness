@@ -223,6 +223,50 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(SRC).toContain('as unknown as CorumRouteAwareSendMessage')
   })
 
+  it('★★ subagent/end 里「收口失败」与「待集成」必须各自独立判定（早退会吃掉待集成通知）', () => {
+    // 2026-09-18 根因：原实现 `if (failures.length === 0) return` 排在待集成通知**之前**
+    // ⇒ 只有「收口提交也失败」时才发得出「有分支待集成」，正常情况**永不发**
+    // （作者本场会话两次隔离委派都没被提醒，手工 cherry-pick 收尾，worktrees 堆到 2.4GB）。
+    const handler = between("ctx.on('subagent/end' as never", '}) as never, { global: true })')
+    // ⚠️ 判「代码有没有」必须先剥注释：本文件的修复注释里**引用**了那行旧代码
+    // （`if (failures.length === 0) return`），裸子串判会把说明性注释也算成回潮
+    // ——本仓已有这个学费（见 stripComments 的说明）。
+    const code = stripComments(handler)
+    expect(code, '出现 `failures.length === 0) return` 早退 ⇒ 待集成通知会被吃掉')
+      .not.toMatch(/if\s*\(\s*failures\.length\s*===\s*0\s*\)\s*return/)
+    // 收口失败必须收窄进自己的分支（`> 0`），不得早退。
+    expect(code).toMatch(/if\s*\(\s*failures\.length\s*>\s*0\s*\)/)
+    // 两者都要在同一处理器里独立出现。
+    expect(code).toContain('drainSettleCommitFailures')
+    expect(code).toContain('corumPendingIntegration')
+    // 待集成通知必须在 drain 之后（顺序语义：先收口、再报待集成）。
+    expect(code.indexOf('corumPendingIntegration')).toBeGreaterThan(code.indexOf('drainSettleCommitFailures'))
+  })
+
+  it('★★ 前台隔离委派的结果必须带 isolationBoundary=worktree（否则模型不知道要 integrate）', () => {
+    // 2026-09-18 根因：boundary 此前**只在没隔离时**填（注释写「worktree 是常规路径、无需
+    // 提醒」）——而隔离成功恰恰是唯一需要模型行动的情形（改动在分支上，只有 integrate 能并进主树）。
+    const block = between('const corumIsolationBoundary:', 'const corumSetMechanismFilter')
+    expect(block).toContain("'worktree'")
+    expect(block).toContain("'skipped-non-git'")
+    // 且必须真的在隔离时取 worktree（不是恒 undefined）。
+    expect(block).toMatch(/corumIsolate\s*\?\s*'worktree'/)
+    // output.schema 必须同步（additionalProperties:false ⇒ 不同步会被 INVALID_TOOL_OUTPUT 吞掉）。
+    const schema = between('isolationBoundary: { type: \'string\', enum:', '}')
+    expect(schema).toContain('worktree')
+  })
+
+  it('★ worktree 档的提示必须点明 `subagent { integrate: true }` 且劝阻手工 cherry-pick', () => {
+    const orch = readFileSync(
+      join(import.meta.dirname, '../../corum-orchestration/src/orchestration.ts'),
+      'utf8',
+    )
+    const fn = between('export function corumIsolationBoundaryNotice(', '\n}', orch)
+    expect(fn).toContain('integrate: true')
+    expect(fn).toMatch(/cherry-pick|Do not merge/i)
+    expect(fn).toContain('ONLY on that branch')
+  })
+
   it('★ 提示词不再宣告「机制会自动重试」（改版后这句话是假的）', () => {
     const prompt = between('Child model routing is NOT yours to choose', '\n')
     expect(prompt).not.toContain('automatically retries')
