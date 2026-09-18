@@ -243,6 +243,25 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(code.indexOf('corumPendingIntegration')).toBeGreaterThan(code.indexOf('drainSettleCommitFailures'))
   })
 
+  it('★★ 待集成通知必须认领式去重（双实例各注册一个 end 监听 ⇒ 不去重就发两条）', () => {
+    // 2026-09-18：corum preset 里 corum-tool-subagent 是**双实例**（worker + research），
+    // 每个实例都注册 {global:true} 的 subagent/end 监听 ⇒ 同一 settle 被处理两次。
+    // 两个「取走即删」的用量天然只生效一次，待集成通知是**纯读**，不去重就重复
+    // （实机：同一会话 seq 24/25 逐字相同）。
+    const handler = between("ctx.on('subagent/end' as never", '}) as never, { global: true })')
+    const code = stripComments(handler)
+    expect(code, '待集成通知没有认领去重 ⇒ 双实例会各发一条').toContain('claimPendingIntegrationNotice')
+    const orch = readFileSync(
+      join(import.meta.dirname, '../../corum-orchestration/src/orchestration.ts'),
+      'utf8',
+    )
+    // 认领语义必须是「先到者 true，后来者 false」。
+    const claim = between('claimPendingIntegrationNotice(', '\n  }', orch)
+    expect(claim).toContain('has(key)')
+    expect(claim).toContain('return false')
+    expect(claim).toContain('add(key)')
+  })
+
   it('★★ 前台隔离委派的结果必须带 isolationBoundary=worktree（否则模型不知道要 integrate）', () => {
     // 2026-09-18 根因：boundary 此前**只在没隔离时**填（注释写「worktree 是常规路径、无需
     // 提醒」）——而隔离成功恰恰是唯一需要模型行动的情形（改动在分支上，只有 integrate 能并进主树）。

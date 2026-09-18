@@ -1671,6 +1671,20 @@ export class CorumOrchestration extends Service {
    * 新建对话，如果用户还配置了原来不可用的大模型，仍然会调用失败」）。同样只存内存。
    */
   private readonly modelOverrides = new Map<string, { provider: string; model: string; reasoningEffort?: string }>()
+  /**
+   * 已就哪些分支发过「待集成」通知（key = `sessionId + '\u0000' + branch`）。
+   *
+   * 为什么需要（2026-09-18，修掉早退后暴露）：`corum-tool-subagent` 在 corum preset 里是
+   * **双实例**（worker + research，见 corum-agent/compile.ts），两个实例各自 `apply()`、
+   * 各自注册一个 `{global:true}` 的 `subagent/end` 监听 ⇒ 同一个 settle 事件被处理**两次**。
+   * `takeChildSpawn` / `drainSettleCommitFailures` 都是「取走即删」故天然只生效一次；
+   * 而「待集成」通知是**纯读**（`entriesOf` 不消费状态）⇒ 两个实例各发一条一模一样的通知
+   * （实机：同一会话 seq 24 与 25 内容逐字相同）。这里用「认领」语义去重。
+   *
+   * 住 service 实例字段而非模块级（红线 1）：两个实例共享同一个 `corumOrchestration`。
+   * 只存内存：分支被集成/丢弃后不再需要记住。
+   */
+  private readonly pendingNotified = new Set<string>()
   /** Phase 4：持久化 domain 句柄（storageDomain 缺失时为 undefined，回落纯内存）。 */
   private readonly domainPromise: Promise<Domain<typeof corumOrchestrationDomainSpec>> | undefined
 
@@ -2028,6 +2042,22 @@ export class CorumOrchestration extends Service {
   /** 该会话是否已停用委派（每次工具调用前查）。 */
   delegationDisabledFor(sessionId: string): boolean {
     return this.delegationDisabled.has(sessionId)
+  }
+
+  /**
+   * 认领「该分支的待集成通知」——**只有第一个调用者拿到 true**，其余实例静默跳过。
+   *
+   * 消费方（corum-tool-subagent 的 subagent/end 监听）在投递前先调本方法；
+   * 双实例因此只发一条（见 {@link pendingNotified} 的说明）。
+   * @param sessionId - 父会话 id。
+   * @param branch - 分支名。
+   * @returns true = 本次由我投递；false = 已有人投递过，跳过。
+   */
+  claimPendingIntegrationNotice(sessionId: string, branch: string): boolean {
+    const key = `${sessionId}\u0000${branch}`
+    if (this.pendingNotified.has(key)) return false
+    this.pendingNotified.add(key)
+    return true
   }
 
   /** 解除该会话的委派停用（用户后来改了配置/重新启用时清掉）。 */

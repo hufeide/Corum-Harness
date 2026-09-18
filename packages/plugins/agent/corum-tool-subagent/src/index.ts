@@ -1334,9 +1334,15 @@ export function apply(ctx: Context, config: Config): void {
     // 永不进主树，UI 只报 finished）。这里对所有产生隔离分支的 settle 统一补发，让单发后台与
     // 编排同样「不可静默」。编排路径仍会发自己的通知（两处通知幂等合并——同键去重）。
     if (parent !== undefined) {
-      const pendingAfter = corumPendingIntegration(orchestration.entriesOf(String(parent.session.id)))
-      if (pendingAfter.length > 0) {
-        corumNotifyPendingIntegration(parent, pendingAfter.map(entry => entry.branch), ctx.logger)
+      const sessionId = String(parent.session.id)
+      const pendingAfter = corumPendingIntegration(orchestration.entriesOf(sessionId))
+      // ⚠️ 认领式去重（2026-09-18）：本插件在 corum preset 里是**双实例**（worker + research，
+      // 见 corum-agent/compile.ts），两个实例各注册一个 {global:true} 的 end 监听 ⇒ 同一个
+      // settle 会被处理两次。上面两个「取走即删」的用量天然只生效一次，而本条是**纯读**，
+      // 不去重就会发两条逐字相同的通知（实机确认：同一会话 seq 24/25 内容一致）。
+      const fresh = pendingAfter.filter(entry => orchestration.claimPendingIntegrationNotice(sessionId, entry.branch))
+      if (fresh.length > 0) {
+        corumNotifyPendingIntegration(parent, fresh.map(entry => entry.branch), ctx.logger)
       }
     }
   }) as never, { global: true })
