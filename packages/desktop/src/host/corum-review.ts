@@ -217,13 +217,56 @@ interface FrozenRound {
  * 服务启动时回放 journal，把未结束的轮次恢复出来。
  */
 type JournalLine =
-  | { t: 'capture'; session: string; round: number; workspace: string; path: string; blob: string; parent?: string; parentCwd?: string }
-  | { t: 'capture-absent'; session: string; round: number; workspace: string; path: string; parent?: string; parentCwd?: string }
-  | { t: 'capture-unavailable'; session: string; round: number; workspace: string; path: string; parent?: string; parentCwd?: string }
+  | { t: 'capture'; session: string; round: number; workspace: string; path: string; blob: string; parent?: string; parentCwd?: string; via?: CaptureVia }
+  | { t: 'capture-absent'; session: string; round: number; workspace: string; path: string; parent?: string; parentCwd?: string; via?: CaptureVia }
+  | { t: 'capture-unavailable'; session: string; round: number; workspace: string; path: string; parent?: string; parentCwd?: string; via?: CaptureVia }
   | { t: 'end'; session: string; round: number }
+
+/**
+ * 这条捕获走的是哪条路径。
+ *
+ * `tool` = 确定性的 tool/call 捕获（文件工具的路径 / bash 命令串里解析出的写目标）；
+ * `union` = 轮末并集兜底的启发式补入（「目录脏 + mtime 新」）。
+ *
+ * 为什么要标记：两者**可信度不同** —— tool 路径能证明来源，union 只能证明「这个目录在
+ * 这个时间窗里脏过」。旧 journal 没有这个字段，于是事后无法区分「guest 子会话的假捕获」
+ * 与「父会话的真捕获」（2026-09-18 那 7 个文件的误标就这样留在了旧数据里，清不掉）。
+ * 新数据带上标记后，任何基于归因的清理/审计都有依据。
+ */
+type CaptureVia = 'tool' | 'union'
+
+/**
+ * `frozen.jsonl` 的一行：一轮在「工作区健在」时算出的改动结论（见 `FROZEN_FILE`）。
+ *
+ * 只放**结论**：`files` 是 `ReviewFileEntry`（路径 + ±N + hash + 改前状态），不是改后正文。
+ */
+type FrozenLine = {
+  t: 'frozen'
+  session: string
+  workspace: string
+  round: number
+  at: number
+  files: ReviewFileEntry[]
+}
+
 
 /** journal 文件名（每个工作区一份，与影子仓库同级）。 */
 const JOURNAL_FILE = 'round-journal.jsonl'
+
+/**
+ * 冻结态落盘的文件名（每个工作区一份，与 journal 同级）。
+ *
+ * 为什么冻结态也要落盘：轮次 journal 只持久化 **pre-image**（改前内容），「改后」（当前内容）
+ * 只能靠读工作区得到 —— 而隔离 worktree 集成后就被回收了。进程重启后再看那个子 Agent 的
+ * 卡片，就永远算不出改动列表。把「工作区健在时算出的那份结论」落盘，重启后仍能如实呈现。
+ *
+ * 只存**结论**（path/±N/hash/status），不存改后正文：正文在工作区被回收后本就不可得，
+ * 而结论正是审查卡要显示的东西。
+ */
+const FROZEN_FILE = 'frozen.jsonl'
+
+/** 冻结态落盘的压实阈值（超过就按会话保留最后一条）。 */
+const MAX_FROZEN_LINES = 200
 
 /**
  * 文件改前内容的上线状态枚举（2026-09-13 收口，问题 1-④）。
@@ -353,6 +396,11 @@ export class CorumReviewService extends TypertRemoteService {
     void this.restoreRounds().catch((error: unknown) => {
       ctx.logger.warn(`corum-review restoreRounds failed: ${String(error)}`)
     })
+    // 冻结态回放（与轮次回放并列）：轮次 journal 只有 pre-image，「改后」只能在当时算，
+    // 所以隔离 worktree 被回收/进程重启后，只有这份落盘结论还能如实回答「改了什么」。
+    void this.restoreFrozen().catch((error: unknown) => {
+      ctx.logger.warn(`corum-review restoreFrozen failed: ${String(error)}`)
+    })
 
     // pre-image 捕获：**同步**读文件，必须早于工具落盘（见文件头）。
     // 框架已把监听器包在 try/catch 里，这里再兜一层是为了不留半截状态。
@@ -457,7 +505,7 @@ export class CorumReviewService extends TypertRemoteService {
       round.touched.set(rel, pre)
       // 立刻落库（异步，不阻塞会话）：内容进对象库 + 追加 journal 一行。
       // 这样应用在「一轮进行中」被重启/崩溃后，这一轮的 pre-image 仍然可恢复（C6）。
-      void this.persistCapture(round, rel, pre)
+      void this.persistCapture(round, rel, pre, 'tool')
     }
   }
 
@@ -580,17 +628,107 @@ export class CorumReviewService extends TypertRemoteService {
     try {
       const files = await this.filesOf(workspace, touched)
       if (files === null) return
+      const at = Date.now()
       this.frozen.set(sessionId, {
         workspace,
         roundIndex,
         files,
         preimages: new Map(touched),
-        at: Date.now(),
+        at,
       })
       this.evictFrozen()
+      // 落盘：进程重启后（worktree 可能已被回收）仍能如实报出这份结论。
+      await this.persistFrozen(sessionId, { workspace, roundIndex, files, at })
     } catch (error) {
       this.ctx.logger.warn(`corum-review freeze failed (${sessionId}): ${String(error)}`)
     }
+  }
+
+  /**
+   * 把冻结态追加进 `frozen.jsonl`（理由见 `FROZEN_FILE`）。
+   *
+   * 失败只记日志：冻结态落盘是**加强**，丢了就退回「重启后如实报空」。
+   */
+  private async persistFrozen(
+    sessionId: string,
+    record: { readonly workspace: string; readonly roundIndex: number; readonly files: ReviewFileEntry[]; readonly at: number },
+  ): Promise<void> {
+    try {
+      const file = join(this.repoRoot(record.workspace), FROZEN_FILE)
+      mkdirSync(dirname(file), { recursive: true })
+      const line: FrozenLine = {
+        t: 'frozen',
+        session: sessionId,
+        workspace: record.workspace,
+        round: record.roundIndex,
+        at: record.at,
+        files: record.files,
+      }
+      await appendFile(file, JSON.stringify(line) + '\n', 'utf8')
+      await this.compactFrozen(file)
+    } catch (error) {
+      this.ctx.logger.warn(`corum-review persistFrozen failed (${sessionId}): ${String(error)}`)
+    }
+  }
+
+  /** 冻结态文件压实：超过阈值就按会话只留最后一条（原子替换，与 journal 同款）。 */
+  private async compactFrozen(file: string): Promise<void> {
+    try {
+      const text = await readFile(file, 'utf8')
+      const lines = text.split('\n').filter(raw => raw.trim() !== '')
+      if (lines.length <= MAX_FROZEN_LINES) return
+      const latest = new Map<string, string>()
+      for (const raw of lines) {
+        try { latest.set((JSON.parse(raw) as FrozenLine).session, raw) } catch { /* 丢掉坏行 */ }
+      }
+      const tmp = `${file}.tmp`
+      await writeFile(tmp, [...latest.values()].join('\n') + '\n', 'utf8')
+      await rename(tmp, file)
+    } catch (error) {
+      this.ctx.logger.warn(`corum-review compactFrozen failed: ${String(error)}`)
+    }
+  }
+
+  /**
+   * 启动时把各工作区的 `frozen.jsonl` 读回内存（每个会话取最后一条）。
+   *
+   * 恢复出来的只有**结论**（文件列表），没有 pre-image —— 所以 `fileBefore` 对这类轮次可能
+   * 报 `missing`（改前内容在那次进程里，已随进程结束）。但审查卡要显示的「改了哪些文件、
+   * 各 ±N 行」照常给得出 —— 那正是隔离 worktree 被回收后唯一还能如实回答的部分。
+   */
+  private async restoreFrozen(): Promise<void> {
+    const home = process.env.DSH_HOME ?? resolveDshHome('~/.corum')
+    const base = join(home, 'review')
+    if (!existsSync(base)) return
+    for (const key of readdirSync(base)) {
+      const file = join(base, key, FROZEN_FILE)
+      if (!existsSync(file)) continue
+      try {
+        // eslint-disable-next-line no-await-in-loop -- 工作区数量有限
+        const text = await readFile(file, 'utf8')
+        const latest = new Map<string, FrozenLine>()
+        for (const raw of text.split('\n')) {
+          if (raw.trim() === '') continue
+          let line: FrozenLine
+          try { line = JSON.parse(raw) as FrozenLine } catch { continue }
+          if (line.t !== 'frozen' || typeof line.session !== 'string' || !Array.isArray(line.files)) continue
+          const prev = latest.get(line.session)
+          if (prev === undefined || line.at >= prev.at) latest.set(line.session, line)
+        }
+        for (const line of latest.values()) {
+          this.frozen.set(line.session, {
+            workspace: line.workspace,
+            roundIndex: line.round,
+            files: line.files,
+            preimages: new Map(),
+            at: line.at,
+          })
+        }
+      } catch (error) {
+        this.ctx.logger.warn(`corum-review frozen replay failed (${key}): ${String(error)}`)
+      }
+    }
+    this.evictFrozen()
   }
 
   /** 冻结态条数护栏（超出按最旧淘汰）。 */
@@ -634,7 +772,7 @@ export class CorumReviewService extends TypertRemoteService {
    * 把一次捕获落成「对象库里的 blob + journal 一行」。失败只记日志：内存里那份仍然
    * 可用，只是失去跨重启的持久性。
    */
-  private async persistCapture(round: LiveRound, rel: string, pre: Preimage): Promise<void> {
+  private async persistCapture(round: LiveRound, rel: string, pre: Preimage, via: CaptureVia): Promise<void> {
     try {
       const repo = await this.ensureRepo(round.workspace)
       // 父会话 + 父 cwd 随行落盘：重启后 `restoreRounds` 靠它复原「guest 轮次」判定，
@@ -647,6 +785,7 @@ export class CorumReviewService extends TypertRemoteService {
         round: round.index,
         workspace: round.workspace,
         path: rel,
+        via,
         ...parent === undefined ? {} : { parent },
         ...parentCwd === undefined ? {} : { parentCwd },
       }
@@ -1075,7 +1214,7 @@ export class CorumReviewService extends TypertRemoteService {
       added += 1
       // 与文件工具同一条持久化路径：崩在一轮中间也能恢复（C6）。
       // eslint-disable-next-line no-await-in-loop -- 同上
-      await this.persistCapture(round, rel, pre)
+      await this.persistCapture(round, rel, pre, 'union')
     }
     return added
   }

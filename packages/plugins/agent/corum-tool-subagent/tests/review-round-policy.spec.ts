@@ -18,6 +18,7 @@
  *      「文件不存在」⇒ 全删，或 pre-image 也取不回时条目被静默丢掉 ⇒ 改动区为空。
  *      所以「工作区不在 ⇒ 绝不 live」是第二护栏。
  */
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   MAX_FROZEN_ROUNDS,
@@ -219,5 +220,52 @@ describe('会话 ledger 上限（会话 → cwd / 父会话 / 所有者 记账�
   it('上限是有限值（长进程里见过的会话数无界，不设护栏就是慢性内存泄漏）', () => {
     expect(Number.isFinite(MAX_SESSION_LEDGER)).toBe(true)
     expect(MAX_SESSION_LEDGER).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * 落盘契约的读写对账（源码扫描）。
+ *
+ * 为什么用扫描而不是单测：这两条契约的**两端**（写侧 append、读侧 replay）都在
+ * `corum-review.ts` 里分居两处，而真正的失效形态是「写侧加了字段、读侧没认」——
+ * 例如 2026-09-18 收口时我给 journal 加了 `parent`/`parentCwd`，若读侧不同步，
+ * 重启后 guest 轮次就认不出父会话，缺陷随重启复活。这种「一端改了另一端没改」
+ * 只有把两侧的形一起断言才拦得住（同款做法先例：verify 门的 schema↔catch↔render
+ * 三面对账）。
+ */
+describe('落盘契约读写对账（源码扫描）', () => {
+  const src = readFileSync(
+    new URL('../../../../desktop/src/host/corum-review.ts', import.meta.url),
+    'utf8',
+  )
+
+  it('journal 写侧带 parent/parentCwd/via，读侧认得 parent/parentCwd', () => {
+    expect(src).toContain('const parent = this.sessionParents.get(round.sessionId)')
+    expect(src).toContain('...parent === undefined ? {} : { parent },')
+    expect(src).toContain('...parentCwd === undefined ? {} : { parentCwd },')
+    expect(src).toContain("if (line.parent !== undefined && line.parent !== '')")
+    expect(src).toContain('this.setLedger(this.sessionParents, line.session, line.parent)')
+    expect(src).toContain('this.setLedger(this.sessionCwds, line.parent, line.parentCwd)')
+  })
+
+  it('捕获来源标记：tool / union 两条路径都写，且类型允许', () => {
+    expect(src).toContain("type CaptureVia = 'tool' | 'union'")
+    expect(src).toContain("this.persistCapture(round, rel, pre, 'tool')")
+    expect(src).toContain("this.persistCapture(round, rel, pre, 'union')")
+  })
+
+  it('冻结态落盘的写侧字段与读侧消费一致（t/session/workspace/round/at/files）', () => {
+    expect(src).toContain("type FrozenLine = {")
+    for (const field of ['session: string', 'workspace: string', 'round: number', 'at: number', 'files: ReviewFileEntry[]']) {
+      expect(src).toContain(field)
+    }
+    expect(src).toContain("t: 'frozen',")
+    expect(src).toContain('const line: FrozenLine = {')
+    expect(src).toContain("if (line.t !== 'frozen' || typeof line.session !== 'string' || !Array.isArray(line.files)) continue")
+  })
+
+  it('冻结态落盘与回放都被接线（否则重启后子卡又变空）', () => {
+    expect(src).toContain('void this.restoreFrozen()')
+    expect(src).toContain('await this.persistFrozen(sessionId, { workspace, roundIndex, files, at })')
   })
 })
