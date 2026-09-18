@@ -176,6 +176,35 @@ export function hasUncommittedChanges(path: string): boolean {
   }
 }
 
+/**
+ * fork（corum）：**有效修改**判定——收口提交（turn-end / 隔离前）的唯一准入条件。
+ *
+ * 用户 2026-09-18 定调（原话）：「**除了 .gitignore 中的之外，只要修改了就算有效**。
+ * 当然 Agent 可以自己 check，有额外的可手动剔除并更新 .gitignore」。
+ *
+ * 两条一读就懂、但对所有项目都成立的规则：
+ *   · **`.gitignore` 覆盖的路径不算有效修改**——而 git 的 `--porcelain` 本来就**不列**
+ *     ignored 文件，故机制**不需要自建产物排除表**。这是关键：排除规则住在各项目自己的
+ *     `.gitignore` 里（项目自治），机制只提供「有没有有效修改」这个通用判断。
+ *   · **其余任何改动都算**：已跟踪文件的修改/删除/重命名，以及**未跟踪的新文件**。
+ *     未跟踪也算，是因为「Agent 新建一个源文件」正是真实工作；把明显的暂存产物剔掉是
+ *     **Agent 侧的责任**（自己清理 + 更新 `.gitignore`），不是机制去猜文件类型。
+ *
+ * 与 {@link hasUncommittedChanges} 的分工：后者是**纯 git 事实**（porcelain 非空），
+ * 本函数是**机制策略**（「什么样的改动值得为它落一条提交」）。当前两者判据相同，
+ * 但策略是**有名字、有单一落点**的——将来若要加「排除某类产物」，只改这里，
+ * 且必须同时更新这条注释与它的单测（`tests/settle-commit.spec.ts`）。
+ *
+ * 为什么它是机制兜底而不是可选项：没有它，每轮对话都会留下一条**没有内容的**提交。
+ * 实测全库 **0 个空提交**，正是靠这道判断在 `settleCommit` 里挡住了空跑。
+ *
+ * @param path - 目标 git 工作区。
+ * @returns true = 有值得提交的有效修改。
+ */
+export function hasEffectiveChanges(path: string): boolean {
+  return hasUncommittedChanges(path)
+}
+
 /** 强制提交失败的结构化原因（供上层注入通知/阻断）。 */
 export interface SettleCommitFailure {
   path: string
@@ -194,13 +223,20 @@ export interface SettleCommitFailure {
  * 提交用 `-c user.name/email` 一次性身份（不写用户的 global/local config）；
  * `--no-verify` 防宿主钩子拦下（钩子失败会让「必须提交」失效）。
  *
+ * ⚠️ **两道「不留噪声」的保证**（2026-09-18 用户定调，通用兜底、非本仓专属）：
+ *   ① 准入用 {@link hasEffectiveChanges}——**没有有效修改就不提交**。否则每轮对话
+ *      都会留下一条没有内容的提交（`.gitignore` 之外的任何改动才算有效修改）。
+ *   ② 这里**绝不传 `--allow-empty`**：git 对「无改动」会自行拒绝提交，等于多了一道
+ *      与 ① 独立的底。实测全库 **0 个空提交**即这两道的结果。改本函数时不要加
+ *      `--allow-empty`（`--allow-empty` 在本仓只允许出现在**建仓初始化**那一处）。
+ *
  * @param path - 目标 git 目录（父树主工作区）。
  * @param subject - 提交信息首行（含溯源，如 `wip(<scope>): auto-commit on settle`）。
  * @returns `undefined` = 成功或无需提交（干净/目录不存在/非 git）；否则为失败原因。
  */
 export function settleCommit(path: string, subject: string): SettleCommitFailure | undefined {
   if (!existsSync(path)) return undefined
-  if (!hasUncommittedChanges(path)) return undefined
+  if (!hasEffectiveChanges(path)) return undefined
   const added = runGitSync(path, ['add', '-A'])
   if (added.code !== 0) return { path, reason: `git add failed: ${added.stderr.trim()}` }
   const committed = runGitSync(path, [
