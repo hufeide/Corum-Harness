@@ -138,7 +138,7 @@
       danger-full-access:
         sandbox: danger-full-access
         approval: never
-        name: 完全访问
+        name: 完全权限
         description: 不受限制，可访问工作区外文件
 
 # ── corum IDE 行 ──────────────────────────────────────────────────────────

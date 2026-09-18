@@ -49,8 +49,10 @@ function permissionGlyph(value: string): ReactNode | undefined {
  * Display transform: kebab-case machine names render as title-case labels
  * (`workspace-write` → `Workspace Write`); non-kebab host-configured names
  * pass through. Full access intentionally overrides the machine-name
- * transform so both permission surfaces use the product label `Full access`;
- * the warning body remains locale-aware.
+ * transform so both permission surfaces use one localized product label
+ * (`完全权限` zh / `Full access` en, via `access.fullLabel`) — the host preset
+ * `name` is a single fixed string and cannot follow the UI language, so the
+ * popup reads the locale key instead; the warning body is locale-aware too.
  */
 function displayName(name: string): string {
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) return name

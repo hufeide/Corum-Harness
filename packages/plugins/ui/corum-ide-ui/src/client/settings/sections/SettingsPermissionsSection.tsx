@@ -55,7 +55,7 @@ const PRESET_FIELD = 'defaultPreset'
 const PRESET_OPTIONS = [
   { id: 'read-only', label: '只读 read-only · 审批：每次询问' },
   { id: 'workspace-write', label: '工作区可写 workspace-write · 审批：每次询问' },
-  { id: 'danger-full-access', label: '危险完全访问 danger-full-access · 不询问' },
+  { id: 'danger-full-access', label: '危险完全权限 danger-full-access · 不询问' },
 ]
 
 /** 未上线 badge（PRD §6.1）。 */
