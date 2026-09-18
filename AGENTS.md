@@ -68,7 +68,15 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/HANDOFF-2026-09-18-packaging-pipeline-and-perf.md` — **最新交接入口**
+- `docs/HANDOFF-2026-09-18-preset-collision.md` — **最新交接入口**
+  （2026-09-18 夜场，用户换会话继续排查：**首要任务 = 打通「打包态同一进程挂两个不同 preset 必挂」**
+  —— 切换自定义模型/resume 会话时报 `command "goal" is already registered`（全局层分支），而官方给每个
+  preset 各自 standing scope；判据矩阵：dev 态同序列两 preset 都 OK（打包特有）、全新进程单独挂任一 preset
+  都 OK（需两个 preset 共存）、闭包内相关包各只 1 份同版本（已排除「两份模块实例」）。文件内含**复现探针、
+  复位命令、守卫清单、纪律禁区（验证类操作会改变被验证对象，验完必须复位）**，以及本场 15 个提交的分主题索引。
+  打包链路的原理与修法细节见同日的 `docs/HANDOFF-2026-09-18-packaging-pipeline-and-perf.md`。**下个 session 从这里开始。**）
+- `docs/HANDOFF-2026-09-18-packaging-pipeline-and-perf.md` — 同日上一份交接（打包链路：闭包缺官方包的真凶、
+  闭包补齐/去重/断言、两个审计脚本；编排归因修复与跳转按钮亦在其中汇总）
   （2026-09-18 打包链路场：用户定调「一定要把打包做好，不然开发了不能发布没有意义」。
   **打包版起不了 agent 的真凶** = `pnpm deploy --legacy` 物化的闭包**系统性缺官方包**
   （工作区 208 个官方包里缺 35 个，因为它们在官方侧多为 peer/devDependency，而打包用
