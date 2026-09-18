@@ -43,6 +43,19 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from './local-llm-face.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+// 值导入 SessionLogOffset：投影缓存按官方 lifecycle identity 建索引，查询要传
+// inheritedEventCount（未 seed 的会话恒为 0）。空类型 import dsh-session-projection-cache
+// 让 ctx.sessionProjectionCache 的 Context 合并生效（列表标题的零 I/O 读取路径）。
+import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-projection-cache'
+// 模块增强：让 `SessionProjectionMap` 认识列表视图消费的两个 key。
+// `title` 由官方 dsh-session-title 声明（写入时折好的标题），`sessionListMetadata`
+// 由官方 dsh-api-session-controller 声明（blank + lastPromptAt）。这两处都是
+// declaration merging，不 import 它们的类型面就查不到 key（同 corum-subagent 的
+// projection-types.ts 自声明 subagent 的做法）。type-only，无运行时开销。
+import type {} from '@deepseek-ai/dsh-session-title/types'
+import type {} from '@deepseek-ai/dsh-api-session-controller/types'
+import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 // 空类型 import：让 ctx.sessionPersistence 的 Context 合并生效（resume 用）。
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-permission-presets'
@@ -59,7 +72,7 @@ import { findSessionByLane, readSessionIndex, registerSession } from './session-
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
 import type { PolishConfig } from './profile-store.ts'
 import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensurePmProfile, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID } from './builtin-profiles.ts'
-import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './event-projection.ts'
+import { extractHeader, summarizeText, simplifyEventData } from './event-projection.ts'
 // fork（corum）：指挥模式（基准模式 `conductor`）——主 Agent 运行时裁剪 + 人格段。
 import {
   CONDUCTOR_PERSONA,
@@ -92,6 +105,24 @@ async function readPersistedEvents(
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * 列表行标题的**回退**（官方 `api/session-controller` 的 `displayTitleOf` 同口径）：
+ * 投影缓存未命中时用「工作区目录末段 → 会话 id」而不是去读历史。
+ *
+ * 为什么这样回退是对的：标题只是**展示**字段，而算它需要读整个会话历史（旧实现
+ * 的 N+1，见 `listTaskAgentsRemote` 的性能段）。官方在自己的冷列表里就是这么做的
+ * ——宁可显示工作区名，也不为一行标题扫一遍事件日志。
+ *
+ * @param cwd - 会话绑定的工作区路径。
+ * @param sessionId - 会话 id（cwd 缺失时的最后回退）。
+ * @returns 非空标题。
+ */
+function taskListFallbackTitle(cwd: string, sessionId: string): string {
+  const trimmed = (cwd ?? '').trim().replace(/[/\\]+$/, '')
+  const base = trimmed.slice(trimmed.lastIndexOf('/') + 1).slice(trimmed.lastIndexOf('\\') + 1)
+  return base !== '' ? base : sessionId
 }
 import { scanSkills } from './skill-catalog.ts'
 import { corumHome } from './home.ts'
@@ -2465,6 +2496,37 @@ export class CorumAgentService extends TypertRemoteService {
    * 列出 task 模式会话（侧栏 task 列表数据源；可按 cwd 过滤）。
    * 合并存活表与持久化索引：附标题（首条 user 消息摘要）、cwd、sessionId、
    * 最后活动时间、是否存活。一个工作区可多个会话。
+   *
+   * ## 性能：**列表路径绝不读会话历史**（2026-09-18，照官方 dsh 模式重写）
+   *
+   * 旧实现对**每个** task 会话 `readPersistedEvents(…, 0)` 读**完整历史**，只为算
+   * 标题与末条时间。实测（:9333，86 个 task 会话）该 RPC 耗时 **997ms**，而同一
+   * 时刻其它所有 RPC 都在 28–77ms；耗时与会话数**线性相关**（86 个→806ms、
+   * 10 个→93ms ⇒ 每个会话约 9.4ms）。后果：侧栏分组加号进 blank 会话后，Agent
+   * 名/模型/提示语要等 **~1.0s** 才填充（实测时间线：30ms 渲染出占位「选择 Agent」，
+   * 1035ms 才改成真名），用户报障「延迟 1 秒多」。
+   *
+   * 官方 dsh 的列表（`api/session-controller/src/list.ts` 的 `ApiSessionList.list`
+   * + `summarizeCold`）**从不扫历史**：标题/`lastPromptAt`/`blank` 全部取自
+   * **写入时就折好**的投影缓存（`session_projcache` 的 `rows.title` /
+   * `rows.sessionListMetadata`），读取是零 I/O 的「视图直读」；**缓存未命中也不
+   * 回落读历史**，而是按 `displayTitleOf` 回退「工作区名 → id」。全量历史读取
+   * （`SessionHandle.read`）只保留给「真的打开某一个会话」。
+   *
+   * corum 的投影缓存**本来就是官方那套**（`session_projcache` 由官方
+   * dsh-session-projection-cache 维护，corum 已在运行），且 `corum-subagent` 早有
+   * 同款复用先例（`list-children.ts` 的 `cachedSnapshot` + 「缓存损坏静默回落」）。
+   * 故此处照官方实现：**先读缓存，未命中不读历史**。
+   *
+   * 命中率实测（:9333，88 个 task 会话）：63 行取到缓存标题 ⇒ 25 行未命中，而那些
+   * 未命中的**都有真历史**（中位 34KB、最大 351KB）。若「未命中回落读历史」，这 25 个
+   * 仍要全读（≈240ms），**只砍掉一半延迟**——所以官方那条「未命中也不读历史」的
+   * 纪律是必需的，不是保守选择。
+   *
+   * ⚠️ 查缓存覆盖率时**认 sqlite 真源**（`storages/kv.sqlite` 的
+   * `u_session_projcache_sessions`），不要读 `storages/session_projcache/sessions/*.json`
+   * ——那是**过时副本**（2026-09-15 用户裁定 KV 层迁 sqlite 后遗留），据它算覆盖率会
+   * 得出错误结论。
    */
   @Remote('listTaskAgents')
   async listTaskAgentsRemote(cwd?: string): Promise<{ tasks: TaskAgentSummary[] }> {
@@ -2473,28 +2535,83 @@ export class CorumAgentService extends TypertRemoteService {
     // cwd 过滤走身份归一（realpath）而非字符串直比：存量实测 "/a/b/" 与 "/a/b"
     // 同指一个目录，直比会把同一工作区的会话漏掉一半（同 findBlankTaskLane）。
     const wantCwd = cwd === undefined ? undefined : canonicalWorkspaceKey(cwd)
+    const rows = await this.taskListRows()
     for (const [sessionId, meta] of Object.entries(index)) {
       if (wantCwd !== undefined && canonicalWorkspaceKey(meta.cwd) !== wantCwd) continue
       const live = this.taskAgents.get(sessionId)
-      // 标题/最后活动从持久化读（冷泳道也有；存活表仅标 alive）。读全历史取首条
-      // user 消息 + 末条时间，失败回退空（会话损坏不阻塞列表）。
-      let title = ''
-      let lastActive = 0
-      try {
-        const events = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)
-        title = taskTitleOf(events)
-        if (events.length > 0) lastActive = events[events.length - 1].time
-      } catch { /* 单个会话读取失败不阻塞列表 */ }
+      // 标题/最后活动**只读投影缓存**（零 I/O）；未命中按官方口径回退，不读历史。
+      // 空串与缺失同义（title 行的 null 也是「尚无标题」）——都要走回退。
+      const row = rows.get(sessionId)
+      const title = row !== undefined && row.title !== '' ? row.title : taskListFallbackTitle(meta.cwd, sessionId)
       out.push({
         sessionId,
         cwd: meta.cwd,
         profileId: meta.profileId,
         alive: live !== undefined,
         title,
-        lastActive,
+        lastActive: row?.lastActive ?? 0,
       })
     }
     return { tasks: out }
+  }
+
+  /**
+   * 为全部 task 会话取**列表视图行**（标题 + 最后活动时间）——**零历史读取**。
+   *
+   * 口径严格照官方 `ApiSessionList.summarizeCold`：
+   *   · 标题 = 投影缓存的 `title` 行（官方 session-title 单元在**写入时**折好）；
+   *   · 时间 = 投影缓存的 `sessionListMetadata.lastPromptAt`；
+   *   · **未命中/缓存不可用 ⇒ 不读历史**，调用方回退 `displayTitleOf` 口径
+   *     （cwd 末段 → sessionId），时间为 0。
+   *
+   * 身份见证（缓存按 lifecycle identity 建索引，需 header 才能查）：先用
+   * `sessionPersistence.list()` 拿真 header——它只 `stat` 文件元数据、**不读事件
+   * 日志**（官方同款用法，`SessionPersistenceSnapshot` 的注释即写明
+   * "without reading the full event log"）。**不用**会话索引里的字段凑 header：
+   * 索引不存 `createdAt`/`isSeeded`，凑出来的身份永远匹配不上缓存（实测会 100%
+   * 未命中，修复等于没做）。
+   *
+   * 为什么未命中不回落读历史：那正是被修掉的 N+1（见
+   * {@link listTaskAgentsRemote} 的性能段）。实测（:9333，88 个 task 会话）63 行取到
+   * 缓存标题、25 行未命中，而未命中那些**都有真历史**（中位 34KB、最大 351KB）——
+   * 回落读历史只能砍掉一半延迟，是假修复。
+   *
+   * 缓存是**派生数据**（官方明言 "a fold shortcut, never an authority"）：读它抛错
+   * 只意味着该行回退，绝不让整个列表失败——同 `corum-subagent` 的
+   * `resolveColdIdentity` 纪律（缓存损坏静默回落，不产生裁决）。
+   *
+   * @returns sessionId → `{title, lastActive}`；缓存不可用/未命中时该 id 缺席。
+   */
+  private async taskListRows(): Promise<Map<string, { title: string; lastActive: number }>> {
+    const rows = new Map<string, { title: string; lastActive: number }>()
+    const cache = this.ctx.get('sessionProjectionCache')
+    if (cache === undefined) return rows
+    let snapshots: readonly SessionPersistenceSnapshot[]
+    try {
+      snapshots = await this.ctx.sessionPersistence.list()
+    } catch {
+      return rows // 列表读失败：全体回退，列表仍可用（不 throw）。
+    }
+    for (const { header } of snapshots) {
+      try {
+        const snapshot = cache.cachedSnapshot(header, SessionLogOffset(0), ['title', 'sessionListMetadata'])
+        if (snapshot === undefined) continue
+        // 标题与时间**各自独立**取值（官方 summarizeCold 同口径：标题缺失只让标题
+        // 走 displayTitleOf 回退，不牵连 updatedAt）——一个还没起标题、但已有
+        // lastPromptAt 的会话，不该连「最后活动时间」一起丢掉。
+        const title = snapshot.values.title
+        const metadata = snapshot.values.sessionListMetadata as { lastPromptAt?: number | null } | undefined
+        const lastActive = typeof metadata?.lastPromptAt === 'number' ? metadata.lastPromptAt : 0
+        if ((typeof title !== 'string' || title === '') && lastActive === 0) continue
+        rows.set(String(header.id), {
+          title: typeof title === 'string' ? title : '',
+          lastActive,
+        })
+      } catch {
+        // 派生缓存损坏 → 该行缺席（调用方回退），不影响其它行。
+      }
+    }
+    return rows
   }
 
   /* ── AI 润色（prompt polish）────────────────────────────────────────────
