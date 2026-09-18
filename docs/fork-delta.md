@@ -1696,6 +1696,18 @@ Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 
      `isolate: 'always'`（默认）→ `corum-isolated`；`isolate: 'off'` → `corum-spawn`；
    - 跑完按 `merge.verify` / `merge.autoIntegrate` 收尾：未声明 autoIntegrate 时**报告待合并
      分支**（`[corum integration] N branch(es) pending: …`），模型再调 `subagent integrate: true`；
+   - **2026-09-18 修**（`bug.orchestration.early-return-swallowed-pending-integration-notice…`）：
+     上面这条「报告待合并分支」的通知此前被一个**早退**吃掉——`subagent/end` 监听里
+     `if (failures.length === 0) return`（`failures` = 收口强制提交失败）排在待集成通知**之前**，
+     而正常情况下提交是成功的 ⇒ 通知**永不发送**；同时 `isolationBoundary` 被设计成
+     **只在「没隔离」时**才附（隔离成功恰是唯一需要 `integrate` 的情形）⇒ 隔离委派跑完
+     模型收不到任何提示，工作静默搁浅（实测 worktrees 堆到 2.4GB/13 个）。
+     修法：两件事**各自独立判定**；`isolationBoundary` 两档都报且 `worktree` 档文案点明
+     `subagent { integrate: true }` 并劝阻手工 cherry-pick。**修①暴露②**：该插件是
+     **双实例**（worker + research，见 `corum-agent/compile.ts`），两个实例各注册一个
+     `{global:true}` 的 end 监听 ⇒ 纯读的通知会发两条（「取走即删」的两处天然只生效一次），
+     故新增 `orchestration.claimPendingIntegrationNotice` 认领式去重（length-prefixed key，红线 1）。
+     ⚠️ 该工具 `output.schema` 声明了 `additionalProperties: false`，**改枚举必须同步 schema**。
    - 因此 `tool-workflow` 行在四个 preset 一律 `disabled`（模型面单一编排语言），
      `workflow-worker-thread` 引擎行保留（orchestrate / ralph 都要用）。
 

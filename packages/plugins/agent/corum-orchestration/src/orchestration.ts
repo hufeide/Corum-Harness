@@ -2054,7 +2054,10 @@ export class CorumOrchestration extends Service {
    * @returns true = 本次由我投递；false = 已有人投递过，跳过。
    */
   claimPendingIntegrationNotice(sessionId: string, branch: string): boolean {
-    const key = `${sessionId}\u0000${branch}`
+    // key 用**长度前缀**而不是裸分隔符拼接：`'a' + 'b\0c'` 与 `'a\0b' + 'c'` 用纯分隔符
+    // 拼会撞成同一个 key。实测中 sessionId / 分支名都不含 NUL，但长度前缀让 key **恒单射**，
+    // 不依赖调用方输入的字符集（单测里那条边界用例就是钉这个）。
+    const key = `${sessionId.length}:${sessionId}\u0000${branch}`
     if (this.pendingNotified.has(key)) return false
     this.pendingNotified.add(key)
     return true
