@@ -134,6 +134,98 @@ async function materializeDeployWorkspace() {
   return wsDir
 }
 
+/**
+ * 闭包去重：删掉「与顶层同版本的嵌套副本」，并断言不留同版本重复实例。
+ *
+ * ## 为什么必须做（2026-09-18 实测，打包版 agent 起不来的根因）
+ *
+ * cordis 的 scope 机制、`dsh-scope` 的注册表、schemastery 的 schema 身份**都靠模块实例唯一**。
+ * 而 `pnpm deploy --config.node-linker=hoisted` 并不能保证全局只有一份：实测闭包里出现
+ * **14 个同版本重复实例**（`cordis` ×3、`dsh-scope` ×2、`schemastery` ×3 …），副本藏在某些包的
+ * 嵌套 `node_modules` 下。后果是打包态 **`agentPresets.mount(agentCtx)` 抛
+ * 「refusing to compose an unscoped context」** —— 建 scope 用的是一份 `dsh-scope`，查 scope 用的是
+ * 另一份，注册表对不上；同一根因还表现为「prompt section 已注册」这类重复注册错误。
+ * dev 态不出现，因为工作区里 pnpm 把它们 dedupe 成一份。
+ *
+ * ## 判据与安全边界
+ *
+ * 只删**版本相同**的嵌套副本（删掉后 Node 向上解析到顶层那份，语义等价）；版本不同的一律保留
+ * （那是真实的多版本共存，不能动）。删除后若仍有同版本重复，**打包失败**——宁可不出包，也不出
+ * 一个「跑起来行为诡异」的包。
+ *
+ * @returns 删除的副本数。
+ */
+async function dedupeClosureNodeModules() {
+  const top = join(HOST_DIR, 'node_modules')
+  const versionOf = (dir) => {
+    try { return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version } catch { return undefined }
+  }
+  let removed = 0
+  for (let pass = 0; pass < 5; pass += 1) {
+    let changed = false
+    const nested = []
+    for (const entry of await readdir(top)) {
+      if (entry.startsWith('.')) continue
+      const scoped = entry.startsWith('@')
+      const owners = scoped
+        ? (await readdir(join(top, entry))).map(n => join(top, entry, n))
+        : [join(top, entry)]
+      for (const owner of owners) {
+        const inner = join(owner, 'node_modules')
+        if (!existsSync(inner)) continue
+        for (const innerEntry of await readdir(inner)) {
+          if (innerEntry.startsWith('.')) continue
+          const names = innerEntry.startsWith('@')
+            ? (await readdir(join(inner, innerEntry))).map(n => `${innerEntry}/${n}`)
+            : [innerEntry]
+          for (const name of names) nested.push({ dir: join(inner, name), name })
+        }
+      }
+    }
+    for (const { dir, name } of nested) {
+      const topDir = join(top, name)
+      if (!existsSync(topDir) || dir === topDir) continue
+      const [a, b] = [versionOf(dir), versionOf(topDir)]
+      if (a === undefined || a !== b) continue
+      await rm(dir, { recursive: true, force: true })
+      removed += 1
+      changed = true
+    }
+    if (!changed) break
+  }
+  // 断言：不允许再有任何同版本重复实例
+  const seen = new Map()
+  const stillDup = []
+  for (const entry of await readdir(top)) {
+    if (entry.startsWith('.')) continue
+    const owners = entry.startsWith('@')
+      ? (await readdir(join(top, entry))).map(n => ({ dir: join(top, entry, n), name: `${entry}/${n}` }))
+      : [{ dir: join(top, entry), name: entry }]
+    for (const { dir, name } of owners) {
+      const inner = join(dir, 'node_modules')
+      if (!existsSync(inner)) continue
+      for (const innerEntry of await readdir(inner)) {
+        if (innerEntry.startsWith('.')) continue
+        const innerNames = innerEntry.startsWith('@')
+          ? (await readdir(join(inner, innerEntry))).map(n => `${innerEntry}/${n}`)
+          : [innerEntry]
+        for (const n of innerNames) {
+          const nestedDir = join(inner, n)
+          const topDir = join(top, n)
+          if (!existsSync(topDir) || nestedDir === topDir) continue
+          if (versionOf(nestedDir) === versionOf(topDir)) stillDup.push(`${n}（嵌套于 ${name}）`)
+        }
+      }
+    }
+    seen.set(entry, true)
+  }
+  if (stillDup.length > 0) {
+    throw new Error(`pack-macos: 闭包仍有同版本重复实例（cordis/scope 注册表会被切开，agent 挂载会失败）：${stillDup.slice(0, 10).join(', ')}`)
+  }
+  if (removed > 0) console.log(`[pack-macos] closure dedupe: removed ${removed} nested same-version duplicate(s)`)
+  return removed
+}
+
 async function deployHost() {
   await rm(HOST_DIR, { recursive: true, force: true })
   await mkdir(HOST_DIR, { recursive: true })
@@ -179,7 +271,8 @@ async function deployHost() {
     await cleanupBrokenSymlinks(join(deployTmp, 'node_modules'))
     await cp(join(deployTmp, 'node_modules'), join(HOST_DIR, 'node_modules'), { recursive: true, dereference: true })
     await rm(deployTmp, { recursive: true, force: true })
-    console.log('[pack-macos] host closure materialized from registry')
+    await dedupeClosureNodeModules()
+  console.log('[pack-macos] host closure materialized from registry')
   } finally {
     // 副本用完即弃（含它自己的 node_modules）：可能上 GB，别留在 /tmp 里。
     await rm(wsDir, { recursive: true, force: true })
