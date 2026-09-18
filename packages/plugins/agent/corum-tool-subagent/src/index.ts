@@ -641,6 +641,59 @@ function corumNotifyForegroundResult(
 }
 
 /**
+ * fork（corum）2026-09-18：**子 Agent 模型路由回退**的可见通知（用户策略第 2 条）。
+ *
+ * 用户策略：「如果发生子 Agent 模型调用出错，则默认退回主 Agent 路由，确保任务完成，
+ * 并**通知用户该情况的处理方式**」。⇒ 这条通知的职责不是「报告一个错误」，而是把
+ * 机制**已经替你做了什么**说清楚，否则用户只看到子 Agent 跑在了别的模型上而无从得知为什么。
+ *
+ * 通知必须给全四样（缺一样用户就无法判断该不该干预）：
+ *   ① 哪个子 Agent（label + childId）；② 原定的模型路由（用户配置的那个）；
+ *   ③ 实际改用的路由（主 Agent 的）；④ 这是**自动回退**、以及用户可以怎么改
+ *   （去 Agent 预设改子 Agent 模型，或换一个可用的 provider/model）。
+ *
+ * 投递形态与 {@link corumNotifyForegroundResult} 同款（`form: 'notice'`，会话里一条
+ * 可见注入行）。注入失败只告警——可见性是增强，不能反过来让委派失败。
+ *
+ * @param parent - 委派方 Agent（注入目标）。
+ * @param label - 委托标签（给用户一句人话上下文）。
+ * @param configured - 原定（用户配置的）模型路由。
+ * @param fallback - 实际改用的主 Agent 路由。
+ * @param cause - 触发回退的原因原文（子 Agent 的失败信息）。
+ * @param logger - 注入失败时的告警出口。
+ */
+function corumNotifyModelFallback(
+  parent: Agent,
+  label: string,
+  configured: { provider: string; model: string },
+  fallback: { provider: string; model: string },
+  cause: string,
+  logger: { warn: (message: string) => void },
+): void {
+  try {
+    const text = [
+      `Subagent model fallback (${label}) — the configured child model was unavailable, so this delegation was automatically retried on your own route.`,
+      `• Configured child model: ${configured.provider}/${configured.model}`,
+      `• Retried on (main Agent route): ${fallback.provider}/${fallback.model}`,
+      `• Cause: ${cause}`,
+      'What this means: the task still ran to completion on the fallback route — no action is required to get your result. If you want this child to keep using its configured model, check that its provider/model is reachable; otherwise change the child model in Settings → Agents (Agent presets), or set it to follow the main Agent.',
+    ].join('\n')
+    parent.inject(createUserMessage({
+      content: [{ type: 'text', text }],
+      // 与同文件其它通知同款跨包类型收窄（source 声明在 @corum/corum-subagent 的
+      // 模块增补里，本包看不到那个 MessageSourceMap 合并）。
+      source: {
+        kind: 'subagent-settled',
+        form: 'notice',
+        summary: boundContextSummary(`Subagent model fallback (${label})`),
+      } as unknown as MessageSource,
+    }))
+  } catch (error: unknown) {
+    logger.warn(`subagent model-fallback notice was not delivered to its parent: ${String(error)}`)
+  }
+}
+
+/**
  * fork（corum）：**收口强制提交失败**的模型面投递（2026-09-15 机制补漏）。
  *
  * 用户裁定：「commit 失败后**交由模型处理并完成提交**」。⇒ 这里不是「报告一个错误然后算了」，
@@ -1179,29 +1232,28 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：orchestrate 任务级结构化输出（对象根 JSON Schema）——子 Agent
         // 必须提交 schema 合法的结果，工作流式结构化子结果（2026-09-10 吸收 workflow 语义）。
         taskSchema?: ObjectJsonSchema
-        // fork（corum）：orchestrate 任务级模型锁（tasks[i].model，P0-4 真接线
-        // 2026-09-14）——调用方最具体的声明，优先级高于 preset config.model 与全局
-        // 默认；subagent 工具不传（它的模型面被 schema 剔除，锁死 preset 路由）。
-        taskModel?: { provider: string; model: string; reasoningEffort?: string }
+        // fork（corum）2026-09-18：`taskModel` **已按用户策略移除**——per-task 模型
+        // 面不再存在（orchestrate 的 tasks[i].model 已从 schema 剔除且不再转达）。
       },
       subagentProvider: SubagentProvider,
     ): Promise<ForegroundToolResult | { kind: 'continuable'; subagentId: string } | { kind: 'background'; jobId: string }> => {
       const parent = exec.agent
       // fork（corum）：官方模型自选请求面（provider/model/reasoning_effort 直挂
       // args 顶层）——corum 的 subagent/orchestrate schema 已剔除这三个字段
-      // （模型锁），modelRequest 恒为空对象，仅保形供官方函数签名消费；
-      // tasks[i].model 走 taskModel 专线（上方锁分支），不混入此面。
+      // （模型锁），modelRequest 恒为空对象，仅保形供官方函数签名消费。
       const modelRequest = args as DelegationModelRequest
       const parentOptions = parentAgentOptionsForDelegation(parent)
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
-      // fork（corum）：模型锁优先级（P0-4 真接线 2026-09-14）——
-      //   任务级 tasks[i].model > preset config.model（角色锁，见
-      //   corum-agent/compile.ts：worker→profile.subagentModel，research→
-      //   profile.researchModel ?? subagentModel）> 全局默认 defaultModel/
-      //   defaultResearchModel > 跟随父。任务级是最具体的调用方声明；
-      //   subagent 工具的模型面被 schema 剔除，taskModel 只能来自 orchestrate。
+      // fork（corum）：模型路由优先级（2026-09-18 按用户策略收敛为两档）——
+      //   ① **用户配置的模型**：preset config.model（角色锁，见
+      //      corum-agent/compile.ts：worker→profile.subagentModel，
+      //      research→profile.researchModel ?? subagentModel），缺省时由全局默认
+      //      defaultModel / defaultResearchModel 兜底（设置→智能体 那两项）；
+      //   ② **跟随父**：两处都没配才落到父 Agent 的真实路由。
+      // ❗**没有第三档**：per-task `tasks[i].model` 已按用户策略剔除（LLM 不可表达），
+      // 故 corumEffectiveModel 只可能来自「用户配置」或 undefined（= 跟随父）。
       const corumGlobalModel = corumReadonlyResearch ? corumGlobal().defaultResearchModel : corumGlobal().defaultModel
-      const corumEffectiveModel = args.taskModel ?? config.model ?? corumGlobalModel
+      const corumEffectiveModel = config.model ?? corumGlobalModel
       const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
         ? undefined
         : {
@@ -1279,35 +1331,11 @@ export function apply(ctx: Context, config: Config): void {
         if (requestedChildAgentOptions !== undefined) request.agentOptions = requestedChildAgentOptions
       } // fork（corum）：end 模型锁缺省分支（官方原逻辑）
 
-      // fork（corum）：任务级模型锁的校验（P0-4 真接线 2026-09-14）——tasks[i].model
-      // 声明的路由必须过两道门禁才允许生效：① settings 兜底（modelSelectionPolicy
-      // 的 routes 白名单，与官方模型自选同一权威；corum preset 未开
-      // modelSelectionSettings 时 policy=undefined，该层自动跳过）；② 真路由预检
-      // （llm.resolveCallConfig）——非法 provider/model 在 spawn 前报错，任务以
-      // 「[task N] failed」落汇合结果，而不是启一个半死的子会话。
-      if (args.taskModel !== undefined) {
-        assertAllowedModelSelection(
-          modelSelectionPolicy,
-          parentOptions,
-          request.agentOptions,
-          { provider: args.taskModel.provider, model: args.taskModel.model },
-        )
-        const llm = runtimeCtx.get('llm')
-        if (llm === undefined) {
-          throw new Error('cannot resolve the task-selected child LLM route because the `llm` service is unavailable')
-        }
-        await preflightChildLlmRoute(
-          llm,
-          parentOptions,
-          request.agentOptions,
-          exec.signal,
-          providerRouteDefaults === undefined,
-        )
-        if (runtimeCtx.subagents.getProvider(config.provider) !== subagentProvider) {
-          throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
-        }
-        exec.signal.throwIfAborted()
-      }
+      // fork（corum）2026-09-18：任务级模型锁的校验块**已删除**（连同 `taskModel`
+      // 入参）。per-task 模型面按用户策略剔除后，这里不再有「LLM 声明的路由」需要
+      // 白名单校验——子 Agent 的路由只来自用户配置（`corumLockedOptions`）或跟随父
+      // （`request.agentOptions` 由父路由合并而来），两者都已在各自分支做过
+      // `preflightChildLlmRoute` 真路由预检。
 
       // fork（corum）：提取本次 spawn 的真实生效模型路由，用于广播帧。
       // 取 request.agentOptions 的 provider/model/reasoningEffort——它是 890 行
@@ -1689,20 +1717,127 @@ export function apply(ctx: Context, config: Config): void {
 
       if (corumTrackWrite) orchestration.beginWriteChild(corumSessionId)
       try {
-        const run: SubagentRun = await corumStart(() => runtimeCtx.subagents.start(config.provider, {
+        /**
+         * fork（corum）2026-09-18：**模型调用失败 ⇒ 退回主 Agent 路由重试一次**
+         * （用户策略第 2 条）。
+         *
+         * 只在「本次用的是**用户配置的**子 Agent 模型」时才回退——若本来就跟随父
+         * （`corumEffectiveModel === undefined`），子 Agent 用的已是主路由，再"退回"
+         * 等于原地重跑，无意义且会凭空放大成本。
+         *
+         * 判定用官方契约（`SubagentRun.result` 的文档明写）：**模型/传输失败以
+         * `stopReason: 'error'` 返回**（不 reject），而 `settleForegroundRun` 会把它
+         * 转成带 `stopReason` 的 throw。故这里 catch 到 stopReason==='error' 即视为
+         * 「模型调用出错」。其余终态（aborted = 用户/机制终止、max-tokens、refusal）
+         * **不回退**——它们不是模型不可用，重跑只会把同样的结局再演一遍并重复收费。
+         *
+         * 回退路由 = 父 Agent 的真实路由（`parentOptions`），正是用户要的「退回和
+         * 主 Agent 一样」。做法是**清掉 `request.agentOptions`** 再跑一次：该字段缺失
+         * 时官方 seam 用父的真实路由（见本文件 400 行的既有说明）。回退只做**一次**
+         * （不递归），成本可控；回退发生走 {@link corumNotifyModelFallback} 通知用户。
+         */
+        const configuredRoute = corumEffectiveModel !== undefined
+          && parentOptions.provider !== undefined && parentOptions.model !== undefined
+          ? {
+              configured: { provider: corumEffectiveModel.provider, model: corumEffectiveModel.model },
+              fallback: { provider: parentOptions.provider, model: parentOptions.model },
+            }
+          : undefined
+        /** 子 Agent 是否因**模型调用**失败（官方契约：stopReason === 'error'）。 */
+        const modelFailureOf = (error: unknown): string | undefined => {
+          const stopReason = (error as { stopReason?: string } | undefined)?.stopReason
+          return stopReason === 'error' ? (error instanceof Error ? error.message : String(error)) : undefined
+        }
+
+        const startRun = (): Promise<SubagentRun> => corumStart(() => runtimeCtx.subagents.start(config.provider, {
           ...request,
           signal: exec.signal,
         }))
-        corumBindRun(String(run.id))
-        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel)
-        const outcome = await settleForegroundRun(run)
+        const emitStarted = (started: SubagentRun): void => {
+          corumBindRun(String(started.id))
+          corumEmitChildStarted(parent.session.id, exec.callId, String(started.id), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel)
+        }
+
+        /**
+         * 至多两轮：① 用户配置的路由；② 跟随主 Agent（**仅**当 ① 判为「模型不可用」）。
+         *
+         * 为什么把「预检」也算首轮的失败判据：锁定路径（`corumLockedOptions`）**不走**
+         * 上面那段 `if (corumLockedOptions === undefined)` 里的 `preflightChildLlmRoute`
+         * ——它只在「跟随父」分支里跑。于是配错的模型有两种失败形态：
+         *   · **spawn 期**解析失败（provider/model 不存在）→ 若不先预检就会直接抛出去，
+         *     回退逻辑进不到 settle，用户看到的是「任务失败」而不是「已回退」；
+         *   · **运行期**失败（模型能连但调用出错）→ 官方契约定为 `stopReason: 'error'`。
+         * 故首轮先对配置路由做一次真路由预检（解析不了 ⇒ 直接回退，连子会话都不启，
+         * 省一次 spawn），再由 settle 的 stopReason 兜运行期失败——两种形态都算用户
+         * 策略第 2 条的「模型调用出错」。
+         */
+        let outcome: ForegroundToolResult | undefined
+        let fallbackReason: string | undefined
+        /** 最终 settle 的那次 run 的 id（通知标题用它；回退轮会覆盖成新 run）。 */
+        let settledRunId = ''
+        const attempts = configuredRoute === undefined ? 1 : 2
+        for (let attempt = 0; attempt < attempts; attempt++) {
+          // 第二轮 = 回退轮：清掉角色锁的 agentOptions，让子 Agent 跟随父的真实路由
+          //（该字段缺失时官方 seam 用父路由）。
+          if (attempt === 1) delete request.agentOptions
+          if (attempt === 0) {
+            const llm = runtimeCtx.get('llm')
+            if (llm !== undefined) {
+              try {
+                await preflightChildLlmRoute(
+                  llm,
+                  parentOptions,
+                  request.agentOptions,
+                  exec.signal,
+                  providerRouteDefaults === undefined,
+                )
+              } catch (error: unknown) {
+                // 配置的路由解析不了 ⇒ 判「模型不可用」并直接进回退轮（不启死会话）。
+                fallbackReason = error instanceof Error ? error.message : String(error)
+                continue
+              }
+            }
+          }
+          const run = await startRun()
+          emitStarted(run)
+          settledRunId = String(run.id)
+          try {
+            outcome = await settleForegroundRun(run)
+            break
+          } catch (error: unknown) {
+            const reason = modelFailureOf(error)
+            // 非模型失败（aborted / max-tokens / refusal）或已是最后一轮 ⇒ 原样抛出。
+            if (reason === undefined || attempt === attempts - 1) throw error
+            fallbackReason = reason
+          }
+        }
+        if (outcome === undefined) {
+          // 循环只有「成功 break」与「抛出」两种出口，故此处不可达；保留是为了让
+          // `outcome` 在类型上收敛为非空（去掉它会退化成 `possibly undefined`）。
+          throw new Error('subagent run produced no outcome')
+        }
+        if (fallbackReason !== undefined && configuredRoute !== undefined) {
+          runtimeCtx.logger.warn(
+            `subagent (${args.label}): configured child model ${configuredRoute.configured.provider}/${configuredRoute.configured.model} failed (${fallbackReason}) — retried once on the parent route ${configuredRoute.fallback.provider}/${configuredRoute.fallback.model}`,
+          )
+          if (args.notifyParent !== false) {
+            corumNotifyModelFallback(
+              parent,
+              args.label,
+              configuredRoute.configured,
+              configuredRoute.fallback,
+              fallbackReason,
+              runtimeCtx.logger,
+            )
+          }
+        }
         // fork（corum）：前台子 Agent 的最终汇报注入父会话（2026-09-09 用户反馈
         // 「子 Agent 结束后反馈没有注入主 Agent」）。工具结果里本来就有汇报，但它埋在
         // 工具卡里、容易被忽略，且子会话卡片只显示进度与任务提示词——这里按后台子
         // Agent 的同款「settlement notice」形态再注入一条正式消息（form:'notice'，
         // 会话流里渲染成一条可见的注入行），汇报以一等消息出现。
         if (args.notifyParent !== false) {
-          corumNotifyForegroundResult(parent, String(run.id), args.label, outcome, runtimeCtx.logger)
+          corumNotifyForegroundResult(parent, settledRunId, args.label, outcome, runtimeCtx.logger)
         }
         // fork（corum）：把「这次改动落在哪」附在**工具结果**上（用户 2026-09-13 定调）。
         // 只在没隔离时附（worktree 是常规路径，报告由 integrate 负责）。
@@ -1878,16 +2013,18 @@ export function apply(ctx: Context, config: Config): void {
                     label: { type: 'string', description: 'A short (3-5 word) label for display.' },
                     isolation: { type: 'string', enum: ['always', 'write-tasks'], description: 'Override isolation for this task. Every write task is isolated regardless (there is no opt-out); this only matters for a task whose tool face has no write ability, where `always` still forces a worktree. Defaults to the instance policy.' },
                     research: { type: 'boolean', description: 'Set true for a read-only research task (write tools denied, no worktree).' },
-                    model: {
-                      type: 'object',
-                      additionalProperties: false,
-                      description: 'Fixed model for this task (mechanism lock). Omit to follow the instance/global default.',
-                      properties: {
-                        provider: { type: 'string', required: true },
-                        model: { type: 'string', required: true },
-                        reasoningEffort: { type: 'string' },
-                      },
-                    },
+                    // fork（corum）2026-09-18：per-task `model` **已从 schema 剔除**。
+                    //
+                    // 用户策略（第 1/4 条）：「子 Agent 使用模型必须唯一，不给 LLM 候选列表；
+                    // 用户设置了子 Agent 要路由到哪个模型就路由到那个模型」，且
+                    // 「orchestrate 也不能豁免」。此前 `tasks[i].model` 是 LLM 可见参数
+                    // （描述还写着 "mechanism lock"），实测主 Agent 可以据此把子 Agent
+                    // 换到任意模型——这正是策略要禁的「让 LLM 决定子 Agent 模型」。
+                    //
+                    // 现在与 `subagent` 工具同款：模型面**物理不可表达**，路由只由
+                    // 用户配置决定（预设锁 → 跟随主 Agent）。`subagent` 工具早在
+                    // 1765 行就做了同样的事（"LLM 物理上无法表达模型偏好"），
+                    // orchestrate 是当时漏掉的那一处。
                     background: { type: 'boolean', description: 'Run in the background (continuable, steered via send_message). Defaults to foreground one-shot.' },
                     schema: {
                       type: 'object',
@@ -2210,9 +2347,8 @@ export function apply(ctx: Context, config: Config): void {
                   ...task.isolation !== undefined ? { taskIsolation: task.isolation } : {},
                   ...task.research !== undefined ? { taskResearch: task.research } : {},
                   ...task.schema !== undefined ? { taskSchema: task.schema } : {},
-                  // fork（corum）：任务级模型锁真接线（P0-4 2026-09-14）——tasks[i].model
-                  // 落到该任务的模型选择；缺失时沿用 preset config.model > 全局默认 > 跟随父。
-                  ...task.model !== undefined ? { taskModel: task.model } : {},
+                  // fork（corum）2026-09-18：**不再转达 task.model**——per-task 模型面
+                  // 已按用户策略剔除（见 schema 处说明），子 Agent 路由只由用户配置决定。
                   // fork（corum）：并发感知隔离的两个入参——① 本次 fan-out 任务数
                   // （≥2 才需要 worktree）；② 不向父会话逐条注入 notice（结果由
                   // orchestrate 的汇总结果承载，避免 N 条重复通知）。
@@ -2399,7 +2535,7 @@ export function apply(ctx: Context, config: Config): void {
               'How the mechanism works (rely on it, do not re-implement):',
               '- EVERY write-capable delegation gets its OWN isolated git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running — there is no opt-out. Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`. Never assume a delegated write has landed — read the result, which states where the work is. Read-only research delegations are not isolated (they write nothing). Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
               '- Isolation is a property of CHANGE, not of delegation: it exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
-              '- Model routing precedence: a per-task `model` on an `orchestrate` task wins for that task; otherwise the preset role lock (worker/research profile) wins over the global default, and with neither the child follows your route. Task-level routes are validated before spawn (settings allowlist when configured, plus a live route preflight) — an invalid provider/model fails that task. Never ask the user to pick a model; `subagent` has no model parameter at all.',
+              '- Child model routing is NOT yours to choose: neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed). The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route. Never ask the user to pick a model; never try to route a child elsewhere. If a child fails because its configured model is unavailable, the mechanism automatically retries that child once on YOUR route and notifies the user — you do not need to (and cannot) do that yourself.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Declaring `merge` at all means the mechanism finishes the job — it merges + commits the isolated branches once every task is done. Omitting `merge` keeps the branches for you; then finish them yourself with the explicit action `subagent { integrate: true }`, because an unmerged branch is invisible work.',
               '- INTEGRATION IS THE MECHANISM\'S when you declare `merge` (it merges + verifies + commits once every task is done — never a child\'s job). Without `merge`, YOU finish it with the explicit `subagent { integrate: true }`; a pending-integration notice is raised either way so branches cannot silently strand. NEVER delegate a main-tree write to an ISOLATED child and expect it to land: that child works in its own worktree, so its writes cannot reach the parent tree.',
               '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
