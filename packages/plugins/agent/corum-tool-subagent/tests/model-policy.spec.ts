@@ -86,8 +86,13 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     expect(code).not.toMatch(/task\.model/)
   })
 
-  it('模型路由优先级只剩两档：用户配置 > 跟随父（没有第三档）', () => {
-    expect(SRC).toContain('const corumEffectiveModel = config.model ?? corumGlobalModel')
+  it('模型路由**始终两档**：预设配的模型 > 跟随主 Agent（运行期无全局兜底档）', () => {
+    // 用户 2026-09-18 澄清：「跟随主 Agent 就是主 Agent 当前预设哪个，子 Agent 也预设哪个。
+    // 全局页面的配置只是说你创建一个新预设的时候默认使用这套配置……**始终是两档**」。
+    // ⇒ 运行期**不得**读 `corum-subagent` 的 defaultModel/defaultResearchModel。
+    expect(SRC).toContain('const corumEffectiveModel = config.model')
+    expect(SRC, '运行期又读了全局兜底档（它应只是「新建预设的模板」）')
+      .not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)
   })
 
   it('候选列表工具（list_subagent_models）存在，但只在 modelSelectionSettings 开启时注册', () => {

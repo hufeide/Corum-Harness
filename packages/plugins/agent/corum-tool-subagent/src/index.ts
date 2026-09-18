@@ -206,7 +206,16 @@ export interface CorumSubagentGlobalSettings {
   readonly maxParallelChildren?: number
   readonly integrateChecks?: string[]
   readonly merger?: 'parent' | 'merger'
+  /**
+   * **新建预设的模板值**（worker 子 Agent 模型）——**不是**运行期兜底档。
+   *
+   * 用户 2026-09-18 澄清：「全局页面的配置只是说你**创建一个新预设的时候默认使用这套
+   * 配置**，如果新的预设自己覆盖了就按预设的配置，**始终是两档**（预设配的模型 / 跟随
+   * 主 Agent）」。故该键**只在预设编辑器创建草稿时被预填**，运行期的子 Agent 路由解析
+   * **不读它**（见 `corumEffectiveModel = config.model`）。
+   */
   readonly defaultModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 同 {@link defaultModel}，面向 research 子 Agent（新建预设时的模板）。 */
   readonly defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
 }
 
@@ -1244,16 +1253,21 @@ export function apply(ctx: Context, config: Config): void {
       const modelRequest = args as DelegationModelRequest
       const parentOptions = parentAgentOptionsForDelegation(parent)
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
-      // fork（corum）：模型路由优先级（2026-09-18 按用户策略收敛为两档）——
-      //   ① **用户配置的模型**：preset config.model（角色锁，见
-      //      corum-agent/compile.ts：worker→profile.subagentModel，
-      //      research→profile.researchModel ?? subagentModel），缺省时由全局默认
-      //      defaultModel / defaultResearchModel 兜底（设置→智能体 那两项）；
-      //   ② **跟随父**：两处都没配才落到父 Agent 的真实路由。
-      // ❗**没有第三档**：per-task `tasks[i].model` 已按用户策略剔除（LLM 不可表达），
-      // 故 corumEffectiveModel 只可能来自「用户配置」或 undefined（= 跟随父）。
-      const corumGlobalModel = corumReadonlyResearch ? corumGlobal().defaultResearchModel : corumGlobal().defaultModel
-      const corumEffectiveModel = config.model ?? corumGlobalModel
+      // fork（corum）：模型路由**始终两档**（2026-09-18 用户澄清口径）——
+      //   ① **预设里配的模型**（`config.model`，角色锁，见 corum-agent/compile.ts：
+      //      worker→profile.subagentModel，research→profile.researchModel ?? subagentModel）；
+      //   ② **跟随主 Agent**：预设没配（= 菜单里选了「（同主 Agent）」）就落到父的真实路由。
+      //
+      // ❗**运行期没有全局兜底那一档**。用户 2026-09-18 明确：「跟随主 Agent 就是主 Agent
+      // 当前预设哪个，子 Agent 也预设哪个。**全局页面的配置只是说你创建一个新预设的时候
+      // 默认使用这套配置**，如果新的预设自己覆盖了就按预设的配置，**始终是两档**」。
+      // 故 `corum-subagent` 全局 ns 的 defaultModel/defaultResearchModel **不参与运行期
+      // 解析**——它们是**新建预设时的模板值**（由设置页在创建草稿时预填，见
+      // SettingsAgentPresetsSection 的 emptyDraft + 全局模板）。
+      // 此前这里写成 `config.model ?? corumGlobalModel`，等于把「模板」当成了运行期的
+      // 第三档：用户在全局页改一项，会静默影响**所有没配该键的预设**的子 Agent 路由
+      // ——既违反两档语义，也让「预设没配 = 跟随主 Agent」这句话不成立。
+      const corumEffectiveModel = config.model
       const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
         ? undefined
         : {

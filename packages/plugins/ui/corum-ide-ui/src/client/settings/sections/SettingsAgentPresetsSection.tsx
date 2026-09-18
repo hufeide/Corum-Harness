@@ -9,7 +9,8 @@ import { Box, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, C
 import { SelectField } from '../SelectField.tsx'
 import { Switch } from '../Switch.tsx'
 import { ConfirmDialog } from '../ConfirmDialog.tsx'
-import { GlassButton, useCorumRpc, useSectionNav } from '../shared.tsx'
+import { GlassButton, useCorumRpc, useCorumSettings, useSectionNav } from '../shared.tsx'
+import type { CorumSettingsFace } from '../shared.tsx'
 import { useDeveloperMode } from '../developer-mode.ts'
 import type { SkillInfo, SkillVersion, SkillBinding, ProfileSummary, McpServerSummaryWire } from '../types.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
@@ -354,14 +355,39 @@ interface EditDraft {
   trust: 'system' | 'user'
 }
 
-function emptyDraft(): EditDraft {
+/**
+ * 新建预设的**初始草稿**。
+ *
+ * ⚠️ 2026-09-18 用户澄清的语义（决定了本函数为什么要吃 `template`）：
+ * 「**跟随主 Agent** 就是主 Agent 当前预设哪个，子 Agent 也预设哪个。**全局页面的配置
+ * 只是说你创建一个新预设的时候默认使用这套配置**，如果新的预设自己覆盖了就按预设的配置，
+ * **始终是两档**。」
+ *
+ * ⇒ 设置→智能体 页那两个「worker / research 子 Agent 默认模型」**不是运行期的第三档**
+ * （运行期只有「预设里配的模型」与「跟随主 Agent」两档，见 `corum-tool-subagent` 的
+ * `corumEffectiveModel = config.model`），而是**新建预设时的预填模板**：新建时把全局值
+ * 带进来，用户想覆盖就改，不改就等于用了全局那套。
+ *
+ * @param template - 全局模板值（`corum-subagent` 的 defaultModel/defaultResearchModel）；
+ *   缺省时保持内置兜底值（全局也没配 ⇒ 预设也不配子模型 ⇒ 子 Agent 跟随主 Agent）。
+ * @returns 新建预设用的草稿。
+ */
+function emptyDraft(template?: { sub?: { provider: string; model: string } | undefined; research?: { provider: string; model: string } | undefined }): EditDraft {
+  const sub = template?.sub
+  const research = template?.research
   return {
     name: '', nickname: '', title: '', dimension: '研发', experience: '',
     personaPreset: DEFAULT_PERSONA_PRESET, personaCustom: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
-    subEnabled: false, subProvider: 'deepseek-official', subModel: 'deepseek-v4-flash',
-    researchEnabled: false, researchProvider: 'deepseek-official', researchModel: 'deepseek-v4-flash',
-    customEnabled: false, modelCardExpanded: false, maxParallel: '',
+    // 模板命中 ⇒ 预填并**打开**该项（让用户看得见「这个预设用了全局模板的模型」）；
+    // 模板缺省 ⇒ subEnabled=false = 菜单里的「（同主 Agent）」，即第二档。
+    subEnabled: sub !== undefined,
+    subProvider: sub?.provider ?? 'deepseek-official',
+    subModel: sub?.model ?? 'deepseek-v4-flash',
+    researchEnabled: research !== undefined,
+    researchProvider: research?.provider ?? 'deepseek-official',
+    researchModel: research?.model ?? 'deepseek-v4-flash',
+    customEnabled: sub !== undefined || research !== undefined, modelCardExpanded: sub !== undefined || research !== undefined, maxParallel: '',
     terminal: 'sandbox', memoryEnabled: false, skills: [], mcpServers: [], trust: 'user',
   }
 }
@@ -440,13 +466,65 @@ type PresetsView =
   | { kind: 'edit'; profile: AgentProfileSummary | 'new' }
   | { kind: 'official-detail'; modeId: string }
 
+/**
+ * 从「设置→智能体」的全局配置取**新建预设的模板值**。
+ *
+ * 用户 2026-09-18 澄清的语义落点：全局页那两项（`corum-subagent` 的
+ * defaultModel / defaultResearchModel）**不是运行期的第三档**——运行期始终两档
+ * （预设里配的模型 / 跟随主 Agent，见 corum-tool-subagent 的
+ * `corumEffectiveModel = config.model`）。它们是**新建预设时的预填模板**：
+ * 「全局页面的配置只是说你创建一个新预设的时候默认使用这套配置，如果新的预设
+ * 自己覆盖了就按预设的配置」。
+ *
+ * 故这里只在**新建**时读一次，预填进草稿；用户保存后就变成该预设自己的配置，
+ * 之后改全局页**不会**回头影响已存在的预设（这正是用户要的「始终两档」）。
+ *
+ * @param settings - settings 面；未提供（服务未就绪）时返回空模板 ⇒ 新建预设不配子模型。
+ * @returns `{sub, research}` 两个可选模板值；缺省项表示「没有模板，不预填」。
+ */
+function newPresetTemplate(settings: CorumSettingsFace | null): {
+  sub?: { provider: string; model: string } | undefined
+  research?: { provider: string; model: string } | undefined
+} {
+  if (settings === null) return {}
+  const namespaces = settings.describe.getSnapshot().view?.namespaces ?? []
+  const entry = namespaces.find(n => n.ns === 'corum-subagent')
+  // 读**用户层**（user）：模板是用户显式配的值；value 是合成后值（含默认），
+  // 拿它当模板会把「未配置」也当成模板。
+  const user = (entry?.user ?? {}) as {
+    defaultModel?: { provider?: string; model?: string }
+    defaultResearchModel?: { provider?: string; model?: string }
+  }
+  const pick = (m: { provider?: string; model?: string } | undefined): { provider: string; model: string } | undefined =>
+    m?.provider !== undefined && m?.model !== undefined && m.provider !== '' && m.model !== ''
+      ? { provider: m.provider, model: m.model }
+      : undefined
+  const sub = pick(user.defaultModel)
+  return {
+    ...sub === undefined ? {} : { sub },
+    // research 未单独配时**不**回落到 sub：菜单里 research 的「（同 worker）」
+    // 由 corum 侧的 `researchModel ?? subagentModel` 表达，模板层不重复这条语义。
+    ...(() => { const r = pick(user.defaultResearchModel); return r === undefined ? {} : { research: r } })(),
+  }
+}
+
 export function AgentPresetsSection() {
   const rpc = useCorumRpc()
+  // 全局模板（设置→智能体 的 worker/research 子 Agent 默认模型）——2026-09-18 用户澄清：
+  // 它们**不是运行期的第三档**，而是**新建预设时的预填值**（见 emptyDraft 的说明）。
+  const settings = useCorumSettings()
   const [view, setView] = useState<PresetsView>({ kind: 'home' })
   const [profiles, setProfiles] = useState<AgentProfileSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dimFilter, setDimFilter] = useState<string>('全部')
   const [search, setSearch] = useState('')
+
+  // describe 镜像订阅：模板值可能在设置页被改，订阅后回来新建才能拿到最新值。
+  useEffect(() => {
+    if (settings === null) return undefined
+    void settings.describe.ensure()
+    return settings.describe.subscribe(() => { /* 下次渲染读最新快照 */ })
+  }, [settings])
 
   const reload = async () => {
     if (!rpc) return
@@ -469,6 +547,7 @@ export function AgentPresetsSection() {
         key={view.profile === 'new' ? '__new__' : view.profile.id}
         profile={view.profile === 'new' ? undefined : view.profile}
         rpc={rpc}
+        template={newPresetTemplate(settings)}
         onBack={() => setView({ kind: 'home' })}
         onSaved={() => { setView({ kind: 'home' }); void reload() }}
       />
@@ -624,14 +703,16 @@ const FALLBACK_MODELS = [
 /** 子 Agent 模型未启用时的占位项（设计稿 iUSeO「（同主 Agent）」）。 */
 const SAME_AS_MAIN = { id: '', label: '（同主 Agent）' }
 
-function EditPresetView({ profile, rpc, onBack, onSaved }: {
+function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
   profile: AgentProfileSummary | undefined
   rpc: CorumRpcCall
+  /** 新建预设时的全局模板值（仅 `profile === undefined` 时生效）。 */
+  template?: { sub?: { provider: string; model: string } | undefined; research?: { provider: string; model: string } | undefined } | undefined
   onBack: () => void
   onSaved: () => void
 }) {
   const isNew = profile === undefined
-  const [draft, setDraft] = useState<EditDraft>(() => isNew ? emptyDraft() : draftFromProfile(profile))
+  const [draft, setDraft] = useState<EditDraft>(() => isNew ? emptyDraft(template) : draftFromProfile(profile))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [skillBindOpen, setSkillBindOpen] = useState(false)
