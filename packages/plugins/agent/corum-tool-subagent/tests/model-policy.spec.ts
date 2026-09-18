@@ -31,12 +31,12 @@ const COMPILE_SRC = readFileSync(
 const LIST_MODELS_SRC = readFileSync(join(import.meta.dirname, '../src/list-models.ts'), 'utf8')
 
 /** 取一段源码：从 `from` 到其后第一个 `to`（不含）。顺序即语义锚点。 */
-function between(from: string, to: string): string {
-  const start = SRC.indexOf(from)
+function between(from: string, to: string, source: string = SRC): string {
+  const start = source.indexOf(from)
   expect(start, `anchor not found: ${from}`).toBeGreaterThanOrEqual(0)
-  const end = SRC.indexOf(to, start + from.length)
+  const end = source.indexOf(to, start + from.length)
   expect(end, `closing anchor not found: ${to}`).toBeGreaterThan(start)
-  return SRC.slice(start, end)
+  return source.slice(start, end)
 }
 
 /**
@@ -90,7 +90,10 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     // 用户 2026-09-18 澄清：「跟随主 Agent 就是主 Agent 当前预设哪个，子 Agent 也预设哪个。
     // 全局页面的配置只是说你创建一个新预设的时候默认使用这套配置……**始终是两档**」。
     // ⇒ 运行期**不得**读 `corum-subagent` 的 defaultModel/defaultResearchModel。
-    expect(SRC).toContain('const corumEffectiveModel = config.model')
+    // 2026-09-18：解析式多了一层**会话级临时覆盖**（机制问过用户之后写的内存值），
+    // 但它不是"配置档"——用户从未配置它、不落盘、新会话自然消失。
+    expect(SRC).toContain('const corumEffectiveModel = corumSessionOverride ?? config.model')
+    expect(SRC).toContain('orchestration.modelOverrideOf(String(parent.session.id))')
     expect(SRC, '运行期又读了全局兜底档（它应只是「新建预设的模板」）')
       .not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)
   })
@@ -106,8 +109,8 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
   })
 })
 
-describe('策略② 失败回退：模型调用出错 ⇒ 退回主 Agent 路由重试一次 + 通知用户', () => {
-  it('★ 回退只在「用的是用户配置的模型」时触发（跟随父时不重复跑）', () => {
+describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按用户两规则处置（2026-09-18 改版）', () => {
+  it('★ 只对「用的是用户配置的模型」的失败启动本机制（跟随父时无「配置模型不可用」可言）', () => {
     const route = between('const configuredRoute =', 'const modelFailureOf =')
     // 必须同时要求 corumEffectiveModel 存在、且父路由可解析。
     expect(route).toContain('corumEffectiveModel !== undefined')
@@ -120,34 +123,81 @@ describe('策略② 失败回退：模型调用出错 ⇒ 退回主 Agent 路由
     expect(fn).toContain("stopReason === 'error'")
   })
 
-  it('★ 回退路由 = 父 Agent 真实路由（清掉 agentOptions ⇒ 官方 seam 跟随父）', () => {
-    // 第二轮（attempt === 1）必须清掉角色锁的 agentOptions，让官方 seam 用父路由。
-    const block = between('for (let attempt = 0; attempt < attempts; attempt++)', 'const run = await startRun()')
-    expect(block).toContain('delete request.agentOptions')
+  it('★★ 不再自动重试：重跑必须先经过提问（用户 2026-09-18「不许替用户做主」）', () => {
+    // 旧版是「attempt===1 无条件清 agentOptions 重跑」——那正是用户本轮否掉的形态。
+    // 新形态：清 agentOptions 只出现在**问了用户并拿到 route 之后**。
+    const askIdx = SRC.indexOf('const asked = await corumAskAboutModel(')
+    expect(askIdx, '找不到提问调用').toBeGreaterThan(-1)
+    // 每一处 delete request.agentOptions 都必须排在某个 corumAskAboutModel 调用之后。
+    let from = 0
+    for (;;) {
+      const at = SRC.indexOf('delete request.agentOptions', from)
+      if (at === -1) break
+      const before = SRC.lastIndexOf('corumAskAboutModel(', at)
+      expect(before, 'delete request.agentOptions 出现在提问之前 ⇒ 退化成自动重试').toBeGreaterThan(-1)
+      from = at + 1
+    }
   })
 
-  it('★ 首轮先对「配置的路由」做真路由预检（spawn 期解析失败也走回退，不直接抛）', () => {
+  it('★ 首轮先对「配置的路由」做真路由预检（spawn 期解析失败也算模型不可用）', () => {
     // 锁定路径不走 `if (corumLockedOptions === undefined)` 里的预检 ⇒ 配错的模型若只靠
-    // settle 兜，会在 spawn 期直接抛出去、用户看到「任务失败」而非「已回退」。
+    // settle 兜，会在 spawn 期直接抛出去、用户看到「任务失败」而非「模型不可用」。
     const block = between('if (attempt === 0) {', 'const run = await startRun()')
     expect(block).toContain('preflightChildLlmRoute')
-    expect(block).toContain('fallbackReason =')
-    expect(block).toContain('continue')
+    expect(block).toContain('configuredFailure =')
+    expect(block).toContain('break')
   })
 
-  it('★ 回退只做一次（不递归：重试分支内不再 catch 回退）', () => {
-    // 重试后的 settle 不在 try 里再包一层回退 —— 出现第二次 delete request.agentOptions 即回潮。
-    const all = SRC.split('delete request.agentOptions').length - 1
-    expect(all, '回退逻辑出现了多处，可能被改成了递归重试').toBe(1)
+  it('★ 用户没同意（route undefined）⇒ 不重跑，如实把失败交回主 Agent（规则 2 下半句）', () => {
+    const block = between('const asked = await corumAskAboutModel(', 'delete request.agentOptions')
+    expect(block).toContain('asked.route === undefined')
+    expect(block).toContain('throw')
   })
 
-  it('★ 回退后通知用户，且通知里含「处理方式」（可执行下一步）', () => {
-    const notify = between('function corumNotifyModelFallback(', 'function corumNotifySettleCommitFailures')
-    // 用户策略原文要求「通知用户该情况的处理方式」⇒ 必须给出可执行的下一步。
-    expect(notify).toContain('Configured child model')
-    expect(notify).toContain('Retried on (main Agent route)')
-    expect(notify).toContain('What this means')
-    expect(notify).toMatch(/Agent presets|Settings/)
+  it('★ 选「否」⇒ 机制停用该会话委派（tools.guard，非提示词劝告）', () => {
+    expect(SRC).toContain('orchestration.disableDelegation')
+    // 执法必须是 guard：单调 deny、理由原样进工具结果。
+    expect(SRC).toContain('runtimeCtx.tools.guard(')
+    expect(SRC).toContain('delegationDisabledFor(')
+    expect(SRC).toContain('corumDelegationDisabledReason()')
+  })
+
+  it('★ 停用后给模型的拒绝理由含「为什么 + 自己干」（理由原样进 isError 工具结果）', () => {
+    const askSrc = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
+    const reason = between('export function corumDelegationDisabledReason(', '\n}', askSrc)
+    expect(reason).toMatch(/do ALL of this work yourself|Delegation is disabled/i)
+    expect(reason).toMatch(/user declined/)
+  })
+
+  it('★ 临时档只写会话内存，**不落盘**（用户要求「临时生效，不覆盖用户的设置」）', () => {
+    // 临时决定必须走 corumOrchestration 的会话级覆盖，而不是 settings/预设。
+    expect(SRC).toContain('setModelOverride')
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    const tempCase = source.slice(source.indexOf("case 'temporary'"), source.indexOf("case 'permanent-follow'"))
+    expect(tempCase).toContain('setModelOverride')
+    // 临时档**不许**出现任何持久化调用。
+    expect(tempCase).not.toContain('applySubagentModelForSession')
+    expect(tempCase).not.toContain('saveProfile')
+  })
+
+  it('★ 永久档才写预设，且走 corum-agent 的写入面（机制写，非 LLM 调工具）', () => {
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    expect(source).toContain('applySubagentModelForSession')
+    // 写失败必须如实报告，不许谎称已生效。
+    expect(source).toMatch(/could not save it|no writable profile/)
+  })
+
+  it('★ 三个永久/临时档位 + 拒绝都在提问选项里（用户要求「既能选永久跟随也能选别的模型」）', () => {
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    expect(source).toContain('CORUM_MODEL_ASK_TEMPORARY')
+    expect(source).toContain('CORUM_MODEL_ASK_FOLLOW_PERMANENTLY')
+    expect(source).toContain('CORUM_MODEL_ASK_PICK_PERMANENTLY')
+    expect(source).toContain('CORUM_MODEL_ASK_DECLINE')
+  })
+
+  it('★ 提示词不再宣告「机制会自动重试」（改版后这句话是假的）', () => {
+    const prompt = between('Child model routing is NOT yours to choose', '\n')
+    expect(prompt).not.toContain('automatically retries')
   })
 })
 
@@ -182,13 +232,16 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     expect(SRC).not.toContain('a per-task `model` on an `orchestrate` task wins')
   })
 
-  it('★ 机制提示词如实说明：子 Agent 模型不由模型选 + 失败会自动回退', () => {
+  it('★ 机制提示词如实说明：子 Agent 模型不由模型选 + 失败时**机制问用户**（不是自动重试）', () => {
     const anchor = 'Child model routing is NOT yours to choose'
     const start = SRC.indexOf(anchor)
     expect(start, `anchor not found: ${anchor}`).toBeGreaterThanOrEqual(0)
     const line = SRC.slice(start, SRC.indexOf('\n', start))
     expect(line).toContain('never try to route a child elsewhere')
-    // 承诺了「自动重试一次 + 通知用户」⇒ 实现必须存在（上面三组断言已在钉它）。
-    expect(line).toContain('automatically retries that child once on YOUR route')
+    // 2026-09-18 改版后的真实承诺：机制问用户并按其答案行动；模型自己不许改路由。
+    expect(line).toContain('asks the user what to do')
+    expect(line).toContain('you must not try to change any model or route yourself')
+    // 旧承诺（自动重试）不得回潮——那句话已不成立。
+    expect(line).not.toContain('automatically retries')
   })
 })

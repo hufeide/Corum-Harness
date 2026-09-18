@@ -484,6 +484,31 @@ export interface CorumSettleCommitFailure {
   readonly reason: string
 }
 
+/**
+ * fork（corum）2026-09-18：一次委派的 spawn 事实（供**异步失败**时问用户）。
+ *
+ * 为什么需要：后台一次性 / continuable 的失败不在工具栈上，`subagent/end` 到达时
+ * 只剩 runId/childId/stopReason，缺「用户配的是哪个模型 / label / 角色」——那三样正是
+ * 提问与「永久写哪个键」必需的（见 `CorumOrchestration.childSpawns` 的说明）。
+ */
+export interface CorumChildSpawnFacts {
+  /** 委派方会话 id（问用户时定位提问落在哪个会话）。 */
+  readonly parentSessionId: string
+  /** 委托标签（提问文案的人话上下文）。 */
+  readonly label: string
+  /** 该角色（决定永久档写 subagentModel 还是 researchModel）。 */
+  readonly role: 'worker' | 'research'
+  /** 用户为该角色配置的模型路由（即"可能不可用"的那个）。 */
+  readonly configured: { provider: string; model: string }
+  /**
+   * 该委派能否「继续」（continuable）。
+   *
+   * 决定失败后的处置形态（用户两规则的分界）：**能 continue** 的会话可以**带着新模型
+   * 续跑同一个子会话**（上下文不丢）；**一次性**任务只能由主 Agent 重新指派一个新子会话。
+   */
+  readonly continuable: boolean
+}
+
 /** 机制自动提交的提交信息（可识别，**不冒充** Agent 的提交）。 */
 export const CORUM_AUTO_COMMIT_SUBJECT = 'wip(isolated): auto-commit on settle'
 
@@ -1618,6 +1643,28 @@ export class CorumOrchestration extends Service {
    * 故 settle 暂存、调用方经 {@link drainSettleCommitFailures} 取走并以 notice 投递给模型。
    */
   private readonly commitFailures = new Map<string, CorumSettleCommitFailure[]>()
+  /**
+   * 会话级**委派停用**标记（key=父 session id）——用户选了「不再派遣子 Agent」后的落点。
+   *
+   * 为什么住在这里（2026-09-18）：红线 1——跨 bundle 共享状态必须是 cordis service 实例
+   * 字段，不能是模块级单例（dsh 把 `@corum/*` 源码内联进每个消费 bundle，模块级状态会
+   * 分裂成互不同步的多份）。本服务已由根上下文 provide（`corumOrchestration`），
+   * corum-tool-subagent 的 apply 又已**强制依赖**它（缺则抛装配错误），是天然的会话级
+   * 状态家；与同文件的 `runningWriteChildren` / `ledger` 同款形态。
+   *
+   * 语义：**只存内存、不落盘**——这是"本会话内不再委派"的临时决定（用户原话「后续主
+   * Agent 不再派遣子 Agent」），新会话不受影响，重启即清（同一用户在同一会话里再遇到
+   * 同一坏模型时会重新被问，符合「每次都问」的口径）。
+   */
+  private readonly delegationDisabled = new Set<string>()
+  /**
+   * 会话级**临时子 Agent 模型覆盖**（key=父 session id）。
+   *
+   * 用户选了「临时改用主 Agent 模型」后落在这里：后续本会话的子 Agent 一律用该路由，
+   * 但**绝不写入 settings.yaml / 预设**（用户原话「临时生效，不覆盖用户的设置，即用户
+   * 新建对话，如果用户还配置了原来不可用的大模型，仍然会调用失败」）。同样只存内存。
+   */
+  private readonly modelOverrides = new Map<string, { provider: string; model: string; reasoningEffort?: string }>()
   /** Phase 4：持久化 domain 句柄（storageDomain 缺失时为 undefined，回落纯内存）。 */
   private readonly domainPromise: Promise<Domain<typeof corumOrchestrationDomainSpec>> | undefined
 
@@ -1959,6 +2006,72 @@ export class CorumOrchestration extends Service {
   /** 该会话当前在跑的写子 Agent 数（>0 表示新派遣与它并发）。 */
   runningWriteChildrenOf(sessionId: string): number {
     return this.runningWriteChildren.get(sessionId) ?? 0
+  }
+
+  /**
+   * 停用该会话的委派（用户选「否，不再派遣子 Agent」）。
+   *
+   * 消费方（corum-tool-subagent）在**同一时刻**注册 `tools.guard`——因为本方法只记状态，
+   * 「让模型的委派调用真的被拒」由 guard 承担（guard 是单调 deny、原因字符串原样进工具
+   * 结果，见官方 tools 服务）。这里只管状态本身，保持"状态"与"执法"分离、各自可测。
+   */
+  disableDelegation(sessionId: string): void {
+    this.delegationDisabled.add(sessionId)
+  }
+
+  /** 该会话是否已停用委派（每次工具调用前查）。 */
+  delegationDisabledFor(sessionId: string): boolean {
+    return this.delegationDisabled.has(sessionId)
+  }
+
+  /** 解除该会话的委派停用（用户后来改了配置/重新启用时清掉）。 */
+  enableDelegation(sessionId: string): void {
+    this.delegationDisabled.delete(sessionId)
+  }
+
+  /** 登记该会话的临时子 Agent 模型覆盖（用户选「临时改用主 Agent 模型」）。 */
+  setModelOverride(
+    sessionId: string,
+    route: { provider: string; model: string; reasoningEffort?: string },
+  ): void {
+    this.modelOverrides.set(sessionId, { ...route })
+  }
+
+  /** 取该会话的临时子 Agent 模型覆盖（无则 undefined = 按预设/跟随主 Agent 原样解析）。 */
+  modelOverrideOf(sessionId: string): { provider: string; model: string; reasoningEffort?: string } | undefined {
+    const route = this.modelOverrides.get(sessionId)
+    return route === undefined ? undefined : { ...route }
+  }
+
+  /** 清除该会话的临时覆盖（用户改回原配置时用）。 */
+  clearModelOverride(sessionId: string): void {
+    this.modelOverrides.delete(sessionId)
+  }
+
+  /**
+   * 登记一次委派的 spawn 事实（key=子会话/run id），供**异步失败**时问用户用。
+   *
+   * 为什么需要它（2026-09-18）：后台一次性 / continuable 这两条路的失败**不在工具调用
+   * 的栈上发生**——工具早已返回（后台 job id / 子会话 id），失败要等 `subagent/end`
+   * 才到。那时手里只有 `info`（runId / childId / stopReason），**没有**「用户为该角色
+   * 配的是哪个模型、label 是什么」这些提问必需的事实。故 spawn 时记一份，settle 时取走。
+   *
+   * 只对「用户配置了锁定模型」的委派登记（没有配置就不存在"配置的模型不可用"这件事；
+   * 那种情况子 Agent 用的就是主路由，失败与模型选择无关）。取走即删，避免长期驻留。
+   */
+  private readonly childSpawns = new Map<string, CorumChildSpawnFacts>()
+
+  /** 登记 spawn 事实（仅锁定路由的委派；见 {@link childSpawns} 的说明）。 */
+  rememberChildSpawn(childId: string, facts: CorumChildSpawnFacts): void {
+    this.childSpawns.set(childId, { ...facts, configured: { ...facts.configured } })
+  }
+
+  /** 取走 spawn 事实（取走即删；拿不到=该委派与「配置模型不可用」无关）。 */
+  takeChildSpawn(childId: string): CorumChildSpawnFacts | undefined {
+    const facts = this.childSpawns.get(childId)
+    if (facts === undefined) return undefined
+    this.childSpawns.delete(childId)
+    return facts
   }
 
   /**

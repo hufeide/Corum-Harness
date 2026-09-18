@@ -66,6 +66,7 @@ export {
   corumOrchestrationDomainSpec,
 } from '@corum/corum-orchestration'
 export type {
+  CorumChildSpawnFacts,
   CorumCleanupOptions,
   CorumSettleCommitFailure,
   CorumIntegrationTruth,

@@ -95,6 +95,7 @@ export {
 } from './orchestration.ts'
 export type {
   CorumWorktreeChild,
+  CorumChildSpawnFacts,
   CorumSettleCommitFailure,
   CorumWorktreeChildOptions,
   CorumCleanupOptions,
