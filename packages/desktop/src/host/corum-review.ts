@@ -70,6 +70,12 @@ import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-session'
 import { parseBashWriteTargets, parsePorcelainPaths, selectUnionCandidates } from './corum-bash-writes.ts'
+import {
+  MAX_SESSION_LEDGER,
+  isGuestRound,
+  resolveSnapshotSource,
+  selectFrozenEvictions,
+} from './corum-review-round-policy.ts'
 
 // ── corum-review settings namespace（保留天数）────────────────────────────────
 
@@ -162,6 +168,13 @@ interface LiveRound {
   lastUnionScanAt?: number
   /** 并集扫描在飞（同时只允许一次）。 */
   unionScanInFlight?: boolean
+  /**
+   * 本轮是从 journal **回放**出来的（重启后恢复）。
+   *
+   * 兜底网的判据要它：回放出来的轮次在旧版 journal 里认不出父会话，按「所有者」放行会
+   * 让父 Agent 当时的脏文件重新被子 Agent 冒领（见 `isGuestRound`）。
+   */
+  fromJournal?: boolean
   /** 相对路径 → 改动前状态。 */
   touched: Map<string, Preimage>
 }
@@ -174,6 +187,28 @@ interface RepoState {
 }
 
 /**
+ * 一轮的**冻结态**：工作区健在时算出的最后一份改动列表 + 那一刻的 pre-image。
+ *
+ * 为什么必须有它（2026-09-18 真机缺陷收口）：轮次的 `workspace` 可能是**临时**目录 ——
+ * 隔离子 Agent 的 worktree 在集成后会被回收（正常 happy path），而卡片恰恰是「子 Agent
+ * 干完活之后」才被展开审查的。此时实时重算读到的「当前内容」全是「文件不存在」：
+ *   ① 每个文件都算成「全删」（`+0 −N`）；
+ *   ② 若 pre-image 也取不回，条目会被「净变化 0 → 跳过」静默丢掉 ⇒ 改动区显示为空。
+ * 冻结态把「工作区还在时的那份真相」钉在内存里，`snapshot`/`fileBefore` 在工作区消失后
+ * 回放它 —— 审查结论不再随 worktree 的回收时刻漂移。
+ */
+interface FrozenRound {
+  /** 冻结时的工作区（已回收也要如实带出去，供 UI/报错话术使用）。 */
+  workspace: string
+  roundIndex: number
+  files: ReviewFileEntry[]
+  /** 那一刻的 pre-image（`fileBefore` 要用它开 diff；对象引用与活轮次共享，不复制正文）。 */
+  preimages: ReadonlyMap<string, Preimage>
+  /** 冻结时刻（淘汰用）。 */
+  at: number
+}
+
+/**
  * 轮次 journal 的一行（append-only JSONL，放在影子仓库根目录）。
  *
  * 为什么需要它（C6）：捕获发生在会话 append 的**同步**路径上，只能先记内存。
@@ -182,9 +217,9 @@ interface RepoState {
  * 服务启动时回放 journal，把未结束的轮次恢复出来。
  */
 type JournalLine =
-  | { t: 'capture'; session: string; round: number; workspace: string; path: string; blob: string }
-  | { t: 'capture-absent'; session: string; round: number; workspace: string; path: string }
-  | { t: 'capture-unavailable'; session: string; round: number; workspace: string; path: string }
+  | { t: 'capture'; session: string; round: number; workspace: string; path: string; blob: string; parent?: string; parentCwd?: string }
+  | { t: 'capture-absent'; session: string; round: number; workspace: string; path: string; parent?: string; parentCwd?: string }
+  | { t: 'capture-unavailable'; session: string; round: number; workspace: string; path: string; parent?: string; parentCwd?: string }
   | { t: 'end'; session: string; round: number }
 
 /** journal 文件名（每个工作区一份，与影子仓库同级）。 */
@@ -275,6 +310,17 @@ function runGitIn(cwd: string, args: string[]): Promise<{ stdout: string; stderr
 export class CorumReviewService extends TypertRemoteService {
   private readonly repos = new Map<string, RepoState>()
   private readonly rounds = new Map<string, LiveRound>()
+  /**
+   * 会话 id → 冻结态（轮次收尾/工作区被回收后仍可审查，见 `FrozenRound`）。
+   * 上限 `MAX_FROZEN_ROUNDS`，超出按最旧淘汰。
+   */
+  private readonly frozen = new Map<string, FrozenRound>()
+  /** 会话 id → cwd（已 realpath 归一）。判「guest 轮次」要拿父会话的 cwd 来比对。 */
+  private readonly sessionCwds = new Map<string, string>()
+  /** 会话 id → 父会话 id（子会话才有）。同上，判定来源见 `isGuestRound`。 */
+  private readonly sessionParents = new Map<string, string>()
+  /** 已被证明是「工作区所有者」的会话（见过其会话事件且没有父会话）。判定见 `isGuestRound`。 */
+  private readonly sessionOwners = new Set<string>()
   /** 已经 warn 过的 key（`warnOnce`）：非 git 工作区之类的稳态失败不刷日志。 */
   private readonly warnedOnce = new Set<string>()
   private retentionDays = DEFAULT_RETENTION_DAYS
@@ -312,7 +358,10 @@ export class CorumReviewService extends TypertRemoteService {
     // 框架已把监听器包在 try/catch 里，这里再兜一层是为了不留半截状态。
     ctx.on('session/event', ((session: unknown, event: unknown) => {
       try {
-        this.onSessionEvent(session as { id?: unknown; header?: { cwd?: unknown } }, event as { type?: unknown; data?: unknown })
+        this.onSessionEvent(
+          session as { id?: unknown; header?: { cwd?: unknown; parentSession?: unknown; origin?: unknown } },
+          event as { type?: unknown; data?: unknown },
+        )
       } catch (error) {
         ctx.logger.warn(`corum-review capture failed: ${String(error)}`)
       }
@@ -322,13 +371,17 @@ export class CorumReviewService extends TypertRemoteService {
   // ── 事件捕获（同步路径，禁止 await）──────────────────────────────────────
 
   private onSessionEvent(
-    session: { id?: unknown; header?: { cwd?: unknown } },
+    session: { id?: unknown; header?: { cwd?: unknown; parentSession?: unknown; origin?: unknown } },
     event: { type?: unknown; data?: unknown },
   ): void {
     const cwd = session.header?.cwd
     if (typeof cwd !== 'string' || cwd === '') return
     const sessionId = String(session.id ?? '')
     if (sessionId === '') return
+
+    // 会话 → cwd / 父会话记账（判 guest 轮次用）。同步路径，只写 Map。
+    // 上限护栏：长进程里见过的会话数是无界的，满了按插入序淘汰最旧的。
+    this.rememberSession(sessionId, cwd, session.header?.parentSession)
 
     if (event.type === 'turn/start') {
       const previous = this.rounds.get(sessionId)
@@ -340,6 +393,17 @@ export class CorumReviewService extends TypertRemoteService {
         startedAt: Date.now(),
         touched: new Map(),
       })
+      return
+    }
+    if (event.type === 'turn/end') {
+      // ★ 子会话（委派）一轮即完工，而它的工作区可能是**临时**目录（隔离 worktree 在
+      // 集成后被回收）。此刻工作区还在 —— 把「工作区健在时算出的真相」冻下来，
+      // 之后即使 worktree 被删，子 Agent 卡片的改动区仍然给得出正确结论。
+      // 主会话不冻：它的工作区是用户的真实目录，不会消失，冻了只会白占内存。
+      if (session.header?.origin === 'subagent') {
+        const round = this.rounds.get(sessionId)
+        if (round !== undefined) void this.freezeRound(sessionId, round.workspace, round.index, round.touched)
+      }
       return
     }
     if (event.type !== 'tool/call') return
@@ -398,6 +462,146 @@ export class CorumReviewService extends TypertRemoteService {
   }
 
   /**
+   * 会话 → cwd / 父会话记账（判 guest 轮次用）。
+   *
+   * cwd 走 `realpathOr` 归一：porcelain 的路径与 cwd 可能一个软链一个不是（macOS 的
+   * `/tmp` → `/private/tmp`），不归一就会把「同一个工作区」判成两个。
+   * 两个 Map 都有条数上限（`MAX_SESSION_LEDGER`，按插入序淘汰最旧）：长进程里见过的
+   * 会话数无界，不设护栏就是一条慢性内存泄漏。
+   */
+  private rememberSession(sessionId: string, cwd: string, parentSession: unknown): void {
+    this.setLedger(this.sessionCwds, sessionId, this.realpathOr(cwd))
+    if (typeof parentSession === 'string' && parentSession !== '') {
+      this.setLedger(this.sessionParents, sessionId, parentSession)
+      return
+    }
+    // 没有父会话 ⇒ 见过它的会话事件就证明了它是工作区所有者（自己就是主会话）。
+    // journal 回放出来的轮次要靠这一条重新获得 mtime 并集兜底（见 `isGuestRound`）。
+    if (!this.sessionOwners.has(sessionId) && this.sessionOwners.size >= MAX_SESSION_LEDGER) {
+      const oldest = this.sessionOwners.values().next()
+      if (oldest.done !== true) this.sessionOwners.delete(oldest.value)
+    }
+    this.sessionOwners.add(sessionId)
+  }
+
+  /** 往有上限的 ledger 里写一条（Map 保插入序：满了删最旧的那个 key）。 */
+  private setLedger(ledger: Map<string, string>, key: string, value: string): void {
+    if (!ledger.has(key) && ledger.size >= MAX_SESSION_LEDGER) {
+      const oldest = ledger.keys().next()
+      if (oldest.done !== true) ledger.delete(oldest.value)
+    }
+    ledger.set(key, value)
+  }
+
+  /**
+   * 本轮是否与父会话**共用**工作区（guest 轮次）—— 是则禁止 mtime 并集兜底。
+   *
+   * 判定策略（含两条保守分支）见 `corum-review-round-policy.ts` 的 `isGuestRound`：
+   * 父子关系已知就按 cwd 比对；未知且本轮是 journal 回放出来的，按 guest 处理 ——
+   * 旧版 journal 行没有 `parent` 字段，不这样兜就会在重启后让修好的缺陷原样复活。
+   */
+  private isGuestRound(round: LiveRound): boolean {
+    const parentSession = this.sessionParents.get(round.sessionId)
+    return isGuestRound({
+      parentSession,
+      parentCwd: parentSession === undefined ? undefined : this.sessionCwds.get(parentSession),
+      workspace: this.realpathOr(round.workspace),
+      fromJournal: round.fromJournal === true,
+      knownWorkspaceOwner: this.sessionOwners.has(round.sessionId),
+    })
+  }
+
+  /** 工作区目录当下是否还在（隔离 worktree 集成后会被回收）。 */
+  private workspaceAlive(workspace: string): boolean {
+    try { return statSync(workspace).isDirectory() } catch { return false }
+  }
+
+  /**
+   * 算一轮的改动列表（`snapshot` 与冻结共用一份实现，避免两条路径算出不同结论）。
+   *
+   * @param workspace - 轮次工作区（读「当前内容」的基准）。
+   * @param touched - 该轮的「路径 → 改前状态」。
+   * @returns 改动条目；影子仓库不可用时返回 `null`（调用方按各自口径降级，绝不抛给 RPC）。
+   */
+  private async filesOf(
+    workspace: string,
+    touched: ReadonlyMap<string, Preimage>,
+  ): Promise<ReviewFileEntry[] | null> {
+    let repo: RepoState
+    try {
+      repo = await this.ensureRepo(workspace)
+    } catch (error) {
+      // 影子仓库不可用（init 失败等）→ 本轮快照给不出来，如实降级为空集并记日志；
+      // 绝不抛给 RPC 调用方（问题 1-②：异常会穿过静默 catch 直达用户通知，且无任何
+      // 诊断信息）。touched 仍在内存里，下一轮/重试时恢复。
+      this.ctx.logger.warn(`corum-review snapshot: ensureRepo failed: ${String(error)}`)
+      return null
+    }
+    const files: ReviewFileEntry[] = []
+    for (const [path, pre] of touched) {
+      const after = this.readCurrent(resolve(workspace, path))
+      // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
+      const beforeText = await this.preimageText(repo, pre)
+      const afterText = after.kind === 'content' ? after.text : null
+      // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
+      const stats = await this.diffStat(repo, beforeText, afterText)
+      if (stats.added === 0 && stats.removed === 0) continue // 净变化 0：不算「更改」
+      // eslint-disable-next-line no-await-in-loop -- 同上
+      const hash = await this.hashObject(repo, afterText ?? '')
+      // 问题 1-④⑤ 收口：把改前状态带上——unavailable 的行由调用方置灰（不可点、
+      // 不可撤销）；blob 形态取不回正文时同样如实报 unavailable。
+      const status: ReviewPreimageStatus =
+        pre.kind === 'unavailable' ? 'unavailable'
+        : pre.kind === 'absent' ? 'absent'
+        : beforeText === null ? 'unavailable'
+        : 'content'
+      files.push({ path, added: stats.added, removed: stats.removed, hash, status })
+    }
+    return files
+  }
+
+  /**
+   * 冻结一轮：把「此刻（工作区健在）算出的改动列表 + pre-image」钉进 `frozen`。
+   *
+   * 失败只记日志：冻结态是**加强**（让回收 worktree 之后的审查仍然正确），
+   * 拿不到就退回旧行为，绝不因为冻结失败而影响会话或轮次收尾。
+   *
+   * `touched` 为空时**直接跳过**：空列表本来就是正确答案（`resolveSnapshotSource`
+   * 会给 `none` → `files: []`，结论一致），而跑下去会 `ensureRepo` 一次，把
+   * 「没有任何改动的轮次不在用户目录里留下影子仓库目录」这条既有不变式破掉。
+   */
+  private async freezeRound(
+    sessionId: string,
+    workspace: string,
+    roundIndex: number,
+    touched: ReadonlyMap<string, Preimage>,
+  ): Promise<void> {
+    if (touched.size === 0) return
+    try {
+      const files = await this.filesOf(workspace, touched)
+      if (files === null) return
+      this.frozen.set(sessionId, {
+        workspace,
+        roundIndex,
+        files,
+        preimages: new Map(touched),
+        at: Date.now(),
+      })
+      this.evictFrozen()
+    } catch (error) {
+      this.ctx.logger.warn(`corum-review freeze failed (${sessionId}): ${String(error)}`)
+    }
+  }
+
+  /** 冻结态条数护栏（超出按最旧淘汰）。 */
+  private evictFrozen(): void {
+    const doomed = selectFrozenEvictions(
+      [...this.frozen].map(([sessionId, f]) => ({ sessionId, at: f.at })),
+    )
+    for (const sessionId of doomed) this.frozen.delete(sessionId)
+  }
+
+  /**
    * 从一条 shell 命令里解析出「写文件」的绝对目标路径。
    *
    * 解析器对不确定的路径一律放弃（变量/通配/算不出的 cd），只用计数 —— 这里把它落成
@@ -433,7 +637,19 @@ export class CorumReviewService extends TypertRemoteService {
   private async persistCapture(round: LiveRound, rel: string, pre: Preimage): Promise<void> {
     try {
       const repo = await this.ensureRepo(round.workspace)
-      const base = { session: round.sessionId, round: round.index, workspace: round.workspace, path: rel }
+      // 父会话 + 父 cwd 随行落盘：重启后 `restoreRounds` 靠它复原「guest 轮次」判定，
+      // 否则回放出来的 guest 轮次会被当成工作区所有者、重新开放 mtime 并集兜底 ——
+      // 等于把「父 Agent 的改动被子 Agent 冒领」这个缺陷带回重启后的进程。
+      const parent = this.sessionParents.get(round.sessionId)
+      const parentCwd = parent === undefined ? undefined : this.sessionCwds.get(parent)
+      const base = {
+        session: round.sessionId,
+        round: round.index,
+        workspace: round.workspace,
+        path: rel,
+        ...parent === undefined ? {} : { parent },
+        ...parentCwd === undefined ? {} : { parentCwd },
+      }
       let line: JournalLine
       if (pre.kind === 'content') {
         const hash = await this.hashObject(repo, pre.text)
@@ -482,12 +698,27 @@ export class CorumReviewService extends TypertRemoteService {
           if (round === undefined) {
             // 恢复出来的轮次：startedAt 只能取「恢复时刻」——用 0 会让轮末并集把上一轮
             // 之前就脏着的文件全当成这一轮的改动（宁可少补，不可误报）。
-            round = { sessionId: line.session, workspace: line.workspace, index: line.round, startedAt: Date.now(), touched: new Map() }
+            round = {
+              sessionId: line.session,
+              workspace: line.workspace,
+              index: line.round,
+              startedAt: Date.now(),
+              touched: new Map(),
+              fromJournal: true,
+            }
             open.set(roundKey, round)
           }
           if (line.t === 'capture') round.touched.set(line.path, { kind: 'blob', hash: line.blob })
           else if (line.t === 'capture-absent') round.touched.set(line.path, { kind: 'absent' })
           else round.touched.set(line.path, { kind: 'unavailable' })
+          // 复原「guest 轮次」判定所需的父子关系（写入侧见 `persistCapture`）。
+          // 不还原则回放出的 guest 轮次会被当成工作区所有者，重新开放 mtime 并集兜底。
+          if (line.parent !== undefined && line.parent !== '') {
+            this.setLedger(this.sessionParents, line.session, line.parent)
+            if (line.parentCwd !== undefined && line.parentCwd !== '') {
+              this.setLedger(this.sessionCwds, line.parent, line.parentCwd)
+            }
+          }
         }
         // 每个会话只保留**最后**一个未结束的轮次（更早的未结束轮次已被下一轮取代）。
         const latest = new Map<string, LiveRound>()
@@ -690,6 +921,11 @@ export class CorumReviewService extends TypertRemoteService {
   /**
    * 结束一轮：提交 A（轮次起点）与 B（轮次终点），把 `main` 推进到 B，打 round ref，
    * 再按保留策略 prune。**异步**（不阻塞会话）；失败只记日志（下一轮仍可继续）。
+   *
+   * 收尾的第一步是**冻结**改动列表（见 `FrozenRound`）：轮次一离开 `rounds`，
+   * `snapshot` 就再也算不出它的改动，而卡片（尤其是子 Agent 卡片）恰恰是事后才展开的。
+   * 冻结读的是「工作区还在时」的现场，所以必须排在 commit 之前、且用的是脱手前的
+   * `touched` 那份引用。
    */
   private closeRound(round: LiveRound): void {
     this.rounds.delete(round.sessionId)
@@ -705,6 +941,8 @@ export class CorumReviewService extends TypertRemoteService {
         if (added > 0) {
           this.ctx.logger.info(`corum-review round ${round.index}: +${added} path(s) via worktree union`)
         }
+        // ★ 冻结「本轮改动 + pre-image」：收尾后 snapshot/fileBefore 靠它继续作答。
+        await this.freezeRound(round.sessionId, round.workspace, round.index, touched)
         let repo: RepoState
         try {
           repo = await this.ensureRepo(round.workspace)
@@ -798,10 +1036,24 @@ export class CorumReviewService extends TypertRemoteService {
   /**
    * 求并在：把「本轮确实变了、但没有任何工具捕获到」的路径补进 `touched`。
    *
+   * ★ 不变式（2026-09-18 真机缺陷收口）：**guest 轮次不做并集兜底**。
+   *
+   * 并集的判据是「路径在 `git status` 里脏 ∧ mtime ≥ 本轮开始时刻」，这个判据只在
+   * **本轮独占该工作区**时成立。只读调研子会话与父会话共用父工作区，而父 Agent 在同一
+   * 时间窗里一直在编辑自己的文件 —— 实测三个只读子会话（0 次写调用）各自被记上了
+   * **完全相同的 7 个路径**，全是父 Agent 正在改的文件；子会话的 pre-image 抓到父的
+   * 半成品，审查卡里子条目**覆盖**父条目并打上「子 Agent」标签（9/9 条全被误标）。
+   *
+   * 为什么去掉这条网是安全的：guest 子会话能落到父工作区的写，如今只剩「非 git 工作区」
+   * 一种（不变式⑤：所有 git 工作区里的写委派恒隔离），而那种情况 `scanWorktreeChanges`
+   * 本来就会因 `git status` 失败而放弃。git 工作区里的 guest 写一律走确定性的 tool/call
+   * 捕获路径（文件工具 + bash 写目标解析器）。
+   *
    * @param touched - 要写入的表（closeRound 传的是已经脱离 `rounds` 的那份）。
    * @returns 补进来的条数。
    */
   private async applyWorktreeChanges(round: LiveRound, touched: Map<string, Preimage>): Promise<number> {
+    if (this.isGuestRound(round)) return 0
     const candidates = await this.scanWorktreeChanges(round, touched)
     if (candidates.length === 0) return 0
     let repo: RepoState
@@ -969,48 +1221,55 @@ export class CorumReviewService extends TypertRemoteService {
   // ── 对外 RPC ─────────────────────────────────────────────────────────────
 
   /**
-   * 当前活轮次的改动快照（Review 卡的数据源）。
+   * 当前轮次的改动快照（Review 卡 + 子 Agent 卡改动区的数据源）。
    * 行数交给 git 自己算（pre-image blob ↔ 当前内容 blob），不自己实现 LCS。
+   *
+   * ★ 取数来源的三条路（判据在 `resolveSnapshotSource`，纯函数、有单测）：
+   *   - **live**：轮次还活着且工作区健在 → 实时重算（唯一「看得见进行中改动」的路）；
+   *   - **frozen**：轮次已收尾、或工作区**已被回收**（隔离 worktree 集成后必然发生）
+   *     → 回放工作区健在时冻下的那份真相。**绝不**对着一个不存在的目录重算：
+   *     那只会得到「文件全被删」的假象，或（pre-image 也取不回时）一张空列表；
+   *   - **none**：都没有 → 如实报空集，不编造。
    */
   @Remote('snapshot')
   async snapshot(sessionId: string): Promise<{ workspace: string | null; roundIndex: number; files: ReviewFileEntry[] }> {
     const round = this.rounds.get(sessionId)
-    if (round === undefined) return { workspace: null, roundIndex: 0, files: [] }
-    // 顺手排一次（节流过的）工作区并集扫描：bash 绕道改的文件要在这里被补进来，用户才
-    // 真的看得见（见 scheduleUnionScan）。不 await：卡片拿手头数据先渲染。
-    this.scheduleUnionScan(round)
-    if (round.touched.size === 0) return { workspace: round.workspace, roundIndex: round.index, files: [] }
-    let repo: RepoState
-    try {
-      repo = await this.ensureRepo(round.workspace)
-    } catch (error) {
-      // 影子仓库不可用（init 失败等）→ 本轮快照给不出来，如实降级为空集并记日志；
-      // 绝不抛给 RPC 调用方（问题 1-②：异常会穿过静默 catch 直达用户通知，且无任何
-      // 诊断信息）。touched 仍在内存里，下一轮/重试时恢复。
-      this.ctx.logger.warn(`corum-review snapshot: ensureRepo failed: ${String(error)}`)
-      return { workspace: round.workspace, roundIndex: round.index, files: [] }
+    const frozen = this.frozen.get(sessionId)
+    const source = resolveSnapshotSource({
+      hasLiveRound: round !== undefined,
+      workspaceAlive: round !== undefined && this.workspaceAlive(round.workspace),
+      hasFrozen: frozen !== undefined,
+    })
+    if (source.kind === 'live' && round !== undefined) {
+      // 顺手排一次（节流过的）工作区并集扫描：bash 绕道改的文件要在这里被补进来，用户才
+      // 真的看得见（见 scheduleUnionScan）。不 await：卡片拿手头数据先渲染。
+      this.scheduleUnionScan(round)
+      if (round.touched.size === 0) return { workspace: round.workspace, roundIndex: round.index, files: [] }
+      const files = await this.filesOf(round.workspace, round.touched)
+      if (files === null) return { workspace: round.workspace, roundIndex: round.index, files: [] }
+      // 顺手刷新冻结态：这是「工作区健在时算出的真相」，工作区一被回收就再也算不出来。
+      // 只更新这份引用，不额外复制 pre-image 正文（`new Map` 复制的是对象引用）。
+      this.frozen.set(sessionId, {
+        workspace: round.workspace,
+        roundIndex: round.index,
+        files,
+        preimages: new Map(round.touched),
+        at: Date.now(),
+      })
+      this.evictFrozen()
+      return { workspace: round.workspace, roundIndex: round.index, files }
     }
-    const files: ReviewFileEntry[] = []
-    for (const [path, pre] of round.touched) {
-      const after = this.readCurrent(resolve(round.workspace, path))
-      // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
-      const beforeText = await this.preimageText(repo, pre)
-      const afterText = after.kind === 'content' ? after.text : null
-      // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
-      const stats = await this.diffStat(repo, beforeText, afterText)
-      if (stats.added === 0 && stats.removed === 0) continue // 净变化 0：不算「更改」
-      // eslint-disable-next-line no-await-in-loop -- 同上
-      const hash = await this.hashObject(repo, afterText ?? '')
-      // 问题 1-④⑤ 收口：把改前状态带上——unavailable 的行由调用方置灰（不可点、
-      // 不可撤销）；blob 形态取不回正文时同样如实报 unavailable。
-      const status: ReviewPreimageStatus =
-        pre.kind === 'unavailable' ? 'unavailable'
-        : pre.kind === 'absent' ? 'absent'
-        : beforeText === null ? 'unavailable'
-        : 'content'
-      files.push({ path, added: stats.added, removed: stats.removed, hash, status })
+    if (frozen !== undefined) {
+      if (source.kind === 'frozen' && source.reason === 'workspace-gone') {
+        this.warnOnce(
+          `frozen-detached:${sessionId}`,
+          `corum-review snapshot: workspace of session ${sessionId} is gone (${frozen.workspace});`
+          + ' serving the frozen change list instead of recomputing',
+        )
+      }
+      return { workspace: frozen.workspace, roundIndex: frozen.roundIndex, files: frozen.files }
     }
-    return { workspace: round.workspace, roundIndex: round.index, files }
+    return { workspace: round?.workspace ?? null, roundIndex: round?.index ?? 0, files: [] }
   }
 
   /** 两段内容之间的行级增删，交给 git diff。 */
@@ -1040,6 +1299,10 @@ export class CorumReviewService extends TypertRemoteService {
    * （左侧应为空）；unavailable=过大/二进制取不到；missing=不在本轮改动里。
    * exists/content/created 保留作兼容投影；unavailable 时 exists 翻成 false ——
    * 旧调用方只认 `!exists` 为失败，这样它至少会报「取不到」而不是开出假空 diff。
+   *
+   * pre-image 的来源与 `snapshot` 同口径：活轮次优先，轮次已收尾/工作区已回收时
+   * 回放**冻结态**里那份 pre-image —— 否则子 Agent 卡片在 worktree 被回收后就再
+   * 也开不出 diff（「改动列表有行，点开说取不到改前内容」）。
    */
   @Remote('fileBefore')
   async fileBefore(sessionId: string, path: string): Promise<{
@@ -1049,14 +1312,16 @@ export class CorumReviewService extends TypertRemoteService {
     status: ReviewPreimageStatus
   }> {
     const round = this.rounds.get(sessionId)
-    if (round === undefined) return { exists: false, content: '', created: false, status: 'missing' }
-    const pre = round.touched.get(path)
+    const frozen = this.frozen.get(sessionId)
+    const pre = round?.touched.get(path) ?? frozen?.preimages.get(path)
     if (pre === undefined) return { exists: false, content: '', created: false, status: 'missing' }
+    const workspace = round?.workspace ?? frozen?.workspace
     if (pre.kind === 'content') return { exists: true, content: pre.text, created: false, status: 'content' }
     if (pre.kind === 'blob') {
       let repo: RepoState
       try {
-        repo = await this.ensureRepo(round.workspace)
+        if (workspace === undefined) throw new Error('no workspace for shadow repo')
+        repo = await this.ensureRepo(workspace)
       } catch (error) {
         // 影子仓库不可用（init 失败等）→ 如实报「取不到」，绝不抛给 RPC 调用方
         // （问题 1-②：旧实现把 ensureRepo 的 throw 直接传到客户端的静默 catch）。
@@ -1075,11 +1340,21 @@ export class CorumReviewService extends TypertRemoteService {
   /**
    * 撤销：把给定路径恢复到「本轮改动前」；`path` 省略 = 撤销整轮。
    * pre-image 为 undefined 且文件当时不存在 ⇒ 删除该文件。
+   *
+   * 只有**活轮次**能撤销：撤销的语义是「把工作区里的当前文件改回改前」。工作区已被
+   * 回收（隔离 worktree 集成后）时没有可改的目标，如实说明原因 —— 旧实现只说
+   * 「当前没有进行中的轮次」，用户会以为是自己点错了。
    */
   @Remote('rollback')
   async rollback(sessionId: string, path?: string): Promise<{ ok: boolean; restored: number; failed: number; message?: string }> {
     const round = this.rounds.get(sessionId)
-    if (round === undefined) return { ok: false, restored: 0, failed: 0, message: '当前没有进行中的轮次' }
+    if (round === undefined) {
+      const frozen = this.frozen.get(sessionId)
+      const message = frozen !== undefined && !this.workspaceAlive(frozen.workspace)
+        ? `该会话的工作区已被回收（${frozen.workspace}），无法在工作区里撤销改动`
+        : '当前没有进行中的轮次'
+      return { ok: false, restored: 0, failed: 0, message }
+    }
     const targets = path === undefined
       ? [...round.touched.keys()]
       : (round.touched.has(path) ? [path] : [])
