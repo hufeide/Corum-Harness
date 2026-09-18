@@ -71,6 +71,12 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     expect(tasksBlock, 'orchestrate tasks 段又出现了 model 参数').not.toMatch(/\n\s{20,}model:\s*\{/)
   })
 
+  it('★ 工具描述也不再宣告 model（schema 删了、描述还写着 = 教模型用不存在的参数）', () => {
+    // 实测踩到：schema 剔了 model，但 DECLARATIVE 那行描述仍列着 `model`，
+    // 模型会照着描述去传 ⇒ 未知参数。描述与 schema 必须同口径。
+    expect(SRC).not.toContain('`label`, `isolation`, `research`, `model`')
+  })
+
   it('★ per-task 模型的接线（taskModel）已彻底移除，不留半条通路', () => {
     // schema 删了但接线还在 = 仍可被内部调用方注入。判据必须**只看代码不看注释**
     // （本文件留了「已移除」的说明性注释，若按裸子串判会与注释一起变红——第一次
