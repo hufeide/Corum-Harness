@@ -59,6 +59,8 @@ export interface ChatRuntimeService {
   openContentDiff?: (input: {
     absolutePath: string
     originalContent: string
+    /** 改后内容的内存副本（审查卡在 worktree 已被回收时用；见 host `corumReview/fileAfter`）。 */
+    modifiedContent?: string | undefined
     note?: string | undefined
   }) => Promise<{ ok: boolean; error?: string }>
   /**
@@ -127,13 +129,13 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   }
 
   /** openContentDiff 桥（SubagentChanges 用；apply 注入，幂等）。 */
-  #openContentDiff: ((input: { absolutePath: string; originalContent: string; note?: string | undefined }) => Promise<{ ok: boolean; error?: string }>) | undefined
+  #openContentDiff: ((input: { absolutePath: string; originalContent: string; modifiedContent?: string | undefined; note?: string | undefined }) => Promise<{ ok: boolean; error?: string }>) | undefined
   /** apply 挂载时注入 openContentDiff 桥（SubagentChanges 用；幂等）。 */
-  setOpenContentDiff(fn: (input: { absolutePath: string; originalContent: string; note?: string | undefined }) => Promise<{ ok: boolean; error?: string }>): void {
+  setOpenContentDiff(fn: (input: { absolutePath: string; originalContent: string; modifiedContent?: string | undefined; note?: string | undefined }) => Promise<{ ok: boolean; error?: string }>): void {
     this.#openContentDiff = fn
   }
   /** SubagentChanges 经此桥打开 diff tab（apply 已注入 corumEditor 直调）。 */
-  openContentDiff(input: { absolutePath: string; originalContent: string; note?: string | undefined }): Promise<{ ok: boolean; error?: string }> {
+  openContentDiff(input: { absolutePath: string; originalContent: string; modifiedContent?: string | undefined; note?: string | undefined }): Promise<{ ok: boolean; error?: string }> {
     if (this.#openContentDiff === undefined) return Promise.resolve({ ok: false, error: '编辑器服务未就绪' })
     return this.#openContentDiff(input)
   }

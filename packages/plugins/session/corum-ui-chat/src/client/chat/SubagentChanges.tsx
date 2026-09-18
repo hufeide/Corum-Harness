@@ -79,6 +79,20 @@ interface FileBeforeResult {
 /** 单文件行的改前状态（snapshot/files 逐项带来；undefined = 未知，按旧行为可点）。 */
 type FileRowStatus = 'content' | 'absent' | 'unavailable' | 'missing' | undefined
 
+/**
+ * RPC `corumReview/fileAfter` 返回形（2026-09-18 收口）。
+ *
+ * diff 视图的**右侧**改由 host 给内存内容：审查卡的右侧原先只能现读磁盘
+ * （`worktreePath + rel`），而隔离 worktree 在集成后会被回收 ⇒ 右侧永远只有一行
+ * 「（无法读取 …）」。改后内容其实已在影子仓库里（`ReviewFileEntry.hash` 是它的 blob 号），
+ * host 从 git 取回后交这里透传给编辑器。
+ */
+interface FileAfterResult {
+  exists: boolean
+  content: string
+  status?: 'content' | 'missing' | 'unavailable'
+}
+
 /** RPC rollback 返回形（与 review-source.ts 同款）。 */
 interface RollbackResult {
   ok: boolean
@@ -338,9 +352,26 @@ function FileRow({
         const absolutePath = worktreePath !== undefined
           ? `${worktreePath}/${path}`
           : resolveWorkspacePath(sessionCwd, path)
+        // 右侧内容：优先向 host 要（工作区健在 = 当前内容；已被回收 = git 里的改后 blob）。
+        // 取不到就退回旧行为（编辑器自己读绝对路径）——注意 `worktreePath` 只随终态推送帧
+        // 到达、不重放，刷新后它会缺省，此时旧行为会把**主树**里同名文件当成右侧（可能混进
+        // 父 Agent 之后的编辑）。所以只要 host 给得出，就一定用它。
+        let modifiedContent: string | undefined
+        try {
+          const after = await conn.rpc.call('/api', 'corumReview/fileAfter', {
+            args: { sessionId: childSessionId, path },
+          }) as { ok: boolean; value?: FileAfterResult }
+          if (after.ok && after.value !== undefined && after.value.status === 'content') {
+            modifiedContent = after.value.content
+          }
+        } catch (err) {
+          // 取不到改后内容不是错误路径（旧 host/影子仓库不可用）：退回编辑器自己读盘。
+          console.warn('[ui-chat] subagent fileAfter failed, falling back to disk read:', err, { path })
+        }
         const opened = await runtime.openContentDiff({
           absolutePath,
           originalContent: value.content,
+          ...modifiedContent === undefined ? {} : { modifiedContent },
           ...(value.created || statusNow === 'absent') ? { note: '该文件是本轮新建的，左侧为空' } : {},
         })
         if (!opened.ok) {

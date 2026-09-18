@@ -238,7 +238,12 @@ type CaptureVia = 'tool' | 'union'
 /**
  * `frozen.jsonl` 的一行：一轮在「工作区健在」时算出的改动结论（见 `FROZEN_FILE`）。
  *
- * 只放**结论**：`files` 是 `ReviewFileEntry`（路径 + ±N + hash + 改前状态），不是改后正文。
+ * 放两样东西：
+ *   - `files` = 结论（路径 + ±N + hash + 改前状态）。其中 `hash` 是**改后内容**在影子仓库
+ *     里的 blob 号（`hashObject` 用 `-w` 落的库）⇒ 工作区被回收后，diff 的**右侧**仍能从
+ *     git 取回，不必依赖那个已消失的目录。
+ *   - `preimages` = 改前内容的**引用**（blob 号 / absent / unavailable，不存正文）⇒ diff 的
+ *     **左侧**同样跨重启可用（正文走 cat-file）。
  */
 type FrozenLine = {
   t: 'frozen'
@@ -247,6 +252,35 @@ type FrozenLine = {
   round: number
   at: number
   files: ReviewFileEntry[]
+  preimages?: Record<string, PreimageRef>
+}
+
+/**
+ * 落盘形态的 pre-image 引用。
+ *
+ * ⚠️ 只落**引用**，绝不落 `content` 正文：正文可能有数 MB，而捕获时已经 `hash-object -w`
+ * 落进影子仓库了（`persistCapture`），冻结时把 `content` 转成 blob 号即可（见 `blobify`）。
+ */
+type PreimageRef =
+  | { readonly k: 'blob'; readonly h: string }
+  | { readonly k: 'absent' }
+  | { readonly k: 'unavailable' }
+
+/**
+ * 落盘形态 → 内存形态（`frozen.jsonl` 回放用）。
+ *
+ * 故意的宽容：`malformed`/未知字段一律降级为 `unavailable`（如实表达「取不到」），
+ * **绝不**降级成 `absent`（那会让一次撤销删掉用户的文件）。
+ */
+function inflatePreimages(raw: Record<string, PreimageRef> | undefined): Map<string, Preimage> {
+  const out = new Map<string, Preimage>()
+  if (raw === undefined) return out
+  for (const [path, ref] of Object.entries(raw)) {
+    if (ref?.k === 'blob' && typeof ref.h === 'string' && ref.h !== '') out.set(path, { kind: 'blob', hash: ref.h })
+    else if (ref?.k === 'absent') out.set(path, { kind: 'absent' })
+    else out.set(path, { kind: 'unavailable' })
+  }
+  return out
 }
 
 
@@ -444,13 +478,20 @@ export class CorumReviewService extends TypertRemoteService {
       return
     }
     if (event.type === 'turn/end') {
-      // ★ 子会话（委派）一轮即完工，而它的工作区可能是**临时**目录（隔离 worktree 在
-      // 集成后被回收）。此刻工作区还在 —— 把「工作区健在时算出的真相」冻下来，
-      // 之后即使 worktree 被删，子 Agent 卡片的改动区仍然给得出正确结论。
-      // 主会话不冻：它的工作区是用户的真实目录，不会消失，冻了只会白占内存。
+      // ★ 子会话（委派）一轮即完工，但它的工作区可能是**临时**目录（隔离 worktree 在集成后
+      // 被回收），而审查卡的 diff 需要两侧：左侧 = pre-image（影子仓库 blob，捕获时就落了库），
+      // 右侧 = **改后**内容 —— 后者原先只在 `closeRound` 时才进 git，而 `closeRound` 挂在该
+      // 会话**下一次** `turn/start`，单轮子会话永不到来（实测其影子仓库 0 提交、0 refs，
+      // 改后内容从未进过 git）。所以在自己的 `turn/end` 就**结算一次**（`settleRound`：
+      // 并集兜底 + 冻结 + A/B 提交 + round ref），轮次**保持存活**以保留「跨轮累积」语义。
+      // 主会话不在这里结算：它的轮次由下一次 `turn/start` 正常收尾，且工作区不会消失。
       if (session.header?.origin === 'subagent') {
         const round = this.rounds.get(sessionId)
-        if (round !== undefined) void this.freezeRound(sessionId, round.workspace, round.index, round.touched)
+        if (round !== undefined) {
+          void this.settleRound(round, round.touched).catch((error: unknown) => {
+            this.ctx.logger.warn(`corum-review settleRound failed (${sessionId}): ${String(error)}`)
+          })
+        }
       }
       return
     }
@@ -637,11 +678,46 @@ export class CorumReviewService extends TypertRemoteService {
         at,
       })
       this.evictFrozen()
-      // 落盘：进程重启后（worktree 可能已被回收）仍能如实报出这份结论。
-      await this.persistFrozen(sessionId, { workspace, roundIndex, files, at })
+      // 落盘：进程重启后（worktree 可能已被回收）仍能如实报出这份结论，且 diff 的两侧
+      // 都能从 git 取回（左侧 = preimages 的 blob 号，右侧 = files[i].hash）。
+      await this.persistFrozen(sessionId, {
+        workspace,
+        roundIndex,
+        files,
+        at,
+        preimages: await this.blobify(workspace, touched),
+      })
     } catch (error) {
       this.ctx.logger.warn(`corum-review freeze failed (${sessionId}): ${String(error)}`)
     }
+  }
+
+  /**
+   * 把内存里的 pre-image 转成**只含引用**的可落盘形态。
+   *
+   * `content` 必须转成 blob 号：正文可能有数 MB，落进 `frozen.jsonl` 会让该文件无界膨胀，
+   * 而影子仓库本来就按内容寻址（`hash-object -w` 自动去重）。转换失败（仓库不可用）时把
+   * 该条降级为 `unavailable` —— 如实表达「改前内容取不到」，绝不猜。
+   */
+  private async blobify(
+    workspace: string,
+    touched: ReadonlyMap<string, Preimage>,
+  ): Promise<Record<string, PreimageRef>> {
+    const out: Record<string, PreimageRef> = {}
+    let repo: RepoState | null = null
+    try {
+      repo = await this.ensureRepo(workspace)
+    } catch { repo = null }
+    for (const [path, pre] of touched) {
+      if (pre.kind === 'blob') { out[path] = { k: 'blob', h: pre.hash }; continue }
+      if (pre.kind === 'absent') { out[path] = { k: 'absent' }; continue }
+      if (pre.kind === 'unavailable' || repo === null) { out[path] = { k: 'unavailable' }; continue }
+      try {
+        // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
+        out[path] = { k: 'blob', h: await this.hashObject(repo, pre.text) }
+      } catch { out[path] = { k: 'unavailable' } }
+    }
+    return out
   }
 
   /**
@@ -651,7 +727,13 @@ export class CorumReviewService extends TypertRemoteService {
    */
   private async persistFrozen(
     sessionId: string,
-    record: { readonly workspace: string; readonly roundIndex: number; readonly files: ReviewFileEntry[]; readonly at: number },
+    record: {
+      readonly workspace: string
+      readonly roundIndex: number
+      readonly files: ReviewFileEntry[]
+      readonly at: number
+      readonly preimages: Record<string, PreimageRef>
+    },
   ): Promise<void> {
     try {
       const file = join(this.repoRoot(record.workspace), FROZEN_FILE)
@@ -663,6 +745,7 @@ export class CorumReviewService extends TypertRemoteService {
         round: record.roundIndex,
         at: record.at,
         files: record.files,
+        preimages: record.preimages,
       }
       await appendFile(file, JSON.stringify(line) + '\n', 'utf8')
       await this.compactFrozen(file)
@@ -720,7 +803,7 @@ export class CorumReviewService extends TypertRemoteService {
             workspace: line.workspace,
             roundIndex: line.round,
             files: line.files,
-            preimages: new Map(),
+            preimages: inflatePreimages(line.preimages),
             at: line.at,
           })
         }
@@ -1058,13 +1141,12 @@ export class CorumReviewService extends TypertRemoteService {
   // ── 轮次收尾 ─────────────────────────────────────────────────────────────
 
   /**
-   * 结束一轮：提交 A（轮次起点）与 B（轮次终点），把 `main` 推进到 B，打 round ref，
-   * 再按保留策略 prune。**异步**（不阻塞会话）；失败只记日志（下一轮仍可继续）。
+   * 结束一轮：**结算**该轮（并集兜底 + 冻结 + A/B 提交 + round ref），再清掉内存里的
+   * pre-image、写 journal `end`、压实 journal、prune。**异步**（不阻塞会话）；失败只记
+   * 日志（下一轮仍可继续）。
    *
-   * 收尾的第一步是**冻结**改动列表（见 `FrozenRound`）：轮次一离开 `rounds`，
+   * 冻结必须排在 commit 之前、且用脱手前的 `touched` 引用：轮次一离开 `rounds`，
    * `snapshot` 就再也算不出它的改动，而卡片（尤其是子 Agent 卡片）恰恰是事后才展开的。
-   * 冻结读的是「工作区还在时」的现场，所以必须排在 commit 之前、且用的是脱手前的
-   * `touched` 那份引用。
    */
   private closeRound(round: LiveRound): void {
     this.rounds.delete(round.sessionId)
@@ -1073,71 +1155,104 @@ export class CorumReviewService extends TypertRemoteService {
     round.touched = new Map() // 立刻释放内存中的 pre-image
     void (async () => {
       try {
-        // ★ 轮末并集兜底：先只读工作区实况，真有候选才建影子仓库，
-        // 所以「没有任何改动的轮次」不会在用户目录里留下任何影子仓库目录。
-        const added = await this.applyWorktreeChanges(round, touched)
-        if (touched.size === 0) return // 本轮真没写文件：不留提交
-        if (added > 0) {
-          this.ctx.logger.info(`corum-review round ${round.index}: +${added} path(s) via worktree union`)
-        }
-        // ★ 冻结「本轮改动 + pre-image」：收尾后 snapshot/fileBefore 靠它继续作答。
-        await this.freezeRound(round.sessionId, round.workspace, round.index, touched)
-        let repo: RepoState
-        try {
-          repo = await this.ensureRepo(round.workspace)
-        } catch (error) {
-          // 影子仓库不可用 → 本轮改动**不落提交**（closeRound 本来就整体在
-          // try/catch 里降级，这里只多一行更明确的日志；轮次 ref 缺失 = 卡片
-          // 下轮重建，不留半截状态）。
-          this.ctx.logger.warn(`corum-review closeRound: ensureRepo failed: ${String(error)}`)
-          return
-        }
-        await this.enqueue(repo, async () => {
-          const base = await this.ensureBaseline(repo)
-          // A：本轮开始时（触达路径换成 pre-image）
-          const before = new Map<string, string | null>()
-          for (const [path, pre] of touched) {
-            // unavailable 与 absent 在这里都记成「父 tree 里没有该路径」：
-            // 提交只需表达「改前不存在/未知」，内容真伪由 Preimage 负责。
-            if (pre.kind === 'blob') { before.set(path, pre.hash); continue }
-            // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
-            before.set(path, pre.kind === 'content' ? await this.hashObject(repo, pre.text) : null)
-          }
-          const commitA = await this.commitWith(repo, base, before, `round ${round.index} start`)
-          // B：本轮结束时（触达路径换成写完之后的内容）
-          const after = new Map<string, string | null>()
-          for (const path of touched.keys()) {
-            const current = this.readCurrent(resolve(round.workspace, path))
-            // eslint-disable-next-line no-await-in-loop -- 同上
-            after.set(path, current.kind === 'content' ? await this.hashObject(repo, current.text) : null)
-          }
-          const commitB = await this.commitWith(repo, commitA, after, `round ${round.index} end`)
-          // round ref：可审的 changeset（寿命由保留天数决定）。
-          await runGit(repo.gitDir, ['update-ref', `refs/corum/rounds/${round.sessionId}/${round.index}`, commitB])
-          // main 换成**无父的快照提交**，只表达「已接受的当前状态」。
-          //
-          // ⚠️ 不能让 main 直接指向 B：那样每轮的 A（含 pre-image blob）会永远留在 main 的
-          // 祖先链上，**prune 掉轮次 ref 也回收不掉** —— 磁盘随「历史总编辑量」无界增长，
-          // 保留天数就形同虚设（实测：prune(0) 后 main 仍有 3 个提交、占用几乎不变）。
-          // 改成无父快照后，可达性只由「保留窗口内的 round ref」+「当前状态」决定，
-          // 超出窗口的对象在下一次 gc 时真正释放。
-          const tree = await runGit(repo.gitDir, ['rev-parse', `${commitB}^{tree}`])
-          if (tree.code !== 0) throw new Error(`rev-parse tree failed: ${tree.stderr || tree.code}`)
-          const state = await runGit(repo.gitDir, [
-            '-c', 'user.name=corum', '-c', 'user.email=corum@localhost',
-            'commit-tree', tree.stdout.trim(), '-m', 'chore: accepted state',
-          ])
-          if (state.code !== 0) throw new Error(`state commit failed: ${state.stderr || state.code}`)
-          await runGit(repo.gitDir, ['update-ref', 'refs/heads/main', state.stdout.trim()])
-          // 轮次已进提交：journal 里这个会话的记录可以丢掉了（否则会无限增长）。
-          await this.appendJournal(round.workspace, { t: 'end', session: round.sessionId, round: round.index })
-          await this.compactJournal(round.workspace, round.sessionId)
-          await this.pruneRepo(repo)
-        })
+        const committed = await this.settleRound(round, touched)
+        if (!committed) return
+        // 轮次已进提交：journal 里这个会话的记录可以丢掉了（否则会无限增长）。
+        await this.appendJournal(round.workspace, { t: 'end', session: round.sessionId, round: round.index })
+        await this.compactJournal(round.workspace, round.sessionId)
+        const repo = this.repos.get(round.workspace)
+        if (repo !== undefined) await this.pruneRepo(repo)
       } catch (error) {
         this.ctx.logger.warn(`corum-review closeRound failed: ${String(error)}`)
       }
     })()
+  }
+
+  /**
+   * 结算一轮：并集兜底 → 冻结 → A/B 提交 + round ref。
+   *
+   * 为什么独立成一条路径（而不是只在 `closeRound` 里做）：`closeRound` 挂在该会话**下一次**
+   * `turn/start`，于是**单轮子会话的轮次永不结算** —— 实测两个隔离子会话的影子仓库
+   * `rev-list --all --count = 0`、「改后」内容从未进过 git，而它们的工作区（隔离 worktree）
+   * 在集成后被回收 ⇒ 审查卡右侧再也取不到内容。现在子会话在自己的 `turn/end` 就结算一次
+   * （`settleRound`，轮次**保持存活**以保留「跨轮累积」语义），于是两侧都由 git 提供。
+   *
+   * @param touched - 该轮的「路径 → 改前状态」（closeRound 传已脱手的那份）。
+   * @returns 是否真的落了提交（false = 无改动或影子仓库不可用，均已记日志）。
+   */
+  private async settleRound(round: LiveRound, touched: Map<string, Preimage>): Promise<boolean> {
+    // ★ 轮末并集兜底：先只读工作区实况，真有候选才建影子仓库，
+    // 所以「没有任何改动的轮次」不会在用户目录里留下任何影子仓库目录。
+    const added = await this.applyWorktreeChanges(round, touched)
+    if (touched.size === 0) return false // 本轮真没写文件：不留提交
+    if (added > 0) {
+      this.ctx.logger.info(`corum-review round ${round.index}: +${added} path(s) via worktree union`)
+    }
+    // ★ 冻结「本轮改动 + pre-image」：轮次收尾/工作区被回收后靠它继续作答。
+    await this.freezeRound(round.sessionId, round.workspace, round.index, touched)
+    return this.writeRoundCommits(round, touched)
+  }
+
+  /**
+   * 把一轮的 A/B 提交落库并推进 refs（A=轮次起点用 pre-image，B=轮次终点用当前内容）。
+   *
+   * 抽成一条共用写入路径，是为了让「子会话 turn/end 结算」与「轮次收尾」的落库语义**完全
+   * 一致** —— 分叉过一次的代价就是「左侧来自提交、右侧只能读工作区」这类不对称。
+   *
+   * @returns 落库是否成功；影子仓库不可用时 false（已记日志，调用方降级）。
+   */
+  private async writeRoundCommits(round: LiveRound, touched: ReadonlyMap<string, Preimage>): Promise<boolean> {
+    let repo: RepoState
+    try {
+      repo = await this.ensureRepo(round.workspace)
+    } catch (error) {
+      // 影子仓库不可用 → 本轮改动**不落提交**（调用方整体在 try/catch 里降级，这里只多
+      // 一行更明确的日志；轮次 ref 缺失 = 卡片下轮重建，不留半截状态）。
+      this.ctx.logger.warn(`corum-review writeRoundCommits: ensureRepo failed: ${String(error)}`)
+      return false
+    }
+    await this.enqueue(repo, async () => {
+      const base = await this.ensureBaseline(repo)
+      // A：本轮开始时（触达路径换成 pre-image）
+      const before = new Map<string, string | null>()
+      for (const [path, pre] of touched) {
+        // unavailable 与 absent 在这里都记成「父 tree 里没有该路径」：
+        // 提交只需表达「改前不存在/未知」，内容真伪由 Preimage 负责。
+        if (pre.kind === 'blob') { before.set(path, pre.hash); continue }
+        // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
+        before.set(path, pre.kind === 'content' ? await this.hashObject(repo, pre.text) : null)
+      }
+      const commitA = await this.commitWith(repo, base, before, `round ${round.index} start`)
+      // B：本轮结束时（触达路径换成写完之后的内容）
+      // ⚠️ 工作区已被回收时 readCurrent 一律给 null ⇒ B 会把这些路径记成「删除」。
+      // 这是**有意的**：这种情况只出现在「轮次存活但工作区已消失」，而那时调用方
+      // （settleRound）已经先把结论冻结好了；B 只作为「当时能看到的实况」留痕。
+      const after = new Map<string, string | null>()
+      for (const path of touched.keys()) {
+        const current = this.readCurrent(resolve(round.workspace, path))
+        // eslint-disable-next-line no-await-in-loop -- 同上
+        after.set(path, current.kind === 'content' ? await this.hashObject(repo, current.text) : null)
+      }
+      const commitB = await this.commitWith(repo, commitA, after, `round ${round.index} end`)
+      // round ref：可审的 changeset（寿命由保留天数决定）。
+      await runGit(repo.gitDir, ['update-ref', `refs/corum/rounds/${round.sessionId}/${round.index}`, commitB])
+      // main 换成**无父的快照提交**，只表达「已接受的当前状态」。
+      //
+      // ⚠️ 不能让 main 直接指向 B：那样每轮的 A（含 pre-image blob）会永远留在 main 的
+      // 祖先链上，**prune 掉轮次 ref 也回收不掉** —— 磁盘随「历史总编辑量」无界增长，
+      // 保留天数就形同虚设（实测：prune(0) 后 main 仍有 3 个提交、占用几乎不变）。
+      // 改成无父快照后，可达性只由「保留窗口内的 round ref」+「当前状态」决定，
+      // 超出窗口的对象在下一次 gc 时真正释放。
+      const tree = await runGit(repo.gitDir, ['rev-parse', `${commitB}^{tree}`])
+      if (tree.code !== 0) throw new Error(`rev-parse tree failed: ${tree.stderr || tree.code}`)
+      const state = await runGit(repo.gitDir, [
+        '-c', 'user.name=corum', '-c', 'user.email=corum@localhost',
+        'commit-tree', tree.stdout.trim(), '-m', 'chore: accepted state',
+      ])
+      if (state.code !== 0) throw new Error(`state commit failed: ${state.stderr || state.code}`)
+      await runGit(repo.gitDir, ['update-ref', 'refs/heads/main', state.stdout.trim()])
+    })
+    return true
   }
 
   // ── 轮末并集兜底（bash 绕道的安全网）──────────────────────────────────────
@@ -1474,6 +1589,51 @@ export class CorumReviewService extends TypertRemoteService {
     // absent = 本轮新建（左侧应为空）；unavailable = 取不到改前内容（调用方置灰）
     if (pre.kind === 'absent') return { exists: true, content: '', created: true, status: 'absent' }
     return { exists: false, content: '', created: false, status: 'unavailable' }
+  }
+
+  /**
+   * 某文件「本轮改动后」的内容（diff 视图**右侧**）。
+   *
+   * 为什么要有这个 RPC（2026-09-18 用户实测「子卡的逐文件 diff 开不出来」）：右侧原先由
+   * 渲染层自己 `readFile(worktreePath + rel)` 现读磁盘 —— 而隔离 worktree 在集成后被回收，
+   * 于是右侧永远只有一行「（无法读取 …）」（`DiffViewer` 读失败不抛错，所以是「开着但没内容」）。
+   * 改后内容其实**已经在影子仓库里**：`filesOf` 算 hash 时用 `hash-object -w` 落了库，
+   * 而 `ReviewFileEntry.hash` 就是那个 blob 号 —— 所以这里能从 git 取回，与工作区生死无关。
+   *
+   * 三条取数顺序（与 `snapshot` 同一条「宁可如实说取不到，也不编造」的原则）：
+   *   ① 工作区健在 → 直接读当前内容（唯一能反映「此刻」的路，进行中的轮次靠它）；
+   *   ② 工作区没了（worktree 已回收）→ 从冻结态记录里的 `hash` 取 blob；
+   *   ③ 都没有 → `missing`，调用方如实告知，不开假 diff。
+   *
+   * @param sessionId - 会话 id（轮次/冻结态都以它为键）。
+   * @param path - 工作区相对路径（与 `snapshot.files[].path` 同形）。
+   */
+  @Remote('fileAfter')
+  async fileAfter(sessionId: string, path: string): Promise<{
+    exists: boolean
+    content: string
+    status: 'content' | 'missing' | 'unavailable'
+  }> {
+    const round = this.rounds.get(sessionId)
+    const frozen = this.frozen.get(sessionId)
+    const workspace = round?.workspace ?? frozen?.workspace
+    if (workspace !== undefined && this.workspaceAlive(workspace)) {
+      const current = this.readCurrent(resolve(workspace, path))
+      if (current.kind === 'content') return { exists: true, content: current.text, status: 'content' }
+      if (current.kind === 'unavailable') return { exists: false, content: '', status: 'unavailable' }
+      // 文件已从工作区消失（被删/被移走）→ 落到 blob 兜底，别把「读不到」当成「被删了」。
+    }
+    const entry = frozen?.files.find(f => f.path === path)
+    if (workspace === undefined || entry === undefined) return { exists: false, content: '', status: 'missing' }
+    try {
+      const repo = await this.ensureRepo(workspace)
+      const result = await runGit(repo.gitDir, ['cat-file', 'blob', entry.hash])
+      if (result.code !== 0) return { exists: false, content: '', status: 'unavailable' }
+      return { exists: true, content: result.stdout, status: 'content' }
+    } catch (error) {
+      this.ctx.logger.warn(`corum-review fileAfter: ${String(error)}`)
+      return { exists: false, content: '', status: 'unavailable' }
+    }
   }
 
   /**

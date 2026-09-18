@@ -266,6 +266,29 @@ describe('落盘契约读写对账（源码扫描）', () => {
 
   it('冻结态落盘与回放都被接线（否则重启后子卡又变空）', () => {
     expect(src).toContain('void this.restoreFrozen()')
-    expect(src).toContain('await this.persistFrozen(sessionId, { workspace, roundIndex, files, at })')
+    expect(src).toContain('await this.persistFrozen(sessionId, {')
+  })
+
+  it('★ 单轮子会话必须自己结算轮次（否则「改后」永不进 git，diff 右侧无内容）', () => {
+    // 现场：两个隔离子会话各只有 1 个 turn，而 closeRound 挂在下一次 turn/start ⇒
+    // 它们的影子仓库 rev-list --all --count = 0、refs 为空，「改后」内容从未落库。
+    expect(src).toContain("if (session.header?.origin === 'subagent') {")
+    expect(src).toContain('void this.settleRound(round, round.touched)')
+    // closeRound 与 settleRound 必须共用同一条落库路径（分叉过一次的代价就是两侧不对称）。
+    expect(src).toContain('private async writeRoundCommits(')
+    expect(src).toContain('const committed = await this.settleRound(round, touched)')
+    expect(src).toContain('return this.writeRoundCommits(round, touched)')
+  })
+
+  it('★ diff 右侧从 git blobs 取（fileAfter），与工作区生死无关', () => {
+    expect(src).toContain("@Remote('fileAfter')")
+    expect(src).toContain("const entry = frozen?.files.find(f => f.path === path)")
+    expect(src).toContain("['cat-file', 'blob', entry.hash]")
+    // 左侧的 pre-image 引用也要落盘（只落引用，不落正文）。
+    expect(src).toContain('preimages: await this.blobify(workspace, touched)')
+    expect(src).toContain('function inflatePreimages(')
+    // 未知/坏形态一律降级为 unavailable，绝不降级成 absent（那会让撤销删掉用户的文件）。
+    expect(src).toContain("else out.set(path, { kind: 'unavailable' })")
+    expect(src).not.toContain("else out.set(path, { kind: 'absent' })")
   })
 })

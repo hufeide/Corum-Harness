@@ -89,6 +89,8 @@ interface ContentDiffCapable {
   openContentDiff?: (input: {
     absolutePath: string
     originalContent: string
+    /** 改后内容的内存副本（worktree 已被回收时由 host `corumReview/fileAfter` 提供）。 */
+    modifiedContent?: string | undefined
     note?: string | undefined
   }) => Promise<{ ok: boolean; error?: string }>
 }

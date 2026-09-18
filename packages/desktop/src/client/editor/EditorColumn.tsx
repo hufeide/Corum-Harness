@@ -80,7 +80,7 @@ interface EditorTab {
   /** diff tab（VS Code「选择以进行比较」+「与已选项目比较」）：只读双侧 diff 视图。
    *  `originalContent` 存在时左侧取内存内容（Review 卡「点击文件看改动」——
    *  重建出的原文不落盘）；否则两侧都按路径读盘。 */
-  diff?: { original: string; modified: string; originalContent?: string | undefined }
+  diff?: { original: string; modified: string; originalContent?: string | undefined; modifiedContent?: string | undefined }
   /** diff tab 的一行说明（如重建不完整的提示），显示在 tab 顶部横幅。 */
   diffNote?: string | undefined
   /** 预览类型（md/svg/图片/视频）；null = 普通代码 tab。 */
@@ -387,13 +387,15 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   }, [tabs, readFile, showEditor])
 
   const openContentDiff = useCallback(async (
-    input: { path: string; originalContent: string; note?: string | undefined },
+    input: { path: string; originalContent: string; modifiedContent?: string | undefined; note?: string | undefined },
   ) => {
     showEditor()
-    const { path, originalContent, note } = input
+    const { path, originalContent, modifiedContent, note } = input
     // 合成键带上内容长度：同一文件再次点击且重建结果变化时应开新 tab 而不是
     // 复用旧内容（monaco 模型在 mount 时一次性建立，不随 props 更新）。
-    const key = `${REVIEW_DIFF_PREFIX}${path}::${originalContent.length}`
+    // 右侧内容长度也进键：同一路径的「改后」在 worktree 回收前后会从「读不到」变成
+    // 「git 里的真内容」，不进键就会复用那个已经渲染成「（无法读取 …）」的旧 tab。
+    const key = `${REVIEW_DIFF_PREFIX}${path}::${originalContent.length}::${modifiedContent?.length ?? 'disk'}`
     const existing = tabs.find(t => t.path === key)
     if (existing !== undefined) {
       setActivePath(key)
@@ -409,7 +411,12 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       error: null,
       externalChanged: false,
       preview: false,
-      diff: { original: `${path}（本轮改动前）`, modified: path, originalContent },
+      diff: {
+        original: `${path}（本轮改动前）`,
+        modified: path,
+        originalContent,
+        ...modifiedContent === undefined ? {} : { modifiedContent },
+      },
       ...note !== undefined ? { diffNote: note } : {},
     }
     setTabs(prev => [...prev, newTab])
@@ -1126,6 +1133,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
                   original={activeTab.diff.original}
                   modified={activeTab.diff.modified}
                   originalContent={activeTab.diff.originalContent}
+                  modifiedContent={activeTab.diff.modifiedContent}
                   language={activeTab.language}
                   readFile={readFile}
                   dark={dark}

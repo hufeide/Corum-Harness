@@ -38,14 +38,23 @@ export interface DiffViewerProps {
   dark: boolean
   /**
    * 左侧原文的**内存内容**（Review 卡的 diff 用）。给了它就不再读盘取左侧 ——
-   * 重建出的原文并不存在于磁盘上。右侧始终读盘（当前文件）。
+   * 重建出的原文并不存在于磁盘上。
    */
   originalContent?: string | undefined
+  /**
+   * 右侧新文的**内存内容**（2026-09-18）。给了它就不再读盘取右侧。
+   *
+   * 为什么必须支持：审查卡的 diff 右侧曾经只能读盘，而**隔离 worktree 在集成后会被回收**
+   * ⇒ 右侧永远只有一行「（无法读取 …）」（读失败不抛错，所以表现为「开着但没内容」）。
+   * 改后内容其实已经在影子仓库里（`ReviewFileEntry.hash` 就是它的 blob 号），
+   * 由 host 的 `corumReview/fileAfter` 取回后经这里传入。
+   */
+  modifiedContent?: string | undefined
   /** 左右并排（true）还是内联单栏（false）。缺省 true。 */
   sideBySide?: boolean | undefined
 }
 
-export function DiffViewer({ original, modified, language, readFile, dark, originalContent, sideBySide = true }: DiffViewerProps): React.ReactElement {
+export function DiffViewer({ original, modified, language, readFile, dark, originalContent, modifiedContent, sideBySide = true }: DiffViewerProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const diffRef = useRef<editor.IStandaloneDiffEditor | null>(null)
 
@@ -93,9 +102,15 @@ export function DiffViewer({ original, modified, language, readFile, dark, origi
         if (cancelled) return
         contentA = ra.ok && ra.value !== undefined ? ra.value.content : `（无法读取 ${original}：${ra.error?.message ?? '未知错误'}）`
       }
-      const rb = await readFile(modified)
-      if (cancelled) return
-      const contentB = rb.ok && rb.value !== undefined ? rb.value.content : `（无法读取 ${modified}：${rb.error?.message ?? '未知错误'}）`
+      // 右侧：给了内存新文就不读盘（改后内容可能在已回收的 worktree 里 —— 见 props 注释）。
+      let contentB: string
+      if (modifiedContent !== undefined) {
+        contentB = modifiedContent
+      } else {
+        const rb = await readFile(modified)
+        if (cancelled) return
+        contentB = rb.ok && rb.value !== undefined ? rb.value.content : `（无法读取 ${modified}：${rb.error?.message ?? '未知错误'}）`
+      }
       const uriA = Uri.parse(`inmemory://diff${original}`)
       const uriB = Uri.parse(`inmemory://diff${modified}`)
       const modelA = editor.createModel(contentA, language, uriA)
