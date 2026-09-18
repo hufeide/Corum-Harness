@@ -176,6 +176,12 @@ async function waitNoActivation(ctx: Context, childId: SessionId): Promise<void>
   }, { timeout: 5_000 })
 }
 
+/** Read the scripted adapter registered on a test context's LLM runtime. */
+function adapterOf(ctx: Context): MockAdapter {
+  return (ctx.llm as unknown as { adapters: Map<string, { adapter: MockAdapter }> })
+    .adapters.get('mock')!.adapter
+}
+
 /**
  * Keep the top-level test parent out of a scripted model corpus. Every child
  * settlement wakes its parent, so a suite that scripts only child responses
@@ -2870,6 +2876,123 @@ describe('continuable errors', () => {
     expect(resumed.events.flatMap(event => event.type === 'request/header'
       ? [event.data.header.config.reasoningEffort]
       : [])).toEqual([effort, effort])
+  })
+
+  // corum（fork #9 增量）：按次路线覆盖（SubagentSendMessageOptions.agentOptions）。
+  // 用真实终点断言：恢复子会话的 request/header.config（物化后的 Agent 以它发起
+  // 模型调用），而不是仅查 options 镜像；MockAdapter 在两个 provider 上都注册，
+  // 使换 provider 的冷恢复能真正跑到发请求。
+  it('honors a per-delivery route override on cold resume, without touching the descriptor', async () => {
+    const adapter = new MockAdapter([
+      textResponse('first on descriptor route'),
+      textResponse('resumed on override route'),
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    // The override names provider "alt", so register the same adapter there too.
+    ctx.llm.registerAdapter(['alt'], adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(loaded.events.find(event => event.type === 'subagent/descriptor')?.data)
+      .toMatchObject({ agentProvider: 'mock', agentModel: 'mock' })
+
+    const messageId = await ctx.subagents.sendMessage(parent, started.childId, message('resume on alt route'), {
+      signal: testSignal,
+      agentOptions: { provider: 'alt', model: 'alt-model' },
+    })
+    expect(messageId).toBeTypeOf('string')
+    await waitNoActivation(ctx, started.childId)
+
+    // The resumed epoch actually called the override route.
+    const resumedRequest = adapter.requests.find(request => request.sessionId === started.childId
+      && request.provider === 'alt')
+    expect(resumedRequest).toMatchObject({ provider: 'alt', model: 'alt-model' })
+    // The override was per-delivery: the descriptor still names the original route.
+    expect((await loadStoredSession(ctx.sessionPersistence, started.childId))
+      .events.filter(event => event.type === 'subagent/descriptor')).toHaveLength(1)
+    expect((await loadStoredSession(ctx.sessionPersistence, started.childId))
+      .events.find(event => event.type === 'subagent/descriptor')?.data)
+      .toMatchObject({ agentProvider: 'mock', agentModel: 'mock' })
+  })
+
+  it('clears the descriptor reasoning effort when a cold-resume override changes the route', async () => {
+    const effort = ReasoningEffortId('high')
+    const adapter = new MockAdapter([textResponse('first')], {
+      efforts: [{ id: effort, name: 'High' }],
+      defaultEffort: effort,
+    })
+    const { ctx, parent } = await setupWith(adapter)
+    // A second adapter with NO reasoning support: carrying the descriptor's
+    // effort over would make the resumed call itself reject with
+    // UNSUPPORTED_REASONING_EFFORT, so reaching it proves the clearing.
+    const plainAdapter = new MockAdapter([textResponse('resumed on alt')])
+    ctx.llm.registerAdapter(['alt'], plainAdapter)
+    const started = await ctx.subagents.startContinuable({
+      ...startSpec(parent),
+      request: {
+        prompt: message('routed work'),
+        parent,
+        agentOptions: { provider: 'mock', model: 'child-model', reasoningEffort: effort },
+      },
+    })
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(loaded.events.find(event => event.type === 'subagent/descriptor')?.data)
+      .toMatchObject({ agentProvider: 'mock', agentModel: 'child-model', agentReasoningEffort: 'high' })
+
+    await ctx.subagents.sendMessage(parent, started.childId, message('switch model'), {
+      signal: testSignal,
+      agentOptions: { provider: 'alt', model: 'other-model' },
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    // The resumed epoch ran on the override route with no effort at all — the
+    // old route's effort did not silently cross the route change.
+    expect(plainAdapter.requests.filter(request => request.sessionId === started.childId)).toHaveLength(1)
+    const resumedRequest = plainAdapter.requests.find(request => request.sessionId === started.childId)
+    expect(resumedRequest).toMatchObject({ provider: 'alt', model: 'other-model' })
+    expect(resumedRequest?.reasoningEffort).toBeUndefined()
+  })
+
+  it('keeps a descriptor route override-free delivery on the descriptor route (no regression)', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('resumed')])
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+
+    await ctx.subagents.sendMessage(parent, started.childId, message('resume plain'), { signal: testSignal })
+    await vi.waitFor(() => {
+      expect(ctx.agents.get(started.childId)?.options).toMatchObject({ provider: 'mock', model: 'mock' })
+    })
+    await waitNoActivation(ctx, started.childId)
+    const resumed = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(resumed.events.flatMap(event => event.type === 'request/header'
+      ? [event.data.header.config]
+      : [])).toEqual([
+      { provider: 'mock', model: 'mock' },
+      { provider: 'mock', model: 'mock' },
+    ])
+  })
+
+  it('ignores the route override for an already-resident child', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('still resident')])
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    const resident = await vi.waitFor(() => {
+      const found = ctx.agents.get(started.childId)
+      expect(found).toBeDefined()
+      return found!
+    })
+
+    await ctx.subagents.sendMessage(parent, started.childId, message('while resident'), {
+      signal: testSignal,
+      agentOptions: { provider: 'alt', model: 'alt-model' },
+    })
+    await vi.waitFor(() => {
+      expect(adapterOf(ctx).requests.filter(request => request.sessionId === started.childId)).toHaveLength(2)
+    })
+    // No teardown: the same resident Agent keeps its descriptor route.
+    expect(ctx.agents.get(started.childId)).toBe(resident)
+    expect(resident.options).toMatchObject({ provider: 'mock', model: 'mock' })
+    await waitNoActivation(ctx, started.childId)
   })
 
   it('unloading the manager drains its live activations', async () => {

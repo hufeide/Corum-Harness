@@ -129,6 +129,19 @@ export type SubagentInterruptAuthority =
 export interface SubagentSendMessageOptions {
   /** Caller cancellation, owning the operation only until inbox acceptance. */
   readonly signal: AbortSignal
+  /**
+   * corum（fork #9 增量）：本次投递的 LLM 路线覆盖（provider/model[/reasoningEffort]）。
+   *
+   * 动机：可续接子 Agent 以 `stopReason: 'error'` 终结（如其模型不可用）后被 DISPOSED，
+   * 父机制要带着既有上下文在同一条子会话上换路线续跑。该覆盖**只按次生效、不落盘**：
+   * 它仅参与 `coldResume` 对恢复 Agent 的物化，永不写回 descriptor（descriptor 仍在
+   * 创建时一次性追加，保持权威）；之后的无覆盖投递/恢复自动回落到描述符路线。
+   *
+   * **已驻留（resident）的子 Agent 不应用此覆盖**：为换路线拆掉一个正在（或可以）
+   * 干活的 Activation 是错的，覆盖只 honoring 在冷恢复路径上；需要换路线时先让/等
+   * 子 Agent 结算，再在下一次投递上携带覆盖（届时走 coldResume）。
+   */
+  readonly agentOptions?: AgentOptions
 }
 
 /** Inputs shared by model steering and the human Queue adapter. */
@@ -141,8 +154,19 @@ type ChildDeliveryOptions =
      */
     readonly source?: MessageSource
     readonly signal: AbortSignal
+    /**
+     * corum（fork #9 增量）：本次投递的路线覆盖；仅冷恢复路径 honoring，驻留子 Agent
+     * 忽略（见 {@link SubagentSendMessageOptions.agentOptions} 的注释）。
+     */
+    readonly agentOptions?: AgentOptions
   }
-  | { readonly delivery: 'queue'; readonly source: MessageSource; readonly signal: AbortSignal }
+  | {
+    readonly delivery: 'queue'
+    readonly source: MessageSource
+    readonly signal: AbortSignal
+    /** 同上：仅冷恢复路径 honoring 的按次路线覆盖。 */
+    readonly agentOptions?: AgentOptions
+  }
 
 /**
  * The residency state of one continuable child, derived from Agent quiescence
@@ -617,6 +641,8 @@ export class SubagentContinuationManager {
     return this.deliverToChild(sender, targetId, content, {
       signal: options.signal,
       delivery: 'steer',
+      // corum（fork #9 增量）：随投递透传按次路线覆盖（undefined 时不产生覆盖）。
+      ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions }),
     })
   }
 
@@ -635,8 +661,14 @@ export class SubagentContinuationManager {
     content: ContentBlock[],
     source: MessageSource,
     signal: AbortSignal,
+    agentOptions?: AgentOptions,
   ): Promise<MessageId> {
-    return this.deliverToChild(parent, childId, content, { source, signal, delivery: 'queue' })
+    return this.deliverToChild(parent, childId, content, {
+      source,
+      signal,
+      delivery: 'queue',
+      ...(agentOptions === undefined ? {} : { agentOptions }),
+    })
   }
 
   /**
@@ -654,8 +686,14 @@ export class SubagentContinuationManager {
     content: ContentBlock[],
     source: MessageSource,
     signal: AbortSignal,
+    agentOptions?: AgentOptions,
   ): Promise<MessageId> {
-    return this.deliverToChild(parent, childId, content, { source, signal, delivery: 'steer' })
+    return this.deliverToChild(parent, childId, content, {
+      source,
+      signal,
+      delivery: 'steer',
+      ...(agentOptions === undefined ? {} : { agentOptions }),
+    })
   }
 
   /** Route one parent-originated delivery through residency and cold resume. */
@@ -1179,17 +1217,34 @@ export class SubagentContinuationManager {
     }
     let activation: Activation
     try {
+      // corum（fork #9 增量）：按次路线覆盖合入冷恢复的物化 options（覆盖赢）。
+      // ① **只在冷恢复路径 honoring**：驻留子 Agent 不拆不换（见 SubagentSendMessageOptions 注释）；
+      // ② **非持久**：合入结果只物化本次 Activation，永不写回 descriptor——之后无覆盖的
+      //    投递仍按 descriptor 路线恢复，descriptor 保持创建时一次追加的权威语义；
+      // ③ **effort 清除规则**与 resolveChildAgentOptions 一致：覆盖换掉了 provider/model
+      //    却没给 effort 时，descriptor 的 agentReasoningEffort 属于旧路线，静默携带会让
+      //    新模型拒绝一个它不支持的 effort（UNSUPPORTED_REASONING_EFFORT），故清除。
+      const override = options.agentOptions
+      const resumedRoute = {
+        ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
+        ...descriptor.agentModel !== undefined ? { model: descriptor.agentModel } : {},
+        ...descriptor.agentReasoningEffort !== undefined
+          ? { reasoningEffort: ReasoningEffortId(descriptor.agentReasoningEffort) }
+          : {},
+        ...override,
+      } satisfies AgentOptions
+      if (
+        override !== undefined
+        && (resumedRoute.provider !== descriptor.agentProvider || resumedRoute.model !== descriptor.agentModel)
+        && override.reasoningEffort === undefined
+      ) {
+        delete resumedRoute.reasoningEffort
+      }
       activation = await this.materialize({
         childId,
         provider: descriptor.provider,
         parent,
-        agentOptions: {
-          ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
-          ...descriptor.agentModel !== undefined ? { model: descriptor.agentModel } : {},
-          ...descriptor.agentReasoningEffort !== undefined
-            ? { reasoningEffort: ReasoningEffortId(descriptor.agentReasoningEffort) }
-            : {},
-        },
+        agentOptions: resumedRoute,
         composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
         signal: options.signal,
       })
