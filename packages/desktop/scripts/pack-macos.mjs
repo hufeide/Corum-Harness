@@ -19,6 +19,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const root = resolve(import.meta.dirname, '..', '..', '..')
 /** desktop 包根（脚本位置推导——2026-09 全局重命名后 packages/shell 已不存在）。 */
@@ -50,10 +51,10 @@ const SHIPPED_SKILLS = join(DESKTOP_ROOT, 'shipped-skills')
 /** host 运行时里 shipped-skills 的 staging 目标（与 shipped-presets 同级，锚点同款）。 */
 const SHIPPED_SKILLS_DIR = join(HOST_DIR, 'shipped-skills')
 
-async function run(label, command, args) {
+async function run(label, command, args, options = {}) {
   console.log(`[pack-macos] ${label}`)
   await new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { cwd: root, stdio: 'inherit' })
+    const child = spawn(command, args, { cwd: options.cwd ?? root, stdio: 'inherit' })
     child.on('error', reject)
     child.on('exit', (code) => {
       if (code === 0) resolveRun()
@@ -99,6 +100,40 @@ async function materializeSymlinks(nodeModules) {
   }
 }
 
+/**
+ * 物化一份**工作区副本**，供 `pnpm deploy` 使用（用户 2026-09-18 定调方案 c）。
+ *
+ * 为什么必须有副本：`pnpm deploy --prod --filter corum-desktop-host` 会在**工作区里**做一次
+ * 按 desktop-host 生产依赖收敛的安装 —— 它会重写各 workspace 包的 `node_modules`，把别的包
+ * 需要的依赖剪掉。实测（2026-09-18）：打包前 `packages/plugins/agent/corum-agent/node_modules/
+ * @deepseek-ai/schemastery` 在，**每次打包跑完就没了**；而紧随其后的 host 冒烟启动会经
+ * **工作区路径**加载 `@corum/corum-agent`（冒烟期 profile scaffolding 的软链指向仓库里的插件
+ * 包）⇒ `ERR_MODULE_NOT_FOUND: @deepseek-ai/schemastery` ⇒ `host bridge exited 1 before ready`。
+ * 把 deploy 移进副本后，收敛只落在副本里，真工作区**一字不动**，冒烟启动自然能解析。
+ *
+ * 副本内容 = 根元数据（workspace 声明 + 锁文件）+ `packages/**`（**排除** node_modules /
+ * build / dist：前者正是要被 deploy 冲刷的东西，后两者是产物、与 deploy 无关且体积大）。
+ * @returns 副本根目录。
+ */
+async function materializeDeployWorkspace() {
+  // ⚠️ 副本**不能**放在 `packages/` 里（cp 会拒绝「复制到自身的子目录」EINVAL），
+  // 也刻意不放在仓库内：它是上 GB 的临时物，放系统临时目录用完即删。
+  const wsDir = join(tmpdir(), `corum-pack-ws-${process.pid}`)
+  await rm(wsDir, { recursive: true, force: true })
+  await mkdir(wsDir, { recursive: true })
+  for (const name of ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', '.npmrc']) {
+    const from = join(root, name)
+    if (existsSync(from)) await cp(from, join(wsDir, name), { recursive: true })
+  }
+  const skip = new Set(['node_modules', 'build', 'dist'])
+  await cp(join(root, 'packages'), join(wsDir, 'packages'), {
+    recursive: true,
+    dereference: true,
+    filter: (source) => !source.split(sep).some(segment => skip.has(segment)),
+  })
+  return wsDir
+}
+
 async function deployHost() {
   await rm(HOST_DIR, { recursive: true, force: true })
   await mkdir(HOST_DIR, { recursive: true })
@@ -116,25 +151,39 @@ async function deployHost() {
   // 只藏在 .pnpm 嵌套目录里，profile 里的裸插件名会解析失败。
   const deployTmp = join(DESKTOP_ROOT, 'build', '.deploy-tmp')
   await rm(deployTmp, { recursive: true, force: true })
-  await run('pnpm deploy desktop-host (hoisted registry closure)', 'pnpm', [
-    '--filter', 'corum-desktop-host', 'deploy',
-    '--legacy',
-    '--prod',
-    '--config.node-linker=hoisted',
-    '--config.auto-install-peers=false',
-    '--config.link-workspace-packages=true',
-    deployTmp,
-  ])
-  if (!existsSync(join(deployTmp, 'node_modules'))) {
-    throw new Error(`pack-macos: pnpm deploy produced no node_modules at ${deployTmp}`)
+  // ★ 在**副本**里 deploy（见 materializeDeployWorkspace 的由来）。
+  const wsDir = await materializeDeployWorkspace()
+  try {
+    await run('pnpm install (deploy workspace copy)', 'pnpm', [
+      'install', '--frozen-lockfile', '--ignore-scripts',
+    ], { cwd: wsDir })
+    await run('pnpm deploy desktop-host (hoisted registry closure, in a workspace copy)', 'pnpm', [
+      '--filter', 'corum-desktop-host', 'deploy',
+      '--legacy',
+      '--prod',
+      '--config.node-linker=hoisted',
+      '--config.auto-install-peers=false',
+      '--config.link-workspace-packages=true',
+      deployTmp,
+    ], { cwd: wsDir })
+    if (!existsSync(join(deployTmp, 'node_modules'))) {
+      throw new Error(`pack-macos: pnpm deploy produced no node_modules at ${deployTmp}`)
+    }
+    // pnpm deploy 会在 .pnpm/node_modules 里留下指向 workspace 的 self-link
+    // symlink（corum-desktop-host、@corum/*、corum-desktop 等），这些在独立 deploy 产物
+    // 里是断链的，cp(dereference) 会 stat 失败。复制前清理掉它们。
+    //
+    // ⚠️ 副本必须**活到这一步之后**：deploy 产物里指向 workspace 的软链指向的是**副本**，
+    // 副本一删它们立刻成断链、会被上面这行当垃圾清掉（实测：`@deepseek-ai/dsh-fs-local`
+    // 就是这么整条消失的）。所以副本在 finally 里、实体化（dereference）完成之后才删。
+    await cleanupBrokenSymlinks(join(deployTmp, 'node_modules'))
+    await cp(join(deployTmp, 'node_modules'), join(HOST_DIR, 'node_modules'), { recursive: true, dereference: true })
+    await rm(deployTmp, { recursive: true, force: true })
+    console.log('[pack-macos] host closure materialized from registry')
+  } finally {
+    // 副本用完即弃（含它自己的 node_modules）：可能上 GB，别留在 /tmp 里。
+    await rm(wsDir, { recursive: true, force: true })
   }
-  // pnpm deploy 会在 .pnpm/node_modules 里留下指向 workspace 的 self-link
-  // symlink（corum-desktop-host、@corum/*、corum-desktop 等），这些在独立 deploy 产物
-  // 里是断链的，cp(dereference) 会 stat 失败。复制前清理掉它们。
-  await cleanupBrokenSymlinks(join(deployTmp, 'node_modules'))
-  await cp(join(deployTmp, 'node_modules'), join(HOST_DIR, 'node_modules'), { recursive: true, dereference: true })
-  await rm(deployTmp, { recursive: true, force: true })
-  console.log('[pack-macos] host closure materialized from registry')
 }
 
 /** 删除 node_modules 下所有断链 symlink（指向不存在的目标）。 */
