@@ -302,6 +302,11 @@ interface ModelSelectionProjections {
   stateOf: (session: Session, key: 'modelSelection') => unknown
 }
 
+/** `agentPreset` 投影的最小能力面（官方 dsh-agent-presets 注册的会话级 preset 键）。 */
+interface AgentPresetProjections {
+  stateOf: (session: Session, key: 'agentPreset') => string | null | undefined
+}
+
 /** `modelSelection` 投影里的选择形状（只读 provider/model）。 */
 interface ProjectedSelection {
   provider: string
@@ -1388,8 +1393,7 @@ export class CorumAgentService extends TypertRemoteService {
     saveProfile(profile)
 
     // 编译并落盘 agent.cordis.yml + preset.yml
-    const dir = agentDirPath(input.id)
-    this.writeAgentDir(loadProfile(input.id)!, dir)
+    this.persistProfileAndRecompile(profile)
 
     // 清掉旧 Agent 使下次重建
     this.agents.delete(input.id)
@@ -1419,6 +1423,66 @@ export class CorumAgentService extends TypertRemoteService {
         source: 'corum' as const,
       },
     }
+  }
+
+  /**
+   * 机制面（供委派机制调用，非 LLM 工具）：把某会话所用 Agent 预设的**子 Agent 模型**改成终值，
+   * 永久生效（写入该预设的 agent.json 并重新编译其 cordis 预设）。
+   *
+   * role='worker' ⇒ profile.subagentModel；role='research' ⇒ profile.researchModel。
+   * route 传 undefined ⇒ **清除该键**（语义 = 跟随主 Agent，见 compile.ts 的两档口径）。
+   *
+   * @param sessionId - 会话 id（用其 Agent 预设作为写入目标）。
+   * @param role - 子 Agent 角色（worker / research）。
+   * @param route - 目标模型路由；undefined 表示「跟随主 Agent」。
+   * @returns 实际写入的预设 id，以及该角色写入后的值（undefined = 已清除/跟随主 Agent）。
+   * @throws 当会话不是存活 Agent，或解析不到其预设时。
+   */
+  applySubagentModelForSession(
+    sessionId: string,
+    role: 'worker' | 'research',
+    route: { provider: string; model: string; reasoningEffort?: string } | undefined,
+  ): { presetId: string; applied: { provider: string; model: string; reasoningEffort?: string } | undefined } {
+    // 预设 id 用 session projection（agentPreset）权威解析——与官方
+    // session-controller 的 presetForSession 同口径：它反映会话**当前**运行的
+    // preset（blank 期切换过 preset 的会话，creation header 已过时）。
+    // 三个存活表都查不到 ⇒ 会话不是本进程存活的 Agent ⇒ fail-loud，绝不静默
+    // 回落默认预设（写错预设 = 用户以为改了 A 实际改了 B）。
+    const live = this.taskAgents.get(sessionId) ?? this.findLaneAgent(sessionId)
+    if (live === undefined) {
+      throw new Error(`corum-agent: applySubagentModelForSession — session "${sessionId}" 不是本进程存活的 Agent 会话`)
+    }
+    const projections = (this.ctx as unknown as { sessionProjections?: AgentPresetProjections }).sessionProjections
+    const presetId = projections?.stateOf(live.agent.session, 'agentPreset') ?? undefined
+    if (presetId === undefined || presetId === null || presetId === '') {
+      throw new Error(`corum-agent: applySubagentModelForSession — 解析不到会话 "${sessionId}" 的 Agent 预设（agentPreset 投影为空）`)
+    }
+    // saveProfile 只浅拷贝入参对象并整体覆盖落盘（{...profile, version, trust}），
+    // **不与存量合并** —— 传部分对象会把没带的字段静默清掉（台账事故
+    // lesson.profile.saveProfile-needs-full-input-and-summary-omits-memoryPolicy：
+    // memoryPolicy 被丢后 listProfiles 全体加载失败）。所以必须先 loadProfile 拿
+    // **完整**对象，只改目标键，再把整个对象传回去。
+    const profile = loadProfile(presetId)
+    if (profile === undefined) {
+      throw new Error(`corum-agent: applySubagentModelForSession — 会话 "${sessionId}" 的预设 "${presetId}" 不存在 agent.json`)
+    }
+    if (route === undefined) {
+      // 清除 = 删除键本身（不用 `key: undefined` 占位——虽然 JSON.stringify 会丢掉
+      // undefined 值，但显式 delete 让内存对象与磁盘 JSON 形态一致，不靠隐式行为）。
+      if (role === 'worker') delete profile.subagentModel
+      else delete profile.researchModel
+    } else {
+      const value = {
+        provider: route.provider,
+        model: route.model,
+        ...(route.reasoningEffort !== undefined ? { reasoningEffort: route.reasoningEffort } : {}),
+      }
+      if (role === 'worker') profile.subagentModel = value
+      else profile.researchModel = value
+    }
+    this.persistProfileAndRecompile(profile)
+    const applied = role === 'worker' ? profile.subagentModel : profile.researchModel
+    return { presetId, applied: applied === undefined ? undefined : { ...applied } }
   }
 
   /** 删除一个 AgentProfile。 */
@@ -2898,6 +2962,32 @@ export class CorumAgentService extends TypertRemoteService {
     const compiled = compilePreset(profile)
     writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
     writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
+  }
+
+  /**
+   * 「agent.json 落盘 → 重新编译 preset 产物 → 内存旧 Agent 失效」的共用收尾
+   * （原 saveProfileRemote 的后三步原样抽出，saveProfileRemote 与
+   * applySubagentModelForSession 共走这一条路——两条写路径一旦分叉，迟早出现
+   * 「改了 agent.json 却没重编译」的半更新状态）。
+   *
+   * 注意 saveProfile 侧 version 自增：saveProfileRemote 传入的是 version:0 的新对象，
+   * 本方法传入的是 loadProfile 出来的存量对象（version 已是现值）——两处语义各自正确，
+   * saveProfile 内部统一按「存量 version + 1」落盘。
+   */
+  private persistProfileAndRecompile(profile: AgentProfile): void {
+    saveProfile(profile)
+    // 编译并落盘 agent.cordis.yml + preset.yml
+    this.writeAgentDir(loadProfile(profile.id)!, agentDirPath(profile.id))
+    // 清掉旧 Agent 使下次重建
+    this.agents.delete(profile.id)
+  }
+
+  /** 按 sessionId 反查泳道/项目模式的存活会话（taskAgents 之外的存活表）。 */
+  private findLaneAgent(sessionId: string): { agent: Agent; sessionId: SessionId } | undefined {
+    for (const entry of this.typeAgents.values()) {
+      if (String(entry.sessionId) === sessionId) return entry
+    }
+    return undefined
   }
 
   /**
