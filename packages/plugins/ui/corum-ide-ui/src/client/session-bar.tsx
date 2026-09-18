@@ -440,10 +440,78 @@ interface SubagentRosterEntry {
  * 「同一终态两处不同源」——「已中断」只落到卡片、花名册却仍写「已完成」正是这个
  * 结构的产物（BUG-31 同族病）。共用之后，终态文案只有一处可改。
  */
-function RosterRow({ entry, openSession }: {
+/** `revealSubagentCard` 的结果（chatRuntime 服务面的窄化；红线 3：只声明用到的字段）。 */
+export interface RevealOutcome {
+  readonly ok: boolean
+  readonly reason?: 'not-ready' | 'not-open' | 'not-loaded'
+  readonly pagesLoaded?: number
+}
+
+/** 用户可见失败反馈（与 SubagentChanges/apply 同款，`__corumNotify` 一次性只读桥）。 */
+function notifyUser(title: string, message?: string): void {
+  const notify = (window as unknown as { __corumNotify?: (n: { tone: 'error'; title: string; message?: string }) => void }).__corumNotify
+  notify?.({ tone: 'error', title, ...message === undefined ? {} : { message } })
+}
+
+/**
+ * 「在主会话瀑布里定位这张卡」的跳转按钮（用户 2026-09-18 定调）。
+ *
+ * 为什么单独一个按钮、而不是改行的点击语义：行的点击早已是「进入子会话」（打开子会话），
+ * 用户明确要求**保留**它、另给一个「点了就过去」的入口。两者分工：
+ *   - 行（→）：切到子会话去看它的完整过程；
+ *   - 本按钮（⌖）：**不切会话**，在父会话瀑布里把那张子 Agent 卡滚到中央并短暂高亮。
+ * 定位走 `chatRuntime.revealSubagentCard`（cordis 服务，红线 1）；找不到时**不静默** ——
+ * 退化为「进入子会话」并如实说明原因，让这个手势永远有结果。
+ */
+function RevealCardButton({ childSessionId, label, revealCard, fallback }: {
+  readonly childSessionId: string
+  /** 无障碍名里的对象描述（子 Agent 标签 / 分支名）。 */
+  readonly label: string
+  readonly revealCard?: ((childSessionId: string) => Promise<RevealOutcome>) | undefined
+  /** 找不到时的退化动作（打开子会话）。 */
+  readonly fallback?: ((sessionId: string) => void) | undefined
+}) {
+  const [busy, setBusy] = useState(false)
+  const onClick = (): void => {
+    if (busy) return
+    setBusy(true)
+    void (async () => {
+      try {
+        const result = await revealCard?.(childSessionId)
+        if (result?.ok === true) return
+        // 如实说明 + 给可执行出路：卡片不在当前加载的窗口里就带用户进子会话。
+        const why = result?.reason === 'not-loaded'
+          ? '该子 Agent 的卡片不在当前已加载的会话窗口内（会话较长，窗口外的节点未渲染）'
+          : result?.reason === 'not-open'
+            ? '当前打开的会话不是该子 Agent 的父会话'
+            : '瀑布视图尚未就绪'
+        notifyUser('没能在会话里定位这张卡', `${why}；已为你打开子会话`)
+        fallback?.(childSessionId)
+      } finally {
+        setBusy(false)
+      }
+    })()
+  }
+  return (
+    <button
+      type="button"
+      className={css.statusDetailAgentJump}
+      data-jump
+      disabled={busy}
+      title="在会话里定位这张卡（不切换会话）"
+      aria-label={`在会话里定位 ${label}`}
+      onClick={onClick}
+    >
+      ⌖
+    </button>
+  )
+}
+
+function RosterRow({ entry, openSession, revealCard }: {
   readonly entry: SubagentRosterEntry
   // exactOptionalPropertyTypes：调用方会把 `openSession`（可能 undefined）原样传进来。
   readonly openSession?: ((sessionId: string) => void) | undefined
+  readonly revealCard?: ((childSessionId: string) => Promise<RevealOutcome>) | undefined
 }) {
   const state = subagentStateOf(entry)
   // chip 色调档只有四档（running/done/aborted/failed）：interrupted 复用 aborted，
@@ -455,16 +523,20 @@ function RosterRow({ entry, openSession }: {
         : state === 'completed' ? '已完成'
           : `Step ${entry.step}${entry.currentAction === undefined ? '' : ` · ${entry.currentAction}`}`
   return (
-    <button
-      type="button"
+    <div
       className={css.statusDetailAgentRow}
       data-done={state === 'running' ? undefined : true}
       data-outcome={tone}
       data-state={state}
-      title={`进入子会话 ${entry.childSessionId}`}
-      aria-label={`进入子会话 ${entry.label}`}
-      onClick={() => { openSession?.(entry.childSessionId) }}
     >
+      {/* ⚠️ 行不能是 <button> 了：跳转按钮要作为它的**兄弟**（按钮嵌按钮是非法 HTML）。 */}
+      <button
+        type="button"
+        className={css.statusDetailAgentHit}
+        title={`进入子会话 ${entry.childSessionId}`}
+        aria-label={`进入子会话 ${entry.label}`}
+        onClick={() => { openSession?.(entry.childSessionId) }}
+      >
       <span className={css.statusDetailAgentDot} data-outcome={tone} />
       <span className={css.statusDetailAgentLabel}>{entry.label}</span>
       <span className={css.statusDetailAgentStep}>{statusText}</span>
@@ -478,8 +550,15 @@ function RosterRow({ entry, openSession }: {
       )}
       {entry.isolated === true && <span className={css.statusDetailAgentBadge}>隔离</span>}
       {entry.mode === 'background' && <span className={css.statusDetailAgentBadge}>后台</span>}
-      <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
-    </button>
+        <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
+      </button>
+      <RevealCardButton
+        childSessionId={entry.childSessionId}
+        label={entry.label}
+        revealCard={revealCard}
+        fallback={openSession}
+      />
+    </div>
   )
 }
 
@@ -1047,7 +1126,7 @@ function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentR
  * 「词元输入/输出」。`contextBreakdown` 是启发式构成近似（基座注释：never as a total），
  * 故这里用它只表达占比，且与 pressureTokens 的差额归入「未用」以保证合计闭合。
  */
-function AgentStatusDetail({ title, projections: p, anchor, roster, openSession, speedSeries, worktrees }: {
+function AgentStatusDetail({ title, projections: p, anchor, roster, openSession, revealCard, speedSeries, worktrees }: {
   title: string
   projections: AgentSessionProjections | undefined
   /** 会话顶栏行在**包含块坐标系**中的盒子（left/width），详情卡据此水平居中
@@ -1057,6 +1136,8 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
   roster: readonly SubagentRosterEntry[]
   /** 打开会话（子 Agent 行点击 → 进入该子会话）。 */
   openSession?: ((sessionId: string) => void) | undefined
+  /** 在父会话瀑布里定位子 Agent 卡（cordis 服务 chatRuntime 的窄化能力）。 */
+  revealCard?: ((childSessionId: string) => Promise<RevealOutcome>) | undefined
   /** 生成速度采样序列（useSpeedSeries；空序列时曲线画基线占位）。 */
   speedSeries: readonly SpeedSample[]
   /** 隔离工作区台账（用户 2026-09-10：P8 后 chip 的新家 = 本浮层）。 */
@@ -1245,7 +1326,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
           </div>
           {/* 运行中条目：始终逐条渲染（BUG-26 不变式）。 */}
           {runningEntries.map(entry => (
-            <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} />
+            <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} revealCard={revealCard} />
           ))}
           {/* 终态条目折叠摘要行（有终态条目时才出现）。 */}
           {terminalEntries.length > 0 && (
@@ -1264,7 +1345,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               {terminalFoldOpen && (
                 <div className={css.statusDetailFoldList}>
                   {terminalEntries.map(entry => (
-                    <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} />
+                    <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} revealCard={revealCard} />
                   ))}
                 </div>
               )}
@@ -1293,12 +1374,14 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
             const childId = entry.childSessionId
             if (childId !== undefined) {
               return (
-            <button
-              key={entry.slug}
-              type="button"
+            <div
               className={css.statusDetailAgentRow}
               data-worktree
               data-navigable
+              >
+            <button
+              type="button"
+              className={css.statusDetailAgentHit}
               title={`进入子会话 ${childId}`}
               aria-label={`进入子会话 ${entry.branch}`}
               onClick={() => { openSession?.(childId) }}
@@ -1314,6 +1397,13 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               </span>
               <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
             </button>
+            <RevealCardButton
+              childSessionId={childId}
+              label={entry.branch}
+              revealCard={revealCard}
+              fallback={openSession}
+            />
+          </div>
               )
             }
             // 无 childSessionId → 只读展示（不可点，保持灰态）。
@@ -1350,12 +1440,14 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                     const childId = entry.childSessionId
                     if (childId !== undefined) {
                       return (
-                    <button
-                      key={entry.slug}
-                      type="button"
+                    <div
                       className={css.statusDetailAgentRow}
                       data-worktree
                       data-navigable
+                      >
+                    <button
+                      type="button"
+                      className={css.statusDetailAgentHit}
                       title={`进入子会话 ${childId}`}
                       aria-label={`进入子会话 ${entry.branch}`}
                       onClick={() => { openSession?.(childId) }}
@@ -1371,6 +1463,13 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                       </span>
                       <span className={css.statusDetailAgentGo} aria-hidden="true">→</span>
                     </button>
+                    <RevealCardButton
+                      childSessionId={childId}
+                      label={entry.branch}
+                      revealCard={revealCard}
+                      fallback={openSession}
+                    />
+                  </div>
                       )
                     }
                     return (
@@ -1403,6 +1502,8 @@ export interface SessionStatusInjected {
   readonly remote?: RemoteEventFace | undefined
   /** 打开会话（浮层子 Agent 行点击 → 进入子会话）。 */
   readonly openSession: (sessionId: string) => void
+  /** 在父会话瀑布里定位子 Agent 卡（缺省时跳转按钮只走退化路径）。 */
+  readonly revealCard?: ((childSessionId: string) => Promise<RevealOutcome>) | undefined
   /**
    * RPC 面（隔离台账 + 子 Agent 花名册的冷启动基线：推送帧不重放，
    * 刷新后需主动拉一次）。结构窄化到「调用一个具名 RPC」——不 import
@@ -1455,7 +1556,7 @@ export interface TrajectoryCapableProps {
  * @param props - 槽运行时 share（sessionId/useSessions/useTrajectory）+ 业务注入面。
  * @returns 状态胶囊与其展开的统计详情卡。
  */
-export function SessionStatusPill({ sessionId, useSessions, remote, openSession, useTrajectory, connection, catalog }: SessionStatusPillProps) {
+export function SessionStatusPill({ sessionId, useSessions, remote, openSession, revealCard, useTrajectory, connection, catalog }: SessionStatusPillProps) {
   const wrapRef = useRef<HTMLSpanElement | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [anchor, setAnchor] = useState({ left: 0, width: 0 })
@@ -1603,6 +1704,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
               anchor={anchor}
               roster={roster}
               openSession={openSession}
+              revealCard={revealCard}
               speedSeries={speedSeries}
               worktrees={worktrees}
             />

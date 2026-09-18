@@ -1305,6 +1305,42 @@
   cursor: pointer;
 }
 .statusDetailAgentRow:hover { background: var(--corum-glass-2); }
+/* 行的可点区（2026-09-18）：跳转按钮必须是行的**兄弟**（按钮嵌按钮是非法 HTML），
+   所以外层 .statusDetailAgentRow 改成容器，内层按钮承载「进入子会话」的点击与整行布局。 */
+.statusDetailAgentHit {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* 「在会话里定位这张卡」按钮：**不切换会话**，只把卡片滚到瀑布中央并短暂高亮。
+   常显（不用 hover 才出现）：用户的主诉就是「卡片被瀑布冲走、找不到」，藏起来反而更难发现。 */
+.statusDetailAgentJump {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(20px * var(--corum-density-scale, 1));
+  height: calc(20px * var(--corum-density-scale, 1));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 1;
+  cursor: pointer;
+}
+.statusDetailAgentRow:hover .statusDetailAgentJump { color: var(--dsw-alias-brand-primary); background: var(--corum-glass-2); }
+.statusDetailAgentJump:disabled { opacity: 0.5; cursor: default; }
 .statusDetailAgentGo {
   flex: none;
   font-size: calc(11px * var(--corum-ui-font-scale, 1));

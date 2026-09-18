@@ -41,6 +41,7 @@ import type { GridActions, PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 import {
   SessionStatusPill, SessionTrajectoryButton, FloatingCloseButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
+  type RevealOutcome,
 } from './session-bar.tsx'
 import type { RemoteEventFace } from './session-bar.tsx'
 import { createLayoutStore } from './stores.ts'
@@ -341,9 +342,35 @@ export function apply(ctx: ClientContext): void {
      * 页面刷新后不重放，纯推送订阅的历史会话永远看不到「N 个隔离工作区 · 待集成」
      * （而未集成分支可能被后续 cleanup 清掉，是最需要可见的信息）。
      */
+    /**
+     * 从 cordis 取 `chatRuntime` 的「定位子卡」能力并窄化（红线 3/4）。
+     *
+     * 为什么不用 `ctx.chatRuntime`：本包不 import 那个 bundle 的类型面（会把它拖进本包
+     * 运行时）；服务实例的唯一性由 root context `reflect.store` 保证，所以运行时按名字取
+     * 一次 + 形状校验即可。取不到就当没有这个能力（调用方退化），绝不抛。
+     */
+    const chatRevealCapable = (): ((childSessionId: string) => Promise<RevealOutcome>) | undefined => {
+      const service = (ctx as unknown as { get?: (name: string) => unknown }).get?.('chatRuntime') as
+        | { revealSubagentCard?: unknown }
+        | undefined
+      const fn = service?.revealSubagentCard
+      if (typeof fn !== 'function') return undefined
+      return (childSessionId: string) => (fn as (id: string) => Promise<RevealOutcome>).call(service, childSessionId)
+    }
+
     const statusInjected = () => ({
       remote,
       openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
+      /**
+       * 「在父会话瀑布里定位子 Agent 卡」的窄化能力（2026-09-18 用户需求）。
+       *
+       * 红线 1：跨 bundle 的共享能力必须是 cordis 服务 —— 子卡的 DOM 在
+       * `@corum/corum-ui-chat` 的 ChatView 里，而入口在本包（另一个 bundle），
+       * 所以经 `chatRuntime` 服务（bundle B `ctx.provide('chatRuntime', …)`）交付。
+       * 红线 3：本包只声明用到的那个方法，不耦合服务实现（窄化 + 运行时形状校验）。
+       * 服务未装配/未实现时返回 undefined 方法 ⇒ 组件的跳转按钮走退化路径（进子会话）。
+       */
+      revealCard: chatRevealCapable(),
       connection: ctx.get('connection') as ConnectionHandle | undefined,
       /**
        * 子 Agent 花名册的 durable 基线源（官方直接子会话目录）。

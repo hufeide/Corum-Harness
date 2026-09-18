@@ -9,6 +9,7 @@ import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import { Button, IconChevronDownOutline14, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import type { ChatSnapshot } from '../contract/snapshot.ts'
+import { chatRuntimeRef, type RevealSubagentCardResult } from '../chat-runtime.ts'
 import { AgentNameContext } from './agent-name-context.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
@@ -18,6 +19,10 @@ import { formatRunDuration } from './message-chrome.ts'
 import css from './ChatView.module.css'
 
 const FOLLOW_THRESHOLD = 24
+/** 定位子卡时最多向前翻几页（超出就如实报 not-loaded，由调用方退化处理）。 */
+const REVEAL_MAX_PAGES = 8
+/** 高亮态持续时长（ms）：与 notification-bridge 同口径，到点撤销 data-reveal。 */
+const REVEAL_HIGHLIGHT_MS = 1600
 const SCROLL_SAMPLE_INTERVAL_MS = 500
 
 /** Active column host when present; otherwise the view-local scroller. */
@@ -339,6 +344,60 @@ export function ChatView({
   const [jumpSettleTick, setJumpSettleTick] = useState(0)
   /** Window head at the last settle-time repage; an unmoved head falls back instead of repaging forever. */
   const jumpRepageHeadRef = useRef<number | null>(null)
+
+  /**
+   * 子卡定位（详情卡「子 Agent」/「并行工作区」行的跳转按钮）所需的实时值。
+   *
+   * 为什么放 ref 而不是直接把实现写进注册的闭包依赖里：`hasMore` / `loadOlder` 每次渲染
+   * 都可能是新引用，注册在 useEffect([...]) 里会导致「注册-撤销」抖动；而定位是**一次性
+   * 的用户手势**，读当下的值即可。挂载期只注册一次，值经 ref 取最新的。
+   */
+  const revealCtxRef = useRef<{ hasMore: boolean; loadOlder: () => void }>({ hasMore: false, loadOlder: () => {} })
+  useEffect(() => {
+    revealCtxRef.current = { hasMore, loadOlder }
+  }, [hasMore, loadOlder])
+
+  /**
+   * 把「在当前瀑布里定位子 Agent 卡」注册给 chatRuntime cordis 服务。
+   *
+   * 为什么实现在这里（而不是 apply）：只有本组件握着 `hasMore` + `loadOlder` —— 会话时间线
+   * 是**事件窗口分页**的，窗口外的节点根本不渲染，所以定位可能需要先向前翻页。
+   * 找不到时**如实返回原因**（绝不静默放弃）：跳转按钮是用户主动发起的动作。
+   */
+  useEffect(() => {
+    const reveal = async (childSessionId: string): Promise<RevealSubagentCardResult> => {
+      const list = listRef.current
+      if (list === null) return { ok: false, reason: 'not-ready' }
+      const selector = `[data-child-session-id="${CSS.escape(childSessionId)}"]`
+      const find = (): HTMLElement | null => list.querySelector<HTMLElement>(selector)
+      const settle = (): Promise<void> => new Promise<void>((resolveSettle) => {
+        requestAnimationFrame(() => { requestAnimationFrame(() => { resolveSettle() }) })
+      })
+      const land = (card: HTMLElement): void => {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        card.setAttribute('data-reveal', '')
+        setTimeout(() => { card.removeAttribute('data-reveal') }, REVEAL_HIGHLIGHT_MS)
+      }
+      const already = find()
+      if (already !== null) { land(already); return { ok: true, pagesLoaded: 0 } }
+      // 不在已加载窗口：向前翻页找。两个止损判据 —— 没有更多历史了，或某一页没有带来
+      // 任何新行（hasMore 与实际推进不同步时不会空转到上限）。
+      let pages = 0
+      while (pages < REVEAL_MAX_PAGES && revealCtxRef.current.hasMore) {
+        const rowsBefore = list.querySelectorAll('[data-chat-flow-key]').length
+        revealCtxRef.current.loadOlder()
+        pages += 1
+        // eslint-disable-next-line no-await-in-loop -- 逐页推进是这里的语义本身
+        await settle()
+        const hit = find()
+        if (hit !== null) { land(hit); return { ok: true, pagesLoaded: pages } }
+        if (list.querySelectorAll('[data-chat-flow-key]').length <= rowsBefore) break
+      }
+      return { ok: false, reason: 'not-loaded', pagesLoaded: pages }
+    }
+    chatRuntimeRef.current?.setRevealSubagentCard(reveal)
+    return () => { chatRuntimeRef.current?.setRevealSubagentCard(undefined) }
+  }, [])
   const firstSeqRef = useRef<number | null>(null)
   const openedRef = useRef(false)
   const lastKeyRef = useRef<string | null>(null)

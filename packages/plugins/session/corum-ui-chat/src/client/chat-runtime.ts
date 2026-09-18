@@ -53,6 +53,20 @@ export interface ChatRuntimeService {
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
   openSession(id: string): void
   /**
+   * 在**当前父会话瀑布**里把某个子 Agent 卡滚到视野中央并短暂高亮。
+   *
+   * 为什么需要它（用户 2026-09-18）：「主 Agent 的会话瀑布会冲走这些卡片」——会话时间线是
+   * **事件窗口分页**的（窗口外的节点根本不渲染），所以详情卡「子 Agent」/「并行工作区」那些
+   * 行光有「进入子会话」不够，用户还需要一个「就在这一页里带我去看那张卡」的入口。
+   *
+   * 与 `openSession` 的分工：本方法**不切换会话**，只在本页定位；找不到时如实返回原因，
+   * 由调用方决定是否退化为 `openSession`。
+   *
+   * @param childSessionId - 子会话 id（与 `SubagentChildEvent.childSessionId` 同源）。
+   * @returns 定位结果（含是否翻页、失败原因）。
+   */
+  revealSubagentCard(childSessionId: string): Promise<RevealSubagentCardResult>
+  /**
    * 在内置编辑器打开「改动前后」diff tab（与 apply.ts ReviewDock 的 openDiff 同款，
    * 经 corumEditor cordis 服务直调）。SubagentChanges 用它打开子会话的文件改动对比。
    */
@@ -76,12 +90,32 @@ export interface ChatRuntimeService {
   sessionCwd?: () => string | undefined
 }
 
+/**
+ * 「在父会话瀑布里定位某个子 Agent 卡」的结果。
+ *
+ * ⚠️ 找不到时**必须**如实说明原因（`ok:false` + `reason`）：跳转按钮是用户的主诉动作，
+ * 静默放弃会变成「点了没反应」。调用方据此给出可执行的下一步（见 session-bar 的按钮）。
+ */
+export interface RevealSubagentCardResult {
+  readonly ok: boolean
+  /**
+   * 失败原因：
+   *   - `not-ready`：瀑布视图还没挂载（服务已注入但列表不可用）；
+   *   - `not-open`：当前打开的会话不是该卡的父会话（卡片根本不在这一页）；
+   *   - `not-loaded`：会话历史已翻到头仍未找到该卡（卡片超出可加载范围）。
+   */
+  readonly reason?: 'not-ready' | 'not-open' | 'not-loaded'
+  /** 实际向前翻了几页才找到（0 = 本来就在已加载窗口里）。 */
+  readonly pagesLoaded?: number
+}
+
 /** 内部可变状态 + 监听器集（服务实现的私有后端）。 */
 class ChatRuntimeImpl implements ChatRuntimeService {
   #sessionId: string | undefined
   #connection: ConnectionHandle | undefined
   #remote: ClientRemote | undefined
   #openSessionFn: (id: string) => void = () => {}
+  #revealSubagentCardFn: ((childSessionId: string) => Promise<RevealSubagentCardResult>) | undefined
   readonly #listeners = new Set<() => void>()
   /** uSES 源对象（稳定引用——getSnapshot/subscribe 闭包绑定本实例，值经 #sessionId 读）。 */
   readonly #source: SessionIdSource = {
@@ -108,6 +142,23 @@ class ChatRuntimeImpl implements ChatRuntimeService {
 
   openSession(id: string): void {
     this.#openSessionFn(id)
+  }
+
+  /**
+   * ⚠️ 刻意写成**实例箭头属性**（不是原型方法）：本方法要被**另一个 bundle** 经窄化能力面
+   * 消费（`corum-ide-ui` 拿到的是一个函数引用），摘下调用极易发生 —— 而原型方法体访问私有
+   * 字段 `#revealSubagentCardFn`，receiver 一丢就抛
+   * `Cannot read properties of undefined (reading '#revealSubagentCardFn')`
+   * （同类缺陷见 `tests/chat-runtime-detached.spec.ts` 的记录）。绑定后摘不摘都安全。
+   */
+  readonly revealSubagentCard = (childSessionId: string): Promise<RevealSubagentCardResult> => {
+    // 视图未挂载（未注入实现）时如实报 not-ready —— 调用方会退化为「进入子会话」。
+    return this.#revealSubagentCardFn?.(childSessionId) ?? Promise.resolve({ ok: false, reason: 'not-ready' })
+  }
+
+  /** 瀑布视图挂载时注入定位实现（幂等；卸载时传 undefined 撤销）。 */
+  setRevealSubagentCard(fn: ((childSessionId: string) => Promise<RevealSubagentCardResult>) | undefined): void {
+    this.#revealSubagentCardFn = fn
   }
 
   /** apply 挂载时注入 remote 事件面（'corum/subagent/progress' 订阅入口，幂等）。 */
