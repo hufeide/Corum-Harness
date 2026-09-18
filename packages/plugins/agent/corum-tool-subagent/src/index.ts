@@ -1240,7 +1240,13 @@ export function apply(ctx: Context, config: Config): void {
     // ⚠️ 本监听器**必须同步返回**、不可 await：emitter 的 per-listener 容错会吞掉抛错，
     // 且阻塞它会拖住 settle 链。故提问走 fire-and-forget 的异步任务，失败只告警。
     if (parent !== undefined && info.stopReason === 'error') {
-      const facts = orchestration.takeChildSpawn(String(info.runId)) ?? orchestration.takeChildSpawn(String(info.id))
+      // ⚠️ 查找键用 `info.id`（= 子会话 id）**而不是** `info.runId`：实测（2026-09-18）
+      // continuable 路径的 `runId` 是 `createActivationObserver` 每次激活**新生成的
+      // randomUUID**（lifecycle.ts:182），与 spawn 时 `startContinuable` 返回的
+      // childId 毫无关系 —— 用 runId 查恒 miss，于是规则 1 在默认路径上**静默不触发**
+      // （第一次实机验证正是这样：子会话建了、失败了、提问卡没出现）。
+      // 子会话 id 才是稳定键：spawn 时记的是它，end 时 `info.id` 还是它。
+      const facts = orchestration.takeChildSpawn(String(info.id))
       if (facts !== undefined) {
         void corumHandleAsyncModelFailure(parent, facts, info, ctx)
       }
