@@ -68,7 +68,16 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/HANDOFF-2026-09-16-verify-gate-enforcement.md` — **最新交接入口**
+- `docs/HANDOFF-2026-09-18-packaging-pipeline-and-perf.md` — **最新交接入口**
+  （2026-09-18 打包链路场：用户定调「一定要把打包做好，不然开发了不能发布没有意义」。
+  **打包版起不了 agent 的真凶** = `pnpm deploy --legacy` 物化的闭包**系统性缺官方包**
+  （工作区 208 个官方包里缺 35 个，因为它们在官方侧多为 peer/devDependency，而打包用
+  `--prod --auto-install-peers=false`）；而 `.app` 在仓库里让 Node 从**工作区**补上缺包 ⇒ 能跑但
+  **两棵树模块实例混用** ⇒ `dsh-scope` 的 `kScope` symbol 被切成两份 ⇒ `agent-presets: refusing to
+  compose an unscoped context` ⇒ agent 挂载失败 ⇒ **整套 MCP 每秒重启**（CPU 高、下拉卡死的因）。
+  修法 = 闭包按「工作区实际装了什么」补齐 + 去重 + 两个审计脚本 + 打包期断言。同一份交接还含
+  **编排归因修复**（guest 轮次禁用 mtime 并集兜底）与 **agent 重建风暴护栏**。**下个 session 从这里开始。**）
+- `docs/HANDOFF-2026-09-16-verify-gate-enforcement.md` — 上一份交接（verify 门禁场，已收口）
   （2026-09-16 verify 门禁场：接续上一份的 §2 遗留项并**收口**。根因 = 声明式 verify **从未进机制
   门禁**——`corumIntegrationTruth` 只判「分支是否进 HEAD」，而集成者用普通 `git merge` 时
   **合并提交自己就进了 HEAD**，故 verify 的 exit 1 被完全忽略；对照会话只因集成者恰好用了

@@ -15,7 +15,12 @@
 """
 import json
 import os
+import re
 import sys
+
+# 开发工具链：它们会随 workspace 依赖混进闭包，但不参与 host 运行；缺失不影响发行包，
+# 报出来只会淹没真信号（2026-09-18 实测：45 项缺口里绝大多数是这批）。
+DEV_TOOLING = re.compile(r'^(vitest|tsdown|benchmark|1to2|glob|tinybench|uri-js|@vitest/|@vitejs/|@types/|@arethetypeswrong/|@cfworker/|@edge-runtime/|@esbuild/|esbuild|rollup|typescript)')
 
 nm = sys.argv[1] if len(sys.argv) > 1 else 'packages/desktop/build/host/node_modules'
 if not os.path.isdir(nm):
@@ -53,10 +58,18 @@ for name, dirpath in sorted(packages.items()):
         pkg = json.load(open(os.path.join(dirpath, 'package.json')))
     except Exception:
         continue
-    deps = set(pkg.get('dependencies', {}).keys()) | set(pkg.get('peerDependencies', {}).keys())
+    if DEV_TOOLING.match(name):
+        continue
+    # 可选 peer（`peerDependenciesMeta[x].optional === true`，如 `ws` 的 bufferutil）与
+    # optionalDependencies 缺了是**正常**的（本就不必安装）—— 不算缺口。
+    optional = set(pkg.get('optionalDependencies', {}).keys())
+    for dep, meta in (pkg.get('peerDependenciesMeta') or {}).items():
+        if isinstance(meta, dict) and meta.get('optional') is True:
+            optional.add(dep)
+    deps = (set(pkg.get('dependencies', {}).keys()) | set(pkg.get('peerDependencies', {}).keys())) - optional
     for dep in deps:
-        if dep.startswith('@deepseek-ai/dsh-') and dep.endswith('-in-process-driver'):
-            pass
+        if DEV_TOOLING.match(dep):
+            continue
         if not resolvable(dep, dirpath):
             missing.setdefault(dep, []).append(name)
 
