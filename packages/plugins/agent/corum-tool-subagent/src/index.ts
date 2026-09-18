@@ -162,8 +162,12 @@ export interface Config {
     /**
      * always=凡召唤必隔离；write-tasks=写任务**且可能并发**才隔离（默认；
      * 单发前台写任务直接在主工作区执行，2026-09-09 并发感知）；off=不隔离。
+     *
+     * **2026-09-16 不变式⑤**：`off` 已清除（用户裁定「隔离恒定生效，off 语义应该被清除」）——
+     * 本字段取值只剩 always / write-tasks，且两者对**写任务等价**（都隔离）。没有任何
+     * 逃生口；迭代/provider 级 `track` 模式是**另一条轴**（独立模式，不经过本判定）。
      */
-    mode?: 'always' | 'write-tasks' | 'off'
+    mode?: 'always' | 'write-tasks'
     /** worktree 根目录（相对父会话 cwd 或绝对路径，默认 '.corum-worktrees'）。 */
     worktreeRoot?: string
     /** 分支名前缀（默认 'wt/'）。 */
@@ -192,7 +196,8 @@ export const CORUM_SUBAGENT_SETTINGS_NAMESPACE = 'corum-subagent'
 
 /** 全局默认配置形（与 preset config 逐键同名；全部可选——未设置的键由实例默认兜底）。 */
 export interface CorumSubagentGlobalSettings {
-  readonly isolationMode?: 'always' | 'write-tasks' | 'off'
+  /** 隔离模式（`off` 已于 2026-09-16 清除，见 `isolation.mode` 的说明）。 */
+  readonly isolationMode?: 'always' | 'write-tasks'
   readonly worktreeRoot?: string
   readonly branchPrefix?: string
   readonly autoCleanup?: boolean
@@ -212,7 +217,7 @@ export const CORUM_SUBAGENT_SETTINGS_SCHEMA: z<CorumSubagentGlobalSettings & {
   defaultModel?: { provider: string; model: string; reasoningEffort?: string }
   defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
 }> = z.object({
-  isolationMode: z.union([z.const('always' as const), z.const('write-tasks' as const), z.const('off' as const)]).default(undefined as unknown as 'always' | 'write-tasks' | 'off'),
+  isolationMode: z.union([z.const('always' as const), z.const('write-tasks' as const)]).default(undefined as unknown as 'always' | 'write-tasks'),
   worktreeRoot: z.string().default(undefined as unknown as string),
   branchPrefix: z.string().default(undefined as unknown as string),
   autoCleanup: z.boolean().default(undefined as unknown as boolean),
@@ -268,13 +273,13 @@ export const Config: z<Config> = z.object({
   maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(3),
   // fork（corum）：隔离/研究/并行/集成/模型锁字段全部保留 omission（不写默认物化）。
   isolation: z.object({
-    mode: z.union(['always', 'write-tasks', 'off'] as const).default(undefined as unknown as 'always' | 'write-tasks' | 'off'),
+    mode: z.union(['always', 'write-tasks'] as const).default(undefined as unknown as 'always' | 'write-tasks'),
     worktreeRoot: z.string().min(1).default(undefined as unknown as string),
     branchPrefix: z.string().default(undefined as unknown as string),
     autoCleanup: z.boolean().default(undefined as unknown as boolean),
     denyDirectFs: z.boolean().default(undefined as unknown as boolean),
   }).default(undefined as unknown as {
-    mode: 'always' | 'write-tasks' | 'off'
+    mode: 'always' | 'write-tasks'
     worktreeRoot: string
     branchPrefix: string
     autoCleanup: boolean
@@ -418,7 +423,10 @@ type ForegroundToolResult = {
    * （`parent-tree` / `skipped-non-git`），由工具的 render 渲染成一行给父 Agent 的
    * 事实说明（见 `corumIsolationBoundaryNotice`）。2026-09-13 用户定调「先做可见性」。
    */
-  readonly isolationBoundary?: 'parent-tree' | 'skipped-non-git'
+  /**
+   * 隔离落点（2026-09-16 不变式⑤：写委派恒隔离 ⇒ 只剩「非 git 工作区降级」一种没隔离）。
+   */
+  readonly isolationBoundary?: 'skipped-non-git'
 }
 
 /**
@@ -1158,7 +1166,7 @@ export function apply(ctx: Context, config: Config): void {
         integrate?: boolean
         verify?: string
         // fork（corum）：orchestrate 任务级隔离/只读覆盖（subagent 工具不传，用配置终值）。
-        taskIsolation?: 'always' | 'write-tasks' | 'off'
+        taskIsolation?: 'always' | 'write-tasks'
         taskResearch?: boolean
         // fork（corum）：本次调用内的 fan-out 任务数（并发感知隔离信号①；
         // subagent 工具不传 = 1）。
@@ -1387,15 +1395,17 @@ export function apply(ctx: Context, config: Config): void {
        * 主工作区里了**。此前这件事只写在给子 Agent 的提示词里，父侧从结果读不出来，
        * 于是 2026-09-12 的探针把「没隔离」当成了「隔离了」。
        *
-       * `worktree` 不发给父侧（那是常规路径、无需提醒；集成结果另有报告），只报两种
+       * `worktree` 不发给父侧（那是常规路径、无需提醒；集成结果另有报告），只报
        * 「没隔离」的落点。
+       *
+       * **2026-09-16 不变式⑤**：写委派恒隔离 ⇒ git 工作区下**不再有**「直落父树」这一档；
+       * 唯一残留的「没隔离」是**非 git 工作区**的自动降级（worktree 建不出来），故只剩
+       * `'skipped-non-git'`。枚举随 `corumIsolationBoundaryNotice` 一并收窄。
        */
-      const corumIsolationBoundary: 'parent-tree' | 'skipped-non-git' | undefined =
+      const corumIsolationBoundary: 'skipped-non-git' | undefined =
         !corumIsWrite || effReadonlyResearch
           ? undefined
-          : corumIsolate
-            ? undefined
-            : corumIsolationSkipped ? 'skipped-non-git' : 'parent-tree'
+          : !corumIsolate && corumIsolationSkipped ? 'skipped-non-git' : undefined
 
       // fork（corum）：机制追加的 deny 必须收敛到「本 preset 真正注册的工具名」——
       // `tools.restrict()` 对未知名 fail-loud，而 corum 的写工具名单是平台硬编码
@@ -1710,7 +1720,9 @@ export function apply(ctx: Context, config: Config): void {
       const disposeTool = runtimeCtx.tools.register(defineTool({
         name: toolName,
         // fork（corum）：描述头追加隔离语义（英文，接在官方 wording 前）。
-        description: 'Delegates run in isolated git worktrees when this instance has isolation configured and the delegation can run concurrently with another write child; a lone write delegation edits the parent working tree directly (no worktree, no branch). The result states which of the two happened, so you never have to guess whether a branch carries the work. ' 
+        // 2026-09-16 不变式⑤：凡**写**委派恒隔离（前台/后台/可继续一视同仁，无逃生口）；
+        // 只读研究委派不隔离（它不落盘）。
+        description: 'Every write-capable delegation runs in its own isolated git worktree + branch — there is no opt-out, so its edits reach your tree only through integration (`subagent { integrate: true }` or an `orchestrate` `merge` declaration). A read-only research delegation is not isolated (it writes nothing). The result tells you which of the two happened, so you never have to guess whether a branch carries the work. '
           + wording.description + corumSchedulingDescription({ backgroundEnabled, continuable, readonlyResearch: corumReadonlyResearch })
           // fork（corum）：决策点分工（2026-09-14 委派正确性轮）——工具描述是模型
           // 选工具时唯一**贴着选择点**读到的文本，因此分工必须写在这里，而不是只
@@ -1793,7 +1805,7 @@ export function apply(ctx: Context, config: Config): void {
                    * `corumIsolationBoundaryNotice`）。父 Agent 据此知道改动已经在自己的
                    * 主工作区里、没有分支代管。
                    */
-                  isolationBoundary: { type: 'string', enum: ['parent-tree', 'skipped-non-git'] },
+                  isolationBoundary: { type: 'string', enum: ['skipped-non-git'] },
                 },
               },
             ],
@@ -1838,7 +1850,7 @@ export function apply(ctx: Context, config: Config): void {
               'Orchestrate several subagents in ONE call. Two modes, same isolation and merge machinery:',
               '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `model`, `schema` (structured output) and `background`.',
               '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await; hooks `agent`, `parallel`, `pipeline`, `phase`, `log`; end with `return <json-value>`). Use this when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
-              'ISOLATION: scripted children are ISOLATED in their own git worktree + branch by default (`isolate: "always"`), so concurrent writers never touch the same tree; pass `isolate: "off"` for a read-only script that must see the parent tree exactly as it is (isolated children see the branch base, not uncommitted parent edits). Declarative tasks keep the concurrency-aware rule: 2+ concurrent write tasks isolate, a lone foreground write task works directly in the parent tree.',
+              'ISOLATION: every write task is ISOLATED in its own git worktree + branch — declarative tasks and scripted children alike, foreground or background, with no opt-out. Isolated children branch off HEAD, and the mechanism commits the parent tree right before creating the worktree, so an isolated child always sees the parent\'s latest committed work. Read-only research tasks are not isolated (they write nothing).',
               'FINISH: declare `merge.verify` (how to build/run/verify this repo) — declaring `merge` is what makes the mechanism merge + verify + commit the isolated branches once every task is done. Omit `merge` only when you intend to finish it yourself with `subagent { integrate: true }`; the call reports pending branches and raises a pending-integration notice either way, because branches you never merge are work nobody can see.',
             ].join('\n'),
             parameters: {
@@ -1854,7 +1866,6 @@ export function apply(ctx: Context, config: Config): void {
                 },
               },
               args: { type: 'object', additionalProperties: true, description: 'SCRIPTED mode: optional JSON input exposed verbatim to the script as the `args` global.' },
-              isolate: { type: 'string', enum: ['always', 'off'], description: 'SCRIPTED mode isolation: `always` (default) gives every scripted child its own worktree + branch so concurrent writes never collide; `off` runs them directly in the parent tree (use for read-only scripts that must see the parent tree as-is).' },
               tasks: {
                 type: 'array',
                 description: 'DECLARATIVE mode: the list of tasks to run (1 or more). Each task is an independent subagent delegation.',
@@ -1864,7 +1875,7 @@ export function apply(ctx: Context, config: Config): void {
                   properties: {
                     prompt: { type: 'string', required: true, description: 'The complete, self-contained task for this subagent. It does not share this conversation, so include everything it needs.' },
                     label: { type: 'string', description: 'A short (3-5 word) label for display.' },
-                    isolation: { type: 'string', enum: ['always', 'write-tasks', 'off'], description: 'Override isolation for this task (always=force a worktree; write-tasks=isolate only when the task can run concurrently with another write task; off=never isolate). Defaults to the instance policy.' },
+                    isolation: { type: 'string', enum: ['always', 'write-tasks'], description: 'Override isolation for this task. Every write task is isolated regardless (there is no opt-out); this only matters for a task whose tool face has no write ability, where `always` still forces a worktree. Defaults to the instance policy.' },
                     research: { type: 'boolean', description: 'Set true for a read-only research task (write tools denied, no worktree).' },
                     model: {
                       type: 'object',
@@ -2128,8 +2139,13 @@ export function apply(ctx: Context, config: Config): void {
                 if (engine === undefined) {
                   throw new Error('orchestrate script mode requires the workflow engine; this preset does not mount @deepseek-ai/dsh-workflow-worker-thread')
                 }
-                const isolate = args.isolate === 'off' ? 'off' : 'always'
-                const scriptProvider = isolate === 'off' ? 'corum-spawn' : 'corum-isolated'
+                // 不变式⑤（2026-09-16）：script 模式**不再有 isolate:'off' 绕过口**。
+                // 它此前能直接选 `corum-spawn`（不建 worktree）而不经过 `corumShouldIsolate`
+                // ——是「凡写委派恒隔离」之外的一条独立逃逸路径。用户裁定「隔离恒定生效」⇒
+                // 一律走 `corum-isolated`（脚本子 Agent 也是子 Agent，同样隔离 + 进台账）。
+                // 注：脚本本身是只读的（纯逻辑编排），真正落盘的是它派出的子 Agent；这些
+                // 现在全部隔离，收尾统一由 `merge` 声明或 `subagent { integrate: true }` 完成。
+                const scriptProvider = 'corum-isolated'
                 if (runtimeCtx.subagents.getProvider(scriptProvider) === undefined) {
                   throw new Error(`orchestrate script mode needs the "${scriptProvider}" subagent provider; it is not registered in this composition`)
                 }
@@ -2165,7 +2181,7 @@ export function apply(ctx: Context, config: Config): void {
               const tasks = args.tasks as unknown as Array<{
                 prompt: string
                 label?: string
-                isolation?: 'always' | 'write-tasks' | 'off'
+                isolation?: 'always' | 'write-tasks'
                 research?: boolean
                 model?: { provider: string; model: string; reasoningEffort?: string }
                 background?: boolean
@@ -2380,7 +2396,7 @@ export function apply(ctx: Context, config: Config): void {
               '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- Write-capable children get ISOLATED git worktrees (own branch; the parent working tree is write-denied to that child) only when they can run CONCURRENTLY with another write child (orchestrate with 2+ tasks, a background delegation, or another write child already running). A lone foreground write delegation works directly in the parent working tree and leaves git to you. Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) — even a forced `isolation: "always"` is skipped rather than failing, and the child is told so. Nothing to do either way.',
+              '- EVERY write-capable delegation gets its OWN isolated git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running — there is no opt-out. Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`. Never assume a delegated write has landed — read the result, which states where the work is. Read-only research delegations are not isolated (they write nothing). Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
               '- Isolation is a property of CHANGE, not of delegation: it exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
               '- Model routing precedence: a per-task `model` on an `orchestrate` task wins for that task; otherwise the preset role lock (worker/research profile) wins over the global default, and with neither the child follows your route. Task-level routes are validated before spawn (settings allowlist when configured, plus a live route preflight) — an invalid provider/model fails that task. Never ask the user to pick a model; `subagent` has no model parameter at all.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Declaring `merge` at all means the mechanism finishes the job — it merges + commits the isolated branches once every task is done. Omitting `merge` keeps the branches for you; then finish them yourself with the explicit action `subagent { integrate: true }`, because an unmerged branch is invisible work.',

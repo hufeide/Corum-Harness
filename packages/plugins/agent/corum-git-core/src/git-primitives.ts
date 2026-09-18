@@ -74,21 +74,30 @@ export async function isGitRepo(path: string): Promise<boolean> {
  * 幂等：.gitignore 已含该行（任意位置，含无尾换行的文件末尾）则不动；
  * 不存在则新建、存在但缺该行则**追加**（不覆盖用户既有内容）。
  *
- * @param dir - 已 realpath 归一的目录。
+ * **导出原因**（2026-09-16 不变式⑤配套）：本函数原先只在 {@link initRepo} 调用，
+ * 于是只对「corum 自己 init 的仓库」生效。用户**既有**仓库（手动 init / clone）若没有
+ * 这一行，第一个 worktree 建好后 `.corum-worktrees/` 会以 `?? .corum-worktrees/` 出现在
+ * `porcelain` 里 ⇒ **下一个**委派的 `corumDirtyParentRefusal` 必被拒（实测复现）。
+ * 隔离改为「写委派恒隔离」后每次委派都过那道门，这个缺口会被放大成「第二次起必被拒」，
+ * 故 `createWorktreeChild` 建目录前也调用本函数（而不是只在 init 时写）。
+ *
+ * @param dir - 已 realpath 归一的目录（主树根）。
+ * @returns `true` = 本次写入了 ignore 行（调用方通常随即把它提交掉）；`false` = 已存在，无需改。
  */
-function ensureWorktreeGitignore(dir: string): void {
+export function ensureWorktreeGitignore(dir: string): boolean {
   const file = join(dir, '.gitignore')
   const line = '.corum-worktrees/'
   if (existsSync(file)) {
     const content = readFileSync(file, 'utf8')
     // 已含该行（精确匹配整行，避免误配 `.corum-worktrees-foo/` 之类）。
-    if (content.split('\n').some(l => l.trim() === line)) return
+    if (content.split('\n').some(l => l.trim() === line)) return false
     // 追加（保证前一行有换行；空文件/无尾换行都安全）。
     const prefix = content === '' || content.endsWith('\n') ? '' : '\n'
     writeFileSync(file, `${content}${prefix}${line}\n`)
-    return
+    return true
   }
   writeFileSync(file, `# corum 编排隔离 worktree 的运行时产物（机制自动写入，勿入库）\n${line}\n`)
+  return true
 }
 
 /**

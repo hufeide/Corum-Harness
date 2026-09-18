@@ -41,16 +41,20 @@ import { startInProcessRun } from '../driver/index.ts'
 export const name = 'corum-subagent-isolated-in-process'
 export const inject = ['subagents']
 
-/** Config: the registry name to register the provider under. */
+/**
+ * `always`（默认）= 每个子会话都建 worktree（并发脚本）；
+ * `track` = 不建 worktree，但登记「在跑写子 Agent」计数 + 注入直连纪律（顺序迭代如 ralph）。
+ *
+ * `off` 已于 2026-09-16 **清除**（用户裁定「隔离恒定生效，off 语义应该被清除」）。
+ * `track` **保留**：它不是逃生口，而是**独立模式**——顺序迭代（ralph）必须看到上一轮改动，
+ * 语义与 plan 同级（用户原话：「迭代模式是一个单独模式，和 plan 一样，除非用户显式指定
+ * 不然 LLM 不触发」）。
+ */
 export interface Config {
   /** Provider name on `ctx.subagents` (default `corum-isolated`). */
   providerName: string
-  /**
-   * `always`（默认）= 每个子会话都建 worktree（并发脚本）；
-   * `track` = 不建 worktree，但登记「在跑写子 Agent」计数 + 注入直连纪律（顺序迭代如 ralph）；
-   * `off` = 直通（只读脚本要看到父工作区未提交改动时用）。
-   */
-  mode: 'always' | 'track' | 'off'
+  /** 见接口文档：`always` 建 worktree / `track` 顺序迭代不建（独立模式）。 */
+  mode: 'always' | 'track'
   /** 并发上限（与工具层同口径，达到即抛错让脚本作者等待/先集成）。 */
   maxParallelChildren: number
   /** worktree 根目录（相对父 cwd 或绝对路径，默认 `.corum-worktrees`）。 */
@@ -61,7 +65,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   providerName: z.string().default('corum-isolated'),
-  mode: z.union([z.const('always' as const), z.const('track' as const), z.const('off' as const)]).default('always' as const),
+  mode: z.union([z.const('always' as const), z.const('track' as const)]).default('always' as const),
   maxParallelChildren: z.natural().min(1).default(4),
   worktreeRoot: z.string(),
   branchPrefix: z.string(),
@@ -216,7 +220,8 @@ class IsolatedInProcessProvider implements SubagentProvider {
     if (mode !== this.config.mode) {
       this.ctx.logger.warn(`corum-isolated: workspace "${parentCwd}" is not a git repository; degrading isolation mode "${this.config.mode}" → "track"`)
     }
-    if (mode === 'off') return startInProcessRun(request, {})
+    // `off` 分支已于 2026-09-16 移除（隔离恒定生效）：只剩 always（建 worktree）与
+    // track（顺序迭代的独立模式，不建 worktree 但登记计数）。
     if (mode === 'track') {
       const tracked = prepareTrackedChild(this.ctx, request)
       try {

@@ -20,7 +20,7 @@
  * 全部用**真实临时 git 仓库**驱动（无 mock），与 execute 层同一 git 命令面。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -31,6 +31,7 @@ import {
   corumCommitWorktreeOnSettle,
   corumDirtyParentRefusal,
   corumGit,
+  corumGitStatusPorcelain,
   corumWorktreeHasUncommitted,
 } from '../src/orchestration.ts'
 
@@ -105,23 +106,54 @@ describe('corumDirtyParentRefusal — 隔离前置校验（严格档：任何 po
   })
 })
 
-describe('createWorktreeChild — 脏父树时在建目录之前就拒绝（H1 的机制化）', () => {
-  it('脏父树 ⇒ 抛错，且**不留下半成品 worktree 目录**', () => {
+describe('createWorktreeChild — 不变式⑤的两条配套（2026-09-16）', () => {
+  // 旧断言是「脏父树 ⇒ 抛错拒绝隔离」。不变式⑤把隔离变成**每次写委派必经之路**后，那条口径
+  // 会直接阻断最常见的工作流（主 Agent 在同一 turn 内改完代码再派写子 Agent，而 turn-end
+  // 强制提交要到 turn 结束才发生）。故机制改为**先自动收口提交父树**再照常建 worktree；
+  // 「严格门」仍在，但只在自家收口失败时才拒绝（兜底）。
+  it('★ 脏父树 ⇒ 机制先自动提交父树，委派照常成功（不再阻断「改完代码立刻派活」）', () => {
     const repo = makeRepo()
     writeFileSync(join(repo, 'dirty.txt'), 'x\n')
     const orchestration = new CorumOrchestration(new Context())
-    const root = join(repo, '.corum-worktrees')
-    expect(() => orchestration.createWorktreeChild('session-1', repo)).toThrow(/isolation refused/)
-    // 关键：拒绝发生在 mkdir/worktree add 之前 ⇒ 不留垃圾目录。
-    expect(existsSync(root)).toBe(false)
+    const child = orchestration.createWorktreeChild('session-1', repo)
+    expect(existsSync(child.path)).toBe(true)
+    // 父树被机制收口提交（主题可识别，不冒充 Agent 的提交）⇒ 现在是干净的。
+    expect(corumGitStatusPorcelain(repo).trim()).toBe('')
+    const subject = execFileSync('git', ['-C', repo, 'log', '-1', '--pretty=%s'], { encoding: 'utf8' }).trim()
+    expect(subject).toContain('auto-commit before isolation')
+    // 关键：子的分支基于**含父改动的 HEAD** ⇒ 子的树等于父的树（H1 的原始目标仍成立）。
+    expect(existsSync(join(child.path, 'dirty.txt'))).toBe(true)
   })
 
-  it('干净父树 ⇒ 正常建出 worktree（守卫不误伤）', () => {
+  it('★ 配套②：既有仓库缺 `.corum-worktrees` ignore ⇒ 机制补齐并提交，第二次委派不被自家门拒', () => {
     const repo = makeRepo()
+    // 复刻「用户既有仓库」：手动 init 的仓库没有机制写的那行 ignore。
+    writeFileSync(join(repo, '.gitignore'), '# user ignore\n')
+    corumGit(repo, ['add', '.gitignore'])
+    corumGit(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t.local', 'commit', '-q', '-m', 'user ignore'])
     const orchestration = new CorumOrchestration(new Context())
-    const child = orchestration.createWorktreeChild('session-2', repo)
+    const first = orchestration.createWorktreeChild('session-2', repo)
+    expect(existsSync(first.path)).toBe(true)
+    // ignore 被机制写入并提交 ⇒ 父树不留 `?? .corum-worktrees/` ⇒ 第二次委派不被拒。
+    expect(readFileSync(join(repo, '.gitignore'), 'utf8')).toContain('.corum-worktrees/')
+    expect(corumGitStatusPorcelain(repo).trim()).toBe('')
+    const second = orchestration.createWorktreeChild('session-2', repo)
+    expect(existsSync(second.path)).toBe(true)
+  })
+
+  it('干净父树且已 ignore ⇒ 建 worktree 不产生无谓提交（守卫不误伤）', () => {
+    const repo = makeRepo()
+    // 先让 ignore 就位并提交（模拟 corum 自己 init 的仓库 / 已跑过一次的仓库）。
+    // 否则配套②会**合法地**补写并提交这行——那是「补齐缺口」，不是「无谓提交」。
+    writeFileSync(join(repo, '.gitignore'), '.corum-worktrees/\n')
+    corumGit(repo, ['add', '.gitignore'])
+    corumGit(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t.local', 'commit', '-q', '-m', 'ignore worktrees'])
+    const before = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    const orchestration = new CorumOrchestration(new Context())
+    const child = orchestration.createWorktreeChild('session-3', repo)
     expect(existsSync(child.path)).toBe(true)
     expect(child.branch.startsWith('wt/')).toBe(true)
+    expect(execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(before)
   })
 })
 

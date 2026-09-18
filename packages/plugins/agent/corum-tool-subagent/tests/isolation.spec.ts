@@ -88,42 +88,43 @@ describe('corumIsWriteTask — fork（corum）写工具判定', () => {
   })
 })
 
-describe('corumShouldIsolate — fork（corum）隔离触发', () => {
-  it('always 恒隔离（只读任务也隔离）', () => {
+describe('corumShouldIsolate — 不变式⑤：凡写委派恒隔离（2026-09-16）', () => {
+  it('★ 写任务恒隔离，**与并发无关**（前台/后台/可继续一视同仁）', () => {
+    // 旧口径是「单发前台写不隔离」——不变式⑤取消了这条豁免。下面每一格都必须为 true，
+    // 不论 mode 与 concurrent 怎么组合。
+    for (const mode of ['always', 'write-tasks'] as const) {
+      for (const concurrent of [true, false]) {
+        expect(corumShouldIsolate(mode, true, false, concurrent), `mode=${mode} concurrent=${concurrent}`).toBe(true)
+      }
+      // 缺省 concurrent 同样隔离（形参已废弃，保留只为签名兼容）。
+      expect(corumShouldIsolate(mode, true, false)).toBe(true)
+    }
+  })
+
+  it('★ 回归锚点：单发前台写委派（concurrent=false）也必须隔离——这正是被取消的豁免', () => {
+    // 2026-09-09 的旧断言此处是 `false`（用户当时反馈「只派一个 TASK 还是走隔离」）。
+    // 2026-09-16 用户裁定收紧：那条豁免取消，此处必须为 true。
+    expect(corumShouldIsolate('write-tasks', true, false, false)).toBe(true)
+    expect(corumShouldIsolate('always', true, false, false)).toBe(true)
+  })
+
+  it('readonlyResearch 恒不隔离（只读不落盘，无需隔离）', () => {
+    expect(corumShouldIsolate('always', true, true)).toBe(false)
+    expect(corumShouldIsolate('write-tasks', true, true, true)).toBe(false)
+    expect(corumShouldIsolate('always', false, true, false)).toBe(false)
+  })
+
+  it('非写任务（工具面被 deny 到无写能力）：只有显式 always 才隔离', () => {
+    expect(corumShouldIsolate('write-tasks', false, false, true)).toBe(false)
+    expect(corumShouldIsolate('write-tasks', false, false, false)).toBe(false)
     expect(corumShouldIsolate('always', false, false)).toBe(true)
   })
-  it('write-tasks 按写任务判定（默认；未给并发信号时保持旧语义）', () => {
-    expect(corumShouldIsolate('write-tasks', true, false)).toBe(true)
-    expect(corumShouldIsolate('write-tasks', false, false)).toBe(false)
-  })
-  it('off 不隔离；readonlyResearch 恒不隔离', () => {
-    // 不变式③（2026-09-16）：off **只对单发前台生效**（非并发才不隔离）——本行缺省
-    // concurrent=true（后台/并发场景），故恒隔离；单发前台（concurrent=false）时 off 才不隔离。
-    expect(corumShouldIsolate('off', true, false, false)).toBe(false)
-    expect(corumShouldIsolate('always', true, true)).toBe(false)
-  })
-  it('不变式③：后台/并发写任务恒隔离（覆盖 off 与任务级 isolation:off）', () => {
-    // 后台/并发（concurrent=true，含缺省）时无论 mode 是什么都隔离——off 不能绕过。
-    expect(corumShouldIsolate('off', true, false, true)).toBe(true)
-    expect(corumShouldIsolate('off', true, false)).toBe(true) // 缺省 concurrent=true
-    expect(corumShouldIsolate('write-tasks', true, false, true)).toBe(true)
-    expect(corumShouldIsolate('always', true, false, true)).toBe(true)
-    // 单发前台（concurrent=false）才不按 off/write-tasks 判定：off 不隔离、write-tasks 不隔离、always 仍隔离。
-    expect(corumShouldIsolate('off', true, false, false)).toBe(false)
-    expect(corumShouldIsolate('write-tasks', true, false, false)).toBe(false)
-    expect(corumShouldIsolate('always', true, false, false)).toBe(true)
-  })
-  it('并发感知（2026-09-09 用户实机反馈）：无并发不隔离、有并发才隔离', () => {
-    // 单发前台写任务：没有并发 → 不建 worktree（用户报的正是这条）。
-    expect(corumShouldIsolate('write-tasks', true, false, false)).toBe(false)
-    // 有并发（fan-out ≥2 / 后台 / 已有在跑写子 Agent）→ 隔离。
-    expect(corumShouldIsolate('write-tasks', true, false, true)).toBe(true)
-    // 只读任务即使并发也不隔离。
-    expect(corumShouldIsolate('write-tasks', false, false, true)).toBe(false)
-    expect(corumShouldIsolate('write-tasks', false, true, true)).toBe(false)
-  })
-  it('always 压过并发判定（显式强制隔离）', () => {
-    expect(corumShouldIsolate('always', true, false, false)).toBe(true)
+
+  it('`off` 已从类型面清除（无逃生口）——mode 只剩 always / write-tasks', () => {
+    // 编译期断言：'off' 不再是合法取值（若有人把它加回来，下面的 @ts-expect-error 会失效）。
+    // @ts-expect-error 'off' 已按用户裁定清除（2026-09-16 不变式⑤）
+    const forbidden: Parameters<typeof corumShouldIsolate>[0] = 'off'
+    void forbidden
   })
 })
 
@@ -531,12 +532,12 @@ describe('git 判据是运行时探测，不是产品开关', () => {
 })
 
 describe('非 git 降级：强制隔离被跳过时告知子 Agent（2026-09-10 核查）', () => {
-  it('工具层：跳过隔离时 prompt 追加说明；机制段不再声称 forced isolation fails loud', async () => {
+  it('工具层：跳过隔离时 prompt 追加说明（降级而非报错）', async () => {
     const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8'))
     expect(src).toContain('corumIsolationSkipped')
     expect(src).toContain('this workspace is not a git repository, so isolation was skipped for this delegation')
-    // 措辞与实现一致：降级而非报错。
-    expect(src).toContain('even a forced `isolation: "always"` is skipped rather than failing')
+    // 措辞与实现一致：降级而非报错（不变式⑤后机制段改述，但这条语义未变）。
+    expect(src).toContain('Isolation needs a git repository')
     expect(src).not.toContain('on an orchestrate task fails loud')
   })
 })
@@ -746,27 +747,31 @@ describe('CorumOrchestration.discardEntry — fork（corum）spawn 失败回滚�
 })
 
 /**
- * 隔离边界的**可见性**（2026-09-13 用户定调：先做 C——把事实说清，不改机制语义）。
+ * 隔离边界的**可见性**（2026-09-13 用户定调「先做可见性」；2026-09-16 不变式⑤收窄到两档）。
  *
- * 由来：`subagent` 缺省策略下**单发前台写任务直接在主工作区改**（无 worktree、无分支），
- * 而这件事此前只写在给**子 Agent** 的提示词里，父 Agent 从工具结果读不出来 —— 2026-09-12
- * 的探针就是这么被骗的（用户要求「派前台隔离子 Agent」，机制按口径没隔离，父侧却以为隔离了）。
- * 现在父侧拿到的那行说明由本函数产出，并由工具 render 附在结果末尾。
+ * 由来：隔离落点必须让**父 Agent** 从工具结果里读到，而不是只写在给子 Agent 的提示词里
+ * ——2026-09-12 的探针就是这么被骗的（要求「派前台隔离子 Agent」，机制按当时口径没隔离，
+ * 父侧却以为隔离了）。
+ *
+ * **2026-09-16 不变式⑤**：写委派恒隔离 ⇒ git 工作区下**不再有**「直落父树」这一档，
+ * `'parent-tree'` 已从枚举**删除**（不可达状态在类型上不可表示）。唯一残留的「没隔离」
+ * 是**非 git 工作区**的自动降级（worktree 建不出来），即 `'skipped-non-git'`。
  */
 describe('corumIsolationBoundaryNotice — 父 Agent 可见的隔离边界', () => {
-  it('parent-tree：明说在主工作区、没隔离、没有分支代管', () => {
-    const text = corumIsolationBoundaryNotice('parent-tree')
-    expect(text).toContain('PARENT working tree')
-    expect(text).toContain('not isolated')
-    expect(text).toContain('lone foreground write delegation')
-    expect(text).toContain('ALREADY in your tree')
-    expect(text).toContain('nothing will merge')
+  it('★ `parent-tree` 已删除：写委派不再有「直落父树」这一档', () => {
+    // 编译期断言：'parent-tree' 不再是合法取值（若有人把它加回来，这行会失效）。
+    // @ts-expect-error 'parent-tree' 已按不变式⑤删除（写委派恒隔离）
+    const forbidden: Parameters<typeof corumIsolationBoundaryNotice>[0] = 'parent-tree'
+    void forbidden
   })
 
   it('skipped-non-git：明说隔离因「不是 git 仓库」被跳过', () => {
     const text = corumIsolationBoundaryNotice('skipped-non-git')
+    expect(text).toContain('PARENT working tree')
+    expect(text).toContain('not isolated')
     expect(text).toContain('not a git repository')
     expect(text).toContain('ALREADY in your tree')
+    expect(text).toContain('nothing will merge')
   })
 
   it('worktree：报已隔离 + 分支，且说明要经 integrate 才进主树', () => {
@@ -776,12 +781,10 @@ describe('corumIsolationBoundaryNotice — 父 Agent 可见的隔离边界', () 
     expect(text).toContain('integrate')
   })
 
-  it('三种落点互不混淆（父 Agent 不能把「没隔离」读成「隔离了」）', () => {
-    const parent = corumIsolationBoundaryNotice('parent-tree')
+  it('两档互不混淆（父 Agent 不能把「没隔离」读成「隔离了」）', () => {
     const skipped = corumIsolationBoundaryNotice('skipped-non-git')
     const worktree = corumIsolationBoundaryNotice('worktree', 'wt/x')
-    expect(parent).not.toBe(skipped)
-    expect(parent).not.toContain('ISOLATED')
+    expect(skipped).not.toBe(worktree)
     expect(skipped).not.toContain('ISOLATED')
     expect(worktree).not.toContain('ALREADY in your tree')
   })

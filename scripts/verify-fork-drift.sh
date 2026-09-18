@@ -1352,12 +1352,20 @@ if [ -d "$VENDORED_PRESETS" ]; then
   else
     fail "isolated provider 缺 track 模式（计数 + 直连纪律）"
   fi
+  # 2026-09-16 不变式⑤（凡写委派恒隔离）：script 模式**不得**再有 `isolate:'off'` 绕过口
+  # ——它此前直接选 `corum-spawn`（不建 worktree）而不经过 corumShouldIsolate，是隔离判定
+  # 之外的一条独立逃逸路径。现在恒选 `corum-isolated`，并断言那个开关已从代码里消失。
   if code_has "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC" \
-    && code_has "isolate === 'off' ? 'corum-spawn' : 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \
+    && code_has "const scriptProvider = 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \
     && code_has "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
-    pass "orchestrate script 模式：引擎 + 按 isolate 选 provider（默认隔离）"
+    pass "orchestrate script 模式：引擎 + 恒选隔离 provider（不变式⑤，无 off 绕过口）"
   else
     fail "orchestrate 缺 script 模式接线（引擎/隔离 provider 选择）"
+  fi
+  if code_has "isolate === 'off'" "$SUBAGENT_TOOL_SRC"; then
+    fail "orchestrate script 模式仍有 isolate:'off' 绕过口（违反不变式⑤）"
+  else
+    pass "orchestrate script 模式：isolate:'off' 绕过口已清除"
   fi
   # ⑤ 改名残留（mode: code）目录不得存在——它会与 mode 枚举冲突、挂载即失败。
   for stale in "$VENDORED_PRESETS"/*/; do

@@ -76,8 +76,13 @@ export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor'
  * host settings namespace `corum-subagent` 兜底（三级配置模型 §1.6）。
  */
 export interface ParallelWorkPolicy {
-  /** 隔离模式：'always' 凡召唤必隔离；'write-tasks' 按工具面判定（默认）；'off' 不隔离。 */
-  isolation?: 'always' | 'write-tasks' | 'off'
+  /**
+   * 隔离模式：'always' 与非 'always' 对**写任务等价**（都隔离）。
+   *
+   * 2026-09-16 不变式⑤（凡写委派恒隔离）后 `off` 已清除——没有逃生口。保留 `write-tasks`
+   * 取值只是为了不动存量配置（它现在是「写任务隔离」的同义词）。
+   */
+  isolation?: 'always' | 'write-tasks'
   /** worktree 根目录（相对会话 cwd 或绝对路径，默认 '.corum-worktrees'）。 */
   worktreeRoot?: string
   /** 分支名前缀（默认 'wt/'）。 */

@@ -36,7 +36,7 @@ import { z } from 'zod'
 // fork（corum）：git 机制归一到 git-core 核心插件（用户 2026-09-16 策略「所有 git 管理
 // 收进一个独立插件」）——收口强制提交的底层原语 settleCommit 由 git-core 提供，
 // 本包不再自实现 `git add/commit`（消除与 corumCommitWorktreeOnSettle 的重复实现）。
-import { settleCommit as gitCoreSettleCommit, abortMerge as gitCoreAbortMerge, mergeInProgress as gitCoreMergeInProgress } from '@corum/corum-git-core/git-primitives'
+import { settleCommit as gitCoreSettleCommit, abortMerge as gitCoreAbortMerge, mergeInProgress as gitCoreMergeInProgress, ensureWorktreeGitignore as gitCoreEnsureWorktreeGitignore } from '@corum/corum-git-core/git-primitives'
 
 /**
  * `subagent/end` 载荷的**局部窄化形**（只取本包用到的两个字段）。
@@ -855,35 +855,52 @@ export function corumIsWriteTask(
 /**
  * fork（corum）：隔离触发判定（readonlyResearch 实例恒不隔离）。
  *
- * 2026-09-09 并发感知（用户实机反馈「只派遣一个 TASK 时还是走了隔离工作区」）：
- * 隔离的存在理由是**并发写冲突**——没有并发就没有冲突，而 worktree 有实打实的
- * 代价（子 Agent 要重装依赖、沙箱默认写不了主仓 .git 管理目录）。因此默认模式
- * `write-tasks` 只在「本次派遣可能与其他写子 Agent 并发」时隔离：
- * - `always`：显式强制，无条件隔离（只读任务除外）；
- * - `write-tasks`（默认）：写任务 **且** 可能并发才隔离；
- * - `off`：永不隔离。
+ * ## 不变式⑤（invariant.write-delegation-always-isolated，用户 2026-09-16 裁定）
  *
- * @param mode - 生效隔离模式（任务级覆盖 > 预设 > 全局 > 默认）。
+ * > 「**无论是前台还是后台，只要进行并行 work，就要隔离**」+「**收紧**」——
+ * > 即**取消「孤立前台写委派可以直接在主工作区干活」这条豁免**：**凡写委派恒隔离**。
+ *
+ * ### 为什么取消那条豁免（它此前的理由已不成立）
+ * 旧口径（2026-09-09）是「隔离的存在理由是并发写冲突，没有并发就没有冲突」，
+ * 于是单发前台写委派直写主树。但实测（2026-09-16）暴露它有两个真问题：
+ *  ① **不对称**：同一条消息里并发两个前台写调用时，**第一个直写主树、第二个隔离**
+ *     （并发信号是「此刻是否已有写子 Agent 在跑」，而首个派遣时第二个还没注册）。
+ *     模型以为两次委托等价，实际一个已落主树、一个在分支上等集成。
+ *  ② **永不进主树的分支 vs 混收的改动**：直写路径的改动与主 Agent 自己的未提交改动
+ *     混在同一工作区，只能靠文件名区分归属；隔离路径的产物则统一走 integrate（可验收、
+ *     可追溯）。既然验收统一由主 Agent 做，就没有理由让任何写委派绕过这条通道。
+ *
+ * ### `off` 已清除（同一次裁定）
+ * 用户原话：「隔离恒定生效，**off 语义应该被清除**」。故 `mode` 只剩 `always` /
+ * `write-tasks`，两者对写任务**等价**（都隔离）——保留 `write-tasks` 是为了不动存量
+ * 配置的取值（它现在只是「写任务隔离」的同义词）。**没有逃生口**。
+ *
+ * ### 边界（不是逃生口，是另一条轴）
+ *  - `readonlyResearch`（只读研究实例/任务）：恒不隔离——它不落盘，无需隔离。
+ *  - 非 git 工作区：由调用方在 `corumIsGitRepo` 为假时降级（worktree 建不出来），
+ *    与 mode 无关。
+ *  - **迭代/provider 级 `track` 模式**（ralph 等顺序迭代）：不经过本函数，属**独立模式**
+ *    （用户 2026-09-16：「迭代模式是一个单独模式，和 plan 一样，除非用户显式指定不然
+ *    LLM 不触发」）。
+ *
+ * @param mode - 生效隔离模式（任务级覆盖 > 预设 > 全局 > 默认）。`off` 已从枚举移除。
  * @param isWriteTask - 有效工具面判定出的写任务（corumIsWriteTask）。
  * @param readonlyResearch - 只读研究实例/任务（恒不隔离）。
- * @param concurrent - 本次派遣是否可能与其他写子 Agent 并发。缺省 true =
- *   旧语义（只要写就隔离），供不掌握并发信号的调用点保持行为等价。
+ * @param concurrent - **已废弃、不再参与判定**（保留形参避免改动所有调用点与单测签名）。
+ *   不变式⑤后写任务恒隔离，与并发无关；仅只读判定与 mode 生效。
  */
 export function corumShouldIsolate(
-  mode: 'always' | 'write-tasks' | 'off',
+  mode: 'always' | 'write-tasks',
   isWriteTask: boolean,
   readonlyResearch: boolean,
   concurrent = true,
 ): boolean {
+  void concurrent
   if (readonlyResearch) return false
-  // 不变式③（invariant.background-parallel-isolated，用户 2026-09-16）：**后台/并发写任务
-  // 恒隔离**——这是最高优先级，覆盖 mode='off' 与任务级 isolation:'off' 的绕过（否则后台
-  // 并行写会落父树、丢隔离/集成能力）。「单发前台可不走隔离」是另一条：只有非并发
-  // （单发前台）时 mode 才参与判定。
-  if (concurrent && isWriteTask) return true
-  if (mode === 'always') return true
-  if (mode === 'off') return false
-  return isWriteTask && concurrent
+  // 不变式⑤：凡写委派恒隔离（前台/后台/可继续一视同仁），无 off 逃生口。
+  if (isWriteTask) return true
+  // 非写任务（工具面被 deny 到无写能力）：只有显式 always 才隔离（保持既有语义）。
+  return mode === 'always'
 }
 
 /** fork（corum）：清理选项——`force` 为无条件强删（仅集成成功后调用）。 */
@@ -1517,23 +1534,24 @@ export function corumIntegratorPersona(
  * 本函数只产出**一句事实**，不改任何机制语义（隔离判据仍在 `corumShouldIsolate`）。
  * 纯函数，可单测；渲染方按平台无关的英文写（本仓提示词/工具结果纪律）。
  *
- * @param boundary - 本次委派的隔离落点：`worktree`（隔离，带分支）/ `parent-tree`
- *   （缺省策略下在主工作区执行）/ `skipped-non-git`（非 git 工作区导致隔离被跳过）。
+ * @param boundary - 本次委派的隔离落点：`worktree`（隔离，带分支）/ `skipped-non-git`
+ *   （非 git 工作区导致隔离被跳过）。
+ *
+ * **2026-09-16 不变式⑤**：`'parent-tree'` 这一档已**删除**——凡写委派恒隔离，git 工作区下
+ * 不存在「写委派直落父树」的形态。唯一「没隔离」的落点是**非 git 工作区**的自动降级
+ * （worktree 建不出来），故枚举收窄为两档，让不可达状态在类型上就不可表示。
  * @param branch - `worktree` 时的分支名（缺省时只报「已隔离」）。
  * @returns 一行说明；`worktree` 且带分支时也返回（供调用方决定是否显示），
  *   调用方对 `worktree` 可选择性省略。
  */
 export function corumIsolationBoundaryNotice(
-  boundary: 'worktree' | 'parent-tree' | 'skipped-non-git',
+  boundary: 'worktree' | 'skipped-non-git',
   branch?: string,
 ): string {
   if (boundary === 'worktree') {
     return `[corum isolation] this delegation ran in an ISOLATED worktree${branch === undefined || branch === '' ? '' : ` (branch ${branch})`} — its edits are on that branch and only reach your tree through integrate.`
   }
-  if (boundary === 'skipped-non-git') {
-    return '[corum isolation] this delegation ran in the PARENT working tree (not isolated): the workspace is not a git repository, so isolation was skipped — its edits are ALREADY in your tree and nothing will merge them.'
-  }
-  return '[corum isolation] this delegation ran in the PARENT working tree (not isolated: a lone foreground write delegation works in place) — no worktree, no branch; its edits are ALREADY in your tree and nothing will merge them.'
+  return '[corum isolation] this delegation ran in the PARENT working tree (not isolated): the workspace is not a git repository, so isolation was skipped — its edits are ALREADY in your tree and nothing will merge them.'
 }
 
 // ── 编排器 service（台账状态下沉；红线 1 合规）──────────────────────────────
@@ -1574,10 +1592,17 @@ export function corumIsolationNotice(entry: Pick<CorumWorktreeChild, 'branch'>):
 /**
  * fork（corum）：非隔离写委托的 prompt 前缀（主工作区直连时禁止 git 操作——父 Agent
  * 可能留有未提交的无关改动，子 Agent 一句 `git add -A` 会把它一起卷进提交）。
+ *
+ * **2026-09-16 不变式⑤后仍保留**：凡写委派恒隔离 ⇒ 工具层的「单发前台直写」路径已消失，
+ * 但本通知仍有两个**真实**消费方，且都不是逃生口：
+ *  ① `corum-isolated` provider 的 **`track` 模式**（ralph 等顺序迭代——独立模式，
+ *     不建 worktree 是因为必须看到上一轮改动）；
+ *  ② 工具层的**非 git 工作区降级**（worktree 建不出来，只能就地写）。
+ * 文案因此不再声称「没有并发写任务」（那已不是本通知的语义，见旧文本），只陈述纪律本身。
  * @returns 注入到子 Agent prompt 最前面的通知文本（含尾随空行）。
  */
 export function corumDirectWriteNotice(): string {
-  return '[corum orchestration] This delegation has no concurrent write task, so you work DIRECTLY in the delegating agent\'s working tree (no isolated worktree). Edit files in place and leave version control to the delegating agent: do NOT run git add / commit / checkout / stash / reset, and do not create branches.\n\n'
+  return '[corum orchestration] This delegation works DIRECTLY in the delegating agent\'s working tree (no isolated worktree): either the workspace is not a git repository, or it runs in a sequential-iteration mode that must see the previous round\'s changes. Edit files in place and leave version control to the delegating agent: do NOT run git add / commit / checkout / stash / reset, and do not create branches.\n\n'
 }
 
 export class CorumOrchestration extends Service {
@@ -1757,6 +1782,44 @@ export class CorumOrchestration extends Service {
     const root = path.resolve(parentCwd, options.worktreeRoot ?? '.corum-worktrees')
     const branch = `${options.branchPrefix ?? 'wt/'}${slug}`
     const worktreePath = path.join(root, slug)
+    // ── 不变式⑤的两条配套（2026-09-16）───────────────────────────────────────
+    // 隔离改为「写委派恒隔离」后，**每一次**写委派都要走到下面这道 `corumDirtyParentRefusal`
+    // 严格门（任何 porcelain 行含 untracked 都拦）。不加配套会直接阻断两条常见工作流：
+    //
+    // 配套①：**建 worktree 前先自动提交父树**。
+    //   主 Agent 在**同一 turn 内**改完代码（write/edit/bash）再派写子 Agent 是极常见序列，
+    //   而 turn-end 强制提交（`settleCommitOnTurnEnd`）只在 turn **结束**时触发 ⇒ 那一刻父树
+    //   是脏的 ⇒ 门必然拒绝 ⇒ 委派失败。机制自己把父树收口提交掉，语义与不变式②（每次修改
+    //   完毕必须提交）一致，且比「turn 结束才提交」更早、更贴合「子从 HEAD 建分支」的前提。
+    //   提交信息可识别（`wip(corum): auto-commit before isolation`），不冒充 Agent 的提交。
+    //
+    // 配套②：**保证 `.corum-worktrees/` 已被 ignore**。
+    //   `ensureWorktreeGitignore` 原先只在 `initRepo` 调用 ⇒ 只对「corum 自己 init 的仓库」
+    //   生效。用户**既有**仓库缺这一行时，第一个 worktree 建好后 `.corum-worktrees/` 会以
+    //   `?? .corum-worktrees/` 判脏 ⇒ **下一个委派必被拒**（实测复现）。这里在建目录前补齐，
+    //   于是上面那次收口提交会把它一并提交掉（自身不留未提交改动）。
+    const gitignoreChanged = gitCoreEnsureWorktreeGitignore(parentCwd)
+    // 收口提交：父树有未提交改动（含我们刚写的 ignore 行）时先提交掉；干净则跳过。
+    // 放在严格门**之前**，让「主 Agent 改完代码立刻派活」这一常见序列不会被自家门拒掉。
+    const settled = corumDirtyParentRefusal(parentCwd) === undefined
+      ? undefined
+      : gitCoreSettleCommit(
+          parentCwd,
+          'wip(corum): auto-commit before isolation'
+            + '\n\nThe mechanism committed the parent tree before creating an isolated worktree:'
+            + ' an isolated child branches off HEAD, so uncommitted parent work would be invisible to it.',
+        )
+    if (settled !== undefined) {
+      // 收口失败（git 身份/钩子等）→ 不静默，但也不掩盖下面那道门的原始拒绝原因。
+      this.ctx.logger.warn(`isolation pre-commit failed for ${parentCwd}: ${settled.reason}`)
+    } else if (gitignoreChanged) {
+      // 父树本就干净、只有我们刚写的 ignore 行：单独提交它，避免它自己成为未提交改动
+      // 而被**下一次**派遣判脏（正是「第二个委派必被拒」那个缺口）。
+      const ignoreSettled = gitCoreSettleCommit(parentCwd, 'chore(corum): ignore .corum-worktrees/')
+      if (ignoreSettled !== undefined) {
+        this.ctx.logger.warn(`could not commit .corum-worktrees ignore in ${parentCwd}: ${ignoreSettled.reason}`)
+      }
+    }
     // 2026-09-15 机制补漏（用户裁定「严格」）：父树有**任何**未提交改动（含 untracked）即拒绝隔离 ——
     // 子从 HEAD 建分支、看不到未提交工作，会在过时的树上开发/验证并可能**静默**报成功。
     // 放在 `mkdirSync`/`worktree add` **之前**，连半成品目录都不产生。
