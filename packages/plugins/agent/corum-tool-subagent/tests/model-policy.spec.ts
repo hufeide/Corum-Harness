@@ -183,8 +183,8 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   it('★ 永久档才写预设，且走 corum-agent 的写入面（机制写，非 LLM 调工具）', () => {
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
     expect(source).toContain('applySubagentModelForSession')
-    // 写失败必须如实报告，不许谎称已生效。
-    expect(source).toMatch(/could not save it|no writable profile/)
+    // 写失败必须如实报告原因，不许谎称已生效、也不许只说"没写成"。
+    expect(source).toMatch(/could NOT save it — reason:/)
   })
 
   it('★ 三个永久/临时档位 + 拒绝都在提问选项里（用户要求「既能选永久跟随也能选别的模型」）', () => {
@@ -193,6 +193,22 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(source).toContain('CORUM_MODEL_ASK_FOLLOW_PERMANENTLY')
     expect(source).toContain('CORUM_MODEL_ASK_PICK_PERMANENTLY')
     expect(source).toContain('CORUM_MODEL_ASK_DECLINE')
+  })
+
+  it('★ 永久档走 ctx.get(corumAgent)（2026-09-18 实机：ctx.root.get 取不到 ⇒ 永久档静默失败）', () => {
+    expect(SRC).toContain("ctx.get('corumAgent')")
+    // root.get 是那次实机的真因，钉住不许回潮。
+    expect(SRC).not.toContain("ctx.root.get('corumAgent')")
+  })
+
+  it('★ 永久档失败要说出**真原因**（第一版把「服务取不到」误报成「没有可写的 profile」）', () => {
+    const raw = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    // persist 必须返回原因而不是裸 boolean。
+    expect(raw).toMatch(/ok: false; reason: string/)
+    expect(raw).toMatch(/could NOT save it — reason:/)
+    // 那句误导性文案不得回潮——**剥注释后**判（注释里正当地记着这次事故的原文，
+    // 裸子串判会把说明性注释也算成回潮，本仓已有这个学费：见 stripComments 的说明）。
+    expect(stripComments(raw)).not.toContain('no writable profile')
   })
 
   it('★ 提示词不再宣告「机制会自动重试」（改版后这句话是假的）', () => {

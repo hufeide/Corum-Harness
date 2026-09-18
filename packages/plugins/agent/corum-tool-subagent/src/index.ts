@@ -1112,7 +1112,13 @@ export function apply(ctx: Context, config: Config): void {
       return { route: undefined, delegationDisabled: false, summary: '' }
     }
     const questions = ctx.get('userQuestions') as unknown as CorumQuestionChannel | undefined
-    const profile = ctx.root.get('corumAgent') as unknown as CorumProfileWriteFace | undefined
+    // 2026-09-18 实机修正：用 `ctx.get` 而**不是** `ctx.root.get`——corumAgent 由
+    // `@corum/corum-agent` 在**根 composition** 的 apply 里 `new CorumAgentService(ctx)`
+    // 注册（`Service` 构造即 provide 到传入的 ctx），而 cordis 的 reflect store 按
+    // isolate key 跨 scope 查找、子 scope 沿祖先链继承 ⇒ 本 scope 直接 get 就够；
+    // 写 `ctx.root.get` 在实测里取不到（首次实机「永久档」报 no writable profile 即此因）。
+    // 按红线 3 用窄接口收窄，不 import @corum/corum-agent。
+    const profile = ctx.get('corumAgent') as unknown as CorumProfileWriteFace | undefined
     const outcome = await corumAskAboutModelFailure(
       {
         state: corumPolicyState,

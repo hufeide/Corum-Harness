@@ -261,26 +261,26 @@ export function applyCorumModelDecision(
       }
     }
     case 'permanent-follow': {
-      const persisted = persistCorumModelChoice(deps.profile, sessionId, facts, undefined, logger)
+      const result = persistCorumModelChoice(deps.profile, sessionId, facts, undefined, logger)
       // 永久改成「跟随主 Agent」= 该角色不再有锁定路由 ⇒ 当前会话的临时覆盖已无意义，清掉。
       deps.state.clearModelOverride(sessionId)
       return {
         ...base,
-        persisted,
-        summary: persisted
+        persisted: result.ok,
+        summary: result.ok
           ? `Your Agent preset was updated permanently: its ${facts.role} child-Agent model now follows the main Agent (this overrides the unavailable ${facts.configured.provider}/${facts.configured.model}). Re-issuing the delegation will run on your own route; new sessions keep this.`
-          : `You chose to make the child Agent follow the main Agent, but the mechanism could not save it (no writable profile). Change it manually in Settings → Agents.`,
+          : `You chose to make the child Agent follow the main Agent, but the mechanism could NOT save it — reason: ${result.reason}. Change it manually in Settings → Agents.`,
       }
     }
     case 'permanent-route': {
-      const persisted = persistCorumModelChoice(deps.profile, sessionId, facts, decision.route, logger)
+      const result = persistCorumModelChoice(deps.profile, sessionId, facts, decision.route, logger)
       deps.state.clearModelOverride(sessionId)
       return {
         ...base,
-        persisted,
-        summary: persisted
+        persisted: result.ok,
+        summary: result.ok
           ? `Your Agent preset was updated permanently: its ${facts.role} child-Agent model is now ${decision.route.provider}/${decision.route.model} (replacing the unavailable ${facts.configured.provider}/${facts.configured.model}). Re-issuing the delegation will run on that model; new sessions keep it.`
-          : `You chose ${decision.route.provider}/${decision.route.model} permanently, but the mechanism could not save it. Change it manually in Settings → Agents.`,
+          : `You chose ${decision.route.provider}/${decision.route.model} permanently, but the mechanism could NOT save it — reason: ${result.reason}. Change it manually in Settings → Agents.`,
       }
     }
     case 'decline': {
@@ -308,23 +308,31 @@ export function applyCorumModelDecision(
   }
 }
 
-/** 写预设（永久档）；无写入面或写失败 ⇒ 返回 false（调用方如实报告，不谎称已生效）。 */
+/**
+ * 写预设（永久档）。返回**失败原因**而不是裸 boolean。
+ *
+ * 为什么要带原因（2026-09-18 实机教训）：第一版只返回 `false`，于是把「服务取不到」
+ * 与「服务取到了但写盘抛错」渲染成同一句 "could not save it (no writable profile)"——
+ * 实机那次真因是**服务查找方式写错**（`ctx.root.get` 取不到），却被文案误导成
+ * "没有可写的 profile"，排查方向直接跑偏。错误信息必须说真话。
+ */
 function persistCorumModelChoice(
   profile: CorumProfileWriteFace | undefined,
   sessionId: string,
   facts: CorumModelFailureFacts,
   route: CorumRoute | undefined,
   logger: { warn: (message: string) => void },
-): boolean {
+): { ok: true } | { ok: false; reason: string } {
   if (profile === undefined) {
-    logger.warn('corum model-ask: no profile write face available; cannot persist the permanent choice')
-    return false
+    logger.warn('corum model-ask: the corumAgent service is unreachable; cannot persist the permanent choice')
+    return { ok: false, reason: 'the profile-write capability (corumAgent) was unreachable from the delegation mechanism' }
   }
   try {
     profile.applySubagentModelForSession(sessionId, facts.role, route)
-    return true
+    return { ok: true }
   } catch (error: unknown) {
-    logger.warn(`corum model-ask: persisting the permanent choice failed: ${String(error)}`)
-    return false
+    const detail = error instanceof Error ? error.message : String(error)
+    logger.warn(`corum model-ask: persisting the permanent choice failed: ${detail}`)
+    return { ok: false, reason: detail }
   }
 }
