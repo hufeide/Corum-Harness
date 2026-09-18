@@ -618,7 +618,9 @@ spec 需每版本重跑等价验证。
 | 分区 | 内容 | rebase 风险 |
 |---|---|---|
 | Config schema | `isolation{mode,worktreeRoot,branchPrefix,autoCleanup,denyDirectFs}` / `readonlyResearch` / `maxParallelChildren` / `integrateChecks` / `merger` / `model{provider,model,reasoningEffort?}`——全部 `.default(undefined as unknown as T)` 保留 omission | **中**（官方 Config 演进需三方合并；schema 段与官方同文件） |
-| 模型锁 | config.model 存在时 agentOptions 终值注入、官方 selection/preflight 块整体跳过；parameters 删 provider/model/reasoning_effort 条件展开（LLM 无选模型参数面）。**2026-09-18 用户定调扩面**：① `orchestrate` 的 `tasks[].model` **也**从 schema 剔除（此前是 LLM 可见参数 ⇒ 主 Agent 可把子 Agent 换到任意模型，违反「子 Agent 模型必须唯一、由用户配置决定」），入参 `taskModel` 与其转达点、已死的白名单校验块三处一并清除；② 路由优先级收敛为**两档**（用户配置 > 跟随父），不再有 per-task 第三档；③ 新增**失败回退**：用户配置的模型「模型调用失败」时自动改走主 Agent 路由重试**一次**并通知用户（spawn 期预检失败与运行期 `stopReason==='error'` 两种形态都兜）。⚠️ 工具 description 与机制提示词必须同步（见 LESSONS §4.21：删 schema 而留描述 = 教模型传不存在的参数） | **中**（官方若改模型解析链需重挂；description/提示词三处须同改） |
+| 模型锁 | config.model 存在时 agentOptions 终值注入、官方 selection/preflight 块整体跳过；parameters 删 provider/model/reasoning_effort 条件展开（LLM 无选模型参数面）。**2026-09-18 用户定调扩面**：① `orchestrate` 的 `tasks[].model` **也**从 schema 剔除（此前是 LLM 可见参数 ⇒ 主 Agent 可把子 Agent 换到任意模型，违反「子 Agent 模型必须唯一、由用户配置决定」），入参 `taskModel` 与其转达点、已死的白名单校验块三处一并清除；② 运行期路由**始终两档**（**预设里配的模型** > 跟随主 Agent）——`corumEffectiveModel = config.model` **单源**，`corum-subagent` 的 `defaultModel/defaultResearchModel` **不再参与运行期解析**（见下一行）；③ 新增**失败回退**：用户配置的模型「模型调用失败」时自动改走主 Agent 路由重试**一次**并通知用户（spawn 期预检失败与运行期 `stopReason==='error'` 两种形态都兜）。⚠️ 工具 description 与机制提示词必须同步（见 LESSONS §4.21：删 schema 而留描述 = 教模型传不存在的参数） | **中**（官方若改模型解析链需重挂；description/提示词三处须同改） |
+| 全局 `defaultModel`/`defaultResearchModel`（语义变更） | **2026-09-18 用户澄清**：这两个**不是运行期兜底档**，而是「**新建预设时的模板值**」——「全局页面的配置只是说你创建一个新预设的时候默认使用这套配置，如果新的预设自己覆盖了就按预设的配置，始终是两档」。落点：运行期不再读（模型锁行）；`corum-ide-ui` 的 `SettingsAgentPresetsSection` 用 `newPresetTemplate()` 在**新建草稿**时预填并自动展开模型卡；设置页文案同步（旧文案「留空 = 跟随主 Agent」是回落的说法）。⚠️ 注意其余键（isolation/denyDirectFs/autoCleanup/maxParallelChildren/integrateChecks/merger）**仍是运行期回落**，未动 | 低（纯 corum 语义） |
+| ⚠️ 已知缺口：`corum-subagent` ns 的注册时机 | 该 settings namespace 由本包**按会话 apply 时注册**（`ctx.inject(['settings'], …)` 在 apply 内）。实测：**全新启动的实例里该 ns 不在 `settings/describe` 文档中**（16 个 ns 无它），创建过 corum 会话后才出现 ⇒ **冷启动后直接进设置页读不到这两个配置项**，模板预填也不生效。建议修法（未做）：把注册提到不依赖会话的装配时机，或在读取处显式降级提示。验证本机制须**先建 corum 会话再断言**（见 `docs/tasks/evidence/subagent-model-template-prefill.spec.json` 的 before） | **中** |
 | 隔离 execute 层 | `CORUM_WRITE_TOOLS` 常量、写工具判定（`corumIsWriteTask`/`corumEffectiveToolFilter`/`corumShouldIsolate` 导出纯函数）、worktree 创建（slug=wt-+randomBytes(3)、git worktree add+失败回滚）、request.cwd 注入、toolFilter deny str_replace_editor 合并 | 低（插入式，官方流程不变） |
 | 会话级台账 | `CorumWorktreeEntry`（slug/branch/path/status/runId）、Map<SessionId>、maxParallelChildren 强制（active 口径）、ctx.effect dispose 清理（worktree remove + branch -D，autoCleanup） | 低 |
 | settle 联动 | `ctx.on('subagent/end' as never, (info, parent) => …)` 按 parent.session.id 定位台账；`corumMarkSettled`（runId 精确 + childId 唯一回退）；`as never` 原因注释（Events 合并声明在 corum-subagent 包，类型实例不匹配） | **中**（官方若改 subagent/end payload 签名需跟随） |
@@ -714,9 +716,13 @@ CDP 验证中暴露：fork #10 的 worktree 台账是**模块级内存 Map**—�
 
 **三级配置第一级（全局默认）落地**：fork #10 注册 host settings namespace `corum-subagent`（schema 全键可选保持 omission；双实例共享模块级单例 scope，防同 namespace 重复注册）；实例解析改为「preset config > 全局设置文档值 > 内置默认」（`corumGlobal()` 每次执行时读，文档更新即时生效）。模型锁同链路（worker←defaultModel、research←defaultResearchModel）。
 
+> ⚠️ **2026-09-18 起本条对「模型」已失效**（用户澄清「始终是两档」）：`defaultModel`/`defaultResearchModel` **不再进运行期解析**，改作**新建预设的模板值**（见 §11.2 的两行）。其余键（隔离/并发/集成/合并者）**仍是**上述三级链路，未变。
+
 **设置 UI**（corum 自研设置中心，SECTION_DEFS 新增 `subagent`，order 115）：隔离与并行（隔离模式/并行上限/自动清理）、集成（合并者/核查命令——标注自动探测规则）、默认模型（worker/research 模型对）、research 实例只读标注。写路径 = `remote.settings.mutate`（revision 防并发覆盖）+ describe 镜像 acceptView 折叠；读路径 = describe 镜像 uSES 订阅。ide-ui inject 增 `remote`/`remote.settings`/`settingsScope`，经 `CorumSettingsContext` 下发（与 CorumRpcContext 同构，红线 1/4 合规）。
 
 **CDP 验证**：① 写入落盘 settings.yaml（`isolationMode: always`）；② **三级覆盖实证**——全局 always 时只读调查任务也被强制隔离（wt-c5d437 建成），证明全局设置覆盖 preset 缺省 write-tasks；③ unset 回落（`corum-subagent: {}`）；④ chip 在 always 模式下正确显示「1 个隔离工作区 · 待集成」。**关键机制事实**：namespace 注册在 Agent mount（preset 实例 apply）时触发，非 boot 时——设置 section 的写入在任何 Agent mount 前会报 "namespace not registered"（首次 mount 后正常），属预期行为。
+
+> ⚠️ **2026-09-18 补记读侧后果**（此前只知写侧）：ns 未注册时**读也拿不到**——全新启动的实例里该 ns **不在 `settings/describe` 文档中**，于是「设置→智能体」那两个子 Agent 模型项与**新建预设的模板预填**都读不到值（实测：冷启动直进设置页 = 空；先建一个 corum 会话 = 正常）。详见 §11.2 的「已知缺口」行与 LESSONS §4.23。
 
 ---
 
