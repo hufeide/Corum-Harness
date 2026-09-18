@@ -618,7 +618,7 @@ spec 需每版本重跑等价验证。
 | 分区 | 内容 | rebase 风险 |
 |---|---|---|
 | Config schema | `isolation{mode,worktreeRoot,branchPrefix,autoCleanup,denyDirectFs}` / `readonlyResearch` / `maxParallelChildren` / `integrateChecks` / `merger` / `model{provider,model,reasoningEffort?}`——全部 `.default(undefined as unknown as T)` 保留 omission | **中**（官方 Config 演进需三方合并；schema 段与官方同文件） |
-| 模型锁 | config.model 存在时 agentOptions 终值注入、官方 selection/preflight 块整体跳过；parameters 删 provider/model/reasoning_effort 条件展开（LLM 无选模型参数面） | **中**（官方若改模型解析链需重挂） |
+| 模型锁 | config.model 存在时 agentOptions 终值注入、官方 selection/preflight 块整体跳过；parameters 删 provider/model/reasoning_effort 条件展开（LLM 无选模型参数面）。**2026-09-18 用户定调扩面**：① `orchestrate` 的 `tasks[].model` **也**从 schema 剔除（此前是 LLM 可见参数 ⇒ 主 Agent 可把子 Agent 换到任意模型，违反「子 Agent 模型必须唯一、由用户配置决定」），入参 `taskModel` 与其转达点、已死的白名单校验块三处一并清除；② 路由优先级收敛为**两档**（用户配置 > 跟随父），不再有 per-task 第三档；③ 新增**失败回退**：用户配置的模型「模型调用失败」时自动改走主 Agent 路由重试**一次**并通知用户（spawn 期预检失败与运行期 `stopReason==='error'` 两种形态都兜）。⚠️ 工具 description 与机制提示词必须同步（见 LESSONS §4.21：删 schema 而留描述 = 教模型传不存在的参数） | **中**（官方若改模型解析链需重挂；description/提示词三处须同改） |
 | 隔离 execute 层 | `CORUM_WRITE_TOOLS` 常量、写工具判定（`corumIsWriteTask`/`corumEffectiveToolFilter`/`corumShouldIsolate` 导出纯函数）、worktree 创建（slug=wt-+randomBytes(3)、git worktree add+失败回滚）、request.cwd 注入、toolFilter deny str_replace_editor 合并 | 低（插入式，官方流程不变） |
 | 会话级台账 | `CorumWorktreeEntry`（slug/branch/path/status/runId）、Map<SessionId>、maxParallelChildren 强制（active 口径）、ctx.effect dispose 清理（worktree remove + branch -D，autoCleanup） | 低 |
 | settle 联动 | `ctx.on('subagent/end' as never, (info, parent) => …)` 按 parent.session.id 定位台账；`corumMarkSettled`（runId 精确 + childId 唯一回退）；`as never` 原因注释（Events 合并声明在 corum-subagent 包，类型实例不匹配） | **中**（官方若改 subagent/end payload 签名需跟随） |
