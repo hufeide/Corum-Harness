@@ -344,16 +344,29 @@ export function ConversationRoot({
           ? undefined
           : workspaceLabel(cwd)))
 
-  // task 泳道会话：工作区在建会话时已绑定、Agent 已锁定，**不渲染**
-  // 「选择工作区」chip + workspace picker + 官方 agentPreset 选择器——整行不出现
-  // （2026-08-31 用户走查：新会话界面顶部不该有「选择工作区」）。Agent 锁定
-  // 标识挪进 composer 工具栏（见下方 composer.bar 的 toolbarLeading）。
+  // 「选择工作区」chip 的渲染判据。
+  //
+  // 2026-08-31 用户走查：新会话界面顶部不该有「选择工作区」⇒ task 泳道会话不渲染
+  // （工作区在建会话时已绑定、Agent 已锁定）。
   // 子 Agent 会话同样不渲染（① 用户定调：子 Agent 由父 Agent 管控，无工作区选择）。
-  const heroWorkspaceRow = isTaskLane || isSubagentSession
-    ? null
-    : (
-      <div className={css.heroWorkspaceRow}>
-        <WorkspaceChip
+  //
+  // ⚠️ 2026-09-19 用户报障②：**「在新对话中分支」(MessageIconActions 的 fork) 建出的
+  // 会话又冒出了这个 chip**。根因是当时用 `isTaskLane`（= sessionId 以 `corum-task-`
+  // 开头）当唯一判据，而 fork 出来的会话 id 是随机 UUID，前缀不匹配 ⇒ 判成「非 task
+  // 泳道」⇒ 渲染。**用 id 前缀当类型判据本身就脆**：任何新建会话路径（fork / 未来别的）
+  // 只要不遵这个前缀就会漏判。
+  //
+  // 这里的分界不是「哪条路径建的会话」，而是「**用户还需不需要挑工作区**」——
+  // 即「这个会话是不是还没开始（blank）」：
+  //   · blank（含 fork 出来的、尚未发首条消息的）→ 工作区仍未定，chip 有意义；
+  //   · 非 blank（已发过消息）→ 工作区已随首次发送落定，chip 无意义，隐藏。
+  // 另外 kkc IDE 里官方 useWorkspaces 已禁（本文件上方注释：降级为空 stub），工作区
+  // 导航由侧栏自研承载 ⇒ **非 blank 时这个 chip 连数据源都没有**，渲染出来只会是个
+  // 点不动的死控件（与 2026-09-19 picker 那次是同一类「不可选中的下拉」问题）。
+  const showWorkspaceRow = hasSession && !isTaskLane && !isSubagentSession && summaryBlank === true
+  const heroWorkspaceRow = showWorkspaceRow
+    ? (
+      <div className={css.heroWorkspaceRow}>        <WorkspaceChip
           buttonRef={pickerAnchor}
           label={chipTitle}
           menuOpen={pickerOpen}
@@ -375,7 +388,8 @@ export function ConversationRoot({
         })}
         {renderSlot('conversation.hero.agentPreset', {})}
       </div>
-    )
+      )
+    : null
 
   // task 泳道会话的 Agent 名片信息（副标语「由 X 执行」+ 对话起始页专业推荐命令）：
   // 所有 task 泳道（blank 与正式会话）都查，发消息切换会话时也保持。
