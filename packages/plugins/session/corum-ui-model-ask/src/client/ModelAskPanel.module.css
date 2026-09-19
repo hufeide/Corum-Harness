@@ -48,8 +48,8 @@
 /* t：11px / 600 / $label-primary。
    行高定死 14px 让两行 + gap1 = 29px，配合 pad18 + border2 得到设计稿的 49px 总高。 */
 .barTitle {
-  font-size: 11px;
-  line-height: 14px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  line-height: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -59,8 +59,8 @@
 
 /* d：10px / normal / $label-tertiary（行高同 14px，见上）。 */
 .barDesc {
-  font-size: 10px;
-  line-height: 14px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 15px;
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -79,7 +79,7 @@
   background: var(--dsw-alias-brand-primary, var(--corum-state-running));
   color: var(--corum-label-on-brand);
   font-family: inherit;
-  font-size: 10px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   cursor: pointer;
 }
@@ -121,7 +121,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 19px;
+  height: 21px;
 }
 
 /* phead/ic：15×15 $state-error。 */
@@ -139,7 +139,7 @@
 .pheadTx {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 13px;
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -187,8 +187,8 @@
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   color: var(--dsw-alias-label-secondary);
   font-family: inherit;
-  font-size: 10px;
-  line-height: 12px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 15px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -212,9 +212,8 @@
 }
 
 /* picker：$glass-2 底 + pad[7,10] + gap6 + r10 + **横排 ai=center**；
-   ic 11×11 $label-tertiary + lbl(fill_container, 10px $label-tertiary) + chev 11×11。
-   行高定死 12px：12 + pad14 + border0 = 26…… 设计稿 picker 高 28（含其 chev 视觉重心），
-   故用 line-height 14px 得 28px。 */
+   ic 11×11 $label-tertiary + lbl(fill_container, 12px $label-tertiary) + chev 11×11。
+   行高 16px（配 12px 字）⇒ 高 16 + pad14 = 30，与设计稿 28 同量级。 */
 .picker {
   display: flex;
   flex-direction: row;
@@ -227,8 +226,8 @@
   border: none;
   color: var(--dsw-alias-label-tertiary);
   font-family: inherit;
-  font-size: 10px;
-  line-height: 14px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 16px;
   cursor: pointer;
   text-align: left;
   box-sizing: border-box;
@@ -248,7 +247,7 @@
 .pickerLabel {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 10px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -272,7 +271,7 @@
 
 .pickerGroup {
   padding: 2px 4px;
-  font-size: 10px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -288,7 +287,7 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font-family: inherit;
-  font-size: 10px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   cursor: pointer;
   text-align: left;
 }
@@ -314,7 +313,7 @@
 
 .pickerEmpty {
   padding: 4px;
-  font-size: 10px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -331,7 +330,7 @@
 .footHint {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 10px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -350,7 +349,7 @@
   background: var(--dsw-alias-brand-primary, var(--corum-state-running));
   color: var(--corum-label-on-brand);
   font-family: inherit;
-  font-size: 10px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 700;
   cursor: pointer;
 }

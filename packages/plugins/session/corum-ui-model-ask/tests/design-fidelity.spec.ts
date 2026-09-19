@@ -57,16 +57,30 @@ describe('design.pen jO5So 保真度 —— ① 通知条 notify-bar', () => {
     expect(bar).toContain('flex-direction: row')
   })
 
-  it('★ 两行文案行高 14px（决定整条高 49px = 29 + pad18 + border2）', () => {
-    expect(rule('barTitle')).toContain('line-height: 14px')
-    expect(rule('barDesc')).toContain('line-height: 14px')
+  it('★ 两行文案行高 16/15（13px 与 12px 字的可读行高）', () => {
+    expect(rule('barTitle')).toContain('line-height: 16px')
+    expect(rule('barDesc')).toContain('line-height: 15px')
   })
 
-  it('★ 字号：标题 11px/600，副行 10px', () => {
+  it('★ 字号走 App 实际字阶（B2·13 / UI·12），不是设计稿窄 mockup 的 11/10', () => {
+    // 方案C 是 400 宽的并排对比 mockup（其 Chat Input 被压到 372，真宽 720），
+    // 字号档位低于 App 实际 UI 档位；按它写 11/10 会比周围界面小一截。
     const title = rule('barTitle')
-    expect(title).toContain('font-size: 11px')
+    expect(title).toContain('calc(13px * var(--corum-ui-font-scale, 1))')
     expect(title).toContain('font-weight: 600')
-    expect(rule('barDesc')).toContain('font-size: 10px')
+    expect(rule('barDesc')).toContain('calc(12px * var(--corum-ui-font-scale, 1))')
+  })
+
+  it('★★ 所有 font-size 必须经过 --corum-ui-font-scale（跟随设置面板的「界面字号」）', () => {
+    // 全仓 615 处 font-size 都已迁到 `calc(<N>px * var(--corum-ui-font-scale, 1))`
+    // （见 corum-ide-ui/client/ui-font-scale.ts）。裸 px 不跟随设置 ⇒ 用户改界面字号时
+    // 本面板是唯一不变的那块。这条守卫防的就是「新插件忘了迁」。
+    // 取每一条 font-size 声明整行（正则里不能用 `\s*(?!calc\()`——`\s*` 会回溯到零宽，
+    // 负向断言就永远不成立），直接抓「font-size: 后面到分号」的整段值再判。
+    const decls = stripComments(CSS).match(/^\s*font-size:([^;]*);/gm) ?? []
+    expect(decls.length, '没抓到任何 font-size 声明，正则或文件结构变了').toBeGreaterThan(0)
+    const bare = decls.filter(decl => !decl.includes('var(--corum-ui-font-scale, 1)'))
+    expect(bare, `这些 font-size 没走 --corum-ui-font-scale：${bare.join(' | ')}`).toEqual([])
   })
 
   it('★ tx 竖排 gap1', () => {
@@ -75,12 +89,12 @@ describe('design.pen jO5So 保真度 —— ① 通知条 notify-bar', () => {
     expect(tx).toContain('gap: 1px')
   })
 
-  it('★「处理」按钮是 $brand-primary 实心 + pad[5,10] + r8 + 10px/700', () => {
+  it('★「处理」按钮是 $brand-primary 实心 + pad[5,10] + r8 + 12px/700', () => {
     const btn = rule('handleBtn')
     expect(btn).toContain('--dsw-alias-brand-primary')
     expect(btn).toContain('padding: 5px 10px')
     expect(btn).toContain('border-radius: 8px')
-    expect(btn).toContain('font-size: 10px')
+    expect(btn).toContain('calc(12px * var(--corum-ui-font-scale, 1))')
     expect(btn).toContain('font-weight: 700')
   })
 
@@ -104,10 +118,10 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
     expect(panel).toContain('flex-direction: column')
   })
 
-  it('★ phead 高 19px + 标题 13px/700', () => {
-    expect(rule('phead')).toContain('height: 19px')
+  it('★ phead 高度 + 标题 15px/700（与提问卡 .qTitle 同档）', () => {
+    expect(rule('phead')).toContain('height: 21px')
     const t = rule('pheadTx')
-    expect(t).toContain('font-size: 13px')
+    expect(t).toContain('calc(15px * var(--corum-ui-font-scale, 1))')
     expect(t).toContain('font-weight: 700')
   })
 
@@ -120,13 +134,13 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
     expect(TSX).not.toContain('${css.iconBtn} ${css.pheadChev}')
   })
 
-  it('★ chip：pad[6,9] + gap5 + r9 + 10px/600 + 行高 12px（行高 26px）', () => {
+  it('★ chip：pad[6,9] + gap5 + r9 + 12px/600（行高 15px）', () => {
     const chip = rule('chip')
     expect(chip).toContain('padding: 6px 9px')
     expect(chip).toContain('gap: 5px')
     expect(chip).toContain('border-radius: 9px')
-    expect(chip).toContain('font-size: 10px')
-    expect(chip).toContain('line-height: 12px')
+    expect(chip).toContain('calc(12px * var(--corum-ui-font-scale, 1))')
+    expect(chip).toContain('line-height: 15px')
     expect(chip).toContain('font-weight: 600')
   })
 
@@ -174,16 +188,16 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
     expect(btn).toContain('padding: 6px 12px')
     expect(btn).toContain('gap: 5px')
     expect(btn).toContain('border-radius: 8px')
-    expect(btn).toContain('font-size: 10px')
+    expect(btn).toContain('calc(13px * var(--corum-ui-font-scale, 1))')
     expect(btn).toContain('font-weight: 700')
   })
 
-  it('★ pfoot 横排 ai=center gap8；hint 10px $label-tertiary', () => {
+  it('★ pfoot 横排 ai=center gap8；hint 11px $label-tertiary', () => {
     const foot = rule('pfoot')
     expect(foot).toContain('gap: 8px')
     expect(foot).toContain('align-items: center')
     const hint = rule('footHint')
-    expect(hint).toContain('font-size: 10px')
+    expect(hint).toContain('calc(11px * var(--corum-ui-font-scale, 1))')
     expect(hint).toContain('--dsw-alias-label-tertiary')
   })
 })
