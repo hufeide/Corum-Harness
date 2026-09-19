@@ -230,7 +230,10 @@ describe('corumIntegrationTruth — 机制真值门禁', () => {
     const truth = corumIntegrationTruth(repo, [entry], before)
     const report = corumIntegrationFailure(truth, 'deadbeefdeadbeef', [entry])
     expect(truth.integrated).toBe(false)
-    expect(report).toContain('branches NOT integrated into HEAD')
+    // 2026-09-20：文案改为「无并入证据」——旧的「branches NOT integrated into HEAD」把
+    // 「已合并后被合规删除的分支」也算进失败，正是本场修的误判（见
+    // integrate-branch-deleted.spec.ts）。语义不变：仍然是「这些条目没证明进 HEAD」。
+    expect(report).toContain('NO evidence of being integrated into HEAD')
     expect(report).toContain('ALREADY had')
     expect(report.indexOf('ALREADY had')).toBeLessThan(report.indexOf('PRESERVED'))
   })

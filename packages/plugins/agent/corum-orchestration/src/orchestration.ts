@@ -86,6 +86,20 @@ export interface CorumWorktreeEntry {
    * 不设防就会把「什么都没干、甚至是还在跑」的条目签收成 `integrated`。
    */
   base?: string
+  /**
+   * fork（corum）：分支 tip 的**台账快照**（分支被删除后仍能证明「这份工作已进 HEAD」）。
+   *
+   * 由来（2026-09-20 机制 bug）：判定集成时按**分支名**跑
+   * `git merge-base --is-ancestor <branch> HEAD`，但「合并后 `branch -D`」正是机制自己
+   * 鼓励的合规收尾（`corumCleanupWorktree` 自己就删分支）——分支一没，两条命令都非零退出
+   * ⇒ 判定 false ⇒ **集成实际成功却被误判未落地**，抛
+   * `Error: integrate did not persist into the main tree`。
+   *
+   * 快照点（都在分支被删**之前**）：条目创建（= `base`）、settle 强制提交之后、
+   * 集成前、以及 `corumCleanupWorktree` 执行 `branch -D` 之前。判定时分支已不存在
+   * 就用它跑 `merge-base --is-ancestor <tip> HEAD`——tip 在 HEAD 祖先链上即证明已并入。
+   */
+  tip?: string
 }
 
 /** 台账快照的一帧：某父会话的 worktree 条目全量投影（renderer 直接渲染）。 */
@@ -125,6 +139,7 @@ const corumLedgerRecordSchema = z.object({
     runId: z.string().optional(),
     childSessionId: z.string().optional(),
     base: z.string().optional(),
+    tip: z.string().optional(),
     reclaimed: z.boolean().optional(),
   })),
 }) as unknown as z.ZodType<CorumLedgerRecord>
@@ -417,6 +432,10 @@ export function corumBranchMerged(cwd: string, branch: string): boolean {
  * fork（corum）：分支的工作是否已进入 HEAD——祖先关系 **或** patch 等价
  * （`git cherry HEAD <branch>` 无 `+` 行，覆盖集成者用 cherry-pick 等价落地的情况）。
  * 无新提交的分支返回 true（空 cherry 输出）；分支不存在/git 不可用返回 false。
+ *
+ * ⚠️ **按分支名的这条路径在分支被删除后必然返回 false**——这是「合并后删分支」这一
+ * 合规收尾下的正常形态，不是「没集成」。不要直接用它判集成；集成判定统一走
+ * {@link corumEntryIntegrated}（它先用台账 tip 快照证明并入，再回落到这里）。
  */
 export function corumBranchIntegrated(cwd: string, branch: string): boolean {
   if (corumBranchMerged(cwd, branch)) return true
@@ -426,6 +445,86 @@ export function corumBranchIntegrated(cwd: string, branch: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * fork（corum）：`sha` 是否已在 HEAD 的祖先链上（`merge-base --is-ancestor`；任何失败 → false）。
+ *
+ * 为什么用「快照 sha」而不是分支名判集成（2026-09-20 机制 bug 修复）：
+ * 分支是**可变引用**——集成后 `branch -D` 就没了，而删分支是机制自己鼓励的合规收尾
+ * （`corumCleanupWorktree` 自己就删）。sha 不会：只要那个 commit 还在历史里，
+ * 「它是不是 HEAD 的祖先」就永远可判。故集成判定以**台账快照**为准。
+ */
+export function corumShaInHead(cwd: string, sha: string): boolean {
+  if (sha === '') return false
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], { cwd, stdio: 'pipe' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * fork（corum）：**集成判定的唯一口径**——接台账条目而非裸分支名
+ * （2026-09-20 机制 bug 修复）。
+ *
+ * 事故（用户实测）：集成实际成功、分支已被合规删除，机制仍抛
+ * `Error: integrate did not persist into the main tree`。根因是判定按**分支名**跑
+ * `merge-base --is-ancestor <branch> HEAD` + `git cherry`，分支被删后两条命令非零退出
+ * ⇒ false ⇒ 一次真落地的集成被判失败（连带保住现场、翻转不了台账）。
+ *
+ * 判定顺序（保守优先，绝不为「看起来像成功」放宽既有门禁）：
+ *   ① **分支在场**：走 {@link corumBranchIntegrated}（祖先或 patch 等价，语义不变）；
+ *   ② **分支已删**：用台账 tip 快照跑祖先判定；但**空分支不认账**——
+ *      `tip === base`（创建后从未提交）与 `tip === HEAD`（fast-forward 到与 HEAD 重合）同罚，
+ *      口径与 `corumReconcileIntegrated` 的空分支豁免一致；
+ *   ③ 无 tip / 无法判定：**保守 false**（旧的失败行为原样保留）。
+ *
+ * @param cwd - 主树工作目录。
+ * @param entry - 台账条目（用 branch/base/tip）：`tip` 缺失时退化为按分支名判定。
+ * @returns 该条目的工作是否已确证进入 HEAD。
+ */
+export function corumEntryIntegrated(
+  cwd: string,
+  entry: Pick<CorumWorktreeEntry, 'branch' | 'base'> & { tip?: string },
+): boolean {
+  // ① 分支还在：既有口径原样保留（未合并分支在场时照样报 false）。
+  if (corumBranchTip(cwd, entry.branch) !== undefined) return corumBranchIntegrated(cwd, entry.branch)
+  // ② 分支已删（合规收尾）——只能靠快照 sha 证明并入。
+  const tip = entry.tip
+  if (tip === undefined || tip === '') return false
+  // 空分支不认账（与对账口径对齐）：tip === base = 一个提交都没做。
+  if (entry.base !== undefined && tip === entry.base) return false
+  // tip === HEAD：fast-forward 重合形态，同样不算「这份工作落地」（安全侧失败）。
+  if (tip === corumGitHead(cwd)) return false
+  return corumShaInHead(cwd, tip)
+}
+
+/**
+ * fork（corum）：**集成前**给每条待集成条目补一次分支 tip 快照（原地写入 `entry.tip`）。
+ *
+ * 调用时机必须早于任何删分支动作（集成者的 `branch -D`、清理、coordinate 回收）——
+ * 这是把「分支名」这份会消失的引用，换成「sha」这份不会消失的证据的唯一时机。
+ * 排障日志（2026-09-20）：快照条数写主日志，配 `integrate truth check` 定位误判。
+ *
+ * @param cwd - 主树工作目录。
+ * @param entries - 待集成条目（原地修改，不改变 status）。
+ * @returns 本次真的写入/刷新了几条（分支已不存在且无旧快照则不计）。
+ */
+export function corumSnapshotBranchTips(
+  cwd: string,
+  entries: readonly CorumWorktreeEntry[],
+): number {
+  let written = 0
+  for (const entry of entries) {
+    const tip = corumBranchTip(cwd, entry.branch)
+    if (tip === undefined) continue
+    if (entry.tip === tip) continue
+    entry.tip = tip
+    written += 1
+  }
+  return written
 }
 
 /** fork（corum）：worktree 是否有未提交改动（目录已不存在 → false）。 */
@@ -716,12 +815,26 @@ export function corumReconcileIntegrated(
 ): { entries: CorumWorktreeEntry[]; flipped: string[] } {
   const hasPending = entries.some(entry => entry.status === 'active' || entry.status === 'settled')
   if (!hasPending) return { entries: [...entries], flipped: [] }
+  // 2026-09-20：分支可能已被合规删除，`git branch --merged HEAD` 那时什么都看不到
+  // （这正是「集成成功却判未落地」的另一半）。故先补 tip 快照，再按合并集合 ∪
+  // 「已删且快照在 HEAD 祖先链上」判定；`merged.size === 0` 的提前返回随之取消——
+  // 一条分支都没有时仍可能有「已删分支」的待集成条目要靠快照翻。
+  corumSnapshotBranchTips(cwd, entries)
   const merged = corumMergedBranches(cwd)
-  if (merged.size === 0) return { entries: [...entries], flipped: [] }
   const head = corumGitHead(cwd)
   const flipped: string[] = []
   const next = entries.map(entry => {
     if (entry.status !== 'active' && entry.status !== 'settled') return entry
+    // 分支已删：走 tip 快照判定（与 `corumIntegrationTruth` 共享同一口径——
+    // `corumEntryIntegrated` 只依赖 branch/base/tip，与合并集合的判定等价）。
+    const branchGone = corumBranchTip(cwd, entry.branch) === undefined
+    if (branchGone) {
+      // tip === HEAD 的空分支豁免在这里同样成立（corumEntryIntegrated 内），
+      // 但下面那句 `tip === head` 早退只在分支在场时有意义，故分支已删时直接交给判定函数。
+      if (!corumEntryIntegrated(cwd, entry)) return entry
+      flipped.push(entry.slug)
+      return { ...entry, status: 'integrated' as const }
+    }
     if (!merged.has(entry.branch)) return entry
     const tip = corumBranchTip(cwd, entry.branch)
     if (tip === undefined || tip === head) return entry
@@ -950,12 +1063,18 @@ export interface CorumCleanupOptions {
  */
 export function corumCleanupWorktree(
   cwd: string,
-  entry: Pick<CorumWorktreeEntry, 'path' | 'branch'>,
+  entry: Pick<CorumWorktreeEntry, 'path' | 'branch'> & { tip?: string },
   options: CorumCleanupOptions = {},
 ): boolean {
   const force = options.force === true
   const keepWorktree = !force && corumWorktreeHasUncommitted(entry.path)
   const keepBranch = !force && !corumBranchMerged(cwd, entry.branch)
+  // 2026-09-20：**删分支之前**先把 tip 记进台账。删掉的是「分支名」这个可变引用，
+  // 快照下来的 sha 仍能证明这份工作已进 HEAD（否则下一轮集成判定会假阴，
+  // 正是「集成成功却抛 integrate did not persist」的机制 bug）。
+  // 只更新非空快照：分支已不存在时保留旧快照（旧值仍是有效证据）。
+  const tipNow = corumBranchTip(cwd, entry.branch)
+  if (tipNow !== undefined) entry.tip = tipNow
   let worktreeRemoved = false
   if (!keepWorktree) {
     try {
@@ -1096,6 +1215,13 @@ export interface CorumIntegrationTruth {
  * 写 `integrated` 并 `worktree remove --force` + `branch -D` → 子任务 commit 变成
  * unreachable、文件从主树消失（`git log --all` 只剩 init）。本函数是该链条的闸门。
  *
+ * 2026-09-20 修正（反向误判，机制 bug）：闸门**不得因为「分支已删」就报失败**——
+ * 「确认并入 HEAD 之后删掉分支」是合规收尾（`corumCleanupWorktree` 自己就删），
+ * 那时 `merge-base --is-ancestor <branch> HEAD` 与 `git cherry` 都非零退出，旧实现据此
+ * 判 false ⇒ **集成实际成功却抛 `integrate did not persist into the main tree`**。
+ * 现在每条条目先补 tip 快照、再按 {@link corumEntryIntegrated} 判定（分支已删时用快照
+ * sha 的祖先关系证明并入）。「分支已删」不再等于失败；只有**既无分支也无有效快照**才是。
+ *
  * @param cwd - 主树（父会话）工作目录。
  * @param entries - 待集成的台账条目（active/settled）。
  * @param dirtyBefore - 集成前 `corumGitStatusPorcelain(cwd)` 原文（dirtyDelta 基线）。
@@ -1156,10 +1282,16 @@ export function corumIntegrationTruth(
   entries: readonly CorumWorktreeEntry[],
   dirtyBefore = '',
 ): CorumIntegrationTruth {
+  // 2026-09-20：判定前补一次 tip 快照。分支在这一刻可能已被合规删除（集成者 merge 后
+  // 自行 `branch -D`，或上一轮清理已删），此后它再也无法用分支名寻址——先把 sha 记下来，
+  // 判定才有证据可用（见 `corumEntryIntegrated`）。
+  corumSnapshotBranchTips(cwd, entries)
   const unmerged: string[] = []
   const uncommitted: string[] = []
   for (const entry of entries) {
-    if (!corumBranchIntegrated(cwd, entry.branch)) unmerged.push(entry.branch)
+    // 按条目判定（分支在场走 merge-base/cherry；分支已删走 tip 快照）——**不要**退回
+    // 裸分支名。按分支名判会在「已合并 + 已合规删分支」时假阴，正是 2026-09-20 的机制 bug。
+    if (!corumEntryIntegrated(cwd, entry)) unmerged.push(entry.branch)
     else if (corumWorktreeHasUncommitted(entry.path)) uncommitted.push(`${entry.slug} (${entry.path})`)
   }
   const beforeLines = dirtyBefore.split('\n').filter(line => line.trim() !== '')
@@ -1234,6 +1366,13 @@ export function corumPartialIntegrationNotice(
 /**
  * fork（corum）：集成未达标的失败报告——把「集成者自述 vs git 实况」一并交给主
  * Agent，并明确现场已保留（worktree/分支未清理，可继续修或人工合并）。
+ *
+ * 2026-09-20 修正（机制 bug）：「分支已被删除」**本身不是失败证据**。合并进 HEAD 之后
+ * 删掉分支是机制自己鼓励的合规收尾（`corumCleanupWorktree` 就删），此时工作已经落地。
+ * 判定已改为按条目（分支在场走 merge-base/cherry，分支已删走 tip 快照祖先关系）——
+ * 所以本报告的 `unmerged` 名单现在只包含**确实没有证据表明进了 HEAD** 的条目：
+ * 既没分支、也没 tip 快照可查（详见 `corumEntryIntegrated`）。这条文案据此改写，
+ * 不再把「分支不存在」笼统说成「这份 commit 是唯一留存」。
  */
 export function corumIntegrationFailure(
   truth: CorumIntegrationTruth,
@@ -1246,7 +1385,8 @@ export function corumIntegrationFailure(
     `main tree HEAD: ${headBefore === '' ? '(unknown)' : headBefore.slice(0, 12)} -> ${truth.head === '' ? '(unknown)' : truth.head.slice(0, 12)}`,
   ]
   if (truth.unmerged.length > 0) {
-    lines.push(`branches NOT integrated into HEAD (their commits are the only copy of that work): ${truth.unmerged.join(', ')}`)
+    lines.push(`branches with NO evidence of being integrated into HEAD: ${truth.unmerged.join(', ')}`)
+    lines.push('(a branch that was merged into HEAD and then deleted is NOT a failure — that is the sanctioned cleanup; these entries failed the check because neither a live branch nor a recorded tip proves their work is in HEAD)')
   }
   if (truth.uncommitted.length > 0) {
     lines.push(`worktrees with UNCOMMITTED changes (written but never committed): ${truth.uncommitted.join(', ')}`)
@@ -1890,7 +2030,14 @@ export class CorumOrchestration extends Service {
     // 在 `git branch --merged HEAD` 里与真合并过的分支完全同形（2026-09-12 实测：
     // 两条刚建好的空分支在重启后就被误判成 integrated 并回收）。
     const base = corumBranchTip(parentCwd, branch)
-    this.addActiveEntry(sessionId, parentCwd, { slug, branch, path: worktreePath, ...base === undefined ? {} : { base } })
+    // 2026-09-20：创建即记 tip 快照（此刻 tip === base，空分支豁免照旧成立）——
+    // 分支被删后判定仍能寻址到这个 sha。
+    this.addActiveEntry(sessionId, parentCwd, {
+      slug,
+      branch,
+      path: worktreePath,
+      ...base === undefined ? {} : { base, tip: base },
+    })
     return { slug, branch, path: worktreePath }
   }
 
@@ -2121,6 +2268,11 @@ export class CorumOrchestration extends Service {
       if (failure !== undefined) failures.push(failure)
     }
     if (failures.length > 0) this.commitFailures.set(sessionId, failures)
+    // 2026-09-20：收口提交之后立刻刷新 tip 快照——这是分支**最后一次确定还活着**、
+    // 且带着子 Agent 全部提交的时刻（此后集成者可能 merge + `branch -D`）。
+    // cwd 未知（台账未记父目录）时跳过：`git` 不接受空 cwd，且那时快照也无处落。
+    const settleCwd = this.ledgerCwds.get(sessionId)
+    if (settleCwd !== undefined) corumSnapshotBranchTips(settleCwd, entries)
     const flipped = corumMarkSettled(entries, { runId: String(info.runId), childId: String(info.id) })
     if (flipped) {
       this.persist(sessionId)

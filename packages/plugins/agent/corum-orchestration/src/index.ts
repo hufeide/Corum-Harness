@@ -67,6 +67,11 @@ export {
   corumListIsolatedWorktrees,
   corumBranchAddsCommits,
   corumBranchTip,
+  // fork（corum）2026-09-20：集成判定按条目 + 分支 tip 快照——修「集成实际成功却被
+  // 误判未落地」（集成者 merge 后合规 `branch -D`，按分支名判定必然假阴）。
+  corumEntryIntegrated,
+  corumShaInHead,
+  corumSnapshotBranchTips,
   corumReconcileIntegrated,
   corumMergedBranches,
   corumIntegrationTruth,

@@ -94,6 +94,9 @@ import {
   corumNarrowDenyFilter,
   corumPartialIntegrationNotice,
   corumMutationToolsForPlatform,
+  // fork（corum）2026-09-20：集成判定改「按条目」+ 分支 tip 快照——修「集成成功却判
+  // 未落地」（集成者 merge 后合规 `branch -D`，按分支名判定假阴）。
+  corumSnapshotBranchTips,
   corumBranchTip,
   corumReapRestoredEntries,
   corumReapOrphanWorktrees,
@@ -1206,6 +1209,9 @@ function resolveDelegationRun(
 export {
   corumBranchIntegrated,
   corumBranchMerged,
+  corumShaInHead,
+  corumEntryIntegrated,
+  corumSnapshotBranchTips,
   corumCleanupLedgerEntries,
   corumCleanupWorktree,
   corumDetectIntegrateChecks,
@@ -1965,6 +1971,18 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：机制真值门禁的前置快照（主树 HEAD + 未提交基线）。
         const corumHeadBefore = corumGitHead(parentCwd)
         const corumDirtyBefore = corumGitStatusPorcelain(parentCwd)
+        // fork（corum）2026-09-20（机制 bug 修复）：**在集成者启动之前**快照每条分支的 tip。
+        //
+        // 这是唯一可靠的快照时机：集成者是子 Agent，它 merge 完完全可能顺手
+        // `branch -D`（机制自己的 persona/清理都在鼓励这个合规收尾）。分支一没，
+        // 之后按**分支名**跑 `merge-base --is-ancestor` 与 `git cherry` 都非零退出 ⇒
+        // 判定 false ⇒ 一次**真的落了地**的集成被报成
+        // `Error: integrate did not persist into the main tree`。
+        // sha 快照不会消失：它之后用来证明「这条工作已经在 HEAD 的祖先链上」。
+        const corumSnapshotted = corumSnapshotBranchTips(parentCwd, pending)
+        runtimeCtx.logger.info(
+          `integrate: snapshotted tip for ${corumSnapshotted}/${pending.length} pending branch(es) before integrator start`,
+        )
         const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
           ...corumIntegrateRequest,
           signal: exec.signal,
@@ -1985,6 +2003,13 @@ export function apply(ctx: Context, config: Config): void {
         //      （附「集成者自述 vs git 实况」对照）+ **保留 worktree 与分支**
         //      + 台账保持 settled（PLAN 不变量「失败不 commit、保留现场」的机制化）；
         //   ②（2026-09-16）声明式 verify 的退出码见下方 `corumIntegrationVerdict`。
+        // fork（corum）2026-09-20：判定前**再刷新一次** tip 快照。分支若仍在（集成者只是
+        // merge、没删分支）这里刷新到最新；分支若已被合规删除，快照保留着启动前那份
+        // 有效证据，判定即按 tip 的祖先关系证明并入。
+        const corumSnapshottedAfter = corumSnapshotBranchTips(parentCwd, pending)
+        if (corumSnapshottedAfter > 0) {
+          runtimeCtx.logger.info(`integrate: refreshed branch tip(s) for ${corumSnapshottedAfter} pending entr(ies) before truth check`)
+        }
         let corumTruth = corumIntegrationTruth(parentCwd, pending, corumDirtyBefore)
         // 排障日志（2026-09-16）：integrate 真值判定结果写主日志——verify 失败是否被拦住、
         // 分支并入与否，此前只能从 throw 反推（「merged+committed 但 verify 失败」无从定位）。
