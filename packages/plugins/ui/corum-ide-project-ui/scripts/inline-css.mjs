@@ -3,7 +3,7 @@
  * @module ide-project/scripts/inline-css
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
@@ -31,4 +31,12 @@ const client = readFileSync(clientJs, 'utf8')
 // 被误判「已注入」，样式长期不注入）。
 if (!client.includes("s.setAttribute('data-plugin','@corum/corum-ide-project-ui')")) {
   writeFileSync(clientJs, inject + '\n' + client)
+  console.log(`[inline-css] injected ${cssText.length} chars of CSS into client.js`)
+} else {
+  console.log('[inline-css] client.js already carries the stylesheet')
 }
+// 与其他 corum fork 包同口径：样式内联完成后删除孤儿 lib/style.css（client bundle
+// 经 window.__ModuleLoader__.load 注入、无法 import CSS；残留只会让打包期
+// 「inline-css 断言」把它判成 tsdown 过、inline-css 未过的中间态）。
+rmSync(styleCss, { force: true })
+console.log('[inline-css] removed lib/style.css')
