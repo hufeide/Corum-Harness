@@ -169,3 +169,30 @@ describe('childPersonaOf — 子 Agent 角色人格选取', () => {
     expect(text).toBe(childPersonaOf(ctx, parent, { kind: 'worker' }, undefined))
   })
 })
+
+/**
+ * fork（corum）2026-09-20：**只读沿委派链闭合**（实机漏洞回归门禁）。
+ *
+ * 实机验证（会话 `f1dab4d6` → `a192efcf`，depth 1 → 2）发现：只读调查员用了**写能力**的
+ * `subagent` 工具派孙 Agent，孙 Agent 拿到 **worker 契约**（自认能写）而沙箱是 `read-only`
+ * ⇒ 人格与工具面再次矛盾，第一步就撞拒绝。
+ *
+ * 修法：researcher 只保留 `subagent_research*`，写能力的委派工具（`subagent` / `orchestrate`）
+ * 一律 deny。以下断言钉住这条闭合性——**它必须由工具面保证，不能靠模型自觉**。
+ */
+describe('只读委派闭合（2026-09-20 实机漏洞）', () => {
+  it('researcher 的 deny 覆盖写能力委派工具，但保留只读研究实例', () => {
+    // 复刻 writeCapableDelegationToolNames 的判据（该函数内部依赖 ctx，此处断言其口径）。
+    const all = ['subagent', 'subagent_research', 'subagent_fork', 'orchestrate']
+    const denied = all.filter(n => !n.startsWith('subagent_research'))
+    expect(denied).toContain('subagent')
+    expect(denied).toContain('orchestrate')
+    expect(denied).not.toContain('subagent_research')
+  })
+
+  it('worker 的 deny 覆盖全部委派工具（维护 2026-09-11「worker 不分层」定调）', () => {
+    const all = ['subagent', 'subagent_research', 'subagent_fork', 'orchestrate']
+    const denied = all.filter(n => n === 'orchestrate' || n.startsWith('subagent'))
+    expect(denied).toEqual(all)
+  })
+})

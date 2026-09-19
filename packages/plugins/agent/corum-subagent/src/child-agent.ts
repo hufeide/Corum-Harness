@@ -289,10 +289,28 @@ export function applyChildComposition(
    *
    * 指挥模式下**无差别** deny（2026-09-11 定调「指挥模式下子 Agent 只干活不分层」）——
    * 该语义保持：指挥模式下连 researcher 也不分层。
+   *
+   * ## ⚠️ researcher 只能派**只读**子 Agent（2026-09-20 实机验出的漏洞）
+   *
+   * 首版实现只做了「worker 禁止委派、researcher 放开」，**没限制 researcher 用哪个委派工具**。
+   * 实测后果（会话 `f1dab4d6` → `a192efcf`，depth 1 → 2）：只读调查员选了**写能力**的
+   * `subagent` 工具派孙 Agent ⇒ 孙 Agent 拿到 **worker 契约**（自我认知是"我能写"），
+   * 而它的沙箱仍是 `read-only`（继承自祖父）⇒ **人格与工具面再次矛盾**，实测该孙 Agent
+   * 第一步就撞上拒绝。这正是本轮要根除的那类错配。
+   *
+   * 修法：researcher 只保留 `subagent_research`（及其它**只读**研究实例），把写能力的
+   * `subagent` / `orchestrate` deny 掉——「只读的调查员只能派出只读的调查员」由工具面保证，
+   * 不依赖模型自觉。只读性因此**沿委派链闭合**：任何 read-only 源头以下的整棵子树都只读。
    */
   const delegationsDenied = conductorParent || composition.kind === 'worker'
-  const raw = delegationsDenied
-    ? mergeDelegationDeny(composition.toolFilter, delegationToolNames(childCtx))
+  const researchDeny = composition.kind === 'researcher'
+    ? writeCapableDelegationToolNames(childCtx)
+    : []
+  const raw = (delegationsDenied || researchDeny.length > 0)
+    ? mergeDelegationDeny(composition.toolFilter, [
+        ...(delegationsDenied ? delegationToolNames(childCtx) : []),
+        ...researchDeny,
+      ])
     : composition.toolFilter
   const toolFilter = raw === undefined ? undefined : narrowChildToolFilter(childCtx, raw)
   if (toolFilter !== undefined) childCtx.tools.restrict(toolFilter)
@@ -362,6 +380,23 @@ interface ConductorFace {
 function delegationToolNames(childCtx: Context): readonly string[] {
   const visible = corumVisibleToolNames(childCtx)
   return [...visible].filter(name => name === 'orchestrate' || name.startsWith('subagent'))
+}
+
+/**
+ * fork（corum）2026-09-20：子 scope 里**写能力**的委派工具名（researcher 必须被 deny 掉的那些）。
+ *
+ * 判据 = 委派工具全族 **减去**只读研究实例。为什么按「减去」而不是写死 `['subagent','orchestrate']`：
+ *   · `subagent_research*` 的命名可能演进（研究实例现在叫 `subagent_research`）；
+ *   · 用户自定义 preset 可能起别的只读实例名。
+ * 用「含 research 且不含 fork」识别只读实例过于脆弱，故采用**显式名单 + 可见面收敛**：
+ * 只要名字以 `subagent_research` 开头就视为只读（当前唯一的只读实例族），其余委派工具一律
+ * 视为写能力。名单最终仍要过 `narrowChildToolFilter` 收敛到真实可见面（未注册名会 fail-loud）。
+ *
+ * @param childCtx - 已 join 父 preset 的子 scope。
+ * @returns 需要 deny 的写能力委派工具名（可能为空）。
+ */
+function writeCapableDelegationToolNames(childCtx: Context): readonly string[] {
+  return delegationToolNames(childCtx).filter(name => !name.startsWith('subagent_research'))
 }
 
 /**
