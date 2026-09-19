@@ -64,4 +64,6 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'corum/artgen/download-progress', mode: 'emit' },
   { event: 'corum/ollama/download-progress', mode: 'emit' },
   { event: 'corum/artgen/job-progress', mode: 'emit' },
+  // 子 Agent 模型不可用 ⇒ 机制问用户（独立通路，不经 userQuestions）
+  { event: 'corum/model-ask/request', mode: 'waterfall' },
 ] as const satisfies readonly TypertForwardableEventEntry[]

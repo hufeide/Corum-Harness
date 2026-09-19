@@ -15,6 +15,14 @@
  * @module @corum/corum-api-remotes/corum-events
  */
 
+// waterfall 事件的 Scoped<Agent> this 参数类型（与 approval/request 同形）。
+// 经 dsh-user-approval 间接拉入 Agent 的 TypertLookupMap/TypertContextMap 合并；
+// Agent 类型本身从 dsh-agent 主入口拉（纯 type，无运行时值——本包 deps 没有
+// dsh-agent，但 dsh-user-approval 的 peerDependency 把它带进了编译面）。
+import type {} from '@deepseek-ai/dsh-user-approval'
+import type { Scoped } from '@deepseek-ai/dsh-scope'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+
 // ── 载荷类型（自包含重声明；事实源 = corum-agent/src/events.ts）──────────────
 
 /** 队列条目实体类型（轻量指针，全文在 ctx.project 共享实体）。 */
@@ -601,6 +609,36 @@ export interface OllamaDownloadProgressEvent {
   readonly etaSeconds?: number
 }
 
+// ── fork（corum）：模型不可用提问的独立通路 ──────────────────────────────────
+
+/** corum/model-ask/request 的提问载荷（host → client）。 */
+export interface CorumModelAskRequestEvent {
+  /** 哪个子 Agent（label，给人话上下文）。 */
+  readonly label: string
+  /** 用户为该角色配置的模型路由（不可用的那个）。 */
+  readonly configured: { provider: string; model: string }
+  /** 机制将采用的回退路由（主 Agent 的真实路由）。 */
+  readonly fallback: { provider: string; model: string }
+  /** 失败原因原文。 */
+  readonly cause: string
+  /** 该角色（决定永久档写 subagentModel 还是 researchModel）。 */
+  readonly role: 'worker' | 'research'
+  /** 可用的模型路由清单（供「永久改为别的模型」二级选择）。 */
+  readonly catalog?: readonly {
+    provider: string
+    label: string
+    models: readonly { model: string; label: string }[]
+  }[]
+}
+
+/** corum/model-ask/request 的用户决定（client → host）。 */
+export interface CorumModelAskOutcomeEvent {
+  /** 用户选中的档位。 */
+  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  /** 临时/永久路由（kind=temporary 或 permanent-route 时携带）。 */
+  readonly route?: { provider: string; model: string; reasoningEffort?: string }
+}
+
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────
 
 declare module '@deepseek-ai/cordis' {
@@ -647,6 +685,16 @@ declare module '@deepseek-ai/cordis' {
     'corum/ollama/download-progress'(data: OllamaDownloadProgressEvent): void
     /** corum/artgen/job-progress：文生图任务进度（P2-7）。 */
     'corum/artgen/job-progress'(data: ArtgenJobProgressEvent): void
+    /**
+     * corum/model-ask/request：子 Agent 模型不可用 ⇒ 机制问用户（独立通路，不经 userQuestions）。
+     * @param data - 失败事实 + 可用模型清单。
+     * @mode waterfall
+     */
+    'corum/model-ask/request'(
+      this: Scoped<Agent>,
+      data: CorumModelAskRequestEvent,
+      next: () => Promise<CorumModelAskOutcomeEvent>,
+    ): Promise<CorumModelAskOutcomeEvent>
   }
 }
 
@@ -689,6 +737,7 @@ export type CorumForwardedEvent =
   | 'corum/artgen/download-progress'
   | 'corum/ollama/download-progress'
   | 'corum/artgen/job-progress'
+  | 'corum/model-ask/request'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}

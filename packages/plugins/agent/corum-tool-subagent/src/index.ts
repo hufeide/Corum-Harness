@@ -28,6 +28,9 @@ import { ReasoningEffortId, boundContextSummary, createUserMessage } from '@deep
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
+import { finalAssistantOutput } from '@deepseek-ai/dsh-subagent'
 import {
   assertSubagentMaxDepth,
   parentAgentOptionsForDelegation,
@@ -348,6 +351,146 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
  * （见 `model-ask-run.ts`），并如实通知用户机制没能问到——绝不替用户做主。
  */
 export const CORUM_ASK_TIMEOUT_MS = 5 * 60 * 1000
+
+// ── fork（corum）：一次性子 Agent 失败后的「智能续跑」─────────────────────────
+//
+// 一次性子 Agent 失败后 session 写句柄已 close，无法 coldResume。但事件已持久化，
+// 可以**读出它做了什么**，把关键上下文注入到新子 Agent 的 prompt 里——新子 Agent
+// 「接着做」而非「从头做」，避免重复调用工具、丢失关键决策。
+
+/** 从失败子 Agent 提取的可续跑上下文。 */
+interface CorumFailedChildContext {
+  /** 原始任务目标（第一条 user message 的文本）。 */
+  readonly originalTask: string
+  /** 最后一轮 assistant 的非空输出（已完成的工作摘要）。 */
+  readonly lastOutput: string | undefined
+  /** 最新的 todo 计划（未完成的步骤）。 */
+  readonly todos: readonly { content: string; status: string }[] | undefined
+  /** 失败原因（turn/end 的 stopReason）。 */
+  readonly stopReason: string | undefined
+}
+
+/** `ctx.sessionQuery` 的窄能力面（红线 3）。 */
+interface CorumSessionQueryFace {
+  observeSession(
+    id: SessionId,
+    options: { signal?: AbortSignal },
+  ): Promise<{ events: readonly SessionEvent[]; inheritedEventCount: number }>
+}
+
+/**
+ * 从失败子 Agent 的持久化 session 提取可续跑上下文。
+ *
+ * 读子 Agent 自己的事件后缀（跳过 seed 前缀），用 `foldConsumedWork` 找最后
+ * 一轮的 turn/end（拿 stopReason），用 `finalAssistantOutput` 拿最后的 assistant
+ * 输出，从 `tool/call` 里提取 todo 状态。
+ *
+ * @param ctx - host context（取 sessionQuery）。
+ * @param childSessionId - 失败子 Agent 的 session id。
+ * @param signal - 取消信号。
+ * @returns 提取的上下文；session 不存在/读失败时返回 undefined（退化为盲重跑）。
+ */
+async function corumExtractFailedChildContext(
+  ctx: Context,
+  childSessionId: string,
+  signal: AbortSignal,
+): Promise<CorumFailedChildContext | undefined> {
+  const query = ctx.get('sessionQuery') as unknown as CorumSessionQueryFace | undefined
+  if (query === undefined) return undefined
+  try {
+    const observation = await query.observeSession(childSessionId as SessionId, { signal })
+    const events = observation.events
+    const own = events.slice(observation.inheritedEventCount)
+
+    // 原始任务 = 第一条 user/message 的文本内容
+    let originalTask = ''
+    for (const event of own) {
+      if (event.type === 'user/message') {
+        const content = (event.data as { content?: readonly ContentBlock[] }).content
+        if (content !== undefined) {
+          originalTask = content
+            .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+            .map(b => b.text)
+            .join('')
+        }
+        break
+      }
+    }
+
+    // 最后一轮 assistant 输出
+    const lastOutput = finalAssistantOutput(own)
+    const lastOutputText = lastOutput === undefined
+      ? undefined
+      : lastOutput
+          .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+          .map(b => b.text)
+          .join('')
+
+    // 最新 todo 状态（从 tool/call name=todo_write 的 arguments 里取最后一次调用）
+    let todos: CorumFailedChildContext['todos']
+    for (const event of [...own].reverse()) {
+      if (event.type === 'tool/call' && (event.data as { name?: string }).name === 'todo_write') {
+        try {
+          const args = JSON.parse((event.data as { arguments?: string }).arguments ?? '{}') as {
+            todos?: readonly { content: string; status: string }[]
+          }
+          if (args.todos !== undefined) todos = args.todos
+        } catch { /* 解析失败略过 */ }
+        break
+      }
+    }
+
+    // 失败原因
+    const { end } = foldConsumedWork(own)
+    const stopReason = end === undefined ? undefined : String((end.data as { reason?: { kind?: string } }).reason?.kind)
+
+    return { originalTask, lastOutput: lastOutputText, todos, stopReason }
+  } catch {
+    // session 不存在/读失败 ⇒ 退化为盲重跑（不阻塞重跑路径）。
+    return undefined
+  }
+}
+
+/**
+ * 构造「接着做」的增强 prompt。
+ *
+ * 把失败子 Agent 的上下文注入到新子 Agent 的原始 prompt 前面，让新子 Agent
+ * 知道：目标是什么、已经做了什么、做到哪了、为什么失败了。
+ *
+ * @param originalPrompt - 原始委派的 prompt。
+ * @param context - 从失败子 Agent 提取的上下文。
+ * @returns 增强后的 prompt（前缀 + 原始 prompt）。
+ */
+function corumBuildResumePrompt(
+  originalPrompt: ContentBlock[],
+  context: CorumFailedChildContext,
+): ContentBlock[] {
+  const sections: string[] = [
+    'CONTEXT FROM A PREVIOUS ATTEMPT THAT FAILED DUE TO MODEL UNAVAILABILITY:',
+    '',
+    `Original task: ${context.originalTask || '(not available)'}`,
+  ]
+  if (context.lastOutput !== undefined && context.lastOutput.length > 0) {
+    sections.push('', `Work completed before failure:\n${context.lastOutput}`)
+  }
+  if (context.todos !== undefined && context.todos.length > 0) {
+    const remaining = context.todos.filter(t => t.status !== 'completed')
+    if (remaining.length > 0) {
+      sections.push('', 'Remaining steps from the plan:', ...remaining.map(t => `- [${t.status}] ${t.content}`))
+    }
+  }
+  if (context.stopReason !== undefined) {
+    sections.push('', `The previous attempt ended with: ${context.stopReason}`)
+  }
+  sections.push(
+    '',
+    'INSTRUCTION: Continue from where the previous attempt left off. Do NOT repeat work that was already completed. Use the context above to avoid redundant tool calls and build on the progress already made.',
+    '',
+    '---',
+    '',
+  )
+  return [{ type: 'text', text: sections.join('\n') }, ...originalPrompt]
+}
 
 /**
  * fork（corum）2026-09-18：**可带路线覆盖的续跑**所需的最小能力面。
@@ -2044,6 +2187,8 @@ export function apply(ctx: Context, config: Config): void {
         let configuredFailure: string | undefined
         /** 最终 settle 的那次 run 的 id（通知标题用它；重跑轮会覆盖成新 run）。 */
         let settledRunId = ''
+        /** fork（corum）：失败子 Agent 的上下文（attempt 0 失败后提取，attempt 1 注入）。 */
+        let failedChildContext: CorumFailedChildContext | undefined
         for (let attempt = 0; attempt < 2; attempt++) {
           if (attempt === 0) {
             const llm = runtimeCtx.get('llm')
@@ -2086,6 +2231,12 @@ export function apply(ctx: Context, config: Config): void {
                 args.notifyParent !== false,
               )
               if (asked.route === undefined) throw error
+              // fork（corum）：提取失败子 Agent 的上下文，注入到重跑的 prompt 里——
+              // 新子 Agent「接着做」而非「从头做」，避免重复调用工具。
+              failedChildContext = await corumExtractFailedChildContext(ctx, settledRunId, exec.signal)
+              if (failedChildContext !== undefined) {
+                request.prompt = corumBuildResumePrompt(request.prompt, failedChildContext)
+              }
               // 用主 Agent 路由重跑：清掉角色锁的 agentOptions（缺失时官方 seam 用父路由）。
               delete request.agentOptions
               continue
