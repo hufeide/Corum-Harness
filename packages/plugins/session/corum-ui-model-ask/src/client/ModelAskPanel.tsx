@@ -60,22 +60,27 @@ const CHIP_ICON: Readonly<Record<ModelAskKind, typeof Zap>> = {
 }
 
 /**
- * 内嵌模型选择：**行恒常显示，只有列表按需展开**。
+ * 内嵌模型选择：**行恒常显示，列表只在选中「永久改指定模型」时展开**。
  *
- * 为什么行不能藏（设计稿判据）：`picker` 是 `panel-expanded` 的固定子节点，其 lbl 原文
- * 「指定模型：选『永久改指定模型』时展开选择」本身就是「此刻收起、选了才展开」的说明——
- * 设计稿把说明写在行上，正是因为行一直看得见。整行按档位隐藏会让面板少一块、高度抖动。
+ * 两处判据都来自设计稿本身：
+ * - 行不藏：`picker` 是 `panel-expanded` 的固定子节点（整行按档位隐藏会让面板少一块、
+ *   高度抖动）。
+ * - 列表由**档位**驱动：该行 lbl 原文是「指定模型：选『永久改指定模型』时展开选择」——
+ *   「选了才展开」写在这行上。故行本身不是自由折叠控件：未选该档时不可点、也不显示箭头
+ *   展开态，避免用户在没选档位时先挑模型（挑完却发现应用不了，白操作一场）。
  */
-function ModelPicker({ catalog, picked, open, onToggle, onPick }: {
+function ModelPicker({ catalog, picked, kind, onPick }: {
   catalog: readonly ModelAskCatalogProvider[]
   picked: PickedRoute | undefined
-  open: boolean
-  onToggle: () => void
+  /** 当前选中档位（只有 permanent-route 会展开列表）。 */
+  kind: ModelAskKind | undefined
   onPick: (route: PickedRoute) => void
 }) {
+  // 展开态 = 「选中了永久改指定模型」这个事实本身，不是独立 UI 状态：档位一换就自动收起。
+  const open = modelAskNeedsRoute(kind)
   return (
     <>
-      <button type="button" className={css.picker} onClick={onToggle}>
+      <div className={css.picker} data-open={open || undefined} aria-expanded={open}>
         <span className={css.pickerGlyph}><Cpu size={11} /></span>
         <span className={css.pickerLabel}>
           {picked === undefined
@@ -85,7 +90,7 @@ function ModelPicker({ catalog, picked, open, onToggle, onPick }: {
         <span className={css.pickerGlyph}>
           {open ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
         </span>
-      </button>
+      </div>
       {open && (
         <div className={css.pickerList}>
           {catalog.length === 0 && <div className={css.pickerEmpty}>没有可用的模型</div>}
@@ -125,7 +130,6 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [kind, setKind] = useState<ModelAskKind | undefined>(undefined)
   const [picked, setPicked] = useState<PickedRoute | undefined>(undefined)
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [applying, setApplying] = useState(false)
   const { request } = pending
 
@@ -201,12 +205,12 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
           })}
         </div>
 
-        {/* picker 行恒常显示（设计稿的 panel-expanded 固定子节点）；列表按需展开。 */}
+        {/* picker 行恒常显示（设计稿的 panel-expanded 固定子节点）；
+            列表由档位驱动展开（选中「永久改指定模型」时）。 */}
         <ModelPicker
           catalog={request.catalog}
           picked={picked}
-          open={pickerOpen}
-          onToggle={() => setPickerOpen(v => !v)}
+          kind={kind}
           onPick={setPicked}
         />
 

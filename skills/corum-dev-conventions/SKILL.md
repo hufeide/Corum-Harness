@@ -42,6 +42,8 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
 - **写工具面 = `write` + `edit`**：`str_replace_editor` 已于 2026-09-11 退场（与 `edit` 职责重叠、失败率最高），新增第三套写工具会拉高整体失败率。
 - **`${VAR}（` 这类「变量后紧跟全角字符」**在 bash 里会吞掉变量名 → `set -u` 报 unbound variable 且报错乱码；变量后必须留空格或用引号。
 - **CSS 不要写 `-webkit-backdrop-filter`**：Chromium 已删该别名，构建会保留最后一条 → 玻璃模糊静默全灭（`docs/LESSONS.md` §1.1b）。只写标准属性。
+- **新 UI 的 `font-size` 必须走 `calc(<N>px * var(--corum-ui-font-scale, 1))`**（2026-09-19 用户报「面板字体似乎小一些」+「字体大小是跟随设置面板的」）：全仓 615 处已迁，裸 px 是唯一不随「外观 → 界面字号」（默认 14px / 12–17）变的那块。图标尺寸保持固定 px（同族插件如此）。**新 UI 插件请照抄 `corum-ui-model-ask/tests/design-fidelity.spec.ts` 里那条守卫。**
+- **设计稿不一定是实物尺寸**——并排对比的 mockup 比真实界面窄，其 px（尺寸与字号）都是缩略值。判据：看**共享组件在该稿里的实例宽度 vs 组件定义宽度**（方案C 的 `Chat Input` 实例 372，定义 720 = 提问卡区域用的真实宽 ⇒ ~0.52× 缩略稿）。缩略稿的字号要映射到设计系统自己的字阶（Design System 区域的 `D1·34 H1·24 H2·20 H3·16 B1·14 B2·13 UI·12 Meta·11 Cap·10`），并对照**已实现的同族面板**（提问卡/审批卡正文 13–15px）。直接照抄缩略稿 px ⇒ 比周围界面明显小一截。见 `docs/dev-conventions.md` §13.6。
 - **`fs` 服务重复注册**：`fs-local` 必须走 realm 私有符号（`isolate: fs`），否则与 host 的 fs-sandbox 抢 root 导致 mount 失败。
 - **官方 preset 的本地副本会被包内置版本静默遮蔽** → `boot.ts` 必须带 `includeShippedRoot: false`（守卫 §17 断言）。
 - **技能根只有一处**：corum 只读 `<CORUM_HOME>/skills/<绑定名>`，不读项目 `.dsh/skills`、`.agents/skills`、`~/.agents/skills`、打包内置根（`includeDefaultRoots: false`）。技能进 corum 只有一条路：设置 → 技能 → 导入技能。

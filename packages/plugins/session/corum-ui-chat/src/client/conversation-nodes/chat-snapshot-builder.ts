@@ -396,13 +396,20 @@ function presentationPosition(
  * 2026-09-09 用户反馈「卡片展示的时机不对，先显示了卡片，然后才出现工具调用
  * subagent，其实卡片已经代表了」——`subagent`/`subagent_*` 的 `tool/call` 同时
  * 产出 SubagentCard（`subagent-call` 节点）与通用 `tool-call` 节点，后者纯冗余。
- * 规则：delegation 调用隐藏通用工具行，**但失败（isError）时保留**——失败信息只
- * 在工具结果里，卡片此时只显示 Done/Running，藏掉就看不见报错了。
+ *
+ * ⚠️ 2026-09-19 用户定调：**「这种应该直接以卡片状态显示为主，当前再次出现工具调用
+ * 失败有点多余」**——故 delegation 的通用行**一律隐藏（含 isError）**。
+ * 此前「isError 时保留」的理由是「失败信息只在工具结果里，卡片此时只显示
+ * Done/Running」；该前提已不成立：卡片现在
+ *   ① 用子会话终态翻 Failed（`subagentProgressStateOf`），
+ *   ② 在子会话**从未创建**（spawn 期预检失败）时用父侧 `tool/result` 的 `isError`
+ *      翻 Failed，并把失败原文摊在卡上（`SubagentCard` 的 `.failReason`）。
+ * 两处合起来覆盖了通用行原本兜的那两种情形 ⇒ 保留它只是把同一件失败说两遍。
  *
  * fork（corum，2026-09-10）：同一规则扩到 `orchestrate`——它同样有自己的卡片
  * （`orchestrate-call` → OrchestrateCard），通用工具行只是那串 JSON 参数。
  * orchestrate 卡片自身会显示逐任务失败（分支 chip + 集成者状态），但整体抛错
- * 时卡片仍需要通用行兜底，故 isError 一律保留。
+ * 时卡片仍需要通用行兜底，故 orchestrate 的 **isError 行仍保留**。
  * @param node - one materialized Chat Node.
  * @returns whether the generic tool row duplicates a delegation/orchestration card.
  */
@@ -412,8 +419,11 @@ function isRedundantDelegationRow(node: ChatConversationViewNode): boolean {
   const root = (candidate.data as { root: ToolCallBlock }).root
   const name = 'kind' in root ? root.call?.name : root.name
   if (name === undefined) return false
-  if (!isSubagentDelegationTool(name) && name !== 'orchestrate') return false
-  return !('kind' in root && root.isError === true)
+  const failed = 'kind' in root && root.isError === true
+  // 子 Agent 卡片自带失败态与失败原文 ⇒ 无论成败都隐藏通用行。
+  if (isSubagentDelegationTool(name)) return true
+  if (name === 'orchestrate') return !failed
+  return false
 }
 
 /**

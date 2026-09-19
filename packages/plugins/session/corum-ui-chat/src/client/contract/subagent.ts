@@ -60,6 +60,16 @@ export interface SubagentInvocation {
   readonly mode?: 'foreground' | 'background'
   /** Renderer-polled child progress (not folded by the Definition). */
   readonly progress?: SubagentProgressSnapshot
+  /**
+   * 父侧工具结果的失败原文（该条 `tool/result` 的 `isError` 内容）。
+   *
+   * 为什么卡片需要它（2026-09-19 用户实测：失败后卡片仍显示 Running）：卡片的进度
+   * 数据源**完全绑定 `childSessionId`**，而**模型不可用在 spawn 期预检失败时子会话
+   * 从未创建**——没有子会话就没有进度帧、没有终态、没有 id 可关联，`progress` 恒
+   * `undefined` ⇒ `subagentProgressStateOf({})` 恒返回 `'running'`。父会话日志里那条
+   * `tool/result` 是**唯一**能证明「这次委派失败了」的信号，故折进 invocation。
+   */
+  readonly toolError?: string
 }
 
 /** One matched child Session's latest observed progress, folded from its event window. */

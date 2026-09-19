@@ -344,23 +344,30 @@ export type SubagentProgressState = 'running' | 'completed' | 'aborted' | 'faile
 export type SubagentTerminalState = Exclude<SubagentProgressState, 'running'>
 
 /**
- * 进度投影 → 展示态（**唯一判据家**）。输入即宿主投影的三个字段，**优先级从高到低**：
+ * 进度投影 → 展示态（**唯一判据家**）。输入的**优先级从高到低**：
  * 1. `stopReason`：`turn/end.reason.kind` 推出的**权威**终局原因——有它就以它记账；
  * 2. `interrupted`：宿主判定「这个子会话半途失去运行」（进程被杀/重启把未闭合的
  *    `turn/start` 留在 log 里；见 `corum-agent/src/agent-service.ts` 的判据注释）。
  *    宿主**只在拿不到 `stopReason` 时**才置它，故它是「没有原因时的诚实补标」，
  *    而不是用来覆盖权威原因的；它也优先于下面的 done 兜底（这类条目 done 也是 true）。
- * 3. `done`：turn 已闭合/宿主已判终局、但拿不到原因（历史条目、冷恢复）→ 按「已完成」
+ * 3. `delegationFailed`：父侧 `tool/result` 报错（`isError`）——**子会话从未创建**时
+ *    的唯一失败证据（2026-09-19 用户实测：模型不可用在 spawn 期预检失败，子会话不存在，
+ *    故没有任何 stopReason / interrupted 可给，卡片就会永远转圈）。它排在 `done` 之前：
+ *    一次已报错的委派不可能「已完成」。
+ * 4. `done`：turn 已闭合/宿主已判终局、但拿不到原因（历史条目、冷恢复）→ 按「已完成」
  *    兜底（与 BUG-31 的折叠判据同源：不能因为拿不到原因就永远算运行中）。
  */
 export function subagentProgressStateOf(progress: {
   readonly stopReason?: SubagentStopReason
   readonly done?: boolean
   readonly interrupted?: boolean
+  /** 父侧工具结果报错（本次委派失败，且子会话可能从未创建）。 */
+  readonly delegationFailed?: boolean
 }): SubagentProgressState {
   const outcome = subagentOutcomeOf(progress.stopReason)
   if (outcome !== undefined) return outcome
   if (progress.interrupted === true) return 'interrupted'
+  if (progress.delegationFailed === true) return 'failed'
   return progress.done === true ? 'completed' : 'running'
 }
 

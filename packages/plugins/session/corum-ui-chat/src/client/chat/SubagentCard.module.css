@@ -235,6 +235,36 @@
   text-overflow: ellipsis;
 }
 
+/* 失败原因（恒展开区，2026-09-19 用户定调「以卡片状态为主」）：委派失败时把父侧
+   tool/result 原文摊在卡上。有了它，瀑布里那条重复的通用工具行才能收掉
+   （见 chat-snapshot-builder 的 isRedundantDelegationRow）。
+   用错误档配色，与卡片自身的 failed chip 同源。 */
+.failReason {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: 10px;
+}
+
+.failIcon {
+  flex: none;
+  margin-top: calc(1px * var(--corum-density-scale, 1));
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.failText {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-word;
+}
+
 /* 任务详情（展开区，设计稿「任务详情」）：file-text 标题 + 父注入提示词全文。 */
 .detail {
   display: flex;

@@ -213,7 +213,10 @@
 
 /* picker：$glass-2 底 + pad[7,10] + gap6 + r10 + **横排 ai=center**；
    ic 11×11 $label-tertiary + lbl(fill_container, 12px $label-tertiary) + chev 11×11。
-   行高 16px（配 12px 字）⇒ 高 16 + pad14 = 30，与设计稿 28 同量级。 */
+   行高 16px（配 12px 字）⇒ 高 16 + pad14 = 30，与设计稿 28 同量级。
+
+   这是一行**说明/状态行**，不是按钮：列表展开由档位驱动（选中「永久改指定模型」），
+   故默认不设 pointer 光标、不设 hover 态——可点的假象会诱使用户在没选档位时先挑模型。 */
 .picker {
   display: flex;
   flex-direction: row;
@@ -228,9 +231,14 @@
   font-family: inherit;
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 16px;
-  cursor: pointer;
   text-align: left;
   box-sizing: border-box;
+}
+
+/* 展开态（已选中「永久改指定模型」）：描边提亮，表明现在是可挑选的。 */
+.picker[data-open] {
+  outline: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  outline-offset: -1px;
 }
 
 /* picker 图标/chev 容器 11×11。 */

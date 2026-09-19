@@ -175,11 +175,22 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
     expect(picker).toContain('align-items: center')
   })
 
-  it('★★ picker 行**恒常显示**，只有列表按需展开（设计稿的 lbl 文案就是这条判据）', () => {
-    // 设计稿 lbl 原文「指定模型：选『永久改指定模型』时展开选择」——说明写在行上，
-    // 正因这一行一直看得见。整行按档位隐藏会让面板少一块、高度抖动（实测过的偏差）。
+  it('★★ picker 行**恒常显示**，列表**由档位驱动**展开（用户 2026-09-19 实测反馈）', () => {
+    // 两条判据都来自设计稿：
+    // ① 行不藏：picker 是 panel-expanded 的固定子节点（整行按档位隐藏会让面板少一块、
+    //    高度抖动）。
+    // ② 列表由档位驱动：lbl 原文「指定模型：选『永久改指定模型』时展开选择」——
+    //    「选了才展开」写在这行上。做成自由折叠控件会让用户在没选档位时先挑模型，
+    //    挑完才发现应用不了（用户实测反馈的就是这个）。
     expect(TSX).not.toContain('{needsRoute && (')
     expect(TSX).toContain('<ModelPicker')
+    // 展开态源自档位，不是一个独立的 UI state。
+    expect(TSX).toContain('const open = modelAskNeedsRoute(kind)')
+    expect(TSX).not.toContain('pickerOpen')
+    // 行本身不是按钮（可点的假象会诱使先挑模型）。
+    const picker = TSX.slice(TSX.indexOf('function ModelPicker'), TSX.indexOf('export function ModelAskPanel'))
+    expect(picker).toContain('className={css.picker}')
+    expect(picker).not.toContain('<button type="button" className={css.picker}')
   })
 
   it('★ 应用按钮：$brand-primary + pad[6,12] + gap5 + r8 + 10px/700', () => {

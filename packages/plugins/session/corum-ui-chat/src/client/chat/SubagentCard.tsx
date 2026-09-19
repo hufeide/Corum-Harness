@@ -17,7 +17,7 @@
 // cordis 服务消费（统一事件中心二期 window 全局迁移；同 bundle 模块级
 // chatRuntimeRef 拿服务实例，见 ../chat-runtime.ts）。
 import { memo, useEffect, useState } from 'react'
-import { ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, GitFork, Loader, Search, Wrench, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, GitFork, Loader, Search, Wrench, X } from 'lucide-react'
 import { subagentProgressStateOf, subagentStateChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentChangeSummary, SubagentDelegationRole, SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
@@ -332,7 +332,7 @@ function useLiveChildIdentity(
 /** 一个 delegation 召唤的卡片（进度由 'corum/subagent/progress' 推送注入，见 useChildProgress）。 */
 function SubagentRow({
   callId, description, prompt: delegationPrompt, childSessionId: foldedChildSessionId,
-  mode: foldedMode, role, t,
+  mode: foldedMode, role, toolError, t,
 }: {
   callId: string
   description: string | undefined
@@ -341,6 +341,8 @@ function SubagentRow({
   mode: 'foreground' | 'background' | undefined
   /** 委派角色（父侧工具名派生；见 SubagentInvocation.role）。 */
   role: SubagentDelegationRole | undefined
+  /** 父侧 tool/result 的失败原文（子会话从未创建时的唯一失败证据）。 */
+  toolError: string | undefined
   t: ChatNodeViewProps<'subagent-call'>['t']
 }) {
   // hooks 顺序恒定（React #310）：必须在任何 early return 之前。
@@ -356,8 +358,16 @@ function SubagentRow({
    * 不认 `interrupted` 卡片会永远 Running（2026-09-12 用户实测「search agent 结束后
    * 卡片仍然是 running」）；而在卡片一处自判、会话条另判一次，就是「同一终态两处
    * 不同源」（花名册把「已中断」算成「已完成」正是这么来的）。
+   *
+   * `delegationFailed`（2026-09-19 用户实测：失败后卡片仍 Running）：模型不可用在
+   * **spawn 期预检失败**时子会话**从未创建** ⇒ 没有进度、没有终态、没有 id 可关联，
+   * `progress` 恒 undefined。此时唯一证据是父侧那条报错的 `tool/result`。它仍走同一个
+   * 判据家（不在卡片里另判一次），单源不变。
    */
-  const state = subagentProgressStateOf(progress ?? {})
+  const state = subagentProgressStateOf({
+    ...progress ?? {},
+    ...toolError === undefined ? {} : { delegationFailed: true },
+  })
   const running = state === 'running'
   const chipTone = subagentStateChipTone(state)
 
@@ -473,9 +483,18 @@ function SubagentRow({
           <span className={css.stepText}>{runningStepText(progress, delegationPrompt, t)}</span>
         </div>
       )}
-      {/* ② 子 Agent 计划段（展开区）：子会话 todo/write 折叠列表，无计划时不渲染。 */}
+      {/* ② 失败原因（2026-09-19 用户定调「以卡片状态为主」）：委派失败时把父侧
+          tool/result 的原文直接摊在卡上，卡片才能替代那条通用工具行——否则藏掉工具行
+          用户就看不到为什么失败。恒展开（不是折叠区）：失败是需要立刻看见的事。 */}
+      {toolError !== undefined && (
+        <div className={css.failReason}>
+          <AlertTriangle size={13} strokeWidth={2} className={css.failIcon} />
+          <span className={css.failText}>{toolError}</span>
+        </div>
+      )}
+      {/* ③ 子 Agent 计划段（展开区）：子会话 todo/write 折叠列表，无计划时不渲染。 */}
       {expanded && progress?.todos !== undefined && progress.todos.length > 0 && <SubagentPlan todos={progress.todos} />}
-      {/* ③ 任务详情（展开区）：父 Agent 注入的提示词全文，仅展开时显示。 */}
+      {/* ④ 任务详情（展开区）：父 Agent 注入的提示词全文，仅展开时显示。 */}
       {expanded && (
         <div className={css.detail}>
           <div className={css.detailHead}>
@@ -517,6 +536,7 @@ export const SubagentCard = memo(function SubagentCard({ node, t }: ChatNodeView
           childSessionId={invocation.childSessionId}
           mode={invocation.mode}
           role={invocation.role}
+          toolError={invocation.toolError}
           t={t}
         />
       ))}

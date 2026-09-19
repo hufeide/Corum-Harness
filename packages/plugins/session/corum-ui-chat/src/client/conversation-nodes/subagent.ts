@@ -3,6 +3,7 @@ import type {
   ConversationMatch, ConversationNodeContext, ConversationNodeDefinition,
 } from '@corum/corum-ui-conversation/client'
 import type { SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import type {} from '@deepseek-ai/dsh-tools/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import { subagentDelegationRoleOf } from '@corum/corum-api-remotes/corum-events'
@@ -27,7 +28,6 @@ interface SubagentCallState {
 }
 
 type ConversationEvent = Parameters<ConversationNodeDefinition['match']>[0]
-
 /**
  * Best-effort correlation of one delegation call to its child Session:
  * durable `origin: 'subagent'` + direct parent lineage + nearest summary row
@@ -91,13 +91,44 @@ function fallbackInvocation(context: ConversationNodeContext<SubagentCallState>)
   return match === undefined ? undefined : startInvocation(match)
 }
 
+/**
+ * 从一条父侧 `tool/result` 取失败原文（成功/无结果返回 undefined）。
+ *
+ * 为什么卡片要读父侧工具结果：卡片的进度数据源完全绑定 `childSessionId`，而模型不可用
+ * 在 **spawn 期预检失败**时子会话**从未创建** —— 没有子会话就没有进度帧也没有终态，
+ * `progress` 恒 undefined，判据家 `subagentProgressStateOf({})` 恒返回 `'running'`，
+ * 卡片于是永远转圈（2026-09-19 用户实测）。父会话日志里这条 `tool/result` 是唯一能
+ * 证明「本次委派失败了」的信号。
+ *
+ * @param match - one matched Conversation event.
+ * @returns 失败原文；该结果不是错误时为 undefined。
+ */
+function delegationFailure(match: ConversationMatch): string | undefined {
+  if (match.event.type !== 'tool/result') return undefined
+  const result = match.event.data.message.content[0]
+  if (result.isError !== true) return undefined
+  // 只取文本块：失败原文由 corum-tool-subagent 的 throw 组装，含「为什么 + 下一步」。
+  const text = result.content
+    .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text)
+    .join('')
+  return text.trim() === '' ? 'delegation failed' : text.trim()
+}
+
 /** This Context's invocation, re-correlated against the live session list. */
 function currentInvocation(
   context: ConversationNodeContext<SubagentCallState>,
   summaries: Readonly<Record<string, SessionSummary>>,
 ): SubagentInvocation | undefined {
   const invocation = context.state?.invocation ?? fallbackInvocation(context)
-  return invocation === undefined ? undefined : refreshCorrelation(invocation, summaries)
+  if (invocation === undefined) return undefined
+  const correlated = refreshCorrelation(invocation, summaries)
+  // 失败原文以父侧日志为权威（每次重算时取最新匹配，冷喂也能从 matches 拿到）。
+  const failure = context.matches
+    .map(delegationFailure)
+    .filter((value): value is string => value !== undefined)
+    .at(-1)
+  return failure === undefined ? correlated : { ...correlated, toolError: failure }
 }
 
 /**
@@ -118,13 +149,22 @@ export function subagentTurnDefinition(
   return {
     kind: 'subagent-progress',
     target: 'chat',
+    // ⚠️ `tool/result` 必须收（2026-09-19）：它是「本次委派失败」在父日志里的唯一
+    // 证据，卡片在子会话从未创建（spawn 期预检失败）时只能靠它翻成失败态。故 match 不
+    // 再只认 `tool/call`——`role: 'update'` 让这些结果进 `context.matches`，由
+    // buildViewNode 重算时折进 `invocation.toolError`。
     match: (event: ConversationEvent) => {
-      if (event.type !== 'tool/call' || !isSubagentDelegationTool(event.data.name)) return null
-      return { id: String(event.data.callId), role: 'start' }
+      if (event.type === 'tool/call' && isSubagentDelegationTool(event.data.name)) {
+        return { id: String(event.data.callId), role: 'start' }
+      }
+      if (event.type === 'tool/result' && isAppendSurfaceEvent(event)) {
+        return { id: String(event.data.message.source.callId), role: 'update' }
+      }
+      return null
     },
     start: (_context, match) => ({ invocation: startInvocation(match) }),
-    // 逐次成节点后本 Context 不再接收后续事件；保留 no-op 以满足 Definition 契约
-    // （子会话 id 的相关性由 buildViewNode 每次重算时对 live sessions 列表求）。
+    // 本 Context 的 state 只承载 start 的 invocation；进度与失败原文都在 buildViewNode
+    // 重算时求（进度对 live sessions 列表求，失败原文对 matches 求），故这里是 no-op。
     update: context => context.state,
     buildViewNode: (context) => {
       const location = context.start?.location ?? context.matches.at(-1)?.location
