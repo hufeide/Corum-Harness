@@ -230,6 +230,35 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(tempCase).toContain('route: { ...fallback }')
   })
 
+  it('★★ 永久档必须**同时**写会话级覆盖（2026-09-19 实机：只写预设 ⇒ 第二次委派照旧提问）', () => {
+    // 根因：预设经 compilePreset 注入 corum-tool-subagent 的 `config.model`，那是
+    // **插件实例创建时**的静态值。`persistProfileAndRecompile` 清的是 corum-agent 侧的
+    // Agent 缓存并重编译产物，**早已在跑的插件实例不会重建** ⇒ 本进程内
+    // `corumEffectiveModel = corumSessionOverride ?? config.model` 仍落回坏模型，
+    // 失败后再次提问（用户实测的现象）。
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    for (const branch of ['permanent-follow', 'permanent-route']) {
+      const start = source.indexOf(`case '${branch}':`)
+      expect(start, `找不到 ${branch} 分支`).toBeGreaterThan(-1)
+      const next = source.indexOf('case ', start + 1)
+      const body = source.slice(start, next === -1 ? undefined : next)
+      // 写预设之后必须回填会话级覆盖。
+      expect(body, `${branch} 只写预设、没回填会话级覆盖 ⇒ 当前进程仍然拿坏模型`)
+        .toContain('setModelOverride')
+      // 且必须返回 route，否则上游 `asked.route === undefined` 会 throw（任务不续跑）。
+      expect(body, `${branch} 没返回生效路由 ⇒ 上游 throw，任务不会继续`).toContain('override:')
+    }
+  })
+
+  it('★ 永久档写失败时不得留下会话级覆盖（否则本次会话静默生效、用户以为改了配置）', () => {
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    const start = source.indexOf("case 'permanent-route':")
+    const body = source.slice(start, source.indexOf('case ', start + 1))
+    // 失败分支必须清覆盖；只有 result.ok 才写。
+    expect(body).toMatch(/if \(result\.ok\) deps\.state\.setModelOverride/)
+    expect(body).toMatch(/else deps\.state\.clearModelOverride/)
+  })
+
   it('★ 永久档走 ctx.get(corumAgent)（2026-09-18 实机：ctx.root.get 取不到 ⇒ 永久档静默失败）', () => {
     expect(SRC).toContain("ctx.get('corumAgent')")
     // root.get 是那次实机的真因，钉住不许回潮。

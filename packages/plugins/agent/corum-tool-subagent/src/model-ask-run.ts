@@ -241,24 +241,37 @@ export function applyCorumModelDecision(
     }
     case 'permanent-follow': {
       const result = persistCorumModelChoice(deps.profile, sessionId, facts, undefined, logger)
-      // 永久改成「跟随主 Agent」= 该角色不再有锁定路由 ⇒ 当前会话的临时覆盖已无意义，清掉。
-      deps.state.clearModelOverride(sessionId)
+      // ★ 永久档必须**同时**写会话级覆盖（2026-09-19 实机：只写预设 ⇒ 第二次委派照旧
+      // 拿坏模型、照旧提问）。根因：预设经 compilePreset 注入 corum-tool-subagent 的
+      // `config.model`，而那是**插件实例创建时**的静态值——`persistProfileAndRecompile`
+      // 清了 corum-agent 侧的 Agent 缓存并重编译产物，但**早已在跑的插件实例不会重建**，
+      // 于是本进程内 `corumEffectiveModel = corumSessionOverride ?? config.model` 仍落回
+      // 那个坏模型。会话级覆盖是当前进程里唯一能立即生效的通路；预设负责新会话。
+      if (result.ok) deps.state.setModelOverride(sessionId, { ...facts.fallback })
+      else deps.state.clearModelOverride(sessionId)
       return {
         ...base,
         persisted: result.ok,
+        // 让调用方拿到生效路由（重跑要用它；永久档此前返回 undefined ⇒ 上游不重跑）。
+        ...result.ok ? { override: { ...facts.fallback } } : {},
         summary: result.ok
-          ? `Your Agent preset was updated permanently: its ${facts.role} child-Agent model now follows the main Agent (this overrides the unavailable ${facts.configured.provider}/${facts.configured.model}). Re-issuing the delegation will run on your own route; new sessions keep this.`
+          ? `Your Agent preset was updated permanently: its ${facts.role} child-Agent model now follows the main Agent (this overrides the unavailable ${facts.configured.provider}/${facts.configured.model}). `
+            + `This session now runs on ${facts.fallback.provider}/${facts.fallback.model}; new sessions keep the preset change.`
           : `You chose to make the child Agent follow the main Agent, but the mechanism could NOT save it — reason: ${result.reason}. Change it manually in Settings → Agents.`,
       }
     }
     case 'permanent-route': {
       const result = persistCorumModelChoice(deps.profile, sessionId, facts, decision.route, logger)
-      deps.state.clearModelOverride(sessionId)
+      // ★ 同 permanent-follow：写预设只对新会话生效，当前进程必须补会话级覆盖。
+      if (result.ok) deps.state.setModelOverride(sessionId, { ...decision.route })
+      else deps.state.clearModelOverride(sessionId)
       return {
         ...base,
         persisted: result.ok,
+        ...result.ok ? { override: { ...decision.route } } : {},
         summary: result.ok
-          ? `Your Agent preset was updated permanently: its ${facts.role} child-Agent model is now ${decision.route.provider}/${decision.route.model} (replacing the unavailable ${facts.configured.provider}/${facts.configured.model}). Re-issuing the delegation will run on that model; new sessions keep it.`
+          ? `Your Agent preset was updated permanently: its ${facts.role} child-Agent model is now ${decision.route.provider}/${decision.route.model} (replacing the unavailable ${facts.configured.provider}/${facts.configured.model}). `
+            + `This session now runs on that model; new sessions keep the preset change.`
           : `You chose ${decision.route.provider}/${decision.route.model} permanently, but the mechanism could NOT save it — reason: ${result.reason}. Change it manually in Settings → Agents.`,
       }
     }
