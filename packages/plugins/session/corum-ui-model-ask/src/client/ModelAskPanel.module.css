@@ -1,8 +1,9 @@
 /* ModelAskPanel —— 子 Agent 模型不可用的决定面板（design.pen jO5So「方案C · 通知条+展开面板」）。
-   全部走 --dsw-alias-* / --corum-* 变量，dark/light 自适应，零硬编码 hex（图标底色除外，
-   与 QuestionCard 同一手法：rgba 由 token 色值派生）。 */
+   数值逐项取自设计稿提取表，px 原值、零换算；色值映射设计变量 → CSS 变量，
+   仅「alpha 合成色」（设计稿直接给的 #RRGGBBAA 叠加色，仓库无对应变量）用 rgba 字面量
+   并注明来源，与 QuestionCard.module.css 的既成做法一致。 */
 
-/* 外壳：与提问卡同宽轴（停在输入框正上方，不遮盖对话） */
+/* 宽度对齐 composer 输入卡（与提问卡同款）：dock 里 width:100% 会铺满整个对话区。 */
 .shell {
   width: 100%;
   max-width: var(--dsh-composer-card-max-width, 720px);
@@ -10,41 +11,45 @@
   box-sizing: border-box;
 }
 
-/* ── ① 收起态 notify-bar（design.pen 372×49）────────────────────────── */
+/* ── ① 收起态 notify-bar：fill #FF6B6B14 + stroke #FF6B6B55 1px
+      + pad[9,12] + gap8 + r12 + 横排 ai=center ─────────────────────────── */
 .bar {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: calc(10px * var(--corum-density-scale, 1));
-  padding: calc(9px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  gap: 8px;
+  padding: 9px 12px;
   border-radius: 12px;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid rgba(255, 107, 107, 0.33); /* #FF6B6B55 */
+  background: rgba(255, 107, 107, 0.08); /* #FF6B6B14 */
   box-sizing: border-box;
 }
 
+/* 通知条左侧图标：ic 14×14 $state-error（裸放，设计稿无底色容器）。 */
 .barIcon {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
-  background: rgba(255, 176, 32, 0.12);
-  color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-label-primary));
+  width: 14px;
+  height: 14px;
+  color: var(--dsw-alias-state-error-primary);
 }
 
+/* tx：竖向 gap1，fill_container。 */
 .barTx {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   flex: 1 1 auto;
   min-width: 0;
 }
 
+/* t：11px / 600 / $label-primary。
+   行高定死 14px 让两行 + gap1 = 29px，配合 pad18 + border2 得到设计稿的 49px 总高。 */
 .barTitle {
-  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-size: 11px;
+  line-height: 14px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -52,36 +57,34 @@
   text-overflow: ellipsis;
 }
 
+/* d：10px / normal / $label-tertiary（行高同 14px，见上）。 */
 .barDesc {
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-size: 10px;
+  line-height: 14px;
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 「处理」按钮（design.pen 40×24） */
+/* btn-handle：$brand-primary + pad[5,10] + r8；字 10px / 700 / $label-on-brand。 */
 .handleBtn {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  padding: 0 calc(10px * var(--corum-density-scale, 1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 7px;
-  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
-  color: var(--dsw-alias-label-primary);
-  font-size: calc(12px * var(--corum-ui-font-scale, 1));
-  font-weight: 500;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-brand-primary, var(--corum-state-running));
+  color: var(--corum-label-on-brand);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.handleBtn:hover {
-  background: var(--corum-glass-3, var(--dsw-alias-bg-layer-1));
-}
-
-/* × 按钮（design.pen 22×22） */
+/* dismiss：22×22 + r7 + 居中；ic 12×12 $label-tertiary（设计稿无底色/无 hover 态）。 */
 .iconBtn {
   flex: none;
   display: inline-flex;
@@ -89,146 +92,203 @@
   justify-content: center;
   width: 22px;
   height: 22px;
+  padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
 }
 
-.iconBtn:hover {
-  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
-  color: var(--dsw-alias-label-primary);
-}
-
-/* ── ② 展开态 panel（design.pen 372×153）────────────────────────────── */
+/* ── ② 展开态 panel-expanded：fill $glass-1 + stroke $glass-border 1px
+      + pad[12,14] + gap10 + r16 + 竖向 ───────────────────────────────── */
 .panel {
   display: flex;
   flex-direction: column;
-  gap: calc(10px * var(--corum-density-scale, 1));
-  padding: calc(11px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
-  border-radius: 12px;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   box-sizing: border-box;
 }
 
-/* phead：icon + 标题 + chevron */
+/* phead：横排 ai=center gap8；chev 是 chevron-up（收起语义）。
+   高度定死 19px 对齐设计稿 phead（22 会让面板整体高出 3px）。 */
 .phead {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: 8px;
   width: 100%;
+  height: 19px;
 }
 
+/* phead/ic：15×15 $state-error。 */
+.pheadIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* phead/t：13px / 700 / $label-primary，fill_container。 */
 .pheadTx {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* chips：四个档位横排（design.pen h=26） */
+/* phead/chev：14×14 $label-tertiary，**裸图标**（设计稿此处不是 22×22 的 dismiss 按钮，
+   借用 .iconBtn 会把 phead 撑到 22px 高）。点击区靠按钮自身 padding 归零 + 图标尺寸。 */
+.pheadChev {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+/* chips：横排 gap6（设计稿四个 chip 在 372 宽内一排放下，不换行）。 */
 .chips {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
-  gap: calc(6px * var(--corum-density-scale, 1));
+  align-items: center;
+  gap: 6px;
   width: 100%;
 }
 
+/* chip：pad[6,9] + gap5 + r9 + 横排 ai=center；字 10px / 600。
+   行高定死 12px：12 + pad12 + border2 = 26px，对齐设计稿 chips 行高（默认 normal
+   行高会让行高到 28px，整块面板随之偏高）。 */
 .chip {
   display: inline-flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 calc(9px * var(--corum-density-scale, 1));
+  gap: 5px;
+  padding: 6px 9px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 8px;
+  border-radius: 9px;
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   color: var(--dsw-alias-label-secondary);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.chip:hover {
-  color: var(--dsw-alias-label-primary);
-}
-
+/* chip 选中态：fill #01CDFE14 + stroke $glass-border-active + 字/图标 $brand-primary。 */
 .chipActive {
-  border-color: var(--dsw-alias-state-business-primary);
-  background: rgba(1, 205, 254, 0.1);
-  color: var(--dsw-alias-state-business-primary);
-  font-weight: 600;
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  background: rgba(1, 205, 254, 0.08); /* #01CDFE14 */
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
 }
 
-/* picker：内嵌模型选择（design.pen h=28） */
+/* chip 图标 11×11（选中时随文字变 brand-primary）。 */
+.chipIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+}
+
+/* picker：$glass-2 底 + pad[7,10] + gap6 + r10 + **横排 ai=center**；
+   ic 11×11 $label-tertiary + lbl(fill_container, 10px $label-tertiary) + chev 11×11。
+   行高定死 12px：12 + pad14 + border0 = 26…… 设计稿 picker 高 28（含其 chev 视觉重心），
+   故用 line-height 14px 得 28px。 */
 .picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  padding-top: calc(2px * var(--corum-density-scale, 1));
-}
-
-.pickerHead {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   border: none;
-  background: transparent;
-  padding: 0;
   color: var(--dsw-alias-label-tertiary);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 14px;
   cursor: pointer;
   text-align: left;
+  box-sizing: border-box;
 }
 
-.pickerHeadText {
+/* picker 图标/chev 容器 11×11。 */
+.pickerGlyph {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+}
+
+/* picker 文案（fill_container，10px）。 */
+.pickerLabel {
   flex: 1 1 auto;
   min-width: 0;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* 展开后的模型清单：glass-2 面板内滚动列表（设计稿未画展开内容，按同族容器规格延伸：
+   r10 + glass-2 + 10px 行高）。 */
 .pickerList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  width: 100%;
   max-height: 132px;
   overflow-y: auto;
   padding: 6px;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  box-sizing: border-box;
 }
 
 .pickerGroup {
-  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  padding: 2px 4px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
-  padding: 2px 4px;
 }
 
 .pickerRow {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   padding: 3px 4px;
   border: none;
   border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  font-size: 10px;
   cursor: pointer;
   text-align: left;
 }
@@ -238,8 +298,9 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* 选中行：与 chip 选中态同源色（$brand-primary）。 */
 .pickerRowActive {
-  color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
   font-weight: 600;
 }
 
@@ -252,24 +313,25 @@
 }
 
 .pickerEmpty {
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  color: var(--dsw-alias-label-tertiary);
   padding: 4px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
-/* pfoot：提示 + 应用按钮（design.pen h=26） */
+/* pfoot：横排 ai=center gap8；hint(fill_container, 10px $label-tertiary)
+   + btn-apply($brand-primary + pad[6,12] + gap5 + r8；字 10px / 700 / $label-on-brand)。 */
 .pfoot {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: 8px;
   width: 100%;
 }
 
 .footHint {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-size: 10px;
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -281,14 +343,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
-  padding: 0 calc(11px * var(--corum-density-scale, 1));
+  gap: 5px;
+  padding: 6px 12px;
   border: none;
   border-radius: 8px;
-  background: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-label-inverse, #fff);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
+  background: var(--dsw-alias-brand-primary, var(--corum-state-running));
+  color: var(--corum-label-on-brand);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
   cursor: pointer;
 }
 
