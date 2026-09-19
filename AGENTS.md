@@ -68,7 +68,16 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
-- `docs/HANDOFF-2026-09-18-preset-collision.md` — **最新交接入口**
+- `docs/HANDOFF-2026-09-19-model-ask-panel-and-restart-gate.md` — **最新交接入口**
+  （2026-09-19 夜场，用户换会话执行重启。**§1 = 重启前必须先重打包**：主实例跑的是打包态
+  （`run/pack-9222.pid`），打包快照 13:41:37，而本场改动 21:31~22:02 ⇒ **直接重启看不到任何效果**
+  （新插件 `@corum/corum-ui-model-ask` 根本不在闭包里、打包 patch 也没有它的注册行）；
+  §2 = 本场 9 个提交（方案C 决定面板新插件 + 四个真 bug + 视觉 1:1 + 三类交互缺陷）；
+  §3 = 环境状态与复位判据（preset 已全部复位、无残留）；§5 = **未验证项如实标注**（主实例从未验过、
+  `npm run pack` 未实际跑过）+ 重启后 8 条验收清单。
+  **本场最贵的一课**：报障「多了个不该有的元素」应先**枚举该区域全部渲染者 + 逐个读 render gate**，
+  别重放用户时序（重放 6 轮没复现，枚举一轮定位）——已记入 `LESSONS.md` §4.28 与规范 §13.8。**下个 session 从这里开始。**）
+- `docs/HANDOFF-2026-09-18-preset-collision.md` — 上一份交接（打包态「两个 preset 相撞」待打通）
   （2026-09-18 夜场，用户换会话继续排查：**首要任务 = 打通「打包态同一进程挂两个不同 preset 必挂」**
   —— 切换自定义模型/resume 会话时报 `command "goal" is already registered`（全局层分支），而官方给每个
   preset 各自 standing scope；判据矩阵：dev 态同序列两 preset 都 OK（打包特有）、全新进程单独挂任一 preset
