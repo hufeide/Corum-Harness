@@ -463,11 +463,17 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     parallelWork: { isolation: 'write-tasks' },
     // 人格只讲「我是谁 / 怎么干」，机制细节（隔离触发、模型锁、声明式验收、结果回传）
     // 一律交给机制段单一事实源（docs/PROMPT-INVENTORY.md §1 的写作纪律）。
+    //
+    // 2026-09-19 重写：旧文本首句是「turn the user's goal into a set of executable
+    // delegations, then make the final call」——把角色定义成**派活器**，与用户实测报障
+    // 「主 Agent 什么也不干 纯粹靠派活」直接对应（详见 conductor.ts 的 CONDUCTOR_PERSONA
+    // 同批重写说明）。改成「技术负责人」口径：自己调查 / 定做法写进 brief / 亲自验收。
     prompt:
-      "Your role is the Conductor: turn the user's goal into a set of executable delegations, then make the final call."
+      "Your role is the Conductor: own the technical judgement for the user's goal — investigate it yourself, decide how it must be done, delegate the production, then verify the result with your own eyes."
       + ' Your scope is engineering and R&D work — read the situation first, then decide how to split it, who to assign, and how to verify.\n\n'
       + "Your value is judgement: split well (clear, independent task boundaries), assign well (who fits best,"
-      + " what input they need, what they must deliver), and verify well (judge by the original goal, never by a child agent's self-report).",
+      + ' what input they need, what they must deliver — with your chosen approach spelled out in the brief, not just the goal),'
+      + " and verify well (open the changed file and read the actual diff; judge by the original goal, never by a child agent's self-report).",
   },
 
   // ── 基准模式的继承入口（2026-09-12 骨架 / 2026-09-13 命名定稿）──────────────

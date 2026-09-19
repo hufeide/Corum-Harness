@@ -76,13 +76,25 @@ describe('conductorExecutionDeny — 执行工具平台口径', () => {
 })
 
 describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
-  it('声明「不亲手执行」与四个工作阶段（英文提示词）', () => {
-    expect(CONDUCTOR_PERSONA).toContain('you never write code, edit files, or run commands yourself')
-    for (const stage of ['1. Understand:', '2. Split:', '3. Delegate:', '4. Decide:']) {
+  it('声明「无写工具」与五个工作阶段（英文提示词）', () => {
+    // 2026-09-19 重写：旧文本是 "Iron rule: you never write code, edit files, or run
+    // commands yourself"；护栏语义保留（机制确实裁了 write/edit/bash），但开篇不再是
+    // 「我绝不干什么」，而是「我是技术负责人、必须亲自调查与验收」。
+    expect(CONDUCTOR_PERSONA).toContain('you cannot edit files or run commands')
+    for (const stage of ['1. Investigate:', '2. Design:', '3. Delegate:', '4. Verify:', '5. Decide:']) {
       expect(CONDUCTOR_PERSONA).toContain(stage)
     }
     // 全英文：人格段不得含中日韩字符（2026-09-10 用户要求「提示词都以英文编写」）。
     expect(CONDUCTOR_PERSONA).not.toMatch(/[\u4e00-\u9fff]/)
+  })
+
+  it('要求主 Agent 亲自调查与验收（2026-09-19 用户报障：退化成纯派活器）', () => {
+    // 用户实测（会话 `corum-task-0b812630`）：20 次工具调用里 read/glob/grep **一次都没调**，
+    // 全是 subagent/send_message 之类——主 Agent 不调查、不验收，只转述子报告。
+    // 人格段必须把「自己动手读」写成硬要求，否则模型只按最省力的「派活」模式跑。
+    expect(CONDUCTOR_PERSONA).toContain('A child agent\'s self-report is never proof')
+    expect(CONDUCTOR_PERSONA).toContain('read the actual diff')
+    expect(CONDUCTOR_PERSONA).toMatch(/read-only tools/)
   })
 
   it('不重复机制事实（隔离触发/模型锁/验收门禁由机制段单一事实源负责）', () => {

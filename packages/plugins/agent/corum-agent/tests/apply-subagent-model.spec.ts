@@ -72,6 +72,26 @@ function makeService(): CorumAgentService {
   Object.defineProperty(svc, 'taskAgents', { value: live })
   Object.defineProperty(svc, 'typeAgents', { value: sessions })
   Object.defineProperty(svc, 'agents', { value: new Map<string, unknown>() })
+  // mock ctx 必须**同时**提供 `get()`——真实 cordis ctx 上是 `ctx.get(name)` 取服务
+  // （未 inject 的属性访问会抛 `cannot get property "…" without inject`，见
+  // vendor/cordis/src/reflect.ts:144；get 无此门禁，同文件 233-243）。
+  // 生产代码走 `ctx.get('sessionProjections')`，故 mock 少了 get 就会
+  // `this.ctx.get is not a function`——那是 mock 失真，不是实现错。
+  //
+  // ⚠️ `agents` 也必须给（2026-09-19 实机修复的第三来源）：`applySubagentModelForSession`
+  // 现在按 taskAgents → typeAgents → **`ctx.agents.get`** 三级查会话，因为 IDE「新会话」
+  // 路径建起的会话本进程存活却不在前两张 corum 自有表里。mock 缺 `agents` 时生产代码在
+  // `this.ctx.agents.get(...)` 上抛 `Cannot read properties of undefined (reading 'agents')`，
+  // 把「未知会话」这条断言（d1）掩盖成 TypeError——mock 失真，不是实现错。
+  //
+  // ctx 必须建在 **makeService**（而不是 registerSession）：(d1)「未知会话」就是**不登记
+  // 任何会话**直接调用的，ctx 只在 registerSession 里给就永远覆盖不到那条路径。
+  ;(svc as unknown as { ctx: unknown }).ctx = {
+    sessionProjections: { stateOf: (): unknown => undefined },
+    agents: { get: (): unknown => undefined },
+    get: (name: string): unknown => (name === 'sessionProjections' ? { stateOf: (): unknown => undefined } : undefined),
+    logger: { warn: (): void => {}, info: (): void => {}, error: (): void => {} },
+  }
   return svc
 }
 
@@ -83,16 +103,11 @@ function registerSession(svc: CorumAgentService, sessionId: string, presetId: st
   }
   const agent = { session } as unknown as Agent
   ;(svc as unknown as { taskAgents: Map<string, unknown> }).taskAgents.set(sessionId, { agent, sessionId, cwd: '/tmp/x', profileId: presetId })
-  // mock ctx 必须**同时**提供 `get()`——真实 cordis ctx 上是 `ctx.get(name)` 取服务
-  // （未 inject 的属性访问会抛 `cannot get property "…" without inject`，见
-  // vendor/cordis/src/reflect.ts:144；get 无此门禁，同文件 233-243）。
-  // 生产代码走 `ctx.get('sessionProjections')`，故 mock 少了 get 就会
-  // `this.ctx.get is not a function`——那是 mock 失真，不是实现错。
-  ;(svc as unknown as { ctx: unknown }).ctx = {
-    sessionProjections: projections,
-    get: (name: string): unknown => (name === 'sessionProjections' ? projections : undefined),
-    logger: { warn: (): void => {}, info: (): void => {}, error: (): void => {} },
-  }
+  // ctx 的 mock 形状见 {@link makeService}（**不**在这里造：d1 走的就是「无会话」路径）。
+  const ctx = (svc as unknown as { ctx: { sessionProjections: unknown; get: (n: string) => unknown } }).ctx
+  ctx.sessionProjections = projections
+  const baseGet = ctx.get.bind(ctx)
+  ctx.get = (name: string): unknown => (name === 'sessionProjections' ? projections : baseGet(name))
 }
 
 describe('★ 服务取用纪律（2026-09-18 实机事故的回归门禁）', () => {

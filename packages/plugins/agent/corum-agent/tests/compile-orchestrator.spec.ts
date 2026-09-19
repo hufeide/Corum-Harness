@@ -99,8 +99,9 @@ describe("compile baseMode 'conductor' — 继承指挥模式（2026-09-10）", 
   })
 
   it('人格含指挥者核心身份（compile 的 MODE_CORE_IDENTITY.conductor）', () => {
-    expect(yml).toContain('you never write code, edit files, or run commands yourself')
-    expect(yml).toContain('Split:')
+    expect(yml).toContain('you cannot edit files or run commands')
+    expect(yml).toContain('Investigate:')
+    expect(yml).toContain('Verify:')
     expect(yml).toContain('Decide:')
   })
 })
