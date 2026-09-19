@@ -273,6 +273,9 @@ describe('corumVerifyFailureNotice — 与「分支没进 HEAD」是两种形态
     // 真值失败的首句（本形态下是假话）。
     expect(unmergedNotice).toContain('integrate did not persist into the main tree')
     expect(verifyNotice).not.toContain('integrate did not persist into the main tree')
+    // 2026-09-20：真值失败的第二句改为「无并入证据」表述，否定断言同步跟上旧+新两种
+    // 措辞，否则这条守卫会在文案改动后**静默失去意义**（永远为真）。
+    expect(verifyNotice).not.toContain('NO evidence of being integrated into HEAD')
     expect(verifyNotice).not.toContain('branches NOT integrated into HEAD')
     // 两份报告必须**不同**（否则调用方无从分辨该修什么）。
     expect(verifyNotice).not.toBe(unmergedNotice)
