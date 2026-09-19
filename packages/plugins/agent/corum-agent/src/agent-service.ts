@@ -465,6 +465,15 @@ export class CorumAgentService extends TypertRemoteService {
   private readonly taskAgents = new Map<string, { agent: Agent; sessionId: SessionId; cwd: string; profileId: string }>()
 
   /**
+   * task 泳道的模型选择 ref（sessionId → createAgentForTask 装的那个 ModelSelectionRef）。
+   * installTaskModelSelection 每次请求实时读 `selection.current`——
+   * `selectTaskAgentProfile` 换绑 preset 后改这个 ref 的 current 即切换模型
+   * （不能靠重装：cordis waterfall 先注册的是外层，后装的监听会被创建时的外层盖回）。
+   * 只在内存：进程重启后由 setup 按 profile 重新装配。
+   */
+  private readonly taskSelections = new Map<string, ModelSelectionRef>()
+
+  /**
    * 待定的访问权限档位（sessionId → preset 名），**只存内存、不落盘**。
    * 用户建任务时选的档位先记在这里，等发第一条消息时才写进会话事件
    * （见 {@link rememberPendingPermission}）——这样未发消息的会话不留磁盘记录。
@@ -1798,6 +1807,7 @@ export class CorumAgentService extends TypertRemoteService {
           assembled: undefined,
         }
         installTaskModelSelection(resolved.agent.ctx, reuseSelection)
+        this.taskSelections.set(String(resolved.sessionId), reuseSelection)
         // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
         this.rememberPendingPermission(String(resolved.sessionId), permission)
         return { agent: resolved.agent, presetId: profile.id, sessionId: resolved.sessionId }
@@ -1856,6 +1866,7 @@ export class CorumAgentService extends TypertRemoteService {
     this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${root})`)
 
     this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd: root, profileId: profile.id })
+    this.taskSelections.set(String(sessionId), selection)
     return { agent: handle.agent, presetId: profile.id, sessionId }
   }
 
@@ -2099,6 +2110,7 @@ export class CorumAgentService extends TypertRemoteService {
     this.ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
     const entry = { agent: handle.agent, sessionId: sid, cwd: meta.cwd, profileId: meta.profileId }
     this.taskAgents.set(sessionId, entry)
+    this.taskSelections.set(sessionId, selection)
     return entry
   }
 
@@ -2138,6 +2150,40 @@ export class CorumAgentService extends TypertRemoteService {
       resolved.agent.ctx,
       conductorModeOf(profileId, isOfficialPreset, profile === undefined ? undefined : effectiveExecutionTools(profile)),
     )
+    // fork（corum）2026-09-19：**换绑 preset 后模型选择必须跟随新 profile**。
+    // 用户实测（corum-task-5e63ac3a）：+号建 task 泳道（v4-flash）→ composer 切成
+    // 指挥模式（kimi-k3-1）→ 之后所有 request/header 仍是 v4-flash。原因有两层：
+    // ① select 只 recompose preset（工具/人格）、不动 createAgentForTask 装的模型绑定；
+    // ② 不能靠**重装** installTaskModelSelection 覆盖——cordis waterfall 先注册的是外层，
+    //    后装的监听会被创建时的外层监听盖回（见 task-model-selection.ts 头部注释）。
+    // 正解 = 改**创建时那个 selection ref 的 current**（installTaskModelSelection 每次
+    // 请求都实时读它），而不是再装一层。ref 在 createAgentForTask 里按 sessionId 存着。
+    {
+      const selection = this.taskSelections.get(String(sessionId))
+      const switchModel = profile === undefined
+        ? this.ctx.agentDefaultModel.currentSelection()
+        : profile.model
+      if (selection !== undefined) {
+        selection.current = {
+          provider: switchModel.provider,
+          model: switchModel.model,
+          ...(switchModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(switchModel.reasoningEffort) }),
+        }
+      } else {
+        // 无登记（进程重启后内存态丢失、或泳道不是本进程所建）：退回重装一层。
+        // 此时创建时的外层监听已随宿主进程消亡，新装的这一层就是唯一绑定。
+        const fallbackSelection: ModelSelectionRef = {
+          current: {
+            provider: switchModel.provider,
+            model: switchModel.model,
+            ...(switchModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(switchModel.reasoningEffort) }),
+          },
+          assembled: undefined,
+        }
+        installTaskModelSelection(resolved.agent.ctx, fallbackSelection)
+        this.taskSelections.set(String(sessionId), fallbackSelection)
+      }
+    }
     this.ctx.logger.info(`corum-agent(task): preset switched — ${sessionId} → ${profileId}`)
     return { ok: true }
   }
