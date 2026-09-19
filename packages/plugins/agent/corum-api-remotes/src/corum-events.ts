@@ -16,12 +16,16 @@
  */
 
 // waterfall 事件的 Scoped<Agent> this 参数类型（与 approval/request 同形）。
-// 经 dsh-user-approval 间接拉入 Agent 的 TypertLookupMap/TypertContextMap 合并；
-// Agent 类型本身从 dsh-agent 主入口拉（纯 type，无运行时值——本包 deps 没有
-// dsh-agent，但 dsh-user-approval 的 peerDependency 把它带进了编译面）。
+// 经 dsh-user-approval 间接拉入 Agent 的 TypertLookupMap/TypertContextMap 合并。
+// Agent 不在本包 node_modules（peer dep 未 hoist），故用结构化类型替代——
+// Scoped<T> 只需要 T 有个 ctx 字段，结构匹配即可。
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+
+/** 结构化 Agent 占位（替代 dsh-agent 的 Agent 接口；Scoped<T> 只需要 T 有 ctx）。 */
+interface CorumScopedAgent {
+  readonly ctx: unknown
+}
 
 // ── 载荷类型（自包含重声明；事实源 = corum-agent/src/events.ts）──────────────
 
@@ -691,7 +695,7 @@ declare module '@deepseek-ai/cordis' {
      * @mode waterfall
      */
     'corum/model-ask/request'(
-      this: Scoped<Agent>,
+      this: Scoped<CorumScopedAgent>,
       data: CorumModelAskRequestEvent,
       next: () => Promise<CorumModelAskOutcomeEvent>,
     ): Promise<CorumModelAskOutcomeEvent>
