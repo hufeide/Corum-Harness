@@ -52,9 +52,9 @@ import { registerListSubagentModels } from './list-models.ts'
 import {
   corumAskAboutModelFailure,
   type CorumDelegationPolicyState,
+  type CorumModelAskChannel,
   type CorumModelCatalog,
   type CorumProfileWriteFace,
-  type CorumQuestionChannel,
   type CorumRoute,
 } from './model-ask-run.ts'
 import { corumDelegationDisabledReason } from './model-ask.ts'
@@ -567,7 +567,43 @@ interface CorumSubagentChildEvent {
 declare module '@deepseek-ai/cordis' {
   interface Events {
     'corum/subagent/child': (data: CorumSubagentChildEvent) => void
+    /**
+     * 机制级模型询问（host → client 的独立通路；**不是** userQuestions）。
+     *
+     * 与 `@corum/corum-api-remotes` 的白名单声明各自一次（fork 包之间看不到彼此的
+     * Events 合并，见上方 `corum/subagent/child` 的同一说明）：结构必须逐字段一致，
+     * 改一处要两处一起改。
+     * @param request - 失败事实 + 档位清单 + 可用模型清单。
+     * @param next - 无应答者时继续传递（落到调用方传的默认值）。
+     * @mode waterfall
+     */
+    'corum/model-ask/request'(
+      request: CorumModelAskRequest,
+      next: () => Promise<CorumModelAskAnswer>,
+    ): Promise<CorumModelAskAnswer>
   }
+}
+
+/** `corum/model-ask/request` 的载荷（与 api-remotes 的 CorumModelAskRequestEvent 同构）。 */
+interface CorumModelAskRequest {
+  readonly agent: Agent
+  readonly label: string
+  readonly configured: { provider: string; model: string }
+  readonly fallback: { provider: string; model: string }
+  readonly cause: string
+  readonly role: 'worker' | 'research'
+  readonly options: readonly { kind: string; label: string; description: string }[]
+  readonly catalog: readonly {
+    provider: string
+    label: string
+    models: readonly { model: string; label: string }[]
+  }[]
+}
+
+/** `corum/model-ask/request` 的回传（与 api-remotes 的 CorumModelAskOutcomeEvent 同构）。 */
+interface CorumModelAskAnswer {
+  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
 type ForegroundToolResult = {
@@ -883,6 +919,27 @@ function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
       }
       return out
     },
+  }
+}
+
+/**
+ * fork（corum）2026-09-18：**机制级模型询问**的独立通路调用面。
+ *
+ * 走 host 侧自定义 waterfall `corum/model-ask/request`（`corum-api-remotes` 已把该事件
+ * 加进转发白名单，`mode: 'waterfall'`），由 client 插件 `@corum/corum-ui-model-ask` 应答。
+ * **刻意不复用 `userQuestions`**：那条通路的消费者是 LLM 的 `ask_user_question` 工具，
+ * 与机制级提问共用会让两者在同一 waterfall 里互相截获、delegate 语义纠缠。
+ *
+ * 为什么在这里 `ctx.get` 而不是注入一个服务：该通路是**事件**（cordis 事件总线），
+ * 事件不需要「服务存在」即可安全发起——没有应答者时 waterfall 会落到我们传的
+ * `next`（返回 dismissed），这正是「该部署没有 UI 插件」时想要的保守降级。
+ *
+ * @param runtimeCtx - host context（发事件用）。
+ * @returns 通路调用面（恒非 undefined——事件总线永远可用）。
+ */
+function corumModelAskChannel(runtimeCtx: Context): CorumModelAskChannel {
+  return {
+    call: (request, next) => runtimeCtx.waterfall('corum/model-ask/request', request, next),
   }
 }
 
@@ -1281,7 +1338,9 @@ export function apply(ctx: Context, config: Config): void {
       )
       return { route: undefined, delegationDisabled: false, summary: '' }
     }
-    const questions = ctx.get('userQuestions') as unknown as CorumQuestionChannel | undefined
+    // 提问走 host 侧的**独立通路** `corum/model-ask/request`（waterfall）——不借
+    // `ctx.userQuestions`：那是 LLM 主动提问的通路，与机制级询问的生命周期、取消语义、
+    // 文案归属都不同，共用会让两者互相截获（见 model-ask.ts 头注释）。
     // 2026-09-18 实机修正：用 `ctx.get` 而**不是** `ctx.root.get`——corumAgent 由
     // `@corum/corum-agent` 在**根 composition** 的 apply 里 `new CorumAgentService(ctx)`
     // 注册（`Service` 构造即 provide 到传入的 ctx），而 cordis 的 reflect store 按
@@ -1292,7 +1351,7 @@ export function apply(ctx: Context, config: Config): void {
     const outcome = await corumAskAboutModelFailure(
       {
         state: corumPolicyState,
-        questions,
+        channel: corumModelAskChannel(ctx),
         profile,
         catalog: corumModelCatalog(ctx),
       },

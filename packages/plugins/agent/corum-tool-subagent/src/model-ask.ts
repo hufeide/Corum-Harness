@@ -28,20 +28,66 @@
  *   处理这个隐患」，并进一步明确「要用户既能选永久跟随主 Agent 也能选别的模型这才对」。
  *   故永久档有两个选项：永久跟随主 Agent、永久改为**指定的另一个模型**。
  *
- * ## 为什么用 userQuestions 而不是 approval
+ * ## 为什么走自己的 host 通路，而不是借 userQuestions
  *
- * 实测（读官方源码）：`approval.request()` 语义是「允许/拒绝**本次工具调用**」，且**要求会话
- * 有 open turn**（`hasOpenTurn` 否则抛错）；而 `userQuestions.ask()` **无 turn 门禁**、
- * 支持带选项的结构化问题、答案原样返回（`{id, selected[], custom?}`）。本场景的失败可能来自
- * **后台 job 在工具早已返回之后**才 settle，approval 那条路先天不可用。
- * 先例：官方 `plan-mode` 就在 host 侧直接 `ctx.get('userQuestions').ask({...agent, signal})`。
+ * 本机制**不**复用 `ctx.userQuestions`。提问是机制级的、由失败事件驱动，与 LLM 主动调用
+ * `ask_user_question` 工具是两码事：共用一个 waterfall 会让模型的提问和机制的提问在同一条
+ * 通路里互相影响（谁先应答、谁被 delegate、超时归谁），而两者的生命周期、取消语义、文案
+ * 归属都不同。故本机制在 host 侧起一条**独立通路** `corum/model-ask/request`（waterfall，
+ * 见 corum-api-remotes 的转发白名单），由 `corum-ui-model-ask` 这个 client 插件应答。
+ *
+ * 顺带（这也是当初考虑 userQuestions 的原因）：`approval.request()` 语义是「允许/拒绝**
+ * 本次工具调用**」且要求会话有 open turn，本场景的失败可能来自**后台 job 在工具早已返回
+ * 之后**才 settle，approval 那条路先天不可用；而自有 waterfall 没有 turn 门禁。
  */
 
-/** 提问的三个档位标签（选项 label 即协议——答案按 label 回传，故必须唯一且稳定）。 */
-export const CORUM_MODEL_ASK_TEMPORARY = 'Temporarily use the main Agent\'s model for this session'
-export const CORUM_MODEL_ASK_FOLLOW_PERMANENTLY = 'Permanently follow the main Agent\'s model'
-export const CORUM_MODEL_ASK_PICK_PERMANENTLY = 'Permanently switch to another model…'
-export const CORUM_MODEL_ASK_DECLINE = 'No — stop delegating; do the work yourself'
+/**
+ * 档位的**机制词汇表**（`kind` 即协议）。
+ *
+ * 协议走 `kind`（稳定标识）而不是选项 label：label 是给人看的文案，会随 UI 改版与本地化
+ * 变动，把它当协议键会让「用户选了哪一档」随文案漂移。label/description 只作呈现，由
+ * {@link corumModelAskOptions} 下发（host 是词汇表的唯一事实源，client 只渲染）。
+ */
+export const CORUM_MODEL_ASK_OPTIONS = [
+  {
+    kind: 'temporary',
+    label: '临时用主模型',
+    description: '仅本次任务 · 任务结束即恢复',
+  },
+  {
+    kind: 'permanent-follow',
+    label: '永久跟随主 Agent',
+    description: '以后所有子 Agent 都用主模型',
+  },
+  {
+    kind: 'permanent-route',
+    label: '永久改指定模型',
+    description: '从下方选择并记住',
+  },
+  {
+    kind: 'decline',
+    label: '停止委派',
+    description: '本次及后续不再自动委派',
+  },
+] as const satisfies readonly CorumModelAskOption[]
+
+/** 一个档位的呈现数据（`kind` 是协议，label/description 是文案）。 */
+export interface CorumModelAskOption {
+  readonly kind: CorumModelAskDecision['kind']
+  readonly label: string
+  readonly description: string
+}
+
+/**
+ * 下发档位清单（host → client）。
+ *
+ * 为什么由 host 下发而不是 client 里硬编码：档位与「机制接受哪些 kind」必须同源，否则
+ * client 多画一个没有对应处置的档位，用户点了会静默落进 dismissed。
+ * @returns 四个档位的呈现数据（顺序即 UI 顺序）。
+ */
+export function corumModelAskOptions(): readonly CorumModelAskOption[] {
+  return CORUM_MODEL_ASK_OPTIONS
+}
 
 /** 用户在提问卡上作答后的**机制决定**（答案被解析成这个联合，而不是字符串散落各处）。 */
 export type CorumModelAskDecision =
@@ -71,56 +117,66 @@ export interface CorumModelFailureFacts {
 }
 
 /**
- * 提问的**问题文本**（中文，面向用户）。
+ * 通知条的**一行摘要**（收起态第二行：哪个子 Agent + 为什么失败）。
  *
- * 为什么写中文而代码注释/通知是英文：这条消息的读者是**用户本人**（不是模型），
- * 而本仓的 UI 面向中文用户（设置页、权限档位等都是中文）。
+ * 为什么只给一行：通知条停在对话顶部、不阻塞阅读，用户此刻只需要「谁、为什么」就能
+ * 决定要不要点「处理」；完整事实在展开面板里。
+ * @param facts - 失败事实。
+ * @returns 一行摘要文本。
  */
-export function corumModelAskQuestion(facts: CorumModelFailureFacts): string {
-  return `子 Agent 配置的模型当前不可用，无法用它完成任务。`
-}
-
-/** 问题的补充说明（渲染在问题下方、不进选项 label）。 */
-export function corumModelAskDetail(facts: CorumModelFailureFacts): string {
-  return [
-    `子 Agent：${facts.label}`,
-    `配置的模型：${facts.configured.provider}/${facts.configured.model}`,
-    `可回退到的模型（主 Agent 当前所用）：${facts.fallback.provider}/${facts.fallback.model}`,
-    `失败原因：${facts.cause}`,
-    '',
-    '选择「临时」只对当前会话生效，不改动你的配置；选择「永久」会改写该 Agent 预设的子 Agent 模型。',
-  ].join('\n')
+export function corumModelAskSummary(facts: CorumModelFailureFacts): string {
+  return `${facts.label} · ${facts.configured.model} ${corumModelAskShortCause(facts.cause)}`
 }
 
 /**
- * 解析用户答案 → 机制决定。
+ * 把失败原因压成适合一行展示的短语。
  *
- * 为什么单独成函数：这段判定是**安全关键**的（错判会把用户的「不要」当成「要」），
- * 抽出来才能被单测直接钉住，而不必起一个 UI。`custom` 自由文本视为「没选档位」。
+ * 为什么需要压缩：`cause` 是子 Agent 的报错原文（可能很长，含堆栈与 JSON），
+ * 直接塞进一行会把通知条撑破。这里只取首个句子/片段，完整原文仍进展开面板。
+ * @param cause - 失败原因原文。
+ * @returns 一行内的短原因。
+ */
+export function corumModelAskShortCause(cause: string): string {
+  const firstLine = cause.split('\n', 1)[0] ?? ''
+  const firstSentence = firstLine.split(/(?<=[。.！!？?])\s*/, 1)[0] ?? firstLine
+  const trimmed = firstSentence.trim()
+  return trimmed.length > 40 ? `${trimmed.slice(0, 40)}…` : trimmed
+}
+
+/**
+ * 解析用户的机制决定 → 规范化的 {@link CorumModelAskDecision}。
  *
- * @param selected - 用户选中的选项 label（官方契约：单选回传一个 label）。
- * @param fallback - 机制提供的回退路由（主 Agent 路由）。
- * @param pickedRoute - 用户在二级问题里选的模型路由（未选=undefined）。
- * @returns 机制决定；无法识别时返回 `dismissed`（保守：不改变现状）。
+ * 为什么单独成函数：这段判定是**安全关键**的（错判会把用户的「不要」当成「要」，
+ * 或者默默替用户挑一个模型），抽出来才能被单测直接钉住，而不必起一个 UI。
+ *
+ * @param kind - client 回传的档位（协议键；未知/缺失一律视为「没作答」）。
+ * @param fallback - 机制提供的回退路由（主 Agent 路由；`temporary` 档取它）。
+ * @param pickedRoute - 用户在展开面板里选的模型路由（仅 `permanent-route` 档需要）。
+ * @returns 规范化决定；无法识别时返回 `dismissed`（保守：不改变现状）。
  */
 export function corumResolveModelAskDecision(
-  selected: readonly string[],
+  kind: string | undefined,
   fallback: { provider: string; model: string; reasoningEffort?: string },
   pickedRoute: { provider: string; model: string; reasoningEffort?: string } | undefined,
 ): CorumModelAskDecision {
-  const choice = selected[0]
-  if (choice === undefined) return { kind: 'dismissed' }
-  if (choice === CORUM_MODEL_ASK_TEMPORARY) return { kind: 'temporary', route: { ...fallback } }
-  if (choice === CORUM_MODEL_ASK_FOLLOW_PERMANENTLY) return { kind: 'permanent-follow' }
-  if (choice === CORUM_MODEL_ASK_PICK_PERMANENTLY) {
-    // 选了「永久改为别的模型」但二级选择没回来（用户跳过）⇒ 保守当作 dismissed，
-    // 绝不默默替用户挑一个模型（那正是用户明确反对的「替我做主」）。
-    return pickedRoute === undefined
-      ? { kind: 'dismissed' }
-      : { kind: 'permanent-route', route: { ...pickedRoute } }
+  switch (kind) {
+    case 'temporary':
+      // 回退路由恒取机制自己解析出的主 Agent 路由，**不采信 client 传来的 route**：
+      // client 是呈现层，路由的决定权在机制（用户要的「和主 Agent 一样」由机制保证）。
+      return { kind: 'temporary', route: { ...fallback } }
+    case 'permanent-follow':
+      return { kind: 'permanent-follow' }
+    case 'permanent-route':
+      // 选了「永久改为指定模型」但没带回路由（用户只点档位没选模型）⇒ 保守当作
+      // dismissed，绝不默默替用户挑一个模型（那正是用户明确反对的「替我做主」）。
+      return pickedRoute === undefined
+        ? { kind: 'dismissed' }
+        : { kind: 'permanent-route', route: { ...pickedRoute } }
+    case 'decline':
+      return { kind: 'decline' }
+    default:
+      return { kind: 'dismissed' }
   }
-  if (choice === CORUM_MODEL_ASK_DECLINE) return { kind: 'decline' }
-  return { kind: 'dismissed' }
 }
 
 /**

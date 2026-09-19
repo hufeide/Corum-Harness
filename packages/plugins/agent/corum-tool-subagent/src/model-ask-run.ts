@@ -1,21 +1,25 @@
 /**
  * fork（corum）2026-09-18：**问用户 + 按答案改变机制行为**的执行核（策略见 `model-ask.ts` 头注释）。
  *
- * 本文件只做「执行」：把 {@link CorumModelFailureFacts} 变成一个 `userQuestions.ask()`，
- * 把答案解析成 {@link CorumModelAskDecision}，再按决定去
+ * 本文件只做「执行」：把 {@link CorumModelFailureFacts} 变成一个
+ * `corum/model-ask/request` waterfall 调用，把回传的档位解析成
+ * {@link CorumModelAskDecision}，再按决定去
  *   ① 改会话级临时覆盖、② 写预设（永久档）、③ 停用委派、④ 通知。
  * 判定（纯函数）与文案在 `model-ask.ts`，状态在 `corumOrchestration` 服务——三处分离，
  * 各自可单测。
+ *
+ * ## 通路
+ *
+ * 事件走 host 侧的**独立通路** `corum/model-ask/request`（`corum-api-remotes` 的转发
+ * 白名单里是 `mode: 'waterfall'`），由 `@corum/corum-ui-model-ask` 这个 client 插件应答。
+ * 与 `userQuestions`（LLM 主动提问）**完全隔离**：两条 waterfall 各自监听、互不截获。
  */
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
-  CORUM_MODEL_ASK_DECLINE,
-  CORUM_MODEL_ASK_FOLLOW_PERMANENTLY,
-  CORUM_MODEL_ASK_PICK_PERMANENTLY,
-  CORUM_MODEL_ASK_TEMPORARY,
-  corumModelAskDetail,
-  corumModelAskQuestion,
+  corumModelAskOptions,
+  corumModelAskShortCause,
   corumResolveModelAskDecision,
+  type CorumModelAskOption,
   type CorumModelAskDecision,
   type CorumModelFailureFacts,
 } from './model-ask.ts'
@@ -38,20 +42,46 @@ export interface CorumDelegationPolicyState {
   clearModelOverride: (sessionId: string) => void
 }
 
-/** 提问通道（`ctx.userQuestions` 的窄面；缺失=该部署没有作答通道）。 */
-export interface CorumQuestionChannel {
-  ask: (request: {
-    questions: readonly {
-      id: string
-      question: string
-      header?: string
-      detail?: string
-      options?: readonly { label: string; description?: string }[]
-      multiSelect?: boolean
-    }[]
-    agent: Agent
-    signal: AbortSignal
-  }) => Promise<{ answers: readonly { id: string; selected: readonly string[]; custom?: string }[] }>
+/** 可用的模型路由清单（供「永久改为指定模型」内嵌选择）。 */
+export interface CorumModelCatalog {
+  listRoutes: () => Promise<readonly {
+    provider: string
+    label: string
+    models: readonly { model: string; label: string }[]
+  }[]>
+}
+
+/**
+ * `corum/model-ask/request` 的 host 侧调用面。
+ *
+ * 为什么用 `ctx.waterfall` 而不是 `ctx.emit`：需要**回传**用户的档位，`emit` 是单向的。
+ * 为什么不是 `ctx.get('userQuestions')`：那是 LLM 提问的通路，机制级询问必须在自己的
+ * 通路上（见 `model-ask.ts` 头注释）。
+ */
+export interface CorumModelAskChannel {
+  call: (
+    request: {
+      readonly agent: Agent
+      readonly label: string
+      readonly configured: { provider: string; model: string }
+      readonly fallback: { provider: string; model: string }
+      readonly cause: string
+      readonly role: 'worker' | 'research'
+      readonly options: readonly CorumModelAskOption[]
+      readonly catalog: readonly {
+        provider: string
+        label: string
+        models: readonly { model: string; label: string }[]
+      }[]
+    },
+    next: () => Promise<CorumModelAskOutcomeEvent>,
+  ) => Promise<CorumModelAskOutcomeEvent>
+}
+
+/** client 回传的决定（协议键 `kind` + 可选的选定路由）。 */
+export interface CorumModelAskOutcomeEvent {
+  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
 /** 永久档的写入面（`corumAgent` 服务的窄面；缺失=无法永久写，降级为只报告）。 */
@@ -61,11 +91,6 @@ export interface CorumProfileWriteFace {
     role: 'worker' | 'research',
     route: CorumRoute | undefined,
   ) => { presetId: string; applied: CorumRoute | undefined }
-}
-
-/** 可用的模型路由清单（供「永久改为别的模型」二级选择）。 */
-export interface CorumModelCatalog {
-  listRoutes: () => Promise<readonly { provider: string; label: string; models: readonly { model: string; label: string }[] }[]>
 }
 
 /** 提问结果（供调用方记录/测试断言）。 */
@@ -88,9 +113,10 @@ export interface CorumModelAskOutcome {
  * 之后的收尾路径，此时再抛错会把「一次委派失败」放大成「父会话这一步崩掉」，
  * 而用户的诉求恰恰是「确保任务完成」。
  *
- * @param deps - 机制依赖（状态面 + 提问通道 + 可选写入面/目录）。
- * @param parent - 委派方 Agent（**必须是存活的运行时根**，否则 ask 会 CALLER_NOT_LIVE）。
+ * @param deps - 机制依赖（状态面 + 提问通路 + 可选写入面/目录）。
+ * @param parent - 委派方 Agent（waterfall 的 scope 载体）。
  * @param facts - 失败事实（label/configured/fallback/cause/role）。
+ * @param channel - 独立通路的调用面（缺失=该部署没有 corum-ui-model-ask）。
  * @param signal - 取消信号（父会话取消时提问随之作废）。
  * @param logger - 告警出口。
  * @returns 决定与生效结果；任何异常都被降级为「dismissed + 无改动」。
@@ -98,7 +124,7 @@ export interface CorumModelAskOutcome {
 export async function corumAskAboutModelFailure(
   deps: {
     state: CorumDelegationPolicyState
-    questions: CorumQuestionChannel | undefined
+    channel: CorumModelAskChannel | undefined
     profile?: CorumProfileWriteFace | undefined
     catalog?: CorumModelCatalog | undefined
   },
@@ -107,7 +133,6 @@ export async function corumAskAboutModelFailure(
   signal: AbortSignal,
   logger: { warn: (message: string) => void },
 ): Promise<CorumModelAskOutcome> {
-  const sessionId = String(parent.session.id)
   const fail = (reason: string, decision: CorumModelAskDecision = { kind: 'dismissed' }): CorumModelAskOutcome => ({
     decision,
     override: undefined,
@@ -116,11 +141,11 @@ export async function corumAskAboutModelFailure(
     summary: reason,
   })
 
-  const channel = deps.questions
+  const channel = deps.channel
   if (channel === undefined) {
-    // 没有作答通道（headless / sdk-minimal 等组合）：**保守降级**——不停用委派、不改配置，
-    // 明确告诉用户「机制无法询问」，把决定权交回人。绝不替用户选。
-    logger.warn(`corum model-ask: no user-questions channel; cannot ask about ${facts.label}`)
+    // 没有作答通道（headless / sdk-minimal 等组合，或 UI 插件未挂）：**保守降级**——
+    // 不停用委派、不改配置，明确告诉用户「机制无法询问」，把决定权交回人。绝不替用户选。
+    logger.warn(`corum model-ask: no corum/model-ask channel; cannot ask about ${facts.label}`)
     return fail(
       `Subagent model unavailable (${facts.label}) and this deployment has no way to ask you: `
       + `configured ${facts.configured.provider}/${facts.configured.model} failed (${facts.cause}). `
@@ -128,42 +153,42 @@ export async function corumAskAboutModelFailure(
     )
   }
 
-  // ── 第一问：三个档位 + 拒绝（label 即协议，见 model-ask.ts）──────────────
-  let answers: readonly { id: string; selected: readonly string[]; custom?: string }[]
+  // 可用模型清单（供展开面板的「永久改指定模型」内嵌选择）。列举失败不阻断提问——
+  // 前三个档位不依赖它。
+  let catalog: readonly {
+    provider: string
+    label: string
+    models: readonly { model: string; label: string }[]
+  }[] = []
+  if (deps.catalog !== undefined) {
+    try {
+      catalog = await deps.catalog.listRoutes()
+    } catch (error: unknown) {
+      logger.warn(`corum model-ask: listing models failed: ${String(error)}`)
+    }
+  }
+
+  // ── 一次询问：四个档位 + 内嵌模型选择（方案 C：一轮完成，无第二轮问答）──
+  let answer: CorumModelAskOutcomeEvent
   try {
-    const answer = await channel.ask({
-      questions: [{
-        id: 'corum-subagent-model-fallback',
-        header: '子 Agent 模型不可用',
-        question: corumModelAskQuestion(facts),
-        detail: corumModelAskDetail(facts),
-        options: [
-          {
-            label: CORUM_MODEL_ASK_TEMPORARY,
-            description: `本会话改用 ${facts.fallback.provider}/${facts.fallback.model}；不改动你的配置，新会话仍用原模型。`,
-          },
-          {
-            label: CORUM_MODEL_ASK_FOLLOW_PERMANENTLY,
-            description: '永久改写该 Agent 预设：子 Agent 模型设为「跟随主 Agent」。',
-          },
-          {
-            label: CORUM_MODEL_ASK_PICK_PERMANENTLY,
-            description: '永久改写该 Agent 预设为你指定的另一个模型。',
-          },
-          {
-            label: CORUM_MODEL_ASK_DECLINE,
-            description: '不再派遣子 Agent，后续工作全部由主 Agent 自己完成。',
-          },
-        ],
-      }],
-      agent: parent,
-      signal,
-    })
-    answers = answer.answers
+    answer = await channel.call(
+      {
+        agent: parent,
+        label: facts.label,
+        configured: { ...facts.configured },
+        fallback: { ...facts.fallback },
+        cause: corumModelAskShortCause(facts.cause),
+        role: facts.role,
+        options: corumModelAskOptions(),
+        catalog,
+      },
+      // 下游没人应答 ⇒ 视为「没作答」（等价于用户挂起）。绝不抛错——提问失败不该
+      // 把一次委派失败放大成父会话崩溃。
+      async () => ({ kind: 'dismissed' as const }),
+    )
   } catch (error: unknown) {
-    // 取消/放弃/无 answerer 都在这里：ASK_CANCELLED（用户关掉）、ASK_ABORTED（父取消）、
-    // NO_PROVIDER（通道没人应答）、CALLER_NOT_LIVE / DELEGATED_CALLER（调用方传错 agent）。
-    // 一律降级为「不改变现状」，并把原因记进日志——绝不因为问不到就去改用户的配置。
+    // 父会话取消、通路断开、client 抛错都在这里。一律降级为「不改变现状」，
+    // 并把原因记进日志——绝不因为问不到就去改用户的配置。
     const detail = error instanceof Error ? error.message : String(error)
     logger.warn(`corum model-ask: could not ask about ${facts.label}: ${detail}`)
     return fail(
@@ -172,53 +197,7 @@ export async function corumAskAboutModelFailure(
     )
   }
 
-  const firstSelection = answers.find(a => a.id === 'corum-subagent-model-fallback')?.selected ?? []
-
-  // ── 第二问（仅当用户选了「永久改为别的模型」）：列出可用路由 ──────────────
-  // 为什么是**第二次 ask** 而不是同一张卡里放两个问题：corum 的提问卡对一次 ask 里的所有
-  // 问题**一次提交**（per-question skip），第二问放进去会在用户选「临时」时也强行出现。
-  let picked: CorumRoute | undefined
-  if (firstSelection[0] === CORUM_MODEL_ASK_PICK_PERMANENTLY) {
-    const catalog = deps.catalog
-    if (catalog === undefined) {
-      logger.warn('corum model-ask: no model catalog available for the "pick another model" branch')
-      return fail('You chose to switch permanently to another model, but this deployment cannot list models.')
-    }
-    let options: { label: string; description?: string }[] = []
-    const lookup = new Map<string, CorumRoute>()
-    try {
-      for (const provider of await catalog.listRoutes()) {
-        for (const model of provider.models) {
-          const label = `${provider.label} / ${model.label}`
-          options.push({ label, description: `provider=${provider.provider} model=${model.model}` })
-          lookup.set(label, { provider: provider.provider, model: model.model })
-        }
-      }
-    } catch (error: unknown) {
-      logger.warn(`corum model-ask: listing models failed: ${String(error)}`)
-    }
-    if (options.length === 0) {
-      return fail('You chose to switch permanently to another model, but no models could be listed.')
-    }
-    try {
-      const answer = await channel.ask({
-        questions: [{
-          id: 'corum-subagent-model-pick',
-          header: '选择要永久使用的模型',
-          question: '选择该子 Agent 之后永久使用的模型：',
-          options,
-        }],
-        agent: parent,
-        signal,
-      })
-      const chosen = answer.answers.find(a => a.id === 'corum-subagent-model-pick')?.selected?.[0]
-      picked = chosen === undefined ? undefined : lookup.get(chosen)
-    } catch (error: unknown) {
-      logger.warn(`corum model-ask: model pick was not answered: ${String(error)}`)
-    }
-  }
-
-  const decision = corumResolveModelAskDecision(firstSelection, facts.fallback, picked)
+  const decision = corumResolveModelAskDecision(answer.kind, facts.fallback, answer.route)
 
   // ── 应用决定 ────────────────────────────────────────────────────────────
   return applyCorumModelDecision(deps, parent, facts, decision, logger)

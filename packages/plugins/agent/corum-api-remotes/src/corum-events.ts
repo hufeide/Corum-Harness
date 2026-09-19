@@ -625,8 +625,19 @@ export interface CorumModelAskRequestEvent {
   readonly cause: string
   /** 该角色（决定永久档写 subagentModel 还是 researchModel）。 */
   readonly role: 'worker' | 'research'
-  /** 可用的模型路由清单（供「永久改为别的模型」二级选择）。 */
-  readonly catalog?: readonly {
+  /**
+   * 档位清单（host 是机制词汇表的唯一事实源，client 只渲染）。
+   *
+   * 为什么随载荷下发而不是 client 硬编码：client 多画一个没有对应处置的档位，用户点了
+   * 会静默落进 dismissed；少画一个则某档位不可达。两边必须同源。
+   */
+  readonly options: readonly {
+    readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
+    readonly label: string
+    readonly description: string
+  }[]
+  /** 可用的模型路由清单（供「永久改指定模型」内嵌选择；列举失败时为空数组）。 */
+  readonly catalog: readonly {
     provider: string
     label: string
     models: readonly { model: string; label: string }[]

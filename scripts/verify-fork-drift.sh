@@ -468,6 +468,14 @@ for ev in $declared; do
         && pass "${ev}：corum-ollama 有 emit" \
         || fail "${ev}：corum-ollama 无 emit（注释不算）"
       ;;
+    corum/model-ask/request)
+      # 机制级模型询问（waterfall，不是 emit）：发起点是委派工具的失败收尾。
+      # 归 corum-tool-subagent——它 `ctx.waterfall` 该事件，client 插件
+      # @corum/corum-ui-model-ask 应答。刻意不走 userQuestions（见 model-ask.ts 头注释）。
+      code_has_r "'$ev'" "$REPO_ROOT/packages/plugins/agent/corum-tool-subagent/src" \
+        && pass "${ev}：corum-tool-subagent 有 waterfall 发起" \
+        || fail "${ev}：corum-tool-subagent 无发起（注释不算）"
+      ;;
     *)
       skip "${ev}：无 emit 面映射（新增事件请在脚本里登记归属）"
       ;;

@@ -187,12 +187,47 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(source).toMatch(/could NOT save it — reason:/)
   })
 
-  it('★ 三个永久/临时档位 + 拒绝都在提问选项里（用户要求「既能选永久跟随也能选别的模型」）', () => {
-    const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
-    expect(source).toContain('CORUM_MODEL_ASK_TEMPORARY')
-    expect(source).toContain('CORUM_MODEL_ASK_FOLLOW_PERMANENTLY')
-    expect(source).toContain('CORUM_MODEL_ASK_PICK_PERMANENTLY')
-    expect(source).toContain('CORUM_MODEL_ASK_DECLINE')
+  it('★ 四个档位（临时 / 永久跟随 / 永久改指定 / 停止委派）由机制词汇表下发', () => {
+    // 档位清单是 host 的词汇表（client 只渲染），四个 kind 必须都在。
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
+    for (const kind of ['temporary', 'permanent-follow', 'permanent-route', 'decline']) {
+      expect(source, `档位 ${kind} 不在机制词汇表里`).toContain(`kind: '${kind}'`)
+    }
+    // 下发面：client 不硬编码档位，读 host 传下来的 options。
+    const run = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    expect(run).toContain('corumModelAskOptions')
+  })
+
+  it('★★ 机制级提问走自己的 host 通路，**不借 userQuestions**（用户明确的架构要求）', () => {
+    // 这不是风格偏好：userQuestions 的消费者是 LLM 的 ask_user_question 工具，
+    // 两条询问共用一条 waterfall 会互相截获、delegate 语义纠缠。
+    expect(SRC).not.toContain("ctx.get('userQuestions')")
+    expect(SRC).toContain('corumModelAskChannel')
+    expect(SRC).toContain("'corum/model-ask/request'")
+    const run = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    // 剥注释后判：头注释正当地记着「为什么不借 userQuestions」，裸子串判会把
+    // 那段说明也算成回潮（本仓已有这个学费，见 stripComments 的说明）。
+    expect(stripComments(run)).not.toContain('userQuestions')
+    expect(run).toContain('CorumModelAskChannel')
+    // 通路缺失时必须保守降级（不停用委派、不改配置），绝不替用户做主。
+    expect(run).toMatch(/no corum\/model-ask channel/)
+  })
+
+  it('★★ 协议走 kind 而不是选项 label（label 会随 UI/本地化漂移，不能当协议键）', () => {
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
+    const resolve = between('export function corumResolveModelAskDecision(', 'switch (kind)', source)
+    // 判定入参是 kind，不是 label 数组。
+    expect(resolve).toContain('kind: string | undefined')
+    expect(resolve).not.toContain('selected')
+  })
+
+  it('★ 临时档的路由恒取机制解析出的主 Agent 路由，不采信 client 传来的 route', () => {
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
+    const tempCase = source.slice(
+      source.indexOf("case 'temporary':"),
+      source.indexOf("case 'permanent-follow':"),
+    )
+    expect(tempCase).toContain('route: { ...fallback }')
   })
 
   it('★ 永久档走 ctx.get(corumAgent)（2026-09-18 实机：ctx.root.get 取不到 ⇒ 永久档静默失败）', () => {
