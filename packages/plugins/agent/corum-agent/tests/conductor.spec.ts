@@ -23,6 +23,7 @@ import {
   conductorModeOf,
   effectiveExecutionTools,
 } from '../src/conductor.ts'
+import { CHILD_WORKER_ROLE } from '../src/tool-policy.ts'
 
 const PRESET_DIR = join(import.meta.dirname, '../../../../desktop/shipped-presets/official')
 
@@ -109,6 +110,51 @@ describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
     expect(CONDUCTOR_PERSONA).toContain('subagent')
     expect(CONDUCTOR_PERSONA).toContain('subagent_research')
     expect(CONDUCTOR_PERSONA).toContain('orchestrate')
+  })
+})
+
+describe('CHILD_WORKER_ROLE — 执行者契约（2026-09-20 用户报障）', () => {
+  // 用户原话：「对于子 Agent 需要一套强有力的约束 作为执行者 目前看思考和搜索的时间太多了，
+  // 完全不是按照指令照做，而是从头再次核查」。
+  //
+  // 旧文本只讲身份（worker / 执行 brief / 不能继续委派），**没有任何行为约束**——
+  // 没有「不许重做 brief 已给的调研」、没有范围纪律、没有停止条件。叠加「每个子 Agent
+  // 都被注入完整 AGENTS.md(11KB) + runtime context」（那是给顶层 Agent 写的全局开发规范），
+  // worker 就会从头重建认知。以下断言钉住新增的六条硬约束，防止被回退成纯身份描述。
+  it('声明执行者身份（子 Agent 是执行者，不是规划者）', () => {
+    expect(CHILD_WORKER_ROLE).toContain('executor, not a planner')
+    expect(CHILD_WORKER_ROLE).toContain('authoritative specification')
+  })
+
+  it('禁止重做 brief 已给的调研（本模式最大的时间浪费源）', () => {
+    expect(CHILD_WORKER_ROLE).toContain('Do not redo reconnaissance the brief already answers')
+    expect(CHILD_WORKER_ROLE).toContain('Do not re-plan it')
+  })
+
+  it('禁止扩大范围与顺手重构（越界必须改为报告）', () => {
+    expect(CHILD_WORKER_ROLE).toContain('Stay inside the brief')
+    expect(CHILD_WORKER_ROLE).toContain('report it in your reply — do not fix it unasked')
+  })
+
+  it('给出停止条件（达标即停，不追求「更彻底」，不反复重验）', () => {
+    expect(CHILD_WORKER_ROLE).toContain('Stop when the brief is satisfied')
+    expect(CHILD_WORKER_ROLE).toContain('do not re-verify the same thing repeatedly')
+  })
+
+  it('brief 有错时必须回报而不是自行发挥', () => {
+    expect(CHILD_WORKER_ROLE).toContain('do not improvise')
+    expect(CHILD_WORKER_ROLE).toContain('blocked report')
+  })
+
+  it('保留既有三条身份句与「不能继续委派」（不得被重写丢掉）', () => {
+    expect(CHILD_WORKER_ROLE).toContain('You cannot delegate further')
+    expect(CHILD_WORKER_ROLE).toContain('verify what you can')
+  })
+
+  it('全英文（提示词纪律）且不复述机制事实', () => {
+    expect(CHILD_WORKER_ROLE).not.toMatch(/[\u4e00-\u9fff]/)
+    expect(CHILD_WORKER_ROLE).not.toContain('worktree')
+    expect(CHILD_WORKER_ROLE).not.toContain('isolation')
   })
 })
 
