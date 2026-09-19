@@ -40,7 +40,7 @@ import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
 import { Switch } from '../Switch.tsx'
 import { Badge } from '../Badge.tsx'
-import { useCorumSettings } from '../shared.tsx'
+import { useCorumRpc, useCorumSettings } from '../shared.tsx'
 import { ReviewRetentionGroup, AgentStallGroup } from './general-groups.tsx'
 import css from '../SettingsSections.module.css'
 
@@ -89,6 +89,38 @@ interface PresetsView {
 /** 模型三元组（provider/model 两列；空 = 未设置跟随兜底）。 */
 type ModelTriple = { provider: string; model: string; reasoningEffort?: string }
 
+/** 下拉选项形（与 SelectField 的 options 对齐）。 */
+interface ModelOption { id: string; label: string }
+
+/** 模型目录形（provider 列表 + 按 provider 索引的模型列表）。 */
+interface ModelCatalog {
+  providers: ModelOption[]
+  modelsByProvider: Record<string, ModelOption[]>
+}
+
+/**
+ * 模型下拉兜底目录（`corumAgent/listModels` 不可用时；与 Agent 预设编辑页
+ * `SettingsAgentPresetsSection.tsx` 的兜底目录一致）。
+ */
+const FALLBACK_PROVIDERS: ModelOption[] = [
+  { id: 'deepseek-official', label: 'deepseek-official' },
+  { id: 'pi-ai', label: 'pi-ai' },
+]
+const FALLBACK_MODELS: ModelOption[] = [
+  { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
+  { id: 'deepseek-v4', label: 'deepseek-v4' },
+  { id: 'deepseek-r1', label: 'deepseek-r1' },
+]
+
+/** 「未设置」占位项：id='' 表示该档未配置（跟随兜底/主 Agent）。 */
+const UNSET_OPTION: ModelOption = { id: '', label: '未设置' }
+
+/** 已保存值不在目录中时并入临时选项（label 用原值），避免下拉显示空白。 */
+function ensureOption(list: ModelOption[], id: string | undefined): ModelOption[] {
+  if (id === undefined || id === '' || list.some(o => o.id === id)) return list
+  return [...list, { id, label: id }]
+}
+
 /**
  * 三级配置第一级：本页全局默认 → Agent 预设可逐键覆盖 → 未覆盖回落本页。
  *
@@ -98,6 +130,7 @@ type ModelTriple = { provider: string; model: string; reasoningEffort?: string }
  */
 export function AgentSettingsSection() {
   const settings = useCorumSettings()
+  const rpc = useCorumRpc()
   const [, force] = useState(0)
   // describe 镜像订阅（uSES 源；snapshot 变更即重渲染）。
   useEffect(() => {
@@ -105,6 +138,28 @@ export function AgentSettingsSection() {
     void settings.describe.ensure()
     return settings.describe.subscribe(() => { force(v => v + 1) })
   }, [settings])
+
+  // 模型目录（本页拉一次，三个 ModelPairField 共用；失败静默用兜底目录，页面不白屏）。
+  const [catalog, setCatalog] = useState<ModelCatalog>({ providers: FALLBACK_PROVIDERS, modelsByProvider: {} })
+  useEffect(() => {
+    if (rpc === null) return undefined
+    let cancelled = false
+    void (async () => {
+      try {
+        const r = await rpc<{ providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }> }>('corumAgent', 'listModels', {})
+        if (cancelled || r.providers.length === 0) return
+        const providers: ModelOption[] = r.providers.map(p => ({ id: p.id, label: p.name !== '' ? p.name : p.id }))
+        const modelsByProvider: Record<string, ModelOption[]> = {}
+        for (const p of r.providers) {
+          modelsByProvider[p.id] = p.models.map(m => ({ id: m.id, label: m.name !== '' ? m.name : m.id }))
+        }
+        setCatalog({ providers, modelsByProvider })
+      } catch {
+        // 静默：RPC 失败时保留兜底目录，不阻断设置页。
+      }
+    })()
+    return () => { cancelled = true }
+  }, [rpc])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -197,6 +252,7 @@ export function AgentSettingsSection() {
                   ...(modelUser.reasoningEffort === undefined ? {} : { reasoningEffort: modelUser.reasoningEffort }),
                 }
               : undefined}
+            catalog={catalog}
             disabled={disabled}
             onChange={v => {
               void applyPair(DEFAULT_MODEL_NS, 'provider', v?.provider, 'model', v?.model)
@@ -210,6 +266,7 @@ export function AgentSettingsSection() {
         <SettingRow label="worker 子 Agent 默认模型" desc="新建预设时的默认值：新建的 Agent 预设会预填这个模型；预设里自己改了就以预设为准，已建好的预设不受本项影响。留空 = 新预设不配，子 Agent 跟随主 Agent。">
           <ModelPairField
             value={subUser.defaultModel}
+            catalog={catalog}
             disabled={disabled}
             onChange={v => { void apply(SUBAGENT_NS, 'defaultModel', v) }}
           />
@@ -217,6 +274,7 @@ export function AgentSettingsSection() {
         <SettingRow label="research 子 Agent 默认模型" desc="同上，面向只读研究子 Agent 的模板值；留空 = 新预设不单独配（跟随该预设的 worker 设置）。" divider={false}>
           <ModelPairField
             value={subUser.defaultResearchModel}
+            catalog={catalog}
             disabled={disabled}
             onChange={v => { void apply(SUBAGENT_NS, 'defaultResearchModel', v) }}
           />
@@ -335,46 +393,67 @@ export function AgentSettingsSection() {
 }
 
 /**
- * 模型对字段（provider/model 两列；空 = 未设置跟随兜底）。
+ * 模型对字段（provider/model 两列下拉；空 = 未设置跟随兜底）。
  *
  * ⚠️ provider 与 model 必须**成对**写入 —— `agent-default-model` 的 schema
  * 把两者都标为 `.required()`，只写一半会留下不合法的半成品。
  *
- * @param props - value / disabled / onChange。
- * @returns the two-column model input.
+ * 成对语义（纯受控，选择即生效，不再依赖 onBlur）：
+ * - 两者都已选具体值 → `onChange({ provider, model })`；
+ * - 任一选回「未设置」占位（id=''）→ `onChange(undefined)`（成对 unset）。
+ *
+ * provider 变更联动刷新 model 选项（按所选 provider 取目录）；若原 model
+ * 不在新 provider 的目录里则重置为「未设置」。
+ *
+ * @param props - value / catalog / disabled / onChange。
+ * @returns the two-column model select.
  */
-function ModelPairField({ value, disabled, onChange }: {
+function ModelPairField({ value, catalog, disabled, onChange }: {
   value: ModelTriple | undefined
+  /** 完整模型目录（providers + modelsByProvider；顶层 effect 拉取，RPC 失败时为兜底目录）。 */
+  catalog: ModelCatalog
   disabled: boolean
   onChange: (v: { provider: string; model: string } | undefined) => void
 }) {
-  const [provider, setProvider] = useState(value?.provider ?? '')
-  const [model, setModel] = useState(value?.model ?? '')
+  // 纯受控：选中值直接来自 props（'' = 「未设置」占位），无本地镜像 state。
+  const provider = value?.provider ?? ''
+  const model = value?.model ?? ''
+  // 选项派生：占位（未设置）置顶；provider 目录缺该 provider 时用兜底目录补位；
+  // 已保存值不在目录里时并入临时项（label 用原值），避免下拉显示空白。
+  const providerOptions = ensureOption(
+    catalog.providers.length > 0 ? catalog.providers : FALLBACK_PROVIDERS,
+    provider,
+  )
+  const modelOptions = ensureOption(
+    (provider !== '' && catalog.modelsByProvider[provider] !== undefined)
+      ? catalog.modelsByProvider[provider]
+      : FALLBACK_MODELS,
+    model,
+  )
+  /** 成对提交：两者都选了具体值才写 {provider, model}，任一为占位则成对 unset。 */
+  const commit = (p: string, m: string): void => {
+    onChange(p !== '' && m !== '' ? { provider: p, model: m } : undefined)
+  }
   return (
     <div className={`${css.selectStack} ${css.selectStackControl}`}>
-      <input
-        className={css.textInput}
+      <SelectField
         value={provider}
-        placeholder="provider（如 deepseek-official）"
-        disabled={disabled}
-        onChange={e => { setProvider(e.target.value) }}
-        onBlur={() => {
-          const p = provider.trim()
-          const m = model.trim()
-          onChange(p !== '' && m !== '' ? { provider: p, model: m } : undefined)
+        options={[UNSET_OPTION, ...providerOptions]}
+        onChange={id => {
+          // 联动：provider 变更后原 model 不在新 provider 的目录里则重置为「未设置」。
+          const nextModels = id === '' ? undefined : catalog.modelsByProvider[id]
+          const keep = nextModels !== undefined && model !== '' && nextModels.some(o => o.id === model)
+          commit(id, keep ? model : '')
         }}
+        disabled={disabled}
+        variant="fill"
       />
-      <input
-        className={css.textInput}
+      <SelectField
         value={model}
-        placeholder="model（如 deepseek-v4-flash）"
+        options={[UNSET_OPTION, ...modelOptions]}
+        onChange={id => { commit(provider, id) }}
         disabled={disabled}
-        onChange={e => { setModel(e.target.value) }}
-        onBlur={() => {
-          const p = provider.trim()
-          const m = model.trim()
-          onChange(p !== '' && m !== '' ? { provider: p, model: m } : undefined)
-        }}
+        variant="fill"
       />
     </div>
   )
