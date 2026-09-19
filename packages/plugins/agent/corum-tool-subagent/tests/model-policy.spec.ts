@@ -154,19 +154,27 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(block).toContain('throw')
   })
 
-  it('★ 选「否」⇒ 机制停用该会话委派（tools.guard，非提示词劝告）', () => {
-    expect(SRC).toContain('orchestration.disableDelegation')
-    // 执法必须是 guard：单调 deny、理由原样进工具结果。
-    expect(SRC).toContain('runtimeCtx.tools.guard(')
-    expect(SRC).toContain('delegationDisabledFor(')
-    expect(SRC).toContain('corumDelegationDisabledReason()')
+  it('★★ 选「不重试」⇒ **不锁死会话委派**（2026-09-19 用户实测纠正）', () => {
+    // 前一版在这一档注册 tools.guard 硬禁用整个会话，用户实测发现主 Agent 因此连
+    // 「换模型重派」「用 subagent_research 调研」都做不到，还在通知里读到
+    // 「delegation is DISABLED for this session」，索性把本该委派的活也自己干了。
+    // 正确语义：只表示「本次失败不自动重试」，会话委派能力不变。
+    expect(SRC).not.toContain('runtimeCtx.tools.guard(')
+    expect(SRC).not.toContain('orchestration.disableDelegation')
+    expect(SRC).not.toContain('delegationDisabledFor(')
+    const askSrc = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
+    expect(askSrc).not.toContain('corumDelegationDisabledReason')
   })
 
-  it('★ 停用后给模型的拒绝理由含「为什么 + 自己干」（理由原样进 isError 工具结果）', () => {
-    const askSrc = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
-    const reason = between('export function corumDelegationDisabledReason(', '\n}', askSrc)
-    expect(reason).toMatch(/do ALL of this work yourself|Delegation is disabled/i)
-    expect(reason).toMatch(/user declined/)
+  it('★ 该档的对外文案必须说清「只不重试、能力不变」（文案误导会让模型自己全干）', () => {
+    const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
+    const branch = source.slice(source.indexOf("case 'decline':"), source.indexOf("case 'dismissed':"))
+    // 不能再出现「DISABLED」「do all the work yourself」这类把会话能力说死的措辞。
+    expect(branch).not.toMatch(/delegation is now DISABLED/i)
+    expect(branch).not.toMatch(/Do all of the remaining work yourself/i)
+    // 必须明确告知能力不变，并给出可继续委派的路径。
+    expect(branch).toMatch(/UNCHANGED/i)
+    expect(branch).toMatch(/may still delegate/i)
   })
 
   it('★ 临时档只写会话内存，**不落盘**（用户要求「临时生效，不覆盖用户的设置」）', () => {

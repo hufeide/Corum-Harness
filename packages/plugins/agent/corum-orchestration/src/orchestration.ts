@@ -1650,20 +1650,6 @@ export class CorumOrchestration extends Service {
    */
   private readonly commitFailures = new Map<string, CorumSettleCommitFailure[]>()
   /**
-   * 会话级**委派停用**标记（key=父 session id）——用户选了「不再派遣子 Agent」后的落点。
-   *
-   * 为什么住在这里（2026-09-18）：红线 1——跨 bundle 共享状态必须是 cordis service 实例
-   * 字段，不能是模块级单例（dsh 把 `@corum/*` 源码内联进每个消费 bundle，模块级状态会
-   * 分裂成互不同步的多份）。本服务已由根上下文 provide（`corumOrchestration`），
-   * corum-tool-subagent 的 apply 又已**强制依赖**它（缺则抛装配错误），是天然的会话级
-   * 状态家；与同文件的 `runningWriteChildren` / `ledger` 同款形态。
-   *
-   * 语义：**只存内存、不落盘**——这是"本会话内不再委派"的临时决定（用户原话「后续主
-   * Agent 不再派遣子 Agent」），新会话不受影响，重启即清（同一用户在同一会话里再遇到
-   * 同一坏模型时会重新被问，符合「每次都问」的口径）。
-   */
-  private readonly delegationDisabled = new Set<string>()
-  /**
    * 会话级**临时子 Agent 模型覆盖**（key=父 session id）。
    *
    * 用户选了「临时改用主 Agent 模型」后落在这里：后续本会话的子 Agent 一律用该路由，
@@ -2029,22 +2015,6 @@ export class CorumOrchestration extends Service {
   }
 
   /**
-   * 停用该会话的委派（用户选「否，不再派遣子 Agent」）。
-   *
-   * 消费方（corum-tool-subagent）在**同一时刻**注册 `tools.guard`——因为本方法只记状态，
-   * 「让模型的委派调用真的被拒」由 guard 承担（guard 是单调 deny、原因字符串原样进工具
-   * 结果，见官方 tools 服务）。这里只管状态本身，保持"状态"与"执法"分离、各自可测。
-   */
-  disableDelegation(sessionId: string): void {
-    this.delegationDisabled.add(sessionId)
-  }
-
-  /** 该会话是否已停用委派（每次工具调用前查）。 */
-  delegationDisabledFor(sessionId: string): boolean {
-    return this.delegationDisabled.has(sessionId)
-  }
-
-  /**
    * 认领「该分支的待集成通知」——**只有第一个调用者拿到 true**，其余实例静默跳过。
    *
    * 消费方（corum-tool-subagent 的 subagent/end 监听）在投递前先调本方法；
@@ -2061,11 +2031,6 @@ export class CorumOrchestration extends Service {
     if (this.pendingNotified.has(key)) return false
     this.pendingNotified.add(key)
     return true
-  }
-
-  /** 解除该会话的委派停用（用户后来改了配置/重新启用时清掉）。 */
-  enableDelegation(sessionId: string): void {
-    this.delegationDisabled.delete(sessionId)
   }
 
   /** 登记该会话的临时子 Agent 模型覆盖（用户选「临时改用主 Agent 模型」）。 */

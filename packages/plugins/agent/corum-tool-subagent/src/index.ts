@@ -57,7 +57,6 @@ import {
   type CorumProfileWriteFace,
   type CorumRoute,
 } from './model-ask-run.ts'
-import { corumDelegationDisabledReason } from './model-ask.ts'
 import type {} from './model-selection-settings.ts'
 import {
   recordSubagentModelSelection,
@@ -1322,8 +1321,6 @@ export function apply(ctx: Context, config: Config): void {
   const corumPolicyState: CorumDelegationPolicyState = {
     setModelOverride: (sessionId, route) => orchestration.setModelOverride(sessionId, route),
     modelOverrideOf: sessionId => orchestration.modelOverrideOf(sessionId),
-    disableDelegation: sessionId => orchestration.disableDelegation(sessionId),
-    delegationDisabledFor: sessionId => orchestration.delegationDisabledFor(sessionId),
     clearModelOverride: sessionId => orchestration.clearModelOverride(sessionId),
   }
 
@@ -1344,7 +1341,7 @@ export function apply(ctx: Context, config: Config): void {
     cause: string,
     signal: AbortSignal,
     notify: boolean,
-  ): Promise<{ route: CorumRoute | undefined; delegationDisabled: boolean; summary: string }> => {
+  ): Promise<{ route: CorumRoute | undefined; summary: string }> => {
     // 回退路由 = 父 Agent 的真实路由（用户要的「和主 Agent 一样」）。拿不到就只报告。
     const parentOptions = parentAgentOptionsForDelegation(parent)
     if (parentOptions.provider === undefined || parentOptions.model === undefined) {
@@ -1352,7 +1349,7 @@ export function apply(ctx: Context, config: Config): void {
         `subagent (${label}): configured model ${configuredModel.provider}/${configuredModel.model} failed `
         + `(${cause}) and the parent route is unresolvable, so the user cannot be offered a fallback`,
       )
-      return { route: undefined, delegationDisabled: false, summary: '' }
+      return { route: undefined, summary: '' }
     }
     // 提问走 host 侧的**独立通路** `corum/model-ask/request`（waterfall）——不借
     // `ctx.userQuestions`：那是 LLM 主动提问的通路，与机制级询问的生命周期、取消语义、
@@ -1384,14 +1381,13 @@ export function apply(ctx: Context, config: Config): void {
     )
     ctx.logger.info(
       `subagent (${label}): model decision=${outcome.decision.kind} persisted=${outcome.persisted} `
-      + `delegationDisabled=${outcome.delegationDisabled}`,
+      + `persisted=${outcome.persisted}`,
     )
     if (notify && outcome.summary !== '') {
       corumNotifyModelDecision(parent, label, outcome.summary, ctx.logger)
     }
     return {
       route: outcome.override,
-      delegationDisabled: outcome.delegationDisabled,
       summary: outcome.summary,
     }
   }
@@ -2966,31 +2962,21 @@ export function apply(ctx: Context, config: Config): void {
             },
           }))
       /**
-       * fork（corum）2026-09-18：**用户选了「不再派遣」后的机制级执法**（两规则的下半句）。
+       * fork（corum）2026-09-19：**「停止委派」不再注册 guard**（用户实测纠正）。
        *
-       * 用户原话：「后续主 Agent 不再派遣子 Agent，所有工作由主 Agent 继续」/「主 Agent
-       * 不再指派任何任务，由其全权承担开发直到任务完成」。⇒ 这件事**不能靠提示词劝模型**
-       * （那只是建议，模型可以不听），必须是机制拒绝。
+       * 前一版把「停止委派」实现成会话级硬禁用：注册 `tools.guard`，此后该会话**任何**
+       * subagent/orchestrate 调用都被拒绝，且没有解除入口。用户实测发现这不对——
+       * 主 Agent 因此连「换个模型重新派」「用 subagent_research 去调研」都做不到，
+       * 而且它在通知里读到「delegation is DISABLED for this session」，就把整个会话
+       * 的委派当成永久关停，剩余工作全部自己写（连本该委派的活也自己干了）。
        *
-       * 用官方 `tools.guard`：单调 deny（同层先注册者先判，后续任何 pre-execute 监听都
-       * 无法把拒绝翻回允许）、**返回的字符串原样**作为 isError 工具结果交给模型（不是异常、
-       * 不结束 turn）⇒ 模型能读到「为什么 + 接下来自己干」并按此收敛。作用域 = 注册它的
-       * 那个 agent 上下文（`chainLayers` 沿 scope 链向下生效），故只影响本该被停用的会话。
+       * 正确语义：这一档只是**本次失败不自动重试**（机制本来会在用户同意后重跑一轮，
+       * 选它就跳过那一步，并把失败如实交回主 Agent）。**会话的委派能力不受影响**——
+       * 主 Agent 之后主动要派就派。
        *
-       * 为什么注册在这个 runtimeCtx：它正是本工具实例所属的 agent scope，与工具可见性
-       * 同域——「这个 Agent 能不能派」和「这个 Agent 有哪些工具」是同一层的判断。
+       * 于是这里不再有 guard，`delegationDisabledFor` 也不再被任何执行路径查询。
        */
-      const disposeDelegationGuard = runtimeCtx.tools.guard((exec) => {
-        // 只拦委派类工具名；orchestrate 与两个 subagent 实例都是委派。
-        if (exec.name !== toolName && exec.name !== 'orchestrate') return undefined
-        const caller = exec.agent
-        if (caller === undefined) return undefined
-        return orchestration.delegationDisabledFor(String(caller.session.id))
-          ? corumDelegationDisabledReason()
-          : undefined
-      })
       const disposeToolWithGuard = (): void => {
-        disposeDelegationGuard()
         disposeTool()
       }
       mounted = { subagentProvider, disposeTool: disposeToolWithGuard, disposeOrchestrate }

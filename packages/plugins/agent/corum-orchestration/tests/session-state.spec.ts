@@ -6,9 +6,8 @@
  * 补上后既修掉这个长期红灯，又把本包新加的会话级状态语义直接钉住。
  *
  * 覆盖的是**纯状态语义**（不碰 git / 文件系统）：
- *   ① `claimPendingIntegrationNotice` —— 认领式去重（双实例只发一条通知的关键）； 
- *   ② `disableDelegation` / `delegationDisabledFor` / `enableDelegation`；
- *   ③ `setModelOverride` / `modelOverrideOf` / `clearModelOverride`（含「返回副本」防外部改内部态）；
+ *   ① `claimPendingIntegrationNotice` —— 认领式去重（双实例只发一条通知的关键）；
+ *   ② `setModelOverride` / `modelOverrideOf` / `clearModelOverride`（含「返回副本」防外部改内部态）；
  *   ④ `rememberChildSpawn` / `takeChildSpawn`（取走即删）；
  *   ⑤ 会话隔离：不同 sessionId 互不影响。
  *
@@ -56,34 +55,6 @@ describe('claimPendingIntegrationNotice — 待集成通知的认领式去重', 
     const svc = makeService()
     expect(svc.claimPendingIntegrationNotice('a', 'b\u0000c')).toBe(true)
     expect(svc.claimPendingIntegrationNotice('a\u0000b', 'c')).toBe(true)
-  })
-})
-
-describe('委派停用（选「否」后的机制级执法状态）', () => {
-  it('初始未停用；停用后为真；解除后恢复', () => {
-    const svc = makeService()
-    expect(svc.delegationDisabledFor('sess-1')).toBe(false)
-    svc.disableDelegation('sess-1')
-    expect(svc.delegationDisabledFor('sess-1')).toBe(true)
-    svc.enableDelegation('sess-1')
-    expect(svc.delegationDisabledFor('sess-1')).toBe(false)
-  })
-
-  it('按会话隔离：停用一个会话不影响另一个', () => {
-    const svc = makeService()
-    svc.disableDelegation('sess-1')
-    expect(svc.delegationDisabledFor('sess-1')).toBe(true)
-    expect(svc.delegationDisabledFor('sess-2'), '新会话必须仍是可委派的').toBe(false)
-  })
-
-  it('重复停用/重复解除都幂等', () => {
-    const svc = makeService()
-    svc.disableDelegation('sess-1')
-    svc.disableDelegation('sess-1')
-    expect(svc.delegationDisabledFor('sess-1')).toBe(true)
-    svc.enableDelegation('sess-1')
-    svc.enableDelegation('sess-1')
-    expect(svc.delegationDisabledFor('sess-1')).toBe(false)
   })
 })
 

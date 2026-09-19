@@ -215,8 +215,8 @@
    ic 11×11 $label-tertiary + lbl(fill_container, 12px $label-tertiary) + chev 11×11。
    行高 16px（配 12px 字）⇒ 高 16 + pad14 = 30，与设计稿 28 同量级。
 
-   这是一行**说明/状态行**，不是按钮：列表展开由档位驱动（选中「永久改指定模型」），
-   故默认不设 pointer 光标、不设 hover 态——可点的假象会诱使用户在没选档位时先挑模型。 */
+   整块**默认不渲染**，只在选中「永久改指定模型」时出现（2026-09-19 用户实测纠正：
+   此前做成恒显示的不可点下拉）。行本身是容器，右侧另有 .pickerToggle 承载收起动作。 */
 .picker {
   display: flex;
   flex-direction: row;
@@ -235,10 +235,25 @@
   box-sizing: border-box;
 }
 
-/* 展开态（已选中「永久改指定模型」）：描边提亮，表明现在是可挑选的。 */
-.picker[data-open] {
-  outline: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
-  outline-offset: -1px;
+/* 行右侧的收起/展开小按钮（11×11 图标）。行本身是容器而非按钮——嵌套 button 是
+   非法 HTML（见 dev-conventions §13.5）。 */
+.pickerToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.pickerToggle:hover {
+  color: var(--dsw-alias-label-primary);
 }
 
 /* picker 图标/chev 容器 11×11。 */

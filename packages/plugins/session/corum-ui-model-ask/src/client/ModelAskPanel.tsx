@@ -60,64 +60,74 @@ const CHIP_ICON: Readonly<Record<ModelAskKind, typeof Zap>> = {
 }
 
 /**
- * 内嵌模型选择：**行恒常显示，列表只在选中「永久改指定模型」时展开**。
+ * 内嵌模型选择：**默认整块隐藏，选中「永久改指定模型」时才出现**。
  *
- * 两处判据都来自设计稿本身：
- * - 行不藏：`picker` 是 `panel-expanded` 的固定子节点（整行按档位隐藏会让面板少一块、
- *   高度抖动）。
- * - 列表由**档位**驱动：该行 lbl 原文是「指定模型：选『永久改指定模型』时展开选择」——
- *   「选了才展开」写在这行上。故行本身不是自由折叠控件：未选该档时不可点、也不显示箭头
- *   展开态，避免用户在没选档位时先挑模型（挑完却发现应用不了，白操作一场）。
+ * 判据是设计稿该行 lbl 的原文：「指定模型：**选『永久改指定模型』时展开选择**」——
+ * 「展开选择」的主语是这一整块（行 + 列表），不是只有列表。
+ *
+ * ⚠️ 2026-09-19 用户实测纠正：此前实现成「行恒显示、只有列表按需展开」，且把那行做成
+ * 不可点的 div。用户看到的是一行带箭头的下拉却点不动 —— 「下拉仍然存在，并且是不可选中
+ * 状态，默认应该隐藏才对」。两个错都要修：**默认不渲染**（不是渲染成禁用样），出现时
+ * 是一个真正可交互的控件。
  */
-function ModelPicker({ catalog, picked, kind, onPick }: {
+function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
   catalog: readonly ModelAskCatalogProvider[]
   picked: PickedRoute | undefined
-  /** 当前选中档位（只有 permanent-route 会展开列表）。 */
-  kind: ModelAskKind | undefined
+  /** 是否显示（= 选中了「永久改指定模型」）。false 时**整块不渲染**。 */
+  open: boolean
+  /** 模型列表是否展开（行右侧小箭头控制）。 */
+  listOpen: boolean
+  /** 收起/展开模型列表。 */
+  onToggle: () => void
   onPick: (route: PickedRoute) => void
 }) {
-  // 展开态 = 「选中了永久改指定模型」这个事实本身，不是独立 UI 状态：档位一换就自动收起。
-  const open = modelAskNeedsRoute(kind)
+  if (!open) return null
   return (
     <>
-      <div className={css.picker} data-open={open || undefined} aria-expanded={open}>
+      {/* 行本身是容器而非按钮（嵌套 button 是非法 HTML，本仓已为此付过学费：
+          见 dev-conventions §13.5「row 不能是 button 如果它还要自己的按钮」）。
+          收起动作放在右侧独立的小按钮上。 */}
+      <div className={css.picker}>
         <span className={css.pickerGlyph}><Cpu size={11} /></span>
         <span className={css.pickerLabel}>
           {picked === undefined
             ? '指定模型：选『永久改指定模型』时展开选择'
             : `${picked.label}（${picked.provider}/${picked.model}）`}
         </span>
-        <span className={css.pickerGlyph}>
-          {open ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-        </span>
+        <button
+          type="button"
+          className={css.pickerToggle}
+          aria-label="收起模型列表"
+          onClick={onToggle}
+        >
+          {listOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+        </button>
       </div>
-      {open && (
-        <div className={css.pickerList}>
-          {catalog.length === 0 && <div className={css.pickerEmpty}>没有可用的模型</div>}
-          {catalog.map(provider => (
-            <div key={provider.provider}>
-              <div className={css.pickerGroup}>{provider.label}</div>
-              {provider.models.map(model => {
-                const active = picked?.provider === provider.provider && picked?.model === model.model
-                return (
-                  <button
-                    key={`${provider.provider}/${model.model}`}
-                    type="button"
-                    className={active ? `${css.pickerRow} ${css.pickerRowActive}` : css.pickerRow}
-                    onClick={() => onPick({
-                      provider: provider.provider,
-                      model: model.model,
-                      label: `${provider.label} / ${model.label}`,
-                    })}
-                  >
-                    <span className={css.pickerModel}>{model.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      )}
+      {listOpen && <div className={css.pickerList}>
+        {catalog.length === 0 && <div className={css.pickerEmpty}>没有可用的模型</div>}
+        {catalog.map(provider => (
+          <div key={provider.provider}>
+            <div className={css.pickerGroup}>{provider.label}</div>
+            {provider.models.map(model => {
+              const active = picked?.provider === provider.provider && picked?.model === model.model
+              return (
+                <button
+                  key={`${provider.provider}/${model.model}`}
+                  type="button"
+                  className={active ? `${css.pickerRow} ${css.pickerRowActive}` : css.pickerRow}
+                  onClick={() => onPick({
+                    provider: provider.provider,
+                    model: model.model,
+                    label: `${provider.label} / ${model.label}`,
+                  })}
+                >
+                  <span className={css.pickerModel}>{model.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </div>}
     </>
   )
 }
@@ -130,6 +140,9 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [kind, setKind] = useState<ModelAskKind | undefined>(undefined)
   const [picked, setPicked] = useState<PickedRoute | undefined>(undefined)
+  // 模型列表的展开态。**每次换档位都重置为展开**：选中「永久改指定模型」的目的就是挑模型，
+  // 再让用户多点一次「展开」是多余的一步；用户在列表里收起来后换回来才保留其选择。
+  const [listOpen, setListOpen] = useState(true)
   const [applying, setApplying] = useState(false)
   const { request } = pending
 
@@ -137,6 +150,11 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
   // 「永久改指定模型」必须真的选了一个模型才能应用（否则回传 dismissed = 什么都没变，
   // 却让用户以为已经处理好了）。
   const canApply = kind !== undefined && (!needsRoute || picked !== undefined) && !applying
+  /** 选档位：换档时把模型列表重置为展开（见 listOpen 的说明）。 */
+  const chooseKind = (next: ModelAskKind): void => {
+    if (next !== kind) setListOpen(true)
+    setKind(next)
+  }
 
   const apply = (): void => {
     if (!canApply) return
@@ -196,7 +214,7 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
                 type="button"
                 className={active ? `${css.chip} ${css.chipActive}` : css.chip}
                 title={option.description}
-                onClick={() => setKind(option.kind)}
+                onClick={() => chooseKind(option.kind)}
               >
                 <span className={css.chipIcon}><Icon size={11} /></span>
                 {option.label}
@@ -205,12 +223,15 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
           })}
         </div>
 
-        {/* picker 行恒常显示（设计稿的 panel-expanded 固定子节点）；
-            列表由档位驱动展开（选中「永久改指定模型」时）。 */}
+        {/* picker 整块**默认不渲染**，只在选中「永久改指定模型」时出现
+            （2026-09-19 用户实测纠正：此前做成「恒显示的不可点下拉」，用户看到一行
+            带箭头却点不动的控件）。 */}
         <ModelPicker
           catalog={request.catalog}
           picked={picked}
-          kind={kind}
+          open={needsRoute}
+          listOpen={listOpen}
+          onToggle={() => setListOpen(v => !v)}
           onPick={setPicked}
         />
 

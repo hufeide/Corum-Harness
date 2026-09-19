@@ -66,8 +66,8 @@ export const CORUM_MODEL_ASK_OPTIONS = [
   },
   {
     kind: 'decline',
-    label: '停止委派',
-    description: '本次及后续不再自动委派',
+    label: '不重试本次委派',
+    description: '失败原样交回主 Agent，会话委派能力不变',
   },
 ] as const satisfies readonly CorumModelAskOption[]
 
@@ -177,15 +177,4 @@ export function corumResolveModelAskDecision(
     default:
       return { kind: 'dismissed' }
   }
-}
-
-/**
- * 机制停用委派后，**拒绝委派工具调用**时给模型的理由（原样进工具结果）。
- *
- * 为什么这句话要写这么满：官方 tools 服务的 guard 拒绝会把这段字符串**原样**作为
- * isError 工具结果交给模型（不是异常、不结束 turn），模型的下一步完全取决于它读到了什么。
- * 只说「被拒绝」会让模型反复重试别的委派形态；必须把「为什么 + 该干什么」说全。
- */
-export function corumDelegationDisabledReason(): string {
-  return 'Delegation is disabled for this session: the user declined to keep delegating after the configured child-Agent model turned out to be unavailable, so no child Agent may be spawned. Do ALL of this work yourself with your own tools until the task is complete — do not retry this tool, do not switch to another delegation tool, and do not ask the user to re-enable it. If the work genuinely cannot proceed alone, say so in your final answer.'
 }

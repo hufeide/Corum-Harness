@@ -37,8 +37,6 @@ export interface CorumRoute {
 export interface CorumDelegationPolicyState {
   setModelOverride: (sessionId: string, route: CorumRoute) => void
   modelOverrideOf: (sessionId: string) => CorumRoute | undefined
-  disableDelegation: (sessionId: string) => void
-  delegationDisabledFor: (sessionId: string) => boolean
   clearModelOverride: (sessionId: string) => void
 }
 
@@ -100,8 +98,6 @@ export interface CorumModelAskOutcome {
   readonly override: CorumRoute | undefined
   /** 永久档是否真的写成功（无写入面/写失败=false）。 */
   readonly persisted: boolean
-  /** 委派是否被停用。 */
-  readonly delegationDisabled: boolean
   /** 给用户的可见结论（通知文本用）。 */
   readonly summary: string
 }
@@ -137,7 +133,6 @@ export async function corumAskAboutModelFailure(
     decision,
     override: undefined,
     persisted: false,
-    delegationDisabled: false,
     summary: reason,
   })
 
@@ -224,7 +219,7 @@ export function applyCorumModelDecision(
   logger: { warn: (message: string) => void },
 ): CorumModelAskOutcome {
   const sessionId = String(parent.session.id)
-  const base = { decision, persisted: false, delegationDisabled: false, override: undefined }
+  const base = { decision, persisted: false, override: undefined }
 
   switch (decision.kind) {
     case 'temporary': {
@@ -276,16 +271,19 @@ export function applyCorumModelDecision(
       }
     }
     case 'decline': {
-      // 用户原话：「后续主 Agent 不再派遣子 Agent，所有工作由主 Agent 继续」。
-      // 停用是**机制级**的（消费方同时注册 tools.guard），不是靠提示词劝模型别派。
-      deps.state.disableDelegation(sessionId)
+      // ★ 2026-09-19 用户实测纠正：这一档**只表示「不要再用那个坏模型重试」**，
+       // **不是**把会话的委派能力关掉。前一版在此注册 tools.guard 硬禁用整个会话，
+       // 结果主 Agent 连「换个模型重派」「用 subagent_research 调研」都做不到，还在
+       // 通知里读到「delegation is DISABLED for this session」，索性把所有活（含本该
+       // 委派的）都自己干了。会话的委派能力不因此改变：之后主动要派就派。
+      deps.state.clearModelOverride(sessionId)
       return {
         ...base,
-        delegationDisabled: true,
         summary:
-          `You declined to keep delegating: the configured child-Agent model ${facts.configured.provider}/${facts.configured.model} `
-          + `is unavailable. Delegation is now DISABLED for this session — any further subagent/orchestrate call is refused by the mechanism. `
-          + `Do all of the remaining work yourself until the task is complete.`,
+          `You chose not to retry the delegation: the configured child-Agent model ${facts.configured.provider}/${facts.configured.model} `
+          + `is unavailable. The mechanism will NOT re-issue that delegation automatically — the failure is handed back to you as-is. `
+          + `The session's delegation capability is UNCHANGED: you may still delegate (for example after switching to a working model, `
+          + `or for work that does not need the unavailable one). Nothing was changed about your saved configuration.`,
       }
     }
     case 'dismissed':

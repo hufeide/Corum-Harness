@@ -175,22 +175,42 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
     expect(picker).toContain('align-items: center')
   })
 
-  it('★★ picker 行**恒常显示**，列表**由档位驱动**展开（用户 2026-09-19 实测反馈）', () => {
-    // 两条判据都来自设计稿：
-    // ① 行不藏：picker 是 panel-expanded 的固定子节点（整行按档位隐藏会让面板少一块、
-    //    高度抖动）。
-    // ② 列表由档位驱动：lbl 原文「指定模型：选『永久改指定模型』时展开选择」——
-    //    「选了才展开」写在这行上。做成自由折叠控件会让用户在没选档位时先挑模型，
-    //    挑完才发现应用不了（用户实测反馈的就是这个）。
-    expect(TSX).not.toContain('{needsRoute && (')
-    expect(TSX).toContain('<ModelPicker')
-    // 展开态源自档位，不是一个独立的 UI state。
-    expect(TSX).toContain('const open = modelAskNeedsRoute(kind)')
-    expect(TSX).not.toContain('pickerOpen')
-    // 行本身不是按钮（可点的假象会诱使先挑模型）。
+  it('★★ picker 整块**默认不渲染**，选中「永久改指定模型」才出现（用户实测纠正）', () => {
+    // 判据：设计稿该行 lbl 原文「指定模型：**选『永久改指定模型』时展开选择**」——
+    // 「展开选择」的主语是这一整块（行 + 列表）。
+    //
+    // ⚠️ 用户 2026-09-19 实测：「下拉仍然存在，并且是不可选中状态，默认应该隐藏才对」。
+    // 此前实现成「行恒显示、只把列表按需展开」，且那行是不可点的 div ⇒ 用户看到一行
+    // 带箭头的下拉却点不动。两个错都在本条钉住：①默认不渲染；②出现时是真控件。
     const picker = TSX.slice(TSX.indexOf('function ModelPicker'), TSX.indexOf('export function ModelAskPanel'))
-    expect(picker).toContain('className={css.picker}')
-    expect(picker).not.toContain('<button type="button" className={css.picker}')
+    // ① 默认整块不渲染（early return，而不是渲染成禁用样）。
+    expect(picker).toContain('if (!open) return null')
+    // ② 列表由 listOpen 控制；行右侧的收起按钮是真 button（不是不可点的 div）。
+    expect(picker).toContain('{listOpen && <div className={css.pickerList}>')
+    expect(picker).toContain('css.pickerToggle')
+    // 行本身是容器（嵌套 button 非法，见 dev-conventions §13.5）。
+    expect(picker).toContain('<div className={css.picker}>')
+    expect(picker).not.toContain('<button type="button" className={css.picker}>')
+    // ③ 调用点用档位决定是否渲染。
+    expect(TSX).toContain('open={needsRoute}')
+    // 不得回潮成「恒显示 + data-open 样式态」。
+    expect(TSX).not.toContain('data-open={open || undefined}')
+  })
+
+  it('★ picker 出现时列表默认展开（选中该档的目的就是挑模型，不多要一次点击）', () => {
+    expect(TSX).toContain('const [listOpen, setListOpen] = useState(true)')
+    expect(TSX).toContain('setListOpen(true)')
+  })
+
+  it('★ picker：$glass-2 + pad[7,10] + gap6 + r10 + **横排 ai=center**', () => {
+    const picker = rule('picker')
+    expect(picker).toContain('--corum-glass-2')
+    expect(picker).toContain('padding: 7px 10px')
+    expect(picker).toContain('gap: 6px')
+    expect(picker).toContain('border-radius: 10px')
+    // 设计稿 picker 是 row（ic + lbl + chev），竖排会让它长得像一块区块。
+    expect(picker).toContain('flex-direction: row')
+    expect(picker).toContain('align-items: center')
   })
 
   it('★ 应用按钮：$brand-primary + pad[6,12] + gap5 + r8 + 10px/700', () => {
