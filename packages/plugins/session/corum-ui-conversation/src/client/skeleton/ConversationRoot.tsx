@@ -319,10 +319,32 @@ export function ConversationRoot({
   const hasSession = sessionId !== undefined
   /** 是否 task 泳道会话（corum-task-*）——这类会话 Agent 创建时绑定，session 内锁定。 */
   const isTaskLane = sessionId !== undefined && String(sessionId).startsWith('corum-task-')
-  /** 是否子 Agent 会话（origin=subagent）——由父 Agent 发起和管控，用户不可干涉：
-   *  隐藏 composer 输入框与工作区选择，底部改「返回父会话」撑满条（设计稿 q0T81 稿②）。 */
+  /** 是否子 Agent 会话——由父 Agent 发起和管控，用户不可干涉：
+   *  隐藏 composer 输入框与工作区选择，底部改「返回父会话」撑满条（设计稿 q0T81 稿②）。
+   *
+   * ⚠️ 判据必须与**官方 ui-subagent 抢 composer 所用的那个信号同源**（2026-09-19
+   * 用户报障①：运行中点停止后输入框下方多出一条带边框的横条、输入框被顶上去）。
+   *
+   * 官方 `ui-subagent` 的 `selectReadOnlySubagent` 读的是**运行时 session 对象**的
+   * `session.subagent`（`conversation.composer` 链的 owner 币），命中即**当选**——
+   * 而本槽用 `overlay: true` 渲染，当选时 fallback 是 `display:none` 而非卸载。
+   *
+   * 此前本处只认 sessions 列表摘要的 `origin === 'subagent'`（`byId[id].origin`）。
+   * 两个来源不同源：摘要里的 origin 可能还没到／已过期，而运行时对象已带 `subagent`
+   * ⇒ 本处判「非子会话」照常渲染 corum 的 composer，官方那条只读条**同时当选**并渲染
+   * 在输入卡**下方**（它的 CSS 是 `margin: 0 24px 20px; min-height: 54px` 的独立横条）
+   * ⇒ 于是「输入框下方多出一个东西 + 输入框被顶上去」。
+   *
+   * 为什么「停止」恰好触发（官方 selector 第 44 行）：continuable 子会话在**运行中**
+   * 时官方刻意**不**接管（要留住默认 composer 里那个 primary Stop 好让用户中断它）；
+   * 一旦停下，`running` 转 false ⇒ 接管条件成立 ⇒ 那条只读条就冒出来了。
+   *
+   * 故这里同时认两个信号（任一为真即按子会话处理），与官方口径对齐。
+   */
   const sessionOrigin = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.origin)
-  const isSubagentSession = sessionOrigin === 'subagent'
+  /** 运行时 session 对象自带的 subagent 币（官方 selectReadOnlySubagent 用的同一信号）。 */
+  const runtimeSubagent = session?.subagent
+  const isSubagentSession = sessionOrigin === 'subagent' || (runtimeSubagent !== undefined && runtimeSubagent !== null)
   /** 子 Agent 会话的父会话 id（session/list 行 parentId），供「返回父会话」寻址。 */
   const parentSessionId = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.parentId)
   const zone: InputZone | undefined =
