@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { carrierKeyOf, scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
+import { carrierKeyOf, scopeChainOf, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId, boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -930,6 +930,17 @@ function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
  * **刻意不复用 `userQuestions`**：那条通路的消费者是 LLM 的 `ask_user_question` 工具，
  * 与机制级提问共用会让两者在同一 waterfall 里互相截获、delegate 语义纠缠。
  *
+ * ## 必须带 scope 载体（2026-09-19 实机：不带 ⇒ 静默降级成 dismissed）
+ *
+ * `corum-api-remotes` 的转发循环对 waterfall 事件先取 `carrierKeyOf(this)`，**取不到就
+ * 直接 `next()`**（见其 `remoteEventSource`）——即不带载体的派发根本不会转发到 renderer，
+ * 用户的界面永远不出现，机制拿到的是我们自己传的 dismissed。表现极具迷惑性：日志里
+ * 「无 choice made」，看起来像用户没作答。
+ *
+ * 载体的正确取法与官方两条同类通路（`user-approval` / `user-questions`）逐字一致：
+ * `ctx.waterfall(scopeTarget(agent, agent), event, request, fallback)` —— 第一个参数是
+ * **作用域分派载体**，不是普通入参。
+ *
  * 为什么在这里 `ctx.get` 而不是注入一个服务：该通路是**事件**（cordis 事件总线），
  * 事件不需要「服务存在」即可安全发起——没有应答者时 waterfall 会落到我们传的
  * `next`（返回 dismissed），这正是「该部署没有 UI 插件」时想要的保守降级。
@@ -939,7 +950,12 @@ function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
  */
 function corumModelAskChannel(runtimeCtx: Context): CorumModelAskChannel {
   return {
-    call: (request, next) => runtimeCtx.waterfall('corum/model-ask/request', request, next),
+    call: (request, next) => Promise.resolve().then(() => runtimeCtx.waterfall(
+      scopeTarget(request.agent, request.agent),
+      'corum/model-ask/request',
+      request,
+      next,
+    )),
   }
 }
 

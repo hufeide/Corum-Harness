@@ -1535,9 +1535,20 @@ export class CorumAgentService extends TypertRemoteService {
     // 预设 id 用 session projection（agentPreset）权威解析——与官方
     // session-controller 的 presetForSession 同口径：它反映会话**当前**运行的
     // preset（blank 期切换过 preset 的会话，creation header 已过时）。
-    // 三个存活表都查不到 ⇒ 会话不是本进程存活的 Agent ⇒ fail-loud，绝不静默
+    // 都查不到 ⇒ 会话不是本进程存活的 Agent ⇒ fail-loud，绝不静默
     // 回落默认预设（写错预设 = 用户以为改了 A 实际改了 B）。
-    const live = this.taskAgents.get(sessionId) ?? this.findLaneAgent(sessionId)
+    //
+    // ⚠️ 第三个来源 `this.ctx.agents.get` 不是冗余（2026-09-19 实机：永久档在 IDE
+    // 「新会话」路径上恒失败，报「不是本进程存活的 Agent 会话」）。两张 corum 自有的
+    // 存活表（taskAgents / typeAgents）只登记 corum 自己创建的泳道会话；而 IDE 侧
+    // 直接经官方 sessions/agents 建起的会话在本进程**确实存活**，却不在那两张表里。
+    // 官方 registry 才是「本进程存活」的权威口径（同文件 2083 行恢复逻辑也用它）。
+    const live = this.taskAgents.get(sessionId)
+      ?? this.findLaneAgent(sessionId)
+      ?? (() => {
+        const agent = this.ctx.agents.get(SessionId(sessionId))
+        return agent === undefined ? undefined : { agent, sessionId: SessionId(sessionId) }
+      })()
     if (live === undefined) {
       throw new Error(`corum-agent: applySubagentModelForSession — session "${sessionId}" 不是本进程存活的 Agent 会话`)
     }

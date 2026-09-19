@@ -10,15 +10,15 @@
  */
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
+/** 机制接受的档位（与 host 的 `CorumModelAskDecision['kind']` 同集）。 */
+export type ModelAskKind = 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
+
 /** 一个档位的呈现数据（`kind` 是协议，label/description 是文案）。 */
 export interface ModelAskOption {
   readonly kind: ModelAskKind
   readonly label: string
   readonly description: string
 }
-
-/** 机制接受的档位（与 host 的 `CorumModelAskDecision['kind']` 同集）。 */
-export type ModelAskKind = 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
 
 /** 可用模型清单里的一项（供「永久改指定模型」内嵌选择）。 */
 export interface ModelAskCatalogProvider {
@@ -64,9 +64,9 @@ let nextModelAskKey = 0
 /**
  * 一个可渲染的待决定项。
  *
- * 为什么自己持有 resolve/reject 而不是复用 PendingQuestion：那是提问卡（LLM 提问通路）
- * 的类型，`isDelegation` 的哨兵、abort 语义都锚在 `UserQuestionError` 的 code 上。
- * 本决定走自己的通路，混用会把两条通路的取消语义搅在一起。
+ * 为什么不复用 PendingQuestion：那是提问卡（LLM 提问通路）的类型，`isDelegation` 的
+ * 哨兵、abort 语义都锚在 `UserQuestionError` 的 code 上。本决定走自己的通路，混用会把
+ * 两条通路的取消语义搅在一起。
  */
 export class PendingModelAsk {
   /** pendingInteractions 的判据（与 SessionPendingInteractionMap 的键同名）。 */
@@ -104,14 +104,14 @@ export class PendingModelAsk {
    * @param answer - 用户选定的档位（`permanent-route` 须带 route）。
    */
   answer(answer: ModelAskAnswer): Promise<void> {
-    return this.#finish(() => { this.#resolve(answer) }, 'pending model-ask settlement failed')
+    return this.#settle(() => { this.#resolve(answer) }, 'pending model-ask settlement failed')
   }
 
   /**
    * 用户点 × / 「稍后」——挂起本次询问（host 按「不改变现状」处理）。
    *
-   * 注意这与 {@link delegate} 不同：挂起是**用户的可见选择**，必须回传 dismissed；
-   * delegate 是把机会让给下游监听者（本部署只有本插件一个应答者，故实际不会发生）。
+   * 与 {@link delegate} 的区别：挂起是**用户的可见选择**，必须回传 dismissed；
+   * delegate 是把机会让给下游监听者。
    */
   dismiss(): Promise<void> {
     return this.answer({ kind: 'dismissed' })
@@ -120,11 +120,8 @@ export class PendingModelAsk {
   /** 把未应答的询问让给下一个 waterfall 监听者。 */
   delegate(): void {
     if (this.#settled) return
-    try {
-      this.#finish(() => { this.#reject(this.#delegated) }, 'pending model-ask delegation failed')
-    } catch {
-      // delegate 在 finally 里被调用；已 settle 是正常竞态，不外抛。
-    }
+    void this.#settle(() => { this.#reject(this.#delegated) }, 'pending model-ask delegation failed')
+      .catch(() => undefined)
   }
 
   /**
@@ -139,23 +136,21 @@ export class PendingModelAsk {
   /** 插件卸载 / 通路断开时结束未应答的询问。 */
   abort(reason: unknown): void {
     if (this.#settled) return
-    try {
-      this.#finish(() => { this.#reject(reason) }, 'pending model-ask abort failed')
-    } catch {
-      // 同上：已 settle 的竞态不外抛。
-    }
+    void this.#settle(() => { this.#reject(reason) }, 'pending model-ask abort failed')
+      .catch(() => undefined)
   }
 
-  #finish(settle: () => void, failureMessage: string): Promise<void> {
-    return Promise.resolve().then(() => {
-      if (this.#settled) throw new Error(`pending model-ask ${this.key} is already settled`)
-      this.#settled = true
-      try {
-        settle()
-      } catch (error) {
-        throw error instanceof Error ? error : new Error(failureMessage, { cause: error })
-      }
-    })
+  #settle(settle: () => void, failureMessage: string): Promise<void> {
+    if (this.#settled) {
+      return Promise.reject(new Error(`pending model-ask ${this.key} is already settled`))
+    }
+    this.#settled = true
+    try {
+      settle()
+      return Promise.resolve()
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(failureMessage, { cause: error }))
+    }
   }
 }
 

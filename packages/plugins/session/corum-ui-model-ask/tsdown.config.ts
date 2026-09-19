@@ -75,7 +75,7 @@ export default defineConfig(() => [
       inlineDynamicImports: true,
       banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(CLIENT_ID)}, factory: (require) => {`,
       footer: 'return module.exports; } });',
-      intro: 'var module = { exports: {}; var exports = module.exports;',
+      intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
   },
 ])
