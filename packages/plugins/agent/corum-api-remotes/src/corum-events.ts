@@ -16,16 +16,9 @@
  */
 
 // waterfall 事件的 Scoped<Agent> this 参数类型（与 approval/request 同形）。
-// 经 dsh-user-approval 间接拉入 Agent 的 TypertLookupMap/TypertContextMap 合并。
-// Agent 不在本包 node_modules（peer dep 未 hoist），故用结构化类型替代——
-// Scoped<T> 只需要 T 有个 ctx 字段，结构匹配即可。
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
-
-/** 结构化 Agent 占位（替代 dsh-agent 的 Agent 接口；Scoped<T> 只需要 T 有 ctx）。 */
-interface CorumScopedAgent {
-  readonly ctx: unknown
-}
+import type { Agent } from '@deepseek-ai/dsh-agent'
 
 // ── 载荷类型（自包含重声明；事实源 = corum-agent/src/events.ts）──────────────
 
@@ -617,6 +610,11 @@ export interface OllamaDownloadProgressEvent {
 
 /** corum/model-ask/request 的提问载荷（host → client）。 */
 export interface CorumModelAskRequestEvent {
+  /**
+   * 发起询问的父 Agent（waterfall 的 scope 载体；`TypertAgentScopedRequest`
+   * 硬要求载荷带 `agent`，否则该事件不进可转发联合）。
+   */
+  readonly agent: Agent
   /** 哪个子 Agent（label，给人话上下文）。 */
   readonly label: string
   /** 用户为该角色配置的模型路由（不可用的那个）。 */
@@ -695,7 +693,7 @@ declare module '@deepseek-ai/cordis' {
      * @mode waterfall
      */
     'corum/model-ask/request'(
-      this: Scoped<CorumScopedAgent>,
+      this: Scoped<Agent>,
       data: CorumModelAskRequestEvent,
       next: () => Promise<CorumModelAskOutcomeEvent>,
     ): Promise<CorumModelAskOutcomeEvent>
