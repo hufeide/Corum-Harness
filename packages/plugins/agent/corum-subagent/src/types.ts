@@ -14,6 +14,7 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { ChildKind } from './child-agent.ts'
 import type { SubagentDescriptorData } from './descriptor.ts'
 
 /** Identifies one accepted subagent run across its lifecycle event pair. */
@@ -154,6 +155,23 @@ export interface SubagentStartRequest {
    * unknown-name validation.
    */
   readonly toolFilter?: ToolRestriction
+  /**
+   * fork（corum）：**子 Agent 种类**（2026-09-20 用户定调）——决定它在子 scope 里拿哪套角色
+   * 契约（全能执行者 `worker` / 全面调查员 `researcher`，见 `child-roles.ts`）。
+   *
+   * 为什么它是机制事实而不是从工具面反推：用户要求「**所有**子 Agent 都不能单独继承主 Agent
+   * 人格」，且两类性格**相反**（worker 要收敛、researcher 要发散）。让调用方显式声明种类，
+   * 才不会出现「能写就猜是 worker」这类脆弱推断。缺省 `undefined` = 不替换人格（维持既有
+   * 继承行为，供精简装配与官方路径保持兼容）。
+   */
+  readonly kind?: ChildKind
+  /**
+   * fork（corum）：主 Agent 动态注入的**叠加层**人格片段（2026-09-20 用户定调「叠加，且不可
+   * 覆盖机制层」）。只承载本次任务的领域上下文与约定；拼装顺序恒为
+   * `[kind 角色契约] + [工作风格] + [本字段]`，**无法**删除或覆盖前两段。
+   * 长度由 `PERSONA_INJECTION_MAX_CHARS` 截断。
+   */
+  readonly personaHint?: string
   /**
    * Optional per-child persona. Requires {@link SubagentCapabilities.persona};
    * rejected at start otherwise. In-process backends register it as a scoped

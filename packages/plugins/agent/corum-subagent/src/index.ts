@@ -78,6 +78,10 @@ import { subagentIdentityProjectionDefinition, subagentTimingProjectionDefinitio
 import { deliverSubagentPrompt, type HostPromptDeliveryMode } from './internal.ts'
 
 export * from './out-of-process.ts'
+// fork（corum）2026-09-20：子 Agent 角色契约（两类）+ 注入层上限——工具层构建 request 时
+// 需要 `ChildKind`（决定种类）与 `PERSONA_INJECTION_MAX_CHARS`（截断主 Agent 的注入）。
+export { CHILD_WORKER_ROLE, PERSONA_INJECTION_MAX_CHARS, RESEARCHER_ROLE } from './child-roles.ts'
+export type { ChildKind } from './child-agent.ts'
 export { AssistantOutputFold, finalAssistantOutput } from './assistant-output.ts'
 export { SubagentRunId } from './types.ts'
 export type {

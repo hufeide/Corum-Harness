@@ -27,6 +27,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
+import { CHILD_WORKER_ROLE, RESEARCHER_ROLE } from './child-roles.ts'
 import { delegationDepthOf } from './depth.ts'
 
 /** Thrown when starting a child would exceed the requested depth cap. */
@@ -160,8 +161,36 @@ export function childSessionMeta(
   }
 }
 
+/**
+ * fork（corum）：子 Agent 的**种类**——决定它拿哪套角色人格契约（2026-09-20 用户定调）。
+ *
+ * 为什么需要显式信号（而不是从工具面反推）：用户要求「**所有**子 Agent 都不继承主 Agent
+ * 人格」，且两类子 Agent 的性格**相反**——
+ *   · `worker`     = 忠实执行者：照 brief 做、不重规划、不越界、达标即停、**不做构建**；
+ *   · `researcher` = 全面调查员：主动多角度深挖、交叉验证、可继续派子 Agent 深入调查。
+ * 把「哪种」当作机制事实显式传递，才不会出现「execution 面能写就猜是 worker」这类
+ * 脆弱推断（同 `conductorModes` 内存表的教训，见 docs/LESSONS.md §4.29 附近）。
+ */
+export type ChildKind = 'worker' | 'researcher'
+
 /** The scoped composition a child agent's creation window applies. */
 export interface ChildComposition {
+  /**
+   * fork（corum）：子 Agent 种类 → 决定影子人格选哪套契约。
+   *
+   * `undefined` = 调用方未声明（精简装配/官方路径），人格**不被替换**，维持既有继承行为。
+   */
+  readonly kind?: ChildKind | undefined
+  /**
+   * fork（corum）：主 Agent 动态注入的**叠加层**人格（2026-09-20 用户定调「叠加，且不可
+   * 覆盖机制层」）。
+   *
+   * 与 {@link ChildComposition.kind} 的分工：`kind` 定「你是哪种角色、有什么硬约束」（机制
+   * 单一事实源，不可被写掉）；本字段只承载**本次任务的领域上下文与约定**（「这个仓库用 pnpm」
+   * 「改动要兼容 node18」）。拼装顺序恒为 `[机制人格] + [本字段]`——本字段**无法**删除或
+   * 覆盖机制层。长度上限见 `PERSONA_INJECTION_MAX_CHARS`。
+   */
+  readonly personaHint?: string | undefined
   /** Per-child persona shadowing the deployment persona. */
   readonly persona?: string | undefined
   /** Per-child tool scoping. */
@@ -213,21 +242,39 @@ export function applyChildComposition(
     text: SUBAGENT_DELEGATION_CONTEXT,
   })
   /**
-   * 指挥模式（`corumConductor` 服务，可选）下的子 Agent 契约（2026-09-11 用户定调）：
+   * 子 Agent 人格契约（2026-09-11 首版「指挥模式不继承父人格」；**2026-09-20 扩为无条件**）。
    *
-   * ① **不继承父的角色人格**：父是指挥者时，preset 里那段 persona（含指挥者 iron rule
-   *    "you physically cannot write / edit / bash"）会被原样继承到子 Agent —— 而子 Agent
-   *    有全套写工具、正在跑 bash，人格与工具面直接矛盾。这里用 `deployment:persona`
-   *    影子段换掉：中性工作型角色行 + **保留父的「工作风格人格」**（设置里那个，如专业干练）。
-   * ② **不再召唤孙 Agent**：指挥模式下子 Agent 只干活不分层，deny 掉全部委派工具。
+   * ## 为什么无条件（用户实测报障）
    *
-   * 两者都在**子 scope** 注册，对父与兄弟不可见（与既有 per-child persona/toolFilter 同法）。
-   * `corumConductor` 缺席时（精简装配）整段跳过，维持原行为。
+   * 原实现以「父是不是指挥模式」为门（`conductorParent`），于是：
+   *   ① 非指挥模式的子 Agent **全量继承父的角色人格** —— 一个"产品专家"派出的 worker
+   *      会自称产品专家；指挥模式派出的则会自称编排者；
+   *   ② 该判定读 `conductorModes`（**纯内存表**）⇒ 宿主重启后为空 ⇒ 影子段整段失效，
+   *      子 Agent 带着继承来的编排者人格去干活（实测 8/8 worker 零执行者契约）。
+   *      更糟的是那份人格写着「你没有写工具」，而它手上正握着 write/edit/bash ——
+   *      实测有 worker 在自己的推理里被这个矛盾卡住（"Hmm, but wait. My system prompt
+   *      says 'You have no write tools'... Yet the tool list includes write/edit/bash."）。
+   *
+   * 用户定调（2026-09-20）：**所有子 Agent 都不继承主 Agent 人格**，按种类拿固定的角色
+   * 契约——worker 是**忠实执行者**，researcher 是**全面调查员**。这条规则无条件成立，
+   * 因此不再依赖任何运行时可失状态（①类判断消失，②类 bug 随之消失）。
+   *
+   * ## 三段拼装（顺序固定，注入层不可覆盖机制层）
+   *
+   *   `[kind 角色契约]` + `[父的工作风格人格（若有）]` + `[主 Agent 的 personaHint（若有）]`
+   *
+   * - 角色契约由 `kind` 唯一决定，是机制单一事实源；
+   * - 工作风格（设置里那个「专业干练」）**保留继承**——用户 2026-09-11 定调：子 Agent 只继承
+   *   「怎么干活」，不继承「你是谁」；
+   * - `personaHint` 是主 Agent 注入的**叠加层**，只承载本次任务的领域/约定，**无法**删除或
+   *   覆盖前两段（用户 2026-09-20 定调）；长度在上游截断。
+   *
+   * `composition.persona` 仍是最高优先级的**整体替换**通路（机制内部构造者使用，如集成者
+   * 人格）——它不是主 Agent 可注入的那个字段。
    */
   const conductor = childCtx.get('corumConductor') as ConductorFace | undefined
   const conductorParent = conductor !== undefined && conductor.isConductor(String(parent.session.id))
-  const persona = composition.persona
-    ?? (conductorParent ? conductor?.childPersonaFor(String(parent.session.id)) : undefined)
+  const persona = composition.persona ?? childPersonaOf(childCtx, parent, composition, conductor)
   if (persona !== undefined) {
     childCtx.systemPrompt.section({
       name: 'deployment:persona',
@@ -235,11 +282,57 @@ export function applyChildComposition(
       text: persona,
     })
   }
-  const raw = conductorParent
+  /**
+   * 委派工具的 deny（**非对称**，2026-09-20 用户定调）：
+   *   · `worker`     —— **保持不能再委派**：执行者只干活，分层由主 Agent 负责；
+   *   · `researcher` —— **允许继续派子 Agent**，用于深入调查（多角度/追根因）。
+   *
+   * 指挥模式下**无差别** deny（2026-09-11 定调「指挥模式下子 Agent 只干活不分层」）——
+   * 该语义保持：指挥模式下连 researcher 也不分层。
+   */
+  const delegationsDenied = conductorParent || composition.kind === 'worker'
+  const raw = delegationsDenied
     ? mergeDelegationDeny(composition.toolFilter, delegationToolNames(childCtx))
     : composition.toolFilter
   const toolFilter = raw === undefined ? undefined : narrowChildToolFilter(childCtx, raw)
   if (toolFilter !== undefined) childCtx.tools.restrict(toolFilter)
+}
+
+/**
+ * 组装一个子 Agent 的角色人格（三段拼装，见 {@link applyChildComposition} 的注释）。
+ *
+ * 返回 `undefined` = 不替换人格（`kind` 未声明且父非指挥模式 ⇒ 维持既有继承行为）。
+ * @param childCtx - 已 join 父 preset 的子 scope。
+ * @param parent - 委派方（取它的会话 id 查工作风格人格）。
+ * @param composition - 本次子 Agent 的组合声明。
+ * @param conductor - `corumConductor` 服务（可选）。
+ * @returns 替换用的人格文本，或 `undefined`。
+ */
+export function childPersonaOf(
+  childCtx: Context,
+  parent: Agent,
+  composition: ChildComposition,
+  conductor: ConductorFace | undefined,
+): string | undefined {
+  const parentId = String(parent.session.id)
+  // 工作风格人格（「怎么干活」）——两类子 Agent 都保留继承。
+  const style = conductor?.workStyleFor(parentId)
+  const parts: string[] = []
+  if (composition.kind === 'researcher') parts.push(RESEARCHER_ROLE)
+  else if (composition.kind === 'worker') parts.push(CHILD_WORKER_ROLE)
+  else if (conductor !== undefined && conductor.isConductor(parentId)) {
+    // 兼容路径：`kind` 未声明但父是指挥模式 ⇒ 维持 2026-09-11 的执行者语义。
+    parts.push(CHILD_WORKER_ROLE)
+  } else {
+    return undefined
+  }
+  if (style !== undefined && style.trim() !== '') parts.push(style)
+  if (composition.personaHint !== undefined && composition.personaHint.trim() !== '') {
+    parts.push(composition.personaHint.trim())
+  }
+  // childCtx 目前未用于取片段（保留形参以便将来按 ctx 裁剪），显式消费避免 lint 报未用。
+  void childCtx
+  return parts.join('\n\n')
 }
 
 /**
@@ -248,7 +341,14 @@ export function applyChildComposition(
  */
 interface ConductorFace {
   isConductor: (sessionId: string) => boolean
-  childPersonaFor: (sessionId: string) => string | undefined
+  /**
+   * 该会话所属 profile 的**工作风格人格**（设置里那个「专业干练」），供子 Agent 继承。
+   *
+   * 与「角色人格」严格区分（用户 2026-09-11 定调）：子 Agent 继承「怎么干活」，不继承
+   * 「你是谁」。2026-09-20 起子 Agent 的**角色**契约改由本包按 `kind` 决定，故这里只取
+   * 风格段——角色不再向父方索取。
+   */
+  workStyleFor: (sessionId: string) => string | undefined
 }
 
 /**

@@ -21,6 +21,8 @@
  * @module @deepseek-ai/dsh-subagent/descriptor
  */
 
+import type { ChildKind } from './child-agent.ts'
+
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -81,6 +83,10 @@ export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBas
   readonly agentReasoningEffort?: ReasoningEffortId
   /** Per-child persona that shadows the deployment persona on resume. */
   readonly persona?: string
+  /** fork（corum）：子 Agent 种类——resume 时据此重放同一套角色契约（见输入类型注释）。 */
+  readonly kind?: ChildKind
+  /** fork（corum）：主 Agent 注入的叠加层人格——resume 时一并还原。 */
+  readonly personaHint?: string
   /** Child tool scoping reapplied on resume. */
   readonly toolFilter?: ToolRestriction
 }
@@ -118,6 +124,19 @@ export interface ContinuableSubagentDescriptorInput extends SubagentDescriptorIn
   readonly agentReasoningEffort?: ReasoningEffortId
   /** Requested per-child persona. */
   readonly persona?: string
+  /**
+   * fork（corum）：子 Agent 种类（worker / researcher）——**必须 durable**。
+   *
+   * 理由：人格由种类决定，而 resume 会重新施加人格（见 `continuation.ts` 的
+   * `composition: { persona: descriptor.persona, … }` 通路）。若种类不落盘，重启/续跑后
+   * 同一个子 Agent 会换一套角色契约——正是「人格漂移」。故与 persona/toolFilter 同级持久化。
+   */
+  readonly kind?: ChildKind
+  /**
+   * fork（corum）：主 Agent 注入的叠加层人格（领域/任务上下文）。同样 durable——续跑时必须
+   * 还原同一份上下文，否则子 Agent 会丢失它被告知的约定。
+   */
+  readonly personaHint?: string
   /** Requested child tool scoping. */
   readonly toolFilter?: ToolRestriction
 }
@@ -140,6 +159,9 @@ const CONTINUABLE_DESCRIPTOR_KEYS = new Set([
   'agentModel',
   'agentReasoningEffort',
   'persona',
+  // fork（corum）2026-09-20：种类与注入层必须 durable（否则 resume 后人格漂移）。
+  'kind',
+  'personaHint',
   'toolFilter',
 ])
 const TOOL_FILTER_KEYS = new Set(['allow', 'deny'])
@@ -239,6 +261,9 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
   const agentModel = optionalString(value, 'agentModel')
   const agentReasoningEffort = optionalString(value, 'agentReasoningEffort') as ReasoningEffortId | undefined
   const persona = optionalString(value, 'persona')
+  // fork（corum）2026-09-20：种类与注入层同样从持久化描述符读回（否则 resume 后人格漂移）。
+  const kind = optionalString(value, 'kind') as ChildKind | undefined
+  const personaHint = optionalString(value, 'personaHint')
   const toolFilter = Object.hasOwn(value, 'toolFilter')
     ? parseToolFilter(value['toolFilter'])
     : undefined
@@ -251,6 +276,8 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
     ...agentModel !== undefined ? { agentModel } : {},
     ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
     ...persona !== undefined ? { persona } : {},
+    ...kind !== undefined ? { kind } : {},
+    ...personaHint !== undefined ? { personaHint } : {},
     ...toolFilter !== undefined ? { toolFilter } : {},
   }
 }
@@ -293,6 +320,8 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
       ...input.agentModel !== undefined ? { agentModel: input.agentModel } : {},
       ...input.agentReasoningEffort !== undefined ? { agentReasoningEffort: input.agentReasoningEffort } : {},
       ...input.persona !== undefined ? { persona: input.persona } : {},
+      ...input.kind !== undefined ? { kind: input.kind } : {},
+      ...input.personaHint !== undefined ? { personaHint: input.personaHint } : {},
       ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
     }
   const snapshot = snapshotJsonValue(candidate)

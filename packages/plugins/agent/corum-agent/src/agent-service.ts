@@ -23,7 +23,7 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
 import { installTaskModelSelection } from './task-model-selection.ts'
 import { childRunInterruptOf } from './child-progress.ts'
-import { CHILD_WORKER_ROLE, TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
+import { TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
 import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
 import {
   LOCALE_SETTINGS_NAMESPACE,
@@ -174,8 +174,13 @@ declare module '@deepseek-ai/cordis' {
 export interface CorumConductorFace {
   /** 该会话此刻是否处于指挥模式。 */
   isConductor: (sessionId: string) => boolean
-  /** 指挥模式下子 Agent 的替代人格文本；非指挥模式返回 undefined。 */
-  childPersonaFor: (sessionId: string) => string | undefined
+  /**
+   * 该会话所属 profile 的**工作风格人格**（「怎么干活」），供子 Agent 继承。
+   *
+   * 2026-09-20 起子 Agent 的**角色**契约由 `@corum/corum-subagent` 按 `kind` 决定，本服务
+   * 不再提供角色人格（用户定调：所有子 Agent 都不继承主 Agent 人格）。
+   */
+  workStyleFor: (sessionId: string) => string | undefined
 }
 
 /** 创建结果。 */
@@ -491,12 +496,16 @@ export class CorumAgentService extends TypertRemoteService {
   /**
    * 每个会话**当前**的指挥模式形态（sessionId → ConductorMode）。
    *
+   * ⚠️ **纯内存表**：宿主重启后为空。因此它**只**用于「要不要裁掉主 Agent 自己的执行工具」
+   * 这类①当前进程内有效的运行时效果；**不得**用于决定子 Agent 的人格或其它需要跨重启稳定
+   * 的事实（教训：2026-09-20 实测 8/8 子 Agent 因本表为空而漏掉人格替换，见 `LESSONS.md`）。
+   *
    * 为什么要有这张表：子 Agent 组装发生在 `@corum/corum-subagent`，而「父是不是指挥模式」
    * 只有本服务知道（preset id 只是其中一半口径，corum profile 走
    * `executionTools: 'orchestrator'`）。经 `corumConductor` 服务暴露给子 Agent 组装方，
-   * 用它决定两件事：① 子 Agent 是否继承父的**角色人格**（指挥模式不继承，换成
-   * {@link CHILD_WORKER_ROLE} + 工作风格段）；② 子 Agent 是否还能召唤孙 Agent
-   * （指挥模式下不能，见 2026-09-11 用户定调）。
+   * 用它决定一件事：子 Agent 是否还能召唤孙 Agent（指挥模式下不能，见 2026-09-11 用户定调）。
+   *
+   * 2026-09-20 起它**不再参与人格决策**——子 Agent 角色人格改由 `kind` 无条件决定。
    */
   private readonly conductorModes = new Map<string, ConductorMode>()
 
@@ -506,20 +515,22 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 指挥模式下给子 Agent 的替代人格 = **中性工作型角色行 + 父的「工作风格人格」**。
+   * 某个会话所属 profile 的**工作风格人格**（设置里那个「专业干练」），供子 Agent 继承。
    *
-   * 角色人格（title/domain/persona/prompt）在此**故意丢弃**——用户定调（2026-09-11）：
-   * 子 Agent 只继承「工作风格」（如专业干练），不继承「你是谁」。
+   * 为什么只给风格、不再给角色（2026-09-20 用户定调）：用户要求「**所有**子 Agent 都不能
+   * 单独继承主 Agent 的人格」——子 Agent 的**角色**契约改由 `@corum/corum-subagent` 按
+   * `kind`（worker / researcher）唯一决定，本服务不再参与角色选取，只提供「怎么干活」这一半。
+   *
+   * ⚠️ 本方法**不再依赖** {@link isConductorSession}（那是纯内存表，宿主重启后为空 ⇒ 旧实现
+   * 会因此整段失效，见 `child-agent.ts` 的注释）。风格查询只看 profile 本身，任何模式下都成立。
    * @param sessionId - 父会话 id。
-   * @returns 替代 persona 文本；非指挥模式或查不到 profile 时 undefined（= 维持原样继承）。
+   * @returns 工作风格人格文本；查不到 profile 或未设风格时 undefined。
    */
-  private childPersonaFor(sessionId: string): string | undefined {
-    if (!this.isConductorSession(sessionId)) return undefined
+  private workStyleForSession(sessionId: string): string | undefined {
     const profileId = this.taskAgents.get(sessionId)?.profileId
     if (profileId === undefined) return undefined
     const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
-    const style = profile === undefined ? undefined : workStyleTextOf(profile)
-    return style === undefined ? CHILD_WORKER_ROLE : `${CHILD_WORKER_ROLE}\n\n${style}`
+    return profile === undefined ? undefined : workStyleTextOf(profile)
   }
 
   /**
@@ -619,7 +630,7 @@ export class CorumAgentService extends TypertRemoteService {
      */
     ctx.provide('corumConductor', {
       isConductor: (sessionId: string): boolean => this.isConductorSession(sessionId),
-      childPersonaFor: (sessionId: string): string | undefined => this.childPersonaFor(sessionId),
+      workStyleFor: (sessionId: string): string | undefined => this.workStyleForSession(sessionId),
     } satisfies CorumConductorFace)
     /**
      * 用户发出第一条真实消息时，兑现待定的访问权限档位。

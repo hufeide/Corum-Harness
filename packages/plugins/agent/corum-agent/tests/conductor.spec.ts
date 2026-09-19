@@ -23,7 +23,9 @@ import {
   conductorModeOf,
   effectiveExecutionTools,
 } from '../src/conductor.ts'
-import { CHILD_WORKER_ROLE } from '../src/tool-policy.ts'
+// 2026-09-20：子 Agent 角色契约已迁到 `@corum/corum-subagent` 的 child-roles.ts（它的
+// 消费者是子 scope 的影子段，不再由 corum-agent 提供）。
+import { CHILD_WORKER_ROLE, PERSONA_INJECTION_MAX_CHARS, RESEARCHER_ROLE } from '../../corum-subagent/src/child-roles.ts'
 
 const PRESET_DIR = join(import.meta.dirname, '../../../../desktop/shipped-presets/official')
 
@@ -120,7 +122,7 @@ describe('CHILD_WORKER_ROLE — 执行者契约（2026-09-20 用户报障）', (
   // 旧文本只讲身份（worker / 执行 brief / 不能继续委派），**没有任何行为约束**——
   // 没有「不许重做 brief 已给的调研」、没有范围纪律、没有停止条件。叠加「每个子 Agent
   // 都被注入完整 AGENTS.md(11KB) + runtime context」（那是给顶层 Agent 写的全局开发规范），
-  // worker 就会从头重建认知。以下断言钉住新增的六条硬约束，防止被回退成纯身份描述。
+  // worker 就会从头重建认知。以下断言钉住六条硬约束，防止被回退成纯身份描述。
   it('声明执行者身份（子 Agent 是执行者，不是规划者）', () => {
     expect(CHILD_WORKER_ROLE).toContain('executor, not a planner')
     expect(CHILD_WORKER_ROLE).toContain('authoritative specification')
@@ -136,9 +138,8 @@ describe('CHILD_WORKER_ROLE — 执行者契约（2026-09-20 用户报障）', (
     expect(CHILD_WORKER_ROLE).toContain('report it in your reply — do not fix it unasked')
   })
 
-  it('给出停止条件（达标即停，不追求「更彻底」，不反复重验）', () => {
+  it('给出停止条件（达标即停，不追求「更彻底」）', () => {
     expect(CHILD_WORKER_ROLE).toContain('Stop when the brief is satisfied')
-    expect(CHILD_WORKER_ROLE).toContain('do not re-verify the same thing repeatedly')
   })
 
   it('brief 有错时必须回报而不是自行发挥', () => {
@@ -146,15 +147,73 @@ describe('CHILD_WORKER_ROLE — 执行者契约（2026-09-20 用户报障）', (
     expect(CHILD_WORKER_ROLE).toContain('blocked report')
   })
 
-  it('保留既有三条身份句与「不能继续委派」（不得被重写丢掉）', () => {
-    expect(CHILD_WORKER_ROLE).toContain('You cannot delegate further')
-    expect(CHILD_WORKER_ROLE).toContain('verify what you can')
+  it('禁止构建与安装依赖（用户 2026-09-20 定调：worktree 上构建代价大且产物不回主树）', () => {
+    // 实测代价（会话 c8e05318）：1517 秒 / 36 次 bash，其中 8 次是 install/build。
+    expect(CHILD_WORKER_ROLE).toContain('Do NOT build')
+    expect(CHILD_WORKER_ROLE).toContain('do NOT install dependencies')
+    // 必须点明「为什么不」——给模型的理由而不只是命令（否则它会在别的名义下绕过）。
+    expect(CHILD_WORKER_ROLE).toMatch(/never merged back|isolated worktree/)
+    // 且**不写死具体检查命令**（用户明确：不同语言检查方式不同，不能定死）。
+    expect(CHILD_WORKER_ROLE).not.toContain('tsc --noEmit')
+    expect(CHILD_WORKER_ROLE).not.toContain('pnpm build')
   })
 
-  it('全英文（提示词纪律）且不复述机制事实', () => {
+  it('保留「不能继续委派」（worker 不分层）', () => {
+    expect(CHILD_WORKER_ROLE).toContain('You cannot delegate further')
+  })
+
+  it('全英文（提示词纪律）', () => {
     expect(CHILD_WORKER_ROLE).not.toMatch(/[\u4e00-\u9fff]/)
-    expect(CHILD_WORKER_ROLE).not.toContain('worktree')
-    expect(CHILD_WORKER_ROLE).not.toContain('isolation')
+  })
+})
+
+describe('RESEARCHER_ROLE — 调查员契约（2026-09-20 用户定调）', () => {
+  // 用户原话：「search_agent 要是一个全面的调查员」「允许 researcher 继续指派子 Agent
+  // 深入调查」。取向与 worker **相反**：worker 要收敛，researcher 要发散——所以两者必须
+  // 是两份独立文本，且各自有断言钉住取向，防止被合并或写反。
+  it('声明调查员身份（delegating agent 的眼睛）', () => {
+    expect(RESEARCHER_ROLE).toContain('thorough investigator')
+    expect(RESEARCHER_ROLE).toContain("the delegating agent's eyes")
+  })
+
+  it('要求多角度覆盖与多证据源（不得凭单一来源下结论）', () => {
+    expect(RESEARCHER_ROLE).toContain('more than one angle')
+    expect(RESEARCHER_ROLE).toContain('at least one independent piece of evidence')
+  })
+
+  it('要求区分「查到的事实」与「推断」', () => {
+    expect(RESEARCHER_ROLE).toContain('Separate what you found from what you infer')
+    expect(RESEARCHER_ROLE).toMatch(/inference/)
+  })
+
+  it('要求追根因并给出文件+行号（不是听起来合理的故事）', () => {
+    expect(RESEARCHER_ROLE).toContain('Chase the root cause')
+    expect(RESEARCHER_ROLE).toContain('plausible story that you did not verify is not an answer')
+  })
+
+  it('允许继续派子 Agent 深入调查（用户 2026-09-20 定调），但不得借此逃避自己读', () => {
+    expect(RESEARCHER_ROLE).toContain('subagent_research')
+    expect(RESEARCHER_ROLE).toMatch(/never delegate to avoid doing your own reading/)
+  })
+
+  it('保持只读：报告问题而不动手修', () => {
+    expect(RESEARCHER_ROLE).toContain('Do not fix anything')
+  })
+
+  it('与 worker 的取向相反（防被误合并成同一段）', () => {
+    // worker 说「不许扩大搜索」，researcher 说「要更全面」——两者不得互相渗透。
+    expect(RESEARCHER_ROLE).not.toContain('Do not redo reconnaissance')
+    expect(CHILD_WORKER_ROLE).not.toContain('more than one angle')
+  })
+
+  it('全英文（提示词纪律）', () => {
+    expect(RESEARCHER_ROLE).not.toMatch(/[\u4e00-\u9fff]/)
+  })
+})
+
+describe('主 Agent 动态注入（personaHint）', () => {
+  it('注入上限为 2000 字符（用户 2026-09-20 定调）', () => {
+    expect(PERSONA_INJECTION_MAX_CHARS).toBe(2000)
   })
 })
 

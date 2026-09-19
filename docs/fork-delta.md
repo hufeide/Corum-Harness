@@ -537,7 +537,13 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 | `invariant.ts` | ±4 | PACKAGE_NAME → `@corum/corum-subagent`、插件名 → `corum-subagent-invariant` | 低（机械） |
 | `spawn/index.ts` | ±12 | 插件名 `corum-subagent-spawn-in-process`、默认 provider 名 **`corum-spawn`**（与官方 spawn 并存不抢名）、import 重定向（`../index.ts` + `../driver/index.ts`）、文件头 fork 注释 | 低 |
 | `fork/index.ts` | +97（新增文件） | 官方 `dsh-subagent-fork-in-process` 的 corum 版：默认 provider 名 **`corum-fork`**、`completedTurnPrefix` 种子语义逐行保留、`inheritsParentContext = true`、driver 指向 corum 的 `../driver/index.ts`（cwd 透传） | 低（官方改 seed 逻辑时需同步；守卫 §17 断言种子语义） |
+| `child-roles.ts` | +95（**新增文件，2026-09-20**） | 子 Agent **角色契约**两份（`CHILD_WORKER_ROLE` 忠实执行者 / `RESEARCHER_ROLE` 全面调查员）+ 注入层上限 `PERSONA_INJECTION_MAX_CHARS = 2000`。用户定调：所有子 Agent 都**不继承**主 Agent 人格；worker 不做构建（worktree 产物不回主树）、researcher 可继续派子 Agent 深入调查 | 低（纯新增文件，官方无对应物） |
+| `descriptor.ts` | **+12（2026-09-20 增量）** | durable 描述符增 `kind` / `personaHint` 两字段（输入类型 + 持久化数据 + `DURABLE_KEYS` 白名单 + parse/snapshot 两处拷贝）。理由：人格由种类决定且 resume 会重放，不落盘则**人格漂移** | 低（纯增量字段；官方若改 descriptor 版本需同步 `SUBAGENT_DESCRIPTOR_VERSION`） |
 | `isolated/index.ts` | +170（新增文件） | 隔离版 provider：默认名 **`corum-isolated`**、`mode: always|off`、每次 `agent()` 建 worktree + 登记台账 + 注入隔离通知 + 失败回滚；continuable 直接拒绝 | 低（依赖 `corumOrchestration` 服务的能力面，见 §10.10） |
+| `child-agent.ts` | **±60（2026-09-20 增量，替换原「指挥模式专属」实现）** | ① `ChildComposition` 增 `kind` / `personaHint`；② 人格影子段由「父是否指挥模式」**改为按 `kind` 无条件选取**（旧判据读纯内存表 `conductorModes`，宿主重启后为空 ⇒ 整段失效，实测 8/8 worker 漏替换）；③ 新增导出 `childPersonaOf`（三段拼装：角色契约 → 工作风格 → 注入层）；④ 委派 deny **非对称**：worker 保持禁止、researcher 放开 | **中**（官方若改 `applyChildComposition` 的注册顺序或 persona 通路需三方合并） |
+| `types.ts` | **+18（2026-09-20 增量）** | `SubagentStartRequest` 增 `kind?: ChildKind` / `personaHint?: string` | 低（纯增量字段） |
+| `continuation.ts` | **+16（2026-09-20 增量）** | activation composition 形参增 `kind`/`personaHint`；创建路径、冷恢复路径（`descriptor.*`）、descriptor 快照三处透传 | 低（纯增量字段透传） |
+| `driver/index.ts` | **+3（2026-09-20 增量）** | `applyChildComposition` 调用点透传 `kind`/`personaHint` | 低 |
 
 ### 10.3 设计要点（升级 runbook 必读）
 

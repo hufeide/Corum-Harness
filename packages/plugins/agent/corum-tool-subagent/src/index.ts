@@ -463,6 +463,36 @@ async function corumExtractFailedChildContext(
  * @param context - 从失败子 Agent 提取的上下文。
  * @returns 增强后的 prompt（前缀 + 原始 prompt）。
  */
+/**
+ * fork（corum）2026-09-20：主 Agent 经 `roleContext` 注入的叠加层人格**长度上限**。
+ *
+ * ⚠️ **本地常量，刻意不从 `@corum/corum-subagent` import**：本包 import 的是官方
+ * `@deepseek-ai/dsh-subagent`（注册表实体），而 fork 是另一个模块实例——跨实例取值会踩
+ * 「两份模块实例」红线（见本文件 1509 行附近对同源不同实例的说明）。该上限是**产品口径**
+ * 而非实现细节，两处各持一份、由 `verify-fork-drift.sh` 的注释对账约束（改动需两处同步）。
+ * 权威真源在 `corum-subagent/src/child-roles.ts` 的 `PERSONA_INJECTION_MAX_CHARS`。
+ */
+const PERSONA_INJECTION_MAX_CHARS = 2000
+
+/**
+ * fork（corum）2026-09-20：把主 Agent 注入的 `roleContext` 收成可用的叠加层人格。
+ *
+ * 用户定调「叠加，且不可覆盖机制层」+「2000 字符上限」：
+ * - 空/纯空白 ⇒ `undefined`（不注入，子 Agent 只用机制角色契约）；
+ * - 超限 ⇒ **截断并显式标注**，不静默丢弃——子 Agent 知道自己拿到的上下文不完整，
+ *   主 Agent 也能从结果里看出自己的注入被截了（静默截断会让双方都误以为完整）。
+ *
+ * @param raw - 模型传入的 `roleContext`（可能缺失、非字符串或空白）。
+ * @returns 归一化后的注入文本；无有效内容时 `undefined`。
+ */
+function corumPersonaHint(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const trimmed = raw.trim()
+  if (trimmed === '') return undefined
+  if (trimmed.length <= PERSONA_INJECTION_MAX_CHARS) return trimmed
+  return `${trimmed.slice(0, PERSONA_INJECTION_MAX_CHARS)}\n\n[truncated: this role context exceeded ${PERSONA_INJECTION_MAX_CHARS} characters]`
+}
+
 function corumBuildResumePrompt(
   originalPrompt: ContentBlock[],
   context: CorumFailedChildContext,
@@ -1697,6 +1727,8 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：orchestrate 任务级结构化输出（对象根 JSON Schema）——子 Agent
         // 必须提交 schema 合法的结果，工作流式结构化子结果（2026-09-10 吸收 workflow 语义）。
         taskSchema?: ObjectJsonSchema
+        /** fork（corum）：主 Agent 注入的叠加层人格（`roleContext`）——上层已截断。 */
+        roleContext?: string
         // fork（corum）2026-09-18：`taskModel` **已按用户策略移除**——per-task 模型
         // 面不再存在（orchestrate 的 tasks[i].model 已从 schema 剔除且不再转达）。
       },
@@ -1746,12 +1778,23 @@ export function apply(ctx: Context, config: Config): void {
       // 沙箱钉成 read-only（2026-09-12 用户定调：research 开放 shell 以后，只读性由
       // 沙箱层保证，而不是靠 deny 掉 bash）。
       const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
+      /**
+       * fork（corum）：子 Agent 的**种类**（2026-09-20 用户定调）——决定它在子 scope 里拿哪套
+       * 角色契约（`@corum/corum-subagent` 的 `ChildComposition.kind`）：
+       *   · `researcher`（本实例为只读研究实例）→ **全面调查员**，允许继续派子 Agent 深入调查；
+       *   · `worker`（其余写型实例）→ **忠实执行者**，不许重规划/重调研/越界，且**禁止构建**。
+       * 与 `readonlySandbox` 同源判定（同一个 `effReadonlyResearch`），但语义不同：前者管沙箱、
+       * 后者管人格，故单独传递而不是让下游从沙箱反推。
+       */
+      const childKind: 'worker' | 'researcher' = effReadonlyResearch ? 'researcher' : 'worker'
       const request: {
         label: string
         prompt: ContentBlock[]
         parent: Agent
         agentOptions?: AgentOptions
+        kind?: 'worker' | 'researcher'
         persona?: string
+        personaHint?: string
         toolFilter?: { allow?: string[]; deny?: string[] }
         maxDepth?: number
         cwd?: string
@@ -1762,6 +1805,10 @@ export function apply(ctx: Context, config: Config): void {
         prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
         parent,
         ...corumLockedOptions !== undefined ? { agentOptions: corumLockedOptions } : {},
+        kind: childKind,
+        // fork（corum）2026-09-20：主 Agent 注入的叠加层人格——**截断到上限**（用户定调
+        // 2000 字符）。超限不静默丢弃：截断后显式标注，让子 Agent 与主 Agent 都知道被截了。
+        ...corumPersonaHint(args.roleContext) === undefined ? {} : { personaHint: corumPersonaHint(args.roleContext)! },
         ...config.persona !== undefined ? { persona: config.persona } : {},
         ...config.toolFilter !== undefined ? { toolFilter: config.toolFilter } : {},
         ...maxDepth !== undefined ? { maxDepth } : {},
@@ -2435,6 +2482,13 @@ export function apply(ctx: Context, config: Config): void {
             type: 'string',
             required: true,
             description: wording.promptDescription,
+          },
+          // fork（corum）2026-09-20：主 Agent 动态注入的**叠加层**人格（用户定调「叠加，且
+          // 不可覆盖机制层」）。子 Agent 的角色契约由机制按种类写死（执行者/调查员），本参数
+          // 只补充**本次任务**的领域上下文与约定，拼在机制人格之后，无法删除或覆盖它。
+          roleContext: {
+            type: 'string' as const,
+            description: 'OPTIONAL extra context for the child\'s role — domain expertise and conventions for THIS subtask (e.g. "this repo is a pnpm monorepo; the change must stay Node 18 compatible"), not a replacement for its role. The child already has a fixed role contract (executor or investigator) that you cannot override; whatever you write here is appended after it. Keep it short (a few sentences); it is truncated past 2000 characters.',
           },
           // fork（corum）：模型锁——schema 剔除 provider/model/reasoning_effort
           // 三个参数（官方 modelSelectionEnabled 条件展开块恒不展开）；LLM 物理上

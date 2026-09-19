@@ -122,6 +122,9 @@ export async function startInProcessRun(
   const setup = (childCtx: Context): void => {
     appendDelegatedPolicyOverrides((childCtx.agent as Agent).session, inherited)
     applyChildComposition(childCtx, parent, {
+      // fork（corum）2026-09-20：种类 + 注入层一起下传（人格按 kind 由子 scope 决定）。
+      ...request.kind === undefined ? {} : { kind: request.kind },
+      ...request.personaHint === undefined ? {} : { personaHint: request.personaHint },
       persona: request.persona,
       toolFilter: request.toolFilter,
     })

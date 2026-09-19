@@ -21,6 +21,8 @@
  * @module @deepseek-ai/dsh-subagent
  */
 
+import type { ChildKind } from './child-agent.ts'
+
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -280,7 +282,13 @@ interface MaterializeInputs {
     descriptor: SubagentDescriptorData
   }
   agentOptions: AgentOptions
-  composition: { persona?: string | undefined; toolFilter?: ToolRestriction | undefined }
+  composition: {
+    persona?: string | undefined
+    /** fork（corum）2026-09-20：种类 + 注入层随 resume 一起重放（人格不漂）。 */
+    kind?: ChildKind | undefined
+    personaHint?: string | undefined
+    toolFilter?: ToolRestriction | undefined
+  }
   signal: AbortSignal
 }
 
@@ -490,6 +498,9 @@ export class SubagentContinuationManager {
       ...agentModel !== undefined ? { agentModel } : {},
       ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
       ...request.persona !== undefined ? { persona: request.persona } : {},
+      // fork（corum）2026-09-20：种类与注入层落盘（resume 时据此重放同一套角色契约）。
+      ...request.kind !== undefined ? { kind: request.kind } : {},
+      ...request.personaHint !== undefined ? { personaHint: request.personaHint } : {},
       ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
     })
     // Capture before the first await: a later parent switch belongs to the
@@ -538,7 +549,12 @@ export class SubagentContinuationManager {
             descriptor,
           },
           agentOptions,
-          composition: { persona: request.persona, toolFilter: request.toolFilter },
+          composition: {
+            ...request.kind === undefined ? {} : { kind: request.kind },
+            ...request.personaHint === undefined ? {} : { personaHint: request.personaHint },
+            persona: request.persona,
+            toolFilter: request.toolFilter,
+          },
           signal: spec.signal,
         })
         return this.submitMaterialized(
@@ -1245,7 +1261,12 @@ export class SubagentContinuationManager {
         provider: descriptor.provider,
         parent,
         agentOptions: resumedRoute,
-        composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
+        composition: {
+          ...descriptor.kind === undefined ? {} : { kind: descriptor.kind },
+          ...descriptor.personaHint === undefined ? {} : { personaHint: descriptor.personaHint },
+          persona: descriptor.persona,
+          toolFilter: descriptor.toolFilter,
+        },
         signal: options.signal,
       })
     } catch (error: unknown) {

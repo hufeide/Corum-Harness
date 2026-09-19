@@ -1029,8 +1029,11 @@ if select_section 16; then
 section "[16] fork #9（corum-subagent）：增量 opt-in（官方 preset 行为等价）"
 SUBAGENT_FORK="$REPO_ROOT/packages/plugins/agent/corum-subagent"
 OFFICIAL_SUBAGENT="$DSH_CHECKOUT/packages/subagent/subagent"
-# 允许有差异的文件（全部围绕 cwd 透传；invariant 是模板改名）
-SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts depth.ts index.ts invariant.ts"
+# 允许有差异的文件（围绕 cwd 透传；invariant 是模板改名）+ 2026-09-20 子 Agent 人格分层：
+#   · descriptor.ts —— durable 描述符增 kind/personaHint（人格按种类重放，��落盘会漂移）；
+#   · 新增 child-roles.ts —— 两份角色契约（执行者/调查员）+ 注入层上限，官方无对应物。
+SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts descriptor.ts depth.ts index.ts invariant.ts"
+SUBAGENT_NEW_FILES="child-roles.ts"
 if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
   drift=0
   for official_file in "$OFFICIAL_SUBAGENT"/src/*.ts; do
@@ -1059,7 +1062,12 @@ if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
   [ "$drift" = 0 ] && pass "官方 src 文件：登记文件有差异、其余逐字节一致"
   for extra in "$SUBAGENT_FORK"/src/*.ts; do
     base="$(basename "$extra")"
-    [ -f "$OFFICIAL_SUBAGENT/src/$base" ] || fail "fork #9 新增 src/$base 未登记（请同步本节台账与 fork-delta §10）"
+    [ -f "$OFFICIAL_SUBAGENT/src/$base" ] || {
+      case " $SUBAGENT_NEW_FILES " in
+        *" $base "*) ;;
+        *) fail "fork #9 新增 src/$base 未登记（登记到 SUBAGENT_NEW_FILES 并同步 fork-delta §10）" ;;
+      esac
+    }
   done
 else
   skip "官方检出缺 packages/subagent/subagent/src（跳过 fork #9 逐字节断言）"
