@@ -595,6 +595,67 @@ async function smokeBridge() {
 }
 
 /**
+ * UI 插件「样式内联」断言（2026-09-20 新增，防复发）。
+ *
+ * ## 为什么
+ *
+ * 每个 client UI 插件的构建链是 `tsc -b && tsdown && node scripts/inline-css.mjs`：
+ * tsdown 会重建干净的 lib/client.js 并把样式抽到 lib/style.css，最后一步必须把样式
+ * 内联回 client.js（client bundle 是 CJS、经 window.__ModuleLoader__.load 注入，
+ * 不能 import CSS 文件）。只跑到 tsdown 的「中间态」= client.js 无内联标记 +
+ * 孤儿 lib/style.css，打包态对应插件面板整体无样式（2026-09-20 实测
+ * @corum/corum-ui-questions 提问面板选项全裸）。
+ *
+ * ## 口径
+ *
+ * 与各包 scripts/inline-css.mjs 的幂等判定一致：lib/client.js 必须含**本插件专属**
+ * 标记 `s.setAttribute('data-plugin','<PLUGIN_ID>')`（不能看泛 'data-plugin'——
+ * 业务源码可能出现该字符串，corum-ide-plugin-manager-ui 就因此被误判过；引号形态
+ * 单引号/双引号——trajectory 脚本用 JSON.stringify——都要认），且
+ * lib/style.css 不允许残留（孤儿样式 = tsdown 过、inline-css 未过的中间态）。
+ *
+ * 扫描范围：packages/plugins 下所有含 scripts/inline-css.mjs 的包（client UI 插件
+ * 全集；哪怕暂时不在 desktop-host 闭包里也要过——下次把它补进闭包时不能再踩同一坑）。
+ * 在打包物化之前跑，任一不满足即 fail loud，绝不把无样式 UI 打进 .app。
+ */
+async function assertUiPluginStylesInlined() {
+  const failures = []
+  const pluginsRoot = join(root, 'packages', 'plugins')
+  for (const group of await readdir(pluginsRoot, { withFileTypes: true })) {
+    if (!group.isDirectory()) continue
+    const groupDir = join(pluginsRoot, group.name)
+    for (const pkg of await readdir(groupDir, { withFileTypes: true })) {
+      const pkgDir = join(groupDir, pkg.name)
+      if (!pkg.isDirectory() || !existsSync(join(pkgDir, 'scripts', 'inline-css.mjs'))) continue
+      const name = JSON.parse(await readFile(join(pkgDir, 'package.json'), 'utf8')).name
+      const clientJs = join(pkgDir, 'lib', 'client.js')
+      const styleCss = join(pkgDir, 'lib', 'style.css')
+      if (!existsSync(clientJs)) {
+        failures.push(`${name}：lib/client.js 缺失 — 先跑 pnpm --filter ${name} run build`)
+        continue
+      }
+      const client = readFileSync(clientJs, 'utf8')
+      // 注入产物里 setAttribute 的引号形态有两种：多数脚本是字面单引号
+      // `s.setAttribute('data-plugin','<id>')`，corum-ui-trajectory 的脚本用
+      // JSON.stringify(pluginId) 生成双引号形态——两种都要认，别把已注入误判成未注入。
+      const marker = `s.setAttribute('data-plugin','${name}')`
+      const markerDouble = `s.setAttribute('data-plugin',"${name}")`
+      if (!client.includes(marker) && !client.includes(markerDouble)) {
+        failures.push(`${name}：lib/client.js 无内联样式标记（data-plugin）— 先跑 pnpm --filter ${name} run build`)
+      }
+      if (existsSync(styleCss)) {
+        failures.push(`${name}：lib/style.css 残留（孤儿样式 = tsdown 过、inline-css 未过）— 先跑 pnpm --filter ${name} run build`)
+      }
+    }
+  }
+  if (failures.length > 0) {
+    for (const line of failures) console.error(`[pack-macos] ✗ ${line}`)
+    throw new Error(`pack-macos: ${failures.length} 个 UI 插件包未过完整构建（样式未内联，详见上一行）— 逐个先跑 pnpm --filter <pkg> run build 后重打包`)
+  }
+  console.log('[pack-macos] UI 插件样式内联断言通过（client.js 含 data-plugin 标记、无孤儿 lib/style.css）')
+}
+
+/**
  * 闭包版本一致性硬断言：`pnpm deploy --legacy` 忽略 lockfile 重新解析，
  * `^0.1.3-alpha.1` 会漂到 registry 上的 alpha.2 —— 2026-09-09 实测正式包闭包里
  * 131 个 dsh 包是 alpha.2 而 session 核心是 alpha.1，冷读历史日志直接报
@@ -648,7 +709,17 @@ async function assertUniformDshVersions() {
   console.log(`[pack-macos] dsh closure uniform at ${pinned} (${versions.get(pinned)?.length ?? 0} packages)`)
 }
 
+/** 独立检查入口（不打包）：node packages/desktop/scripts/pack-macos.mjs --check-ui-styles */
+if (process.argv.includes('--check-ui-styles')) {
+  await assertUiPluginStylesInlined().catch((error) => {
+    console.error(error.message)
+    process.exit(1)
+  })
+  process.exit(0)
+}
+
 async function main() {
+  await assertUiPluginStylesInlined()
   await deployHost()
   await assertUniformDshVersions()
   await copyDesktopArtifacts()
