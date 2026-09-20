@@ -103,7 +103,7 @@ import { loadProject, findProjectByCwd } from './project-store.ts'
 // 统一会话索引（两模式共用；键 = sessionId，按 cwd 分组）——
 // 见 session-index.ts 的文件头（两套旧索引键空间不同构，不可机械合并）。
 import { findSessionByLane, registerSession } from './session-index.ts'
-import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig, loadOfficialOverrides } from './profile-store.ts'
+import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
 import { agentRecreateWarning, lifecycleDiagPath, noteAgentRecreate } from './agent-lifecycle-guard.ts'
 import type { PolishConfig } from './profile-store.ts'
 import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensurePmProfile, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID } from './builtin-profiles.ts'
@@ -1084,46 +1084,25 @@ export class CorumAgentService extends TypertRemoteService {
     const officialPresets = (await this.ctx.agentPresets.list())
       .filter(p => OFFICIAL_MODE_IDS.has(p.id) && p.broken === undefined && !corumIds.has(p.id))
     const defaultModel = this.ctx.agentDefaultModel.currentSelection()
-    /**
-     * 官方基础模式的**用户覆盖**（`.agent-presets/_official-overrides.json`）。
-     *
-     * ⚠️ 2026-09-21 修：这份覆盖此前**全库没有任何读取方**（`loadOfficialOverrides` 只被
-     * 它自己的 `saveOfficialOverride` 调用，而后者零调用点）⇒ 用户的覆盖「保存后永远不生效」。
-     * 用户实测报障：「在空态页面选择一个开启了自定义模型覆盖机制的 Agent，模型仍然是默认
-     * 智能体设置中的那个」——官方模式的模型被这一支**硬写成** `agentDefaultModel`，
-     * 覆盖表从未参与。
-     *
-     * 与 corum profile 分支对齐：三个模型字段都按「覆盖优先、缺省回落」合并，
-     * 这样空态表单的默认模型（`listProfiles.model → AgentOption.defaultModel`）
-     * 就会如实反映该模式的覆盖值。
-     */
-    const officialOverrides = loadOfficialOverrides()
-    const officialProfiles = officialPresets.map((p) => {
-      const override = officialOverrides[p.id]
-      return {
+    const officialProfiles = officialPresets.map(p => ({
       id: p.id,
       // 官方 preset 的显示名（name 如「标准模式」），回落 id。
       ...(p.name !== undefined ? { nickname: p.name } : {}),
       // prompt 不回填（preset 的 persona 在组合里，不在 roster 元数据）——
       // 表单只显示 nickname + 模型，prompt 不进 UI 投影。
       prompt: p.description ?? '',
-      // 覆盖优先：官方 preset 本体不声明模型（`standard/preset.yml` 只有 name/description/
-      // order），故「无覆盖」时回落部署默认（= 旧行为，不变）。
-      model: override?.model ?? {
+      model: {
         provider: defaultModel.provider,
         model: defaultModel.model,
         ...(defaultModel.reasoningEffort === undefined ? {} : { reasoningEffort: defaultModel.reasoningEffort }),
       },
-      // 子 Agent 模型同样「覆盖优先」（缺省不带该键 ⇒ 语义 = 跟随主 Agent）。
-      ...(override?.subagentModel === undefined ? {} : { subagentModel: override.subagentModel }),
-      skills: override?.skills ?? [],
-      mcpServers: override?.mcpServers ?? [],
+      skills: [],
+      mcpServers: [],
       terminal: { mode: 'sandbox' },
       version: 1,
       trust: p.trust,
       source: 'official' as const,
-      }
-    })
+    }))
     return { profiles: [...corumProfiles, ...officialProfiles] }
   }
 
