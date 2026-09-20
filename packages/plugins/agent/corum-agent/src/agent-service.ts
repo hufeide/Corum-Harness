@@ -15,7 +15,7 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
@@ -64,9 +64,10 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 // fork（corum）2026-09-20：指挥者 shell 只读 —— 需要 `sandbox/mode` 事件形状。
 // **type-only**：只合并官方事件表，不引运行时实现（避免新增依赖 + 「两份模块实例」红线）。
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import { compilePreset } from './compile.ts'
 // fork（corum）2026-09-20：权限合成（主体 × 用户档位 × 模式约束）——解决「只读被用户档位覆盖」。
 import { ConductorRuntime } from './conductor-runtime.ts'
+// fork（corum）2026-09-20：profile 编译与落盘按关注点抽出（用户定调「文件层面切分清晰」）。
+import { checkoutPinnedSkills as checkoutPinnedSkillsOf, writeAgentDir as writeAgentDirOf } from './profile-compiler.ts'
 // fork（corum）2026-09-20：润色/翻译按关注点抽出的模块（含类型、引擎路由、system 提示词）。
 import {
   parsePolishEnvelope,
@@ -1032,11 +1033,11 @@ export class CorumAgentService extends TypertRemoteService {
     }
 
     // 1. 把绑定的 skill checkout 到 pinned commit（版本 pinning）。
-    this.checkoutPinnedSkills(profile)
+    checkoutPinnedSkillsOf(this.ctx.logger, profile)
 
     // 2. 编译 + 落盘 preset 目录（含 agent.cordis.yml + preset.yml）。
     const dir = agentDirPath(profile.id)
-    this.writeAgentDir(profile, dir)
+    writeAgentDirOf(profile, dir)
 
     // 2. 创建 root Agent，setup 里 mount preset（官方组装链路）。
     const sessionId = SessionId(`corum-dev-${profile.id}-${randomUUID()}`)
@@ -1165,8 +1166,8 @@ export class CorumAgentService extends TypertRemoteService {
       this.ctx.logger.info(`corum-agent: resumed agent — ${sessionId}`)
     } else {
       // 首次：checkout skill + 编译落盘 preset，再 create。
-      this.checkoutPinnedSkills(profile)
-      this.writeAgentDir(profile, agentDirPath(profile.id))
+      checkoutPinnedSkillsOf(this.ctx.logger, profile)
+      writeAgentDirOf(profile, agentDirPath(profile.id))
       handle = await this.ctx.agents.create({
         sessionId,
         meta: { cwd: workCwd, agentPreset: profile.id },
@@ -1744,7 +1745,7 @@ export class CorumAgentService extends TypertRemoteService {
           // agent.json 但产物缺失）若先 select 会报 composition missing、writeAgentDir
           // 永远到不了。官方 preset 无 corum profile 实体——跳过编译落盘
           // （同 selectTaskAgentProfile）。
-          if (!isOfficialPreset) this.writeAgentDir(profile, agentDirPath(profile.id))
+          if (!isOfficialPreset) writeAgentDirOf(profile, agentDirPath(profile.id))
           await this.ctx.agentPresets.select(resolved.agent, profile.id)
           this.registerTaskSession(resolved.sessionId, resolved.cwd, profile.id)
           this.taskAgents.set(String(resolved.sessionId), { ...resolved, profileId: profile.id })
@@ -1808,8 +1809,8 @@ export class CorumAgentService extends TypertRemoteService {
     // 官方 preset 无 corum profile 实体——跳过编译落盘与 skill checkout（preset
     // 目录已在 agentPresets 服务管理的根里，mount 直接按 id 解析）。
     if (!isOfficialPreset) {
-      this.checkoutPinnedSkills(profile)
-      this.writeAgentDir(profile, agentDirPath(profile.id))
+      checkoutPinnedSkillsOf(this.ctx.logger, profile)
+      writeAgentDirOf(profile, agentDirPath(profile.id))
     }
     const handle = await this.ctx.agents.create({
       sessionId,
@@ -2051,7 +2052,7 @@ export class CorumAgentService extends TypertRemoteService {
     // .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有 agent.json
     // 但产物缺失）若先 select 会抛 agent-preset/invalid（composition missing）、
     // writeAgentDir 永远到不了。官方 preset 无 corum profile 实体——跳过编译落盘。
-    if (!isOfficialPreset && profile !== undefined) this.writeAgentDir(profile, agentDirPath(profile.id))
+    if (!isOfficialPreset && profile !== undefined) writeAgentDirOf(profile, agentDirPath(profile.id))
     // select 自己判 blank（turnBoundary 投影）——非 blank 泳道抛 locked，原样上抛给 UI。
     await this.ctx.agentPresets.select(resolved.agent, profileId)
     this.registerTaskSession(resolved.sessionId, resolved.cwd, profileId)
@@ -2911,16 +2912,6 @@ export class CorumAgentService extends TypertRemoteService {
     }
   }
 
-  /**
-   * 编译 AgentProfile 并落盘到 Agent 目录。
-   * 写入 agent.cordis.yml + preset.yml。
-   */
-  private writeAgentDir(profile: AgentProfile, dir: string): void {
-    mkdirSync(dir, { recursive: true })
-    const compiled = compilePreset(profile)
-    writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
-    writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
-  }
 
   /**
    * 「agent.json 落盘 → 重新编译 preset 产物 → 内存旧 Agent 失效」的共用收尾
@@ -2935,7 +2926,7 @@ export class CorumAgentService extends TypertRemoteService {
   private persistProfileAndRecompile(profile: AgentProfile): void {
     saveProfile(profile)
     // 编译并落盘 agent.cordis.yml + preset.yml
-    this.writeAgentDir(loadProfile(profile.id)!, agentDirPath(profile.id))
+    writeAgentDirOf(loadProfile(profile.id)!, agentDirPath(profile.id))
     // 清掉旧 Agent 使下次重建
     this.noteAgentTeardown(profile.id, 'verify')
     this.agents.delete(profile.id)
@@ -2949,36 +2940,6 @@ export class CorumAgentService extends TypertRemoteService {
     return undefined
   }
 
-  /**
-   * 把绑定的 skill 切换到 pinned 版本。
-   * 把 .versions/<versionId>/SKILL.md 复制为当前 SKILL.md。
-   * versionId 为空 = 用当前 SKILL.md（未锁定）。
-   */
-  private checkoutPinnedSkills(profile: AgentProfile): void {
-    const skillsRoot = join(corumHome(), 'skills')
-    for (const binding of profile.skills) {
-      const skillDir = join(skillsRoot, binding.name)
-      if (!existsSync(skillDir)) {
-        this.ctx.logger.warn(`corum-agent: skill "${binding.name}" not found in ${skillsRoot}`)
-        continue
-      }
-      // 未锁定版本（versionId 空）→ 直接用当前 SKILL.md，跳过切换。
-      if (binding.versionId === undefined || binding.versionId === '') continue
-      // 从版本目录复制 SKILL.md
-      const versionSkillMd = join(skillDir, '.versions', binding.versionId, 'SKILL.md')
-      const currentSkillMd = join(skillDir, 'SKILL.md')
-      if (!existsSync(versionSkillMd)) {
-        // 没有版本目录，说明 skill 是手动放进去的，直接用当前 SKILL.md
-        continue
-      }
-      try {
-        const content = readFileSync(versionSkillMd, 'utf8')
-        writeFileSync(currentSkillMd, content, 'utf8')
-      } catch (error) {
-        this.ctx.logger.warn(`corum-agent: failed to switch skill "${binding.name}" to version ${binding.versionId}`, error)
-      }
-    }
-  }
 }
 
 /** 泳道标签转 sessionId 安全段（标签可含 `:`，sessionId/路径只用 lower-kebab）。 */
