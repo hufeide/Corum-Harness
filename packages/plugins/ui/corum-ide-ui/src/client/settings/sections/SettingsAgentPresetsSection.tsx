@@ -1303,8 +1303,9 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
               <div className={css.modelCardDivider} />
 
               {/* 三档执行模型（关闭自定义时只读）；「推理等级」列按当前路由有无
-                  reasoning 元数据条件渲染（无元数据 = 保持两列，见 mainReasoning 等）。 */}
-              <div className={css.formColsStretch}>
+                  reasoning 元数据条件渲染（无元数据 = 保持两列，见 mainReasoning 等）。
+                  三档纵向堆叠（设计稿 dZDmd）：每档独占一行，行内仍为横排三列。 */}
+              <div className={css.formColsVertical}>
                 <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>主 Agent 模型</label>
                   <div className={css.selectStack}>

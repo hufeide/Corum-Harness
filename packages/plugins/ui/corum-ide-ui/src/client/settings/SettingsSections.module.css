@@ -1423,6 +1423,16 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   width: 100%;
 }
 
+/* 模型与并发卡片（设计稿 dZDmd）：三档模型**纵向堆叠**——每档独占一行，
+ * 行内仍是「供应商|模型|推理等级」三列横排（由 .selectStack 承担）。
+ * 与 .formColsStretch 的区别只在方向；后者仍服务「终端+记忆」等双列行，不得改动。 */
+.formColsVertical {
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  width: 100%;
+}
+
 /* selectStack 改横向双列（设计稿 pair: 供应商|模型 并排，各 fill_container） */
 .selectStack {
   display: flex;
