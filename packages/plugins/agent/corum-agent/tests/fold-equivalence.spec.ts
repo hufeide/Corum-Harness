@@ -36,14 +36,46 @@ import { stopReasonOfTurnEnd } from '@corum/corum-api-remotes/corum-events'
 import { foldProgressAll, foldProgressEvent, initialProgressState, type ProgressState } from '../src/child-progress.ts'
 import { sessionEvent } from './harness.ts'
 
-/** 从 HEAD 读 `agent-service.ts`（拆分开始前、含两份原始 switch 的版本）。 */
-function headServiceSource(): string {
-  const out = execFileSync(
+/**
+ * 取「**还含两份原始 switch**」的那一版 `agent-service.ts`。
+ *
+ * ⚠️ 不能用 `HEAD`：P1-b 把 `foldSubagentProgress` 搬进 `subagent-progress.ts` 之后，
+ * HEAD 版里已经没有可提取的原文了（本判据会 fail-loud 而不是静默跳过——实测正是这样
+ * 暴露出来的）。故沿历史回溯，找**最后一个仍含该方法**的提交。
+ *
+ * 找到的那个版本是**冻结**的（历史不会变），所以提取区间稳定；找不到就抛错。
+ */
+function originalFoldRevisionSource(): { rev: string, source: string } {
+  // ⚠️ 路径必须相对**仓库根**：本测试的 cwd 是包目录，而 pathspec 是仓库相对路径 ——
+  // 实测用相对路径会让 `git log -S` **静默返回空**（git 把不存在的 pathspec 当「无匹配」，
+  // 不报错），于是判据看上去「历史里找不到」而真因是路径写错。故先解出仓库根。
+  const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
+  // 两种形态各取所需（实测都踩过）：
+  //   · pathspec（`git log -- <path>`）要**绝对**路径，相对路径会静默无匹配；
+  //   · `git show <rev>:<path>` 要**仓库相对**路径，绝对路径不被接受。
+  const relPath = 'packages/plugins/agent/corum-agent/src/agent-service.ts'
+  const absPath = `${repoRoot}/${relPath}`
+  // `git log -S` 给出「该字符串出现次数发生变化」的提交；取最后一个仍在文件里的版本。
+  const revs = execFileSync(
     'git',
-    ['show', 'HEAD:packages/plugins/agent/corum-agent/src/agent-service.ts'],
-    { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
-  )
-  return out
+    ['--no-pager', 'log', '--format=%H', '-S', 'private foldSubagentProgress(', '--', absPath],
+    { encoding: 'utf8' },
+  ).trim().split('\n').filter(Boolean)
+  if (revs.length === 0) {
+    throw new Error('fold-equivalence: 历史里找不到含 foldSubagentProgress 的提交——判据前提失效')
+  }
+  for (const rev of revs) {
+    let source: string
+    try {
+      source = execFileSync('git', ['show', `${rev}^:${relPath}`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+    } catch {
+      continue // 该提交是文件的首个版本，没有父版本
+    }
+    if (source.includes('private foldSubagentProgress(') && source.includes(SWITCH_START)) {
+      return { rev, source }
+    }
+  }
+  throw new Error('fold-equivalence: 回溯不到含原始 fold 的版本——提取区间已失效')
 }
 
 /** switch 体的起点（增量与全量两份实现用的是同一个 switch 头）。 */
@@ -208,14 +240,14 @@ function expectSameState(actual: ProgressState | undefined, expected: ProgressSt
 }
 
 describe('折叠等价判据：新纯函数 ≡ HEAD 原始实现', () => {
-  const headSrc = headServiceSource()
+  const { rev: originalRev, source: headSrc } = originalFoldRevisionSource()
   const foldOriginal = makeOriginalFold(headSrc)
 
   it('场景清单自检：窗口数与标题一致（防标题漂移成假陈述）', () => {
     expect(scenarios().length).toBe(28)
   })
 
-  it('提取自检：HEAD 原文确实含两份 switch，且提取成功（失败即区间失效，不许静默跳过）', () => {
+  it(`提取自检：原文确实含两份 switch，且提取成功（对照版本 ${originalRev.slice(0, 8)}）`, () => {
     // 两份实现（增量 + 全量）⇒ switch 头应出现 ≥ 2 次
     const hits = headSrc.split(SWITCH_START).length - 1
     expect(hits, 'HEAD 里 switch 头出现次数').toBeGreaterThanOrEqual(2)

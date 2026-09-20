@@ -184,16 +184,34 @@ else
   fail "findLaneAgent 缺少 return undefined（返回类型是 | undefined，编译与测试都发现不了！）"
 fi
 
-# ② -b agents.list 两形态兼容（三处独立实现，都必须保留）
-TRI_FORMS="$(grep -c "typeof raw === 'function' ? raw() : raw" "$SERVICE" || true)"
-TRI_FORMS2="$(grep -c "typeof rawList === 'function' ? rawList() : rawList" "$SERVICE" || true)"
-TOTAL_TRI=$(( ${TRI_FORMS:-0} + ${TRI_FORMS2:-0} ))
-if [ "$TOTAL_TRI" -ge 3 ]; then
-  pass "agents.list 的「方法/可迭代属性」两形态兼容保留（${TOTAL_TRI} 处 ≥ 3）"
-else
-  fail "agents.list 两形态兼容只剩 ${TOTAL_TRI} 处（应为 3：agentRunning / childWorktreeIsolation / buildChangeSummary）"
-  info "删掉兼容写法会让 by-property for...of 抛 function is not iterable，并被 try/catch 吞掉"
-fi
+# ② -b agents.list 两形态兼容（三处独立实现）。
+#
+# ⚠️ 按**文件分别**断言而不是算总数（2026-09-21）：本轮 P2 把 buildChangeSummary 搬进
+# change-summary.ts 后，总数从 3 掉到 2、本组变红——**红得对**，但若图省事改成「总数 ≥ 2」
+# 就废掉了这条判据。按文件断言既容忍搬家，又能指出**哪一处**丢了兼容。
+# 三处各自的位置：agent-service 的 agentRunning / childWorktreeIsolation，change-summary 的反查父会话。
+COMPAT_FILES="\
+agent-service.ts|2|agentRunning + childWorktreeIsolation
+change-summary.ts|1|buildChangeSummary 反查父会话"
+while IFS='|' read -r file want why; do
+  [ -z "$file" ] && continue
+  f="$PKG_DIR/src/$file"
+  if [ ! -f "$f" ]; then
+    fail "agents.list 兼容检查：找不到 $file（搬家后请更新本清单，别删条目）"
+    continue
+  fi
+  # ⚠️ 排除**注释行**：这几个模块的头注里会引用该兼容写法作为说明（实测就这样把 1 处
+  # 数成 2 处）。数注释会让判据既可能假绿也可能假红——两边都不可接受。
+  n1=$(grep -v '^\s*\*' "$f" | grep -v '^\s*//' | grep -o "typeof raw === 'function' ? raw() : raw" | wc -l | tr -d ' ')
+  n2=$(grep -v '^\s*\*' "$f" | grep -v '^\s*//' | grep -o "typeof rawList === 'function' ? rawList() : rawList" | wc -l | tr -d ' ')
+  got=$((n1 + n2))
+  if [ "$got" -eq "$want" ]; then
+    pass "agents.list 两形态兼容：$file 有 ${got} 处（${why}）"
+  else
+    fail "agents.list 两形态兼容：$file 应有 ${want} 处、实测 ${got}（${why}）"
+    info "删掉兼容写法会让 by-property for...of 抛 function is not iterable，并被 try/catch 吞掉"
+  fi
+done <<< "$COMPAT_FILES"
 
 # ② -c 服务取用纪律：可选服务必须走 ctx.get
 if awk '/applySubagentModelForSession\(/,/^  \}$/' "$SERVICE" | grep -q "this\.ctx\.get('sessionProjections'"; then

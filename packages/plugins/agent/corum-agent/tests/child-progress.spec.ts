@@ -60,6 +60,7 @@ describe('childRunInterruptOf — 「半途失去运行」的判据', () => {
 describe('宿主 RPC 的三处回归钉子（文本守卫，与 fork-drift §事件段对账同款）', () => {
   const serviceSource = readFileSync(new URL('../src/agent-service.ts', import.meta.url), 'utf8')
   const trackerSource = readFileSync(new URL('../src/subagent-progress.ts', import.meta.url), 'utf8')
+  const summarySource = readFileSync(new URL('../src/change-summary.ts', import.meta.url), 'utf8')
 
   it('迭代 agents registry 必须兼容「方法 / 可迭代属性」两种形态（2026-09-12 事故根因）', () => {
     // `agents.list` 是方法（list(): Agent[]）——直接 for...of 它会抛
@@ -68,13 +69,16 @@ describe('宿主 RPC 的三处回归钉子（文本守卫，与 fork-drift §事
   })
 
   it('辅助信息（角色/隔离/改动摘要）不得打挂主 RPC：关键取数处有 try/catch 兜底', () => {
-    // ⚠️ 2026-09-21（P1-b）：本断言原先只数 `agent-service.ts` 里的 `try {` 个数
-    // （阈值 >20）。子会话进度簇搬进 `subagent-progress.ts` 后该文件变小、计数掉到 20，
-    // 这条**文本守卫**于是变红——红得对：它的取样面已经跟不上代码布局。
-    // 修法不是降阈值（那会把它变成橡皮图章），而是**把两个文件一起算**：
-    // 「辅助信息不得打挂主 RPC」这条纪律本来就不属于某一个文件。
-    const guarded = (serviceSource.match(/try \{/g)?.length ?? 0)
-      + (trackerSource.match(/try \{/g)?.length ?? 0)
+    // ⚠️ 2026-09-21：本断言原先只数 `agent-service.ts` 里的 `try {` 个数（阈值 >20）。
+    // 本轮每搬走一簇，该文件就变小、计数就掉（P1-b 掉到 20，P2 再掉一次），这条**文本
+    // 守卫**于是连续变红 —— 红得对：它的**取样面**已经跟不上代码布局，而不是纪律失效。
+    //
+    // 修法不是降阈值（那会把它变成橡皮图章），而是把**承载该纪律的全部文件**一起算：
+    // 「辅助信息不得打挂主 RPC」属于这几个模块共同的行为，不属于某一个文件。
+    // ⚠️ 今后再抽新模块，请把新文件加进这个清单，别动阈值。
+    const guarded = [serviceSource, trackerSource, summarySource]
+      .map(src => src.match(/try \{/g)?.length ?? 0)
+      .reduce((a, b) => a + b, 0)
     expect(guarded).toBeGreaterThan(20)
   })
 
