@@ -208,7 +208,7 @@ interface BuiltinRoleSpec {
   subagentModel?: AgentProfile['subagentModel']
   /** 研究子 Agent 模型锁（可选；缺省同 subagentModel）。 */
   researchModel?: AgentProfile['researchModel']
-  /** 并行开发策略（可选；编排专用 Agent 的隔离/合并策略）。 */
+  /** 并行开发策略（可选；只剩 `maxParallelChildren`——隔离/合并键机制恒定生效，见 profile.ts）。 */
   parallelWork?: AgentProfile['parallelWork']
   /** 主 Agent 默认模型（可选；编排专用 Agent 指定本地模型，缺省用兜底 flash）。 */
   model?: AgentProfile['model']
@@ -460,7 +460,8 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     model: { provider: 'localhost', model: 'kimi-k3-1', reasoningEffort: 'high' },
     subagentModel: { provider: 'localhost', model: 'deepseek-v4.1-flash', reasoningEffort: 'high' },
     researchModel: { provider: 'localhost', model: 'glm-5.3-flash', reasoningEffort: 'high' },
-    parallelWork: { isolation: 'write-tasks' },
+    // 2026-09-21 裁定：`parallelWork.isolation` 已随隔离机制恒定生效剔除（死键清除），
+    // 故此处不再声明；并发上限仍可由用户在「模型与并发」卡片改（maxParallelChildren）。
     // 人格只讲「我是谁 / 怎么干」，机制细节（隔离触发、模型锁、声明式验收、结果回传）
     // 一律交给机制段单一事实源（docs/PROMPT-INVENTORY.md §1 的写作纪律）。
     //
