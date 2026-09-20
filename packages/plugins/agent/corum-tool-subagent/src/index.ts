@@ -1340,18 +1340,19 @@ export function apply(ctx: Context, config: Config): void {
 
   // fork（corum）：实例级隔离配置终值（默认在此固化，omission 语义保留在 schema 层）。
   const corumIsolation = config.isolation
-  // fork（corum）：三级配置解析——preset config（实例）> 全局设置（corum-subagent
-  // namespace 文档值）> 实例内置默认。getSnapshot 每次执行时读（文档更新即时生效）。
+  // fork（corum）：两级配置解析——preset config（实例）> 实例内置默认。隔离 / 集成
+  // 相关键已于 2026-09-21 按「机制恒定生效」裁定从全局 ns 移除，故不再有全局档。
+  // getSnapshot 每次执行时读（文档更新即时生效）。
   const corumGlobal = (): CorumSubagentGlobalSettings => corumGlobalSettingsScope?.get() ?? {}
-  const corumIsolationMode = corumIsolation?.mode ?? corumGlobal().isolationMode ?? 'write-tasks'
-  const corumDenyDirectFs = corumIsolation?.denyDirectFs ?? corumGlobal().denyDirectFs ?? true
-  const corumAutoCleanup = corumIsolation?.autoCleanup ?? corumGlobal().autoCleanup ?? true
+  const corumIsolationMode = corumIsolation?.mode ?? 'write-tasks'
+  const corumDenyDirectFs = corumIsolation?.denyDirectFs ?? true
+  const corumAutoCleanup = corumIsolation?.autoCleanup ?? true
   const corumReadonlyResearch = config.readonlyResearch === true
   const corumMaxParallelChildren = config.maxParallelChildren ?? corumGlobal().maxParallelChildren ?? 4
-  // fork（corum）：integrateChecks 三级解析——显式 config 恒优先；缺省时 integrate
-  // 执行点按父 cwd 探测（corumDetectIntegrateChecks），不再静态默认。
-  const corumIntegrateChecks = config.integrateChecks ?? corumGlobal().integrateChecks
-  const corumMerger = config.merger ?? corumGlobal().merger ?? 'parent'
+  // fork（corum）：integrateChecks 两级解析——显式 config；缺省时 integrate 执行点按
+  // 父 cwd 探测（corumDetectIntegrateChecks）兜底，不再静态默认。
+  const corumIntegrateChecks = config.integrateChecks
+  const corumMerger = config.merger ?? 'parent'
 
   /** 机制状态面（`corumOrchestration` 已在本 apply 顶部强制就绪）。 */
   const corumPolicyState: CorumDelegationPolicyState = {

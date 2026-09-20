@@ -25,24 +25,20 @@ export const CORUM_SUBAGENT_SETTINGS_NAMESPACE = 'corum-subagent'
  * 全局配置形（与 preset config 逐键同名；全部可选——未设置的键由实例默认兜底）。
  *
  * ⚠️ **两类语义住在同一个 ns 里**，改键前先分清（2026-09-18 用户澄清）：
- *   · `isolationMode` / `worktreeRoot` / `branchPrefix` / `autoCleanup` /
- *     `denyDirectFs` / `maxParallelChildren` / `integrateChecks` / `merger`
+ *   · `maxParallelChildren`
  *     ⇒ **运行期回落档**（`config.X ?? corumGlobal().X ?? 默认`），改它会立刻影响
  *     所有未显式配该键的预设；
  *   · `defaultModel` / `defaultResearchModel`
  *     ⇒ **新建预设的模板值**，**不参与运行期解析**（子 Agent 路由始终两档：
  *     预设里配的模型 / 跟随主 Agent）。详见各自字段的注释。
+ *
+ * 2026-09-21 裁定：隔离 / 集成相关键（`isolationMode` / `worktreeRoot` / `branchPrefix` /
+ * `autoCleanup` / `denyDirectFs` / `integrateChecks` / `merger`）因机制**恒定生效**
+ * （写任务恒隔离、集成恒自动、自动清理恒开、合并者恒 parent）已从本 ns **移除**
+ * （死键清除）——全局设置页不再暴露它们，运行期解析也不再从这里回落。
  */
 export interface CorumSubagentGlobalSettings {
-  /** 隔离模式（`off` 已于 2026-09-16 清除，见 `isolation.mode` 的说明）。 */
-  readonly isolationMode?: 'always' | 'write-tasks'
-  readonly worktreeRoot?: string
-  readonly branchPrefix?: string
-  readonly autoCleanup?: boolean
-  readonly denyDirectFs?: boolean
   readonly maxParallelChildren?: number
-  readonly integrateChecks?: string[]
-  readonly merger?: 'parent' | 'merger'
   /**
    * **新建预设的模板值**（worker 子 Agent 模型）——**不是**运行期兜底档。
    *
@@ -64,14 +60,7 @@ export const CORUM_SUBAGENT_SETTINGS_SCHEMA: z<CorumSubagentGlobalSettings & {
   defaultModel?: { provider: string; model: string; reasoningEffort?: string }
   defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
 }> = z.object({
-  isolationMode: z.union([z.const('always' as const), z.const('write-tasks' as const)]).default(undefined as unknown as 'always' | 'write-tasks'),
-  worktreeRoot: z.string().default(undefined as unknown as string),
-  branchPrefix: z.string().default(undefined as unknown as string),
-  autoCleanup: z.boolean().default(undefined as unknown as boolean),
-  denyDirectFs: z.boolean().default(undefined as unknown as boolean),
   maxParallelChildren: z.number().step(1).min(1).default(undefined as unknown as number),
-  integrateChecks: z.array(z.string()).default(undefined as unknown as string[]),
-  merger: z.union([z.const('parent' as const), z.const('merger' as const)]).default(undefined as unknown as 'parent' | 'merger'),
   defaultModel: z.object({
     provider: z.string(),
     model: z.string(),
