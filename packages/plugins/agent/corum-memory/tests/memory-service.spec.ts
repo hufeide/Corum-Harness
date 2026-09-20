@@ -282,6 +282,46 @@ describe('MemoryService 业务层 — 检索（applicable / recall 双模式，�
     expect(hit[0].fact).toBe('DeepSeek Harness fork')
   })
 
+  it('多策略检索：按 entity 命中召回（即使 fact 文本不含关键词）', async () => {
+    const { mem } = await setup()
+    // fact 文本是「使用 PostgreSQL」，但 entity 是 'stack'——问「stack」应能按实体召回。
+    await mem.putFact(input({ entity: 'stack', relation: 'uses', fact: '使用 PostgreSQL 作为数据库' }))
+    await mem.putFact(input({ fact: '另一个无关事实' }))
+
+    const hit = await mem.searchFacts({ query: 'stack', mode: 'recall' })
+    expect(hit).toHaveLength(1)
+    expect(hit[0].entity).toBe('stack')
+  })
+
+  it('多策略检索：按 relation 命中召回', async () => {
+    const { mem } = await setup()
+    await mem.putFact(input({ entity: 'A', relation: 'owns', fact: 'A 拥有某个仓库' }))
+    await mem.putFact(input({ fact: '另一个无关事实' }))
+
+    const hit = await mem.searchFacts({ query: 'owns', mode: 'recall' })
+    expect(hit).toHaveLength(1)
+    expect(hit[0].relation).toBe('owns')
+  })
+
+  it('多策略检索：匹配分高者排前（fact 命中 > entity 命中）', async () => {
+    const { mem } = await setup()
+    // fact 直接命中「stack」的，应排在仅 entity 命中「stack」的前面。
+    await mem.putFact(input({ id: 'entity-only', entity: 'stack', relation: 'uses', fact: '使用 PostgreSQL' }))
+    await mem.putFact(input({ id: 'fact-hit', fact: 'stack 是核心组件' }))
+
+    const hit = await mem.searchFacts({ query: 'stack', mode: 'recall' })
+    expect(hit[0].id).toBe('fact-hit') // fact 命中(4) > entity 命中(3)
+  })
+
+  it('无关键词时退化为纯记忆强度排序', async () => {
+    const { mem } = await setup()
+    await mem.putFact(input({ fact: 'low', importance: 10 }))
+    await mem.putFact(input({ fact: 'high', importance: 90 }))
+    const all = await mem.searchFacts({ mode: 'recall' })
+    expect(all[0].fact).toBe('high')
+    expect(all[1].fact).toBe('low')
+  })
+
   it('limit 限制返回条数', async () => {
     const { mem } = await setup()
     await mem.putFact(input({ fact: 'a', importance: 90 }))

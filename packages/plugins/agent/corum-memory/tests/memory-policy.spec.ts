@@ -18,6 +18,7 @@ import {
   isApplicable,
   isRetained,
   effectiveScoreFor,
+  scoreMatch,
   toView,
   conflictsToInvalidate,
   READ_PROMOTE_THRESHOLD,
@@ -154,6 +155,36 @@ describe('toView 派生视图（三维正交）', () => {
     const v = toView(base({ retention: 'temporary', expiresAt: NOW - 1 }), NOW)
     expect(v.retained).toBe(false)
     expect(v.effectiveScore).toBe(0)
+  })
+})
+
+describe('scoreMatch 多策略匹配打分', () => {
+  it('fact 文本命中权重最高（4）', () => {
+    const f = base({ fact: '用户偏好深色模式' })
+    expect(scoreMatch(f, '深色')).toBe(4)
+  })
+  it('entity 命中（3）', () => {
+    const f = base({ entity: 'stack', fact: '无关事实' })
+    expect(scoreMatch(f, 'stack')).toBe(3)
+  })
+  it('relation 命中（2）', () => {
+    const f = base({ relation: 'uses', fact: '无关事实' })
+    expect(scoreMatch(f, 'uses')).toBe(2)
+  })
+  it('source/evidence 命中（1）', () => {
+    const f = base({ source: 'session-123', fact: '无关事实' })
+    expect(scoreMatch(f, 'session')).toBe(1)
+  })
+  it('多字段同时命中则叠加', () => {
+    const f = base({ fact: 'stack uses Postgres', entity: 'stack', relation: 'uses' })
+    // fact 命中(4) + entity 命中(3) = 7（relation 'uses' 不含 'stack'，不命中）
+    expect(scoreMatch(f, 'stack')).toBe(7)
+  })
+  it('无命中返回 0', () => {
+    expect(scoreMatch(base({ fact: '用户偏好深色模式' }), '不存在')).toBe(0)
+  })
+  it('空 query 返回 0', () => {
+    expect(scoreMatch(base(), '')).toBe(0)
   })
 })
 

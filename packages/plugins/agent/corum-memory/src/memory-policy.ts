@@ -160,3 +160,32 @@ export function conflictsToInvalidate(
     isApplicable(f, now),
   )
 }
+
+/**
+ * 多策略匹配打分（无 embedding 的语义近似）。
+ *
+ * 把单一「fact 文本子串」升级为**多字段加权命中**——把 schema 里已有的结构化
+ * 维度（entity / relation / source / evidence）用进检索，避免「只有关键词、连
+ * 实体都匹配不上」的最原始形态。**不是向量检索**，但比纯 includes 更贴近
+ * 「按实体/关系/来源召回」的语义（Graphiti 多策略检索的轻量版，去掉了 embedding）。
+ *
+ * 权重（命中任一字段即得分，多字段命中叠加）：
+ *   - fact 文本子串命中     → 4（最强，直接命中事实本体）
+ *   - entity 命中           → 3（问「这个实体」时召回其所有事实）
+ *   - relation 命中         → 2（问「这段关系」时召回）
+ *   - source 命中           → 1（按来源召回）
+ *   - evidence 命中         → 1（按证据链召回）
+ *
+ * query 为空返回 0（调用方应退化为纯 effectiveScore 排序）。
+ */
+export function scoreMatch(fact: MemoryFact, query: string): number {
+  const q = query.trim().toLowerCase()
+  if (q === '') return 0
+  let score = 0
+  if (fact.fact.toLowerCase().includes(q)) score += 4
+  if (fact.entity !== '' && fact.entity.toLowerCase().includes(q)) score += 3
+  if (fact.relation !== '' && fact.relation.toLowerCase().includes(q)) score += 2
+  if (fact.source !== '' && fact.source.toLowerCase().includes(q)) score += 1
+  if (fact.evidence.some(e => e.toLowerCase().includes(q))) score += 1
+  return score
+}

@@ -29,6 +29,7 @@ import {
   expiresAtFor,
   promoteRetentionOnRead,
   resolveRetentionOnWrite,
+  scoreMatch,
   toView,
 } from './memory-policy.ts'
 
@@ -175,12 +176,16 @@ export class MemoryService extends TypertRemoteService {
   // ── 读 ────────────────────────────────────────────────────────────
 
   /**
-   * 按条件检索事实，按记忆强度（effectiveScore）降序。命中即更新 readCount /
+   * 按条件检索事实，多策略打分 + 记忆强度综合排序。命中即更新 readCount /
    * lastAccessedAt（读取阈值升级 + 访问强化）。
    *
-   * mode='applicable'（默认）只返回当前适用（断言成立）的事实；
-   * mode='recall' 返回所有**仍被记住**（未到 expiresAt）的事实——「失效 ≠ 忘记」：
-   * 断言过期（invalidAt 已过）仍可召回，但存续期耗尽（expiresAt 已过）才是真正遗忘。
+   * 检索策略：
+   *   - 关键词 query：多字段加权命中（fact/entity/relation/source/evidence，
+   *     见 memory-policy.scoreMatch），排序 = 匹配分 × 记忆强度；
+   *   - 无 query：退化为纯记忆强度（effectiveScore）排序；
+   *   - scope：作用域过滤；
+   *   - mode='applicable'（默认）只返回断言成立的事实；
+   *     mode='recall' 返回所有**仍被记住**（未到 expiresAt）的事实。
    */
   async searchFacts(input: SearchFactsInput = {}): Promise<MemoryFactView[]> {
     const table = await this.table()
@@ -188,21 +193,22 @@ export class MemoryService extends TypertRemoteService {
 
     const now = Date.now()
     const scope = input.scope
-    const q = input.query?.trim().toLowerCase() ?? ''
+    const q = input.query?.trim() ?? ''
     const mode = input.mode ?? 'applicable'
     const limit = input.limit ?? 100
 
     const rows: MemoryFact[] = []
     for (const [, f] of table.entries()) {
       if (scope !== undefined && f.scope !== scope) continue
-      if (q !== '' && !f.fact.toLowerCase().includes(q)) continue
       const view = toView(f, now)
       if (mode === 'applicable' && !view.applicable) continue
       if (!view.retained) continue // 存续期耗尽 = 真正遗忘，两种模式都不召回
+      if (q !== '' && scoreMatch(f, q) === 0) continue // 关键词：任一字段命中才召回
       rows.push(f)
     }
 
-    rows.sort((a, b) => toView(b, now).effectiveScore - toView(a, now).effectiveScore)
+    // 排序：有关键词 → 匹配分 × 记忆强度；无关键词 → 纯记忆强度。
+    rows.sort((a, b) => rank(b, q, now) - rank(a, q, now))
     const kept = rows.slice(0, limit)
 
     // 命中副作用：readCount+1（达阈值 → 持久化升级 long）+ 访问强化 lastAccessedAt。
@@ -313,4 +319,16 @@ export class MemoryService extends TypertRemoteService {
   async deleteFactRemote(id: string): Promise<boolean> {
     return this.deleteFact(id)
   }
+}
+
+/**
+ * 综合排序键：有关键词 → 匹配分 × 记忆强度（匹配权重优先，强度打散同匹配者）；
+ * 无关键词 → 纯记忆强度。
+ */
+function rank(f: MemoryFact, query: string, now: number): number {
+  const score = toView(f, now).effectiveScore
+  if (query.trim() === '') return score
+  const match = scoreMatch(f, query)
+  // 匹配分 0 已被过滤，这里 match ≥ 1。匹配分加权 × 强度，保证「更相关且记得牢」靠前。
+  return match * 100 + score
 }

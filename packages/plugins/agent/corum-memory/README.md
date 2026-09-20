@@ -34,6 +34,10 @@
   - **驱逐** eviction：存续期耗尽（`expiresAt` 已过 → 遗忘）+ 硬删除（仅合规/用户显式要求）。
 - **检索双模式**：`applicable`（默认，只返回当前断言成立的事实，驱动当前行为）/
   `recall`（返回所有**仍被记住**的事实，回忆「发生过什么」）。
+- **多策略检索（无 embedding）**：关键词 query 做多字段加权命中
+  （`fact`(4) / `entity`(3) / `relation`(2) / `source`(1) / `evidence`(1)），
+  排序 = 匹配分 × 记忆强度；无 query 退化为纯记忆强度排序。向量语义检索待
+  embedding 引擎就绪后作为第 N 路叠加。
 - **持久化**：复用官方 `dsh-storage-domain`（单域 `corum_memory`、单表 `facts`），
   默认路由到全局 SQLite（`$CORUM_HOME/storages`）。
 

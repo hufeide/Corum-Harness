@@ -25,6 +25,7 @@ export {
   isApplicable,
   isRetained,
   effectiveScoreFor,
+  scoreMatch,
   toView,
   conflictsToInvalidate,
   READ_PROMOTE_THRESHOLD,
