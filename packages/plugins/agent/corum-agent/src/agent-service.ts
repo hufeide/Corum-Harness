@@ -23,6 +23,8 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
 import { installTaskModelSelection } from './task-model-selection.ts'
 import { childRunInterruptOf, foldProgressAll } from './child-progress.ts'
+// fork（corum）2026-09-21：task 泳道解析/冷恢复按关注点抽出（四条路径 + 指挥模式口径）。
+import { resolveTaskSession, type ResolvedTaskSession } from './task-lane.ts'
 // fork（corum）2026-09-21：Agent 存活登记册按关注点抽出（六张状态表 + 语义方法）。
 import { AgentRegistry } from './agent-registry.ts'
 // fork（corum）2026-09-21：终态改动摘要按关注点抽出（两个 host 来源 + 降级路径）。
@@ -1663,56 +1665,24 @@ export class CorumAgentService extends TypertRemoteService {
    * 按 sessionId 解析（或冷恢复）一个 task 会话的 Agent。
    * 已存活直接返回；未存活但已持久化则 resume（官方 session-persistence 冷恢复历史）。
    */
-  private async resolveTaskAgent(sessionId: string): Promise<{ agent: Agent; sessionId: SessionId; cwd: string; profileId: string } | undefined> {
-    const live = this.registry.task(sessionId)
-    if (live !== undefined) return live
-    const index = readTaskSessionIndexOf()
-    const meta = index[sessionId]
-    if (meta === undefined) return undefined
-    // 泳道经官方对象层可能已被激活（侧栏选中/官方 sessions 收录）——此时 ctx.agents
-    // 已有活 agent，直接复用，**不能再 resume**（官方 agents.resume 拒绝 live 会话：
-    // 「cannot prepare session while it is live」）。
-    // profileId 双源：corum profile 或官方 preset id（冷恢复官方模式泳道——
-    // 官方 preset 不绑定固定模型，跟随部署默认）。
-    const isOfficialPreset = meta.profileId !== TASK_PROFILE_ID && loadProfile(meta.profileId) === undefined
-    const profile = meta.profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(meta.profileId)
-    // fork（corum）：指挥模式口径（conductor preset 或 executionTools:'orchestrator'）——
-    // 下面三条恢复路径（复用活 agent / resume / 由官方层激活）都要按它决定是否
-    // 在主 Agent scope 注册裁剪+人格。
-    const conductor = conductorModeOf(meta.profileId, isOfficialPreset, profile === undefined ? undefined : effectiveExecutionTools(profile))
-    const sid0 = SessionId(sessionId)
-    const activated = this.ctx.agents.get(sid0)
-    if (activated !== undefined) {
-      const entry = { agent: activated, sessionId: sid0, cwd: meta.cwd, profileId: meta.profileId }
-      this.registry.registerTask(entry)
-      this.conductor.apply(sessionId, activated.ctx, conductor)
-      return entry
-    }
-    if (!isOfficialPreset && profile === undefined) return undefined
-    const resumeModel = profile !== undefined && profile !== null
-      ? profile.model
-      : (() => { const dm = this.ctx.agentDefaultModel.currentSelection(); return { provider: dm.provider, model: dm.model, ...(dm.reasoningEffort === undefined ? {} : { reasoningEffort: dm.reasoningEffort }) } })()
-    const selection: ModelSelectionRef = {
-      current: {
-        provider: resumeModel.provider,
-        model: resumeModel.model,
-        ...(resumeModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(resumeModel.reasoningEffort) }),
-      },
-      assembled: undefined,
-    }
-    const setup = async (agentCtx: Context): Promise<void> => {
-      await this.ctx.agentPresets.mount(agentCtx, meta.profileId)
-      installTaskModelSelection(agentCtx, selection)
-      this.conductor.apply(sessionId, agentCtx, conductor)
-    }
-    const agentOptions = { provider: resumeModel.provider, model: resumeModel.model }
-    const sid = SessionId(sessionId)
-    const handle = await this.ctx.agents.resume({ resumeSessionId: sid, agentOptions, setup })
-    this.ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
-    const entry = { agent: handle.agent, sessionId: sid, cwd: meta.cwd, profileId: meta.profileId }
-    this.registry.registerTask(entry)
-    this.registry.setTaskSelection(sessionId, selection)
-    return entry
+  /**
+   * 解析（或冷恢复）一条 task 泳道会话。
+   *
+   * 2026-09-21 按关注点抽到 `task-lane.ts`（四条路径 + 官方「live 会话不能再 resume」约束
+   * + 指挥模式口径）。这里只把三样本类能力交给它：
+   *   · `ctx` / `registry`（状态所有者）；
+   *   · `applyConductor`（**显式**说明本模块会写指挥模式 —— 上场漏洞的根因就是
+   *     「两个方法各自写同一份状态、互不知情」，把这条边写在接口上而不是藏起来）。
+   *
+   * 返回值多带一个 `conductor`（本次算出的指挥模式口径）：调用方需要它才能不再算第二遍
+   * —— 两处口径来源正是「同一份状态多个写入者」的温床。
+   */
+  private async resolveTaskAgent(sessionId: string): Promise<ResolvedTaskSession | undefined> {
+    return resolveTaskSession({
+      ctx: this.ctx,
+      registry: this.registry,
+      applyConductor: (sid, agentCtx, mode) => this.conductor.apply(sid, agentCtx, mode),
+    }, sessionId)
   }
 
   /** 创建/恢复一个 task 会话并返回其 sessionId。 */
