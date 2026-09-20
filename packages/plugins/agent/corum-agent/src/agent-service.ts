@@ -66,6 +66,13 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // fork（corum）2026-09-20：权限合成（主体 × 用户档位 × 模式约束）——解决「只读被用户档位覆盖」。
 import { ConductorRuntime } from './conductor-runtime.ts'
+// fork（corum）2026-09-20：泳道登记/查找/挂载按关注点抽出。
+import {
+  attachTaskWorkspace as attachTaskWorkspaceOf,
+  findBlankTaskLane as findBlankTaskLaneOf,
+  readTaskSessionIndex as readTaskSessionIndexOf,
+  registerTaskSession as registerTaskSessionOf,
+} from './lane-registry.ts'
 // fork（corum）2026-09-20：profile 编译与落盘按关注点抽出（用户定调「文件层面切分清晰」）。
 import { checkoutPinnedSkills as checkoutPinnedSkillsOf, writeAgentDir as writeAgentDirOf } from './profile-compiler.ts'
 // fork（corum）2026-09-20：润色/翻译按关注点抽出的模块（含类型、引擎路由、system 提示词）。
@@ -87,7 +94,7 @@ import { GENERAL_WORK_TYPE, canonicalWorkspaceKey, isValidProjectId, isValidWork
 import { loadProject, findProjectByCwd } from './project-store.ts'
 // 统一会话索引（两模式共用；键 = sessionId，按 cwd 分组）——
 // 见 session-index.ts 的文件头（两套旧索引键空间不同构，不可机械合并）。
-import { findSessionByLane, readSessionIndex, registerSession } from './session-index.ts'
+import { findSessionByLane, registerSession } from './session-index.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
 import { agentRecreateWarning, lifecycleDiagPath, noteAgentRecreate } from './agent-lifecycle-guard.ts'
 import type { PolishConfig } from './profile-store.ts'
@@ -1242,28 +1249,7 @@ export class CorumAgentService extends TypertRemoteService {
     })
   }
 
-  // ── task 会话（统一索引：sessionId 作键，一个工作区多会话）──────────────
 
-  /**
-   * 读 task 会话索引（统一索引里 `type='task'` 的那些）。
-   *
-   * **键 = sessionId**（不再是 `<profileId><type>`）：task 模式一个工作区可以有多
-   * 个会话，用复合键会把它们压成一条（实测 217 条会丢 180 条，见台账
-   * `bug.unified-index-shape-loses-task-sessions`）。
-   */
-  private readTaskSessionIndex(): Record<string, { cwd: string; profileId: string }> {
-    const out: Record<string, { cwd: string; profileId: string }> = {}
-    for (const [sessionId, entry] of Object.entries(readSessionIndex())) {
-      if (entry.type !== 'task') continue
-      out[sessionId] = { cwd: entry.cwd, profileId: entry.profileId }
-    }
-    return out
-  }
-
-  /** 登记一条 task 会话（sessionId → cwd/profileId）进统一索引（type='task'）。 */
-  private registerTaskSession(sessionId: SessionId, cwd: string, profileId: string): void {
-    registerSession(String(sessionId), { cwd, profileId, type: 'task' })
-  }
 
   /** 获取已创建的 Agent（未创建返回 undefined）。 */
   getAgent(profileId: string): Agent | undefined {
@@ -1728,7 +1714,7 @@ export class CorumAgentService extends TypertRemoteService {
 
     // 复用目标工作区里已有的 blank task 泳道（官方 connectWorkspace 语义）：
     // 连点「新建任务」不该堆一串空会话。
-    const reuse = this.findBlankTaskLane(root)
+    const reuse = findBlankTaskLaneOf(this.ctx, root)
     if (reuse !== undefined) {
       this.ctx.logger.info(`corum-agent(task): reuse blank lane — ${reuse} (cwd=${root})`)
       const resolved = await this.resolveTaskAgent(reuse)
@@ -1747,7 +1733,7 @@ export class CorumAgentService extends TypertRemoteService {
           // （同 selectTaskAgentProfile）。
           if (!isOfficialPreset) writeAgentDirOf(profile, agentDirPath(profile.id))
           await this.ctx.agentPresets.select(resolved.agent, profile.id)
-          this.registerTaskSession(resolved.sessionId, resolved.cwd, profile.id)
+          registerTaskSessionOf(resolved.sessionId, resolved.cwd, profile.id)
           this.taskAgents.set(String(resolved.sessionId), { ...resolved, profileId: profile.id })
           // fork（corum）：换绑后指挥模式口径必须跟随新 preset（旧限制先撤销）。
           this.conductor.apply(
@@ -1818,8 +1804,8 @@ export class CorumAgentService extends TypertRemoteService {
       agentOptions,
       setup,
     })
-    this.registerTaskSession(sessionId, root, profile.id)
-    await this.attachTaskWorkspace(sessionId, root)
+    registerTaskSessionOf(sessionId, root, profile.id)
+    await attachTaskWorkspaceOf(this.ctx, sessionId, root)
     // 权限档位只记内存、不写事件——写事件会 append 落盘，而用户还没发消息。
     this.rememberPendingPermission(String(sessionId), permission)
     this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${root})`)
@@ -1827,66 +1813,6 @@ export class CorumAgentService extends TypertRemoteService {
     this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd: root, profileId: profile.id })
     this.taskSelections.set(String(sessionId), selection)
     return { agent: handle.agent, presetId: profile.id, sessionId }
-  }
-
-  /**
-   * 找出目标工作区里**尚未发过消息**的泳道会话（复用候选）。
-   *
-   * 判定（对齐官方 blank 语义）：官方 `applySessionListMetadata` 里
-   * `blank = state.blank && event.type !== 'turn/start'`——**日志里出现第一个
-   * `turn/start` 就不再是 blank**。host 侧 `ctx.sessions.list()` 返回的是
-   * `Session`（无 blank 字段，blank 在客户端摘要层），故此处直接按官方同源
-   * 规则判定：同一工作区 + 事件流里没有 `turn/start`。
-   *
-   * **查全库、不只查 task 索引**（修 `bug.task-lane-reuse-misses-project-sessions`）：
-   * 旧实现只遍历 `readTaskSessionIndex()`（仅 `type='task'`），于是同一工作区里
-   * **项目模式的 blank 会话不会被复用** ⇒ 同一工作区出现两条并行泳道（一条 task、
-   * 一条 project）。这与统一模型（工作区即项目）直接冲突，也违背它自己的原始意图
-   * （源码注释：「连点『新建任务』不该堆一串空会话」）。
-   *
-   * 统一模型下的正确判据：**按工作区判**——`type` 只决定「显示哪些会话」，
-   * 不参与「能不能复用」。故这里遍历**统一索引**（两模式的会话都在里面）。
-   *
-   * 工作区比较走 `canonicalWorkspaceKey`（realpath 归一）：存量实测
-   * `"/a/b/"` 与 `"/a/b"` 同指一个目录，直接比字符串会把一个工作区判成两个。
-   */
-  private findBlankTaskLane(cwd: string): string | undefined {
-    const want = canonicalWorkspaceKey(cwd)
-    if (want === undefined) return undefined
-    for (const [sid, entry] of Object.entries(readSessionIndex())) {
-      if (canonicalWorkspaceKey(entry.cwd) !== want) continue
-      const session = this.ctx.sessions.list().find((s) => String(s.id) === sid)
-      // 会话不在对象层时保守不复用（宁可新建一个，也不要复用一个可能有历史的会话）。
-      if (session === undefined) continue
-      if (!session.snapshotEvents().some((e) => e.type === 'turn/start')) return sid
-    }
-    return undefined
-  }
-
-  /**
-   * 把泳道会话挂到官方 workspace（侧栏按 `WorkspaceView.sessionIds` 分组，
-   * 不 attach 就落「未分组」桶）。
-   *
-   * 官方 `session.create({workspaceId})` 会自动 attach，但泳道是自己起的
-   * `agents.create`，必须补这一步。attach 失败**不阻断**会话创建（会话可用，
-   * 只是归到未分组），但要打日志——静默失败会让「未分组」问题无法定位。
-   */
-  private async attachTaskWorkspace(sessionId: SessionId, cwd: string): Promise<void> {
-    const registry = this.ctx.get('workspaceRegistry')
-    if (registry === undefined) {
-      this.ctx.logger.warn('corum-agent(task): workspaceRegistry unavailable — lane stays ungrouped')
-      return
-    }
-    try {
-      // create 幂等：已注册的目录直接返回既有实体（不重复建节点）；未注册则新建
-      // 并 prepend 到侧栏列表（用户要的「工作区先出现这个目录名的父节点」）。
-      const target = await registry.create(cwd)
-      await target.attachSession(sessionId)
-      this.ctx.logger.info(`corum-agent(task): attached — ${String(sessionId)} → workspace ${String(target.id)}`)
-    } catch (error) {
-      // 不阻断：会话已可用，只是归到未分组。打日志避免「未分组」问题无法定位。
-      this.ctx.logger.warn(`corum-agent(task): attach failed — ${String(error)}`)
-    }
   }
 
   /**
@@ -1978,7 +1904,7 @@ export class CorumAgentService extends TypertRemoteService {
   private async resolveTaskAgent(sessionId: string): Promise<{ agent: Agent; sessionId: SessionId; cwd: string; profileId: string } | undefined> {
     const live = this.taskAgents.get(sessionId)
     if (live !== undefined) return live
-    const index = this.readTaskSessionIndex()
+    const index = readTaskSessionIndexOf()
     const meta = index[sessionId]
     if (meta === undefined) return undefined
     // 泳道经官方对象层可能已被激活（侧栏选中/官方 sessions 收录）——此时 ctx.agents
@@ -2055,7 +1981,7 @@ export class CorumAgentService extends TypertRemoteService {
     if (!isOfficialPreset && profile !== undefined) writeAgentDirOf(profile, agentDirPath(profile.id))
     // select 自己判 blank（turnBoundary 投影）——非 blank 泳道抛 locked，原样上抛给 UI。
     await this.ctx.agentPresets.select(resolved.agent, profileId)
-    this.registerTaskSession(resolved.sessionId, resolved.cwd, profileId)
+    registerTaskSessionOf(resolved.sessionId, resolved.cwd, profileId)
     this.taskAgents.set(String(sessionId), { ...resolved, profileId })
     // fork（corum）：指挥模式口径随切换重算（切出指挥模式即撤销裁剪与人格段）。
     this.conductor.apply(
@@ -2190,7 +2116,7 @@ export class CorumAgentService extends TypertRemoteService {
    */
   @Remote('getTaskSessionEvents')
   async getTaskSessionEventsRemote(sessionId: string, fromSeq: number): Promise<{ events: SessionEventDto[] }> {
-    const index = this.readTaskSessionIndex()
+    const index = readTaskSessionIndexOf()
     if (index[sessionId] === undefined) return { events: [] }
     const stored = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), fromSeq)
     const events: SessionEventDto[] = []
@@ -2640,7 +2566,7 @@ export class CorumAgentService extends TypertRemoteService {
    */
   @Remote('listTaskAgents')
   async listTaskAgentsRemote(cwd?: string): Promise<{ tasks: TaskAgentSummary[] }> {
-    const index = this.readTaskSessionIndex()
+    const index = readTaskSessionIndexOf()
     const out: TaskAgentSummary[] = []
     // cwd 过滤走身份归一（realpath）而非字符串直比：存量实测 "/a/b/" 与 "/a/b"
     // 同指一个目录，直比会把同一工作区的会话漏掉一半（同 findBlankTaskLane）。
