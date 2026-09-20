@@ -91,10 +91,22 @@ describe('compilePreset — fork #10 双实例行', () => {
     expect(bare.worker).not.toContain('isolation:')
     expect(bare.worker).not.toContain('maxParallelChildren')
     const full = dualRows(compilePreset(profile({
-      parallelWork: { isolation: 'always', maxParallelChildren: 2, integrateChecks: ['pnpm lint'] },
+      parallelWork: { maxParallelChildren: 2 },
     })).cordisYml)
-    expect(full.worker).toContain('mode: "always"')
     expect(full.worker).toContain('maxParallelChildren: 2')
-    expect(full.worker).toContain('"pnpm lint"')
+  })
+
+  it('2026-09-21：隔离/合并键不再透传（preset 无法覆盖机制）', () => {
+    // 结构上已无法表达（见 profile.ts 的 ParallelWorkPolicy）：这里只断言产物侧不留痕。
+    const { worker } = dualRows(compilePreset(profile({
+      parallelWork: { maxParallelChildren: 3 },
+    })).cordisYml)
+    expect(worker).not.toContain('isolation:')
+    expect(worker).not.toContain('integrateChecks')
+    expect(worker).not.toContain('merger')
+    expect(worker).not.toContain('worktreeRoot')
+    expect(worker).not.toContain('branchPrefix')
+    expect(worker).not.toContain('autoCleanup')
+    expect(worker).not.toContain('denyDirectFs')
   })
 })

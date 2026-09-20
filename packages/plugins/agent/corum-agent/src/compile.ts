@@ -82,8 +82,9 @@ export interface CompiledPreset {
  *
 /**
  * fork #10 双实例行的 config 构造：profile 级覆盖（parallelWork/subagentModel/
- * researchModel）只写显式键，缺省由 host settings namespace `corum-subagent`
- * 兜底（三级配置模型，PLAN §1.6）。
+ * researchModel）。**三级配置模型下，parallelWork 只剩 `maxParallelChildren` 可由
+ * preset 覆盖**（2026-09-21 裁定：隔离 / 合并相关键已从 `ParallelWorkPolicy` 移除，
+ * 机制恒定生效，见 profile.ts）；模型锁（subagentModel/researchModel）仍由 profile 决定。
  */
 function corumSubagentConfig(
   role: 'worker' | 'research',
@@ -121,17 +122,9 @@ function corumSubagentConfig(
     config.toolFilter = { deny: [...corumMutationToolsForPlatform(), ...mcpDenyNames] }
     return config
   }
-  // worker 实例：isolation 策略（只写显式键）。
-  const isolation: Record<string, unknown> = {}
-  if (pw?.isolation !== undefined) isolation.mode = pw.isolation
-  if (pw?.worktreeRoot !== undefined) isolation.worktreeRoot = pw.worktreeRoot
-  if (pw?.branchPrefix !== undefined) isolation.branchPrefix = pw.branchPrefix
-  if (pw?.autoCleanup !== undefined) isolation.autoCleanup = pw.autoCleanup
-  if (pw?.denyDirectFs !== undefined) isolation.denyDirectFs = pw.denyDirectFs
-  if (Object.keys(isolation).length > 0) config.isolation = isolation
+  // worker 实例：**只有 maxParallelChildren 可由 preset 覆盖**（2026-09-21 裁定，
+  // 隔离 / 合并机制恒定生效，不再透传 isolation/merger/integrateChecks）。
   if (pw?.maxParallelChildren !== undefined) config.maxParallelChildren = pw.maxParallelChildren
-  if (pw?.integrateChecks !== undefined) config.integrateChecks = pw.integrateChecks
-  if (pw?.merger !== undefined) config.merger = pw.merger
   return config
 }
 

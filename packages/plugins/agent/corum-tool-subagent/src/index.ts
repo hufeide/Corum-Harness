@@ -171,35 +171,13 @@ export interface Config {
    * budget belongs to the child runtime or its own deployment.
    */
   maxDepth?: number | 'provider-managed'
-  /** fork（corum）：子 Agent 隔离策略。 */
-  isolation?: {
-    /**
-     * always=凡写委派必隔离；write-tasks=（默认）同样对**写任务**恒隔离。
-     * 两者对写任务**等价**——2026-09-16 不变式⑤取消了旧的「单发前台写任务直写主工作区」
-     * 豁免，`off` 也已清除。保留 write-tasks 取值只为不动存量配置。
-     *
-     * **2026-09-16 不变式⑤**：`off` 已清除（用户裁定「隔离恒定生效，off 语义应该被清除」）——
-     * 本字段取值只剩 always / write-tasks，且两者对**写任务等价**（都隔离）。没有任何
-     * 逃生口；迭代/provider 级 `track` 模式是**另一条轴**（独立模式，不经过本判定）。
-     */
-    mode?: 'always' | 'write-tasks'
-    /** worktree 根目录（相对父会话 cwd 或绝对路径，默认 '.corum-worktrees'）。 */
-    worktreeRoot?: string
-    /** 分支名前缀（默认 'wt/'）。 */
-    branchPrefix?: string
-    /** 合并后自动清理（默认 true）。 */
-    autoCleanup?: boolean
-    /** 子 Agent deny str_replace_editor（默认 true）。 */
-    denyDirectFs?: boolean
-  }
+  // 2026-09-21 裁定：`isolation` / `integrateChecks` / `merger` 三键已从本接口与 schema
+  // 剔除——隔离与合并机制恒定生效（调用点固化常量），不允许 preset 覆盖。存量 preset
+  // yaml 里的旧键忽略不迁移（宽松处理：schema 不再声明，读到时丢弃）。
   /** fork（corum）：research 实例语义——本实例为只读研究实例（预 deny 写工具、不隔离）。 */
   readonlyResearch?: boolean
   /** fork（corum）：会话级并行子 Agent 上限（默认 4；超限拒绝新召唤）。 */
   maxParallelChildren?: number
-  /** fork（corum）：integrate 召唤的固定核查命令（默认 ['pnpm -r typecheck']）。 */
-  integrateChecks?: string[]
-  /** fork（corum）：合并者归属（默认 'parent'）。 */
-  merger?: 'parent' | 'merger'
   /** fork（corum）：子 Agent 固定模型路由（机制锁；缺省=跟随父）。 */
   model?: { provider: string; model: string; reasoningEffort?: string }
 }
@@ -254,24 +232,10 @@ export const Config: z<Config> = z.object({
     deny: z.array(z.string()).default(undefined as unknown as string[]),
   }).default(undefined as unknown as { allow: string[]; deny: string[] }),
   maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(3),
-  // fork（corum）：隔离/研究/并行/集成/模型锁字段全部保留 omission（不写默认物化）。
-  isolation: z.object({
-    mode: z.union(['always', 'write-tasks'] as const).default(undefined as unknown as 'always' | 'write-tasks'),
-    worktreeRoot: z.string().min(1).default(undefined as unknown as string),
-    branchPrefix: z.string().default(undefined as unknown as string),
-    autoCleanup: z.boolean().default(undefined as unknown as boolean),
-    denyDirectFs: z.boolean().default(undefined as unknown as boolean),
-  }).default(undefined as unknown as {
-    mode: 'always' | 'write-tasks'
-    worktreeRoot: string
-    branchPrefix: string
-    autoCleanup: boolean
-    denyDirectFs: boolean
-  }),
+  // fork（corum）：研究/并行/模型锁字段保留 omission（不写默认物化）。
+  // （2026-09-21：`isolation` / `integrateChecks` / `merger` 已随机制恒定生效剔除。）
   readonlyResearch: z.boolean().default(undefined as unknown as boolean),
   maxParallelChildren: z.natural().max(Number.MAX_SAFE_INTEGER).default(undefined as unknown as number),
-  integrateChecks: z.array(z.string()).default(undefined as unknown as string[]),
-  merger: z.union(['parent', 'merger'] as const).default(undefined as unknown as 'parent' | 'merger'),
   model: z.object({
     provider: z.string().required(),
     model: z.string().required(),
@@ -1338,21 +1302,15 @@ export function apply(ctx: Context, config: Config): void {
     })
   }
 
-  // fork（corum）：实例级隔离配置终值（默认在此固化，omission 语义保留在 schema 层）。
-  const corumIsolation = config.isolation
-  // fork（corum）：两级配置解析——preset config（实例）> 实例内置默认。隔离 / 集成
-  // 相关键已于 2026-09-21 按「机制恒定生效」裁定从全局 ns 移除，故不再有全局档。
+  // fork（corum）：实例级配置终值。
+  // 2026-09-21 裁定：隔离 / 合并相关键（isolation / integrateChecks / merger）已从 preset
+  // 配置面（Config 接口 + schema）与全局 ns 移除，**机制恒定生效**，故这里不再有相关解析，
+  // 调用点直接固化常量（隔离模式恒 write-tasks、denyDirectFs / autoCleanup 恒 true、
+  // 合并者恒 parent、核查命令恒按父 cwd 探测）。
   // getSnapshot 每次执行时读（文档更新即时生效）。
   const corumGlobal = (): CorumSubagentGlobalSettings => corumGlobalSettingsScope?.get() ?? {}
-  const corumIsolationMode = corumIsolation?.mode ?? 'write-tasks'
-  const corumDenyDirectFs = corumIsolation?.denyDirectFs ?? true
-  const corumAutoCleanup = corumIsolation?.autoCleanup ?? true
   const corumReadonlyResearch = config.readonlyResearch === true
   const corumMaxParallelChildren = config.maxParallelChildren ?? corumGlobal().maxParallelChildren ?? 4
-  // fork（corum）：integrateChecks 两级解析——显式 config；缺省时 integrate 执行点按
-  // 父 cwd 探测（corumDetectIntegrateChecks）兜底，不再静态默认。
-  const corumIntegrateChecks = config.integrateChecks
-  const corumMerger = config.merger ?? 'parent'
 
   /** 机制状态面（`corumOrchestration` 已在本 apply 顶部强制就绪）。 */
   const corumPolicyState: CorumDelegationPolicyState = {
@@ -1900,10 +1858,11 @@ export function apply(ctx: Context, config: Config): void {
           : undefined
 
       // fork（corum）：写工具判定与隔离触发（纯函数，单测覆盖）。
-      // 任务级覆盖（orchestrate 的 tasks[i].isolation/research）优先于实例配置终值。
+      // 任务级覆盖（orchestrate 的 tasks[i].isolation/research）优先于实例固定终值
+      // （2026-09-21 裁定：隔离机制恒定生效，实例侧不再是可配置项，故字面固化常量）。
       // `effReadonlyResearch` 已在上方 request 构造处解析（供只读沙箱钉使用）。
-      const effIsolationMode = args.taskIsolation ?? corumIsolationMode
-      const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, corumDenyDirectFs)
+      const effIsolationMode = args.taskIsolation ?? 'write-tasks'
+      const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, true)
       // fork（corum）：并发感知（2026-09-09 用户实机反馈「只派遣一个 TASK 时还是走了
       // 隔离工作区」）——隔离的存在理由是并发写冲突，没有并发就没有隔离的必要。
       // 四个并发信号（任一成立即视为「可能并发」）：
@@ -2005,15 +1964,16 @@ export function apply(ctx: Context, config: Config): void {
         const parentCwd = parent.session.header.cwd ?? process.cwd()
         // 拒绝时随错误带出的分支快照（抛出后 `entriesOf` 会按 git 实况对账翻转这些条目）。
         const corumPendingBranchNames = pending.map(entry => entry.branch)
-        const effectiveChecks = corumIntegrateChecks ?? corumDetectIntegrateChecks(parentCwd)
+        // 2026-09-21 裁定：核查命令恒按父 cwd 探测；合并者恒 'parent'。
+        const effectiveChecks = corumDetectIntegrateChecks(parentCwd)
         const declaredVerify = typeof args.verify === 'string' && args.verify.trim() !== '' ? args.verify : undefined
         const corumIntegrateRequest = {
           ...request,
           cwd: parentCwd,
-          persona: corumIntegratorPersona(pending, effectiveChecks, corumMerger, declaredVerify),
+          persona: corumIntegratorPersona(pending, effectiveChecks, 'parent', declaredVerify),
           prompt: [{
             type: 'text',
-            text: corumIntegratorPersona(pending, effectiveChecks, corumMerger, declaredVerify) + '\n\n' + String(args.prompt),
+            text: corumIntegratorPersona(pending, effectiveChecks, 'parent', declaredVerify) + '\n\n' + String(args.prompt),
           }] as ContentBlock[],
         }
         // fork（corum）：机制真值门禁的前置快照（主树 HEAD + 未提交基线）。
@@ -2151,7 +2111,7 @@ export function apply(ctx: Context, config: Config): void {
         // 主 Agent（补提交后再次 integrate，或明确丢弃）。
         const leftover = new Set(corumTruth.uncommitted.map(text => text.split(' ')[0]))
         const landed = pending.filter(entry => !leftover.has(entry.slug))
-        if (landed.length > 0) orchestration.markIntegrated(sessionId, landed, corumAutoCleanup)
+        if (landed.length > 0) orchestration.markIntegrated(sessionId, landed, true)
         if (corumTruth.uncommitted.length > 0) {
           orchestration.emitFrame(sessionId)
           runtimeCtx.logger.warn(`integrate partially persisted: ${corumTruth.uncommitted.join(', ')} kept pending`)
@@ -2172,14 +2132,12 @@ export function apply(ctx: Context, config: Config): void {
         const parentCwd = parent.session.header.cwd ?? process.cwd()
         const sessionId = parent.session.id
         const child = orchestration.createWorktreeChild(sessionId, parentCwd, {
-          ...corumIsolation?.worktreeRoot !== undefined ? { worktreeRoot: corumIsolation.worktreeRoot } : {},
-          ...corumIsolation?.branchPrefix !== undefined ? { branchPrefix: corumIsolation.branchPrefix } : {},
           maxParallelChildren: corumMaxParallelChildren,
         })
         corumEntry = { sessionId, slug: child.slug }
         corumEntryInfo = { slug: child.slug, branch: child.branch, path: child.path }
         request.cwd = child.path
-        corumSetMechanismFilter(corumEffectiveToolFilter(config.toolFilter, corumDenyDirectFs))
+        corumSetMechanismFilter(corumEffectiveToolFilter(config.toolFilter, true))
         request.prompt = [{ type: 'text', text: corumIsolationNotice(child) + args.prompt }] as ContentBlock[]
       } else if (corumIsWrite && !effReadonlyResearch) {
         // fork（corum）：不隔离的写任务（单发前台，无并发）直接在主工作区改——必须明确
