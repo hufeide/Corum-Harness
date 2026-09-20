@@ -1,70 +1,97 @@
 /**
- * corum 记忆底座 —— 纯函数层：分层派生 + 衰减（读时降权）+ 适用/留存判定。
+ * corum 记忆底座 —— 纯函数层：存续期 + 衰减（读时降权）+ 适用/留存判定 + 合并。
  *
- * 全部无状态纯函数，不落库、无后台任务、可单测。底座只提供「组织形式」。
+ * 全部无状态纯函数，不落库、无后台任务、可单测。
  *
- * **核心语义（对齐 Graphiti 的时间知识图）——「失效 ≠ 忘记」**：
- *   一条事实的生命周期有**三个正交维度**，绝不用同一个字段/判定混在一起：
- *   - **适用窗口**（validAt → invalidAt）：事实**断言**何时为真（内容属性）。
- *   - **适用性**（applicable）：当前是否「成立、该驱动行为」。到期 → 不再适用，
- *     但**不影响留存**。
- *   - **留存**（retained）：作为「发生过的事」是否还被记住。到期**永不**自动忘记；
- *     忘记只来自**显式删除**（物理层），或未来更高层的显式裁决。
+ * **两个正交的「时间」概念（避免「到期 = 忘记」的老错）**：
+ *   - **断言窗口**（validAt → invalidAt）：事实**内容**何时为真 → 决定 `applicable`。
+ *     断言过期只表示「不再适用/不再驱动行为」，**不影响留存**。
+ *   - **存续期**（retention → expiresAt）：记忆**本身**存多久 → 决定 `retained`。
+ *     到 expiresAt 记忆被遗忘；permanent 永不遗忘。
  *
- *   例：用户要求「10月31日前每天提醒日程」。10/31 前 applicable（提醒），
- *   11/1 后不再 applicable（不提醒），但作为「发生过的事」依然 retained、可被
- *   recall 检索召回。
+ * 例：用户要求「10月31日前每天提醒日程」——11/1 后断言过期（applicable=false，
+ * 不再提醒），但记忆本身仍在（retained=true，取决于 retention 档），可被 recall 召回。
  *
- * 检索因此拆成两种：
- *   - **applicable 检索**（默认）：只返回当前适用的事实，供 Agent 驱动当前行为。
- *   - **recall 检索**：返回全部（含已到期/失效），回忆「发生过什么」。
+ * **存续期四档与 TTL / 衰减半衰期（用户 2026-09 拍板）**：
+ *   | retention  | 语义           | TTL（expiresAt 起算） | 衰减半衰期 |
+ *   | temporary  | 临时（1~3 天）  | 2 天                  | 半天        |
+ *   | short      | 短期（3 个月）  | 3 个月               | 30 天       |
+ *   | long       | 长期（半年以上）| 1 年                  | 半年        |
+ *   | permanent  | 永久            | 永不（null）          | 1 年（微衰）|
  *
- * 衰减策略（用户拍板「只做读时降权，不做后台任务」）：
- *   - effectiveScore 是**记忆强度**（importance × 时间衰减 × 访问强化），
- *     **不因到期归零**——它度量「还记得多牢」，不是「还适用吗」。
- *   - 适用性 applicable 是独立的布尔维度，不进分数。
- *   - 无后台定时器：applicable 每次读时实时算，可逆、零后台风险。
+ * **持久化判定（4 规则）**：
+ *   1. 用户明确要求的纪律 → permanent（写入方显式 retention='permanent'）；
+ *   2. 可判定永久的事实来源 → permanent（同上）；
+ *   3. 用户手动添加（author='user'）→ long；
+ *   4. 多次读取到阈值（readCount ≥ READ_PROMOTE_THRESHOLD）→ long（读时升级）。
  *
  * @module @corum/corum-memory/memory-policy
  */
 
-import type { MemoryFact, MemoryFactView, MemoryTier } from './memory-entities.ts'
+import type { MemoryFact, MemoryFactView, MemoryRetention } from './memory-entities.ts'
 
-/** 各分层的衰减半衰期（毫秒）。archival 半衰期极长 → 几乎不衰。 */
-export const TIER_HALF_LIFE_MS: Record<MemoryTier, number> = {
-  transient: 30 * 60 * 1000, // 30 分钟
-  session: 6 * 60 * 60 * 1000, // 6 小时
-  long: 30 * 24 * 60 * 60 * 1000, // 30 天
-  archival: 365 * 24 * 60 * 60 * 1000, // 1 年
+/** 读取阈值：readCount 达到该值 → 持久化升级到 long。 */
+export const READ_PROMOTE_THRESHOLD = 5
+
+/** 各存续期的 TTL（毫秒；expiresAt = createdAt + TTL）。permanent 永不 expire。 */
+export const RETENTION_TTL_MS: Record<MemoryRetention, number | null> = {
+  temporary: 2 * 24 * 60 * 60 * 1000, // 2 天
+  short: 3 * 30 * 24 * 60 * 60 * 1000, // 3 个月（约 90 天）
+  long: 365 * 24 * 60 * 60 * 1000, // 1 年
+  permanent: null, // 永不
+}
+
+/** 各存续期的衰减半衰期（毫秒）。permanent 微衰（1 年）。 */
+export const RETENTION_HALF_LIFE_MS: Record<MemoryRetention, number> = {
+  temporary: 0.5 * 24 * 60 * 60 * 1000, // 半天
+  short: 30 * 24 * 60 * 60 * 1000, // 30 天
+  long: 180 * 24 * 60 * 60 * 1000, // 半年
+  permanent: 365 * 24 * 60 * 60 * 1000, // 1 年（微衰）
 }
 
 /** 访问强化窗口：lastAccessedAt 在此窗口内时，衰减放缓（半衰期 ×2）。 */
 export const ACCESS_BOOST_WINDOW_MS = 24 * 60 * 60 * 1000 // 1 天
 
 /**
- * 由 importance 派生分层。
- *
- * 规则（**只由 importance 决定，不看时间窗**——到期不改变「它是什么」）：
- *   - importance >= 80 → archival（稳定高价值事实）。
- *   - importance >= 50 → long。
- *   - importance >= 20 → session。
- *   - 其余 → transient。
+ * 由存续期计算 expiresAt（记忆消亡时刻）。
+ * permanent → null（永不）；其余 → createdAt + 该档 TTL。
  */
-export function tierFor(fact: MemoryFact): MemoryTier {
-  if (fact.importance >= 80) return 'archival'
-  if (fact.importance >= 50) return 'long'
-  if (fact.importance >= 20) return 'session'
-  return 'transient'
+export function expiresAtFor(retention: MemoryRetention, createdAt: number): number | null {
+  const ttl = RETENTION_TTL_MS[retention]
+  return ttl === null ? null : createdAt + ttl
 }
 
 /**
- * 当前是否「适用/成立」（该驱动行为）。
+ * 持久化判定（写入时）：由 author / retention 显式声明推导最终 retention。
  *
- * 适用窗口为 [validAt, invalidAt)，两端开闭：
- *   - validAt === null → 自创建起成立；否则要求 now >= validAt。
- *   - invalidAt === null → 永不失效；否则要求 now < invalidAt。
- *
- * ⚠️ 此判定**只回答「现在成立吗」**，与「是否还被记住」（retained）无关。
+ * 规则（用户拍板）：
+ *   1. 显式声明 permanent（纪律 / 永久事实源）→ permanent（写方已声明）；
+ *   2. author='user'（手动添加）→ 至少 long；
+ *   3. 其余 → 保持写方声明的 retention（默认 temporary）。
+ */
+export function resolveRetentionOnWrite(
+  requested: MemoryRetention | undefined,
+  author: string,
+): MemoryRetention {
+  if (requested === 'permanent') return 'permanent'
+  if (requested === 'long') return 'long'
+  if (author === 'user') return 'long' // 手动添加 → long
+  return requested ?? 'temporary'
+}
+
+/**
+ * 持久化升级（读时）：readCount 达到阈值 → 至少 long。
+ * 永久（permanent）不降级；long/permanent 之外才升级。
+ */
+export function promoteRetentionOnRead(fact: MemoryFact): MemoryRetention {
+  if (fact.retention === 'permanent' || fact.retention === 'long') return fact.retention
+  if (fact.readCount >= READ_PROMOTE_THRESHOLD) return 'long'
+  return fact.retention
+}
+
+/**
+ * 当前是否「适用/成立」（断言窗口 validAt→invalidAt）。
+ * 与「是否还被记住」（retained）无关。
  */
 export function isApplicable(fact: MemoryFact, now: number = Date.now()): boolean {
   const born = fact.validAt === null || fact.validAt <= now
@@ -73,30 +100,29 @@ export function isApplicable(fact: MemoryFact, now: number = Date.now()): boolea
 }
 
 /**
- * 是否还被记住。
- *
- * 语义上：记录存在即被记住（忘记 = 显式删除 = 记录不存在）。到期**不**影响留存。
- * 保留为显式概念，供未来扩展（如 TTL 归档、批量遗忘裁决）时挂接。
+ * 是否还被记住：now < expiresAt。permanent（expiresAt=null）恒真。
+ * 忘记 = 到 expiresAt（存续期耗尽）或显式删除。
  */
-export function isRetained(_fact: MemoryFact): boolean {
-  return true
+export function isRetained(fact: MemoryFact, now: number = Date.now()): boolean {
+  if (fact.expiresAt === null) return true
+  return now < fact.expiresAt
 }
 
 /**
- * 读时降权后的记忆强度（0-100），**不因到期归零**。
+ * 读时降权后的记忆强度（0-100），**不因断言到期归零**。
  *
  * 指数衰减：score = importance × 0.5^(age / halfLife)。
- *   - age 由 validAt（缺省用 createdAt）起算，到 now。
- *   - 访问强化：lastAccessedAt 在窗口内则半衰期翻倍（衰减放缓一半）。
- *   - 到期事实仍有正分数——它只是不再「applicable」，仍是可 recall 的记忆。
+ *   - 半衰期由 retention 决定（临时快衰、永久微衰）。
+ *   - age 由 validAt（缺省 createdAt）起算。
+ *   - 访问强化：lastAccessedAt 在窗口内则半衰期翻倍。
+ *   - 记忆被遗忘（expiresAt 已过）→ 0（真正不参与排序）。
  */
 export function effectiveScoreFor(fact: MemoryFact, now: number = Date.now()): number {
-  const tier = tierFor(fact)
-  const halfLife = TIER_HALF_LIFE_MS[tier]
+  if (!isRetained(fact, now)) return 0
+  const halfLife = RETENTION_HALF_LIFE_MS[fact.retention]
   const born = fact.validAt ?? fact.createdAt
   const age = Math.max(0, now - born)
 
-  // 访问强化：最近被检索命中 → 半衰期 ×2（抗衰）。
   let effectiveHalfLife = halfLife
   if (fact.lastAccessedAt !== null && now - fact.lastAccessedAt <= ACCESS_BOOST_WINDOW_MS) {
     effectiveHalfLife = halfLife * 2
@@ -110,22 +136,16 @@ export function effectiveScoreFor(fact: MemoryFact, now: number = Date.now()): n
 export function toView(fact: MemoryFact, now: number = Date.now()): MemoryFactView {
   return {
     ...fact,
-    tier: tierFor(fact),
     effectiveScore: effectiveScoreFor(fact, now),
     applicable: isApplicable(fact, now),
-    retained: isRetained(fact),
+    retained: isRetained(fact, now),
   }
 }
 
 /**
- * 合并裁决（recency-wins with explicit invalidation）：写入一条新事实时，
- * 若它与某条已存在的「同 entity + 同 relation」**且当前适用**的事实冲突，
- * 旧事实应被标 invalidAt（失效），并把新事实的 supersedes 指向旧事实 id——
- * 不物理删除。
- *
- * 本函数是**纯判定**：输入候选新事实 + 现存事实集合，输出「哪些旧事实该失效」。
- * 实际写库在 service 层（它负责读表、调用本函数、再写回）。
- * 已失效（不 applicable）的旧事实不再参与冲突判定——它已经失效，无需再标。
+ * 合并裁决（recency-wins with explicit invalidation）：写入新事实时，若它与
+ * 某条已存在的「同 entity + 同 relation」**且当前适用**的事实冲突，旧事实应被
+ * 标 invalidAt（失效），并把新事实的 supersedes 指向旧事实 id——不物理删除。
  */
 export function conflictsToInvalidate(
   incoming: Pick<MemoryFact, 'entity' | 'relation' | 'scope'>,

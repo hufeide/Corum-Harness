@@ -1,22 +1,26 @@
 /**
- * memory-policy 纯函数契约测试：分层派生 + 读时降权衰减 + 适用/留存判定 + 合并失效。
+ * memory-policy 纯函数契约测试：存续期 + 衰减 + 适用/留存判定 + 合并 + 持久化判定。
  *
- * 核心语义（对齐 Graphiti）——**「失效 ≠ 忘记」**，三个正交维度：
- *   - 分层只由 importance 决定（到期不改变「它是什么」）；
- *   - applicable（适用）由 validAt→invalidAt 窗口决定；到期翻转 applicable，
- *     但**不影响** retained（留存）与 effectiveScore（记忆强度）；
- *   - effectiveScore 是记忆强度，**不因到期归零**；
- *   - 合并失效只针对「当前 applicable」的同 entity+relation 事实。
+ * 锁住底座「组织形式」的关键语义：
+ *   - 两个正交时间：断言窗口（validAt→invalidAt）决定 applicable；
+ *     存续期（retention→expiresAt）决定 retained；
+ *   - 衰减是读时计算，不落库；记忆被遗忘（expiresAt 已过）→ score=0，
+ *     断言到期（invalidAt 已过）**不**归零；
+ *   - 持久化判定：显式 permanent / author=user→long / 读阈值→long；
+ *   - 访问强化：最近被检索命中 → 抗衰。
  */
 import { describe, expect, it } from 'vitest'
 import type { MemoryFact } from '../src/memory-entities.ts'
 import {
-  tierFor,
+  expiresAtFor,
+  resolveRetentionOnWrite,
+  promoteRetentionOnRead,
   isApplicable,
   isRetained,
   effectiveScoreFor,
   toView,
   conflictsToInvalidate,
+  READ_PROMOTE_THRESHOLD,
 } from '../src/memory-policy.ts'
 
 const NOW = 1_800_000_000_000 // 固定 now，测试可复现
@@ -32,6 +36,9 @@ function base(overrides: Partial<MemoryFact> = {}): MemoryFact {
     invalidAt: null,
     source: 'test',
     scope: 'project',
+    retention: 'temporary',
+    expiresAt: null,
+    readCount: 0,
     supersedes: [],
     evidence: [],
     author: 'system',
@@ -41,77 +48,112 @@ function base(overrides: Partial<MemoryFact> = {}): MemoryFact {
   }
 }
 
-describe('tierFor 分层派生（只由 importance 决定）', () => {
-  it('importance >= 80 → archival', () => {
-    expect(tierFor(base({ importance: 80 }))).toBe('archival')
+describe('expiresAtFor 存续期 TTL', () => {
+  it('temporary → 2 天', () => {
+    expect(expiresAtFor('temporary', NOW)).toBe(NOW + 2 * 24 * 60 * 60 * 1000)
   })
-  it('importance 50-79 → long', () => {
-    expect(tierFor(base({ importance: 50 }))).toBe('long')
+  it('short → 3 个月（约 90 天）', () => {
+    expect(expiresAtFor('short', NOW)).toBe(NOW + 3 * 30 * 24 * 60 * 60 * 1000)
   })
-  it('importance 20-49 → session', () => {
-    expect(tierFor(base({ importance: 20 }))).toBe('session')
+  it('long → 1 年', () => {
+    expect(expiresAtFor('long', NOW)).toBe(NOW + 365 * 24 * 60 * 60 * 1000)
   })
-  it('importance < 20 → transient', () => {
-    expect(tierFor(base({ importance: 19 }))).toBe('transient')
-  })
-  it('到期不改变分层（失效 ≠ 降级为 archival）', () => {
-    // 关键修正：到期不再把分层改写成 archival；importance 50 到期后仍是 long。
-    expect(tierFor(base({ importance: 50, invalidAt: NOW - 1 }))).toBe('long')
+  it('permanent → null（永不）', () => {
+    expect(expiresAtFor('permanent', NOW)).toBeNull()
   })
 })
 
-describe('isApplicable 适用判定（成立窗口，与留存无关）', () => {
+describe('resolveRetentionOnWrite 持久化判定（写入时）', () => {
+  it('显式 permanent（纪律/永久事实源）→ permanent', () => {
+    expect(resolveRetentionOnWrite('permanent', 'agent:s1')).toBe('permanent')
+  })
+  it('显式 long → long', () => {
+    expect(resolveRetentionOnWrite('long', 'agent:s1')).toBe('long')
+  })
+  it('author=user（手动添加）→ long，即使未声明', () => {
+    expect(resolveRetentionOnWrite(undefined, 'user')).toBe('long')
+    expect(resolveRetentionOnWrite('temporary', 'user')).toBe('long')
+  })
+  it('未声明且非 user → temporary（默认）', () => {
+    expect(resolveRetentionOnWrite(undefined, 'agent:s1')).toBe('temporary')
+  })
+})
+
+describe('promoteRetentionOnRead 持久化升级（读阈值）', () => {
+  it('readCount 达阈值 → long', () => {
+    expect(promoteRetentionOnRead(base({ retention: 'temporary', readCount: READ_PROMOTE_THRESHOLD }))).toBe('long')
+  })
+  it('readCount 未达阈值 → 保持原档', () => {
+    expect(promoteRetentionOnRead(base({ retention: 'temporary', readCount: READ_PROMOTE_THRESHOLD - 1 }))).toBe('temporary')
+  })
+  it('已是 permanent 不降级', () => {
+    expect(promoteRetentionOnRead(base({ retention: 'permanent', readCount: READ_PROMOTE_THRESHOLD }))).toBe('permanent')
+  })
+})
+
+describe('isApplicable 适用判定（断言窗口，与留存无关）', () => {
   it('未设 invalidAt → applicable', () => {
     expect(isApplicable(base(), NOW)).toBe(true)
   })
-  it('invalidAt 已过 → 不 applicable（到期，但非忘记）', () => {
+  it('invalidAt 已过 → 不 applicable（断言到期，但非遗忘）', () => {
     expect(isApplicable(base({ invalidAt: NOW - 1 }), NOW)).toBe(false)
   })
-  it('invalidAt 未到 → applicable', () => {
-    expect(isApplicable(base({ invalidAt: NOW + 1000 }), NOW)).toBe(true)
-  })
-  it('validAt 未到（未来才成立）→ 不 applicable', () => {
+  it('validAt 未到 → 不 applicable', () => {
     expect(isApplicable(base({ validAt: NOW + 1000, invalidAt: null }), NOW)).toBe(false)
   })
-  it('validAt 为 null → 自创建起成立', () => {
-    expect(isApplicable(base({ validAt: null, invalidAt: null }), NOW)).toBe(true)
+})
+
+describe('isRetained 留存判定（存续期，与断言无关）', () => {
+  it('permanent（expiresAt=null）恒 retained', () => {
+    expect(isRetained(base({ retention: 'permanent', expiresAt: null }), NOW)).toBe(true)
+  })
+  it('expiresAt 已过 → 不 retained（真正遗忘）', () => {
+    expect(isRetained(base({ retention: 'temporary', expiresAt: NOW - 1 }), NOW)).toBe(false)
+  })
+  it('expiresAt 未到 → retained', () => {
+    expect(isRetained(base({ retention: 'short', expiresAt: NOW + 1000 }), NOW)).toBe(true)
+  })
+  it('断言到期（invalidAt 已过）不影响 retained', () => {
+    expect(isRetained(base({ invalidAt: NOW - 1, expiresAt: null }), NOW)).toBe(true)
   })
 })
 
-describe('isRetained 留存判定（忘记 = 显式删除）', () => {
-  it('记录存在即被记住，到期不影响留存', () => {
-    expect(isRetained(base({ invalidAt: NOW - 1 }))).toBe(true)
+describe('effectiveScoreFor 读时降权（记忆强度）', () => {
+  it('记忆被遗忘（expiresAt 已过）→ score=0', () => {
+    expect(effectiveScoreFor(base({ retention: 'temporary', expiresAt: NOW - 1 }), NOW)).toBe(0)
   })
-})
-
-describe('effectiveScoreFor 读时降权（记忆强度，不因到期归零）', () => {
-  it('到期事实仍有正分数（不再 applicable，但记忆强度保留）', () => {
-    const expired = base({ invalidAt: NOW - 1 })
-    expect(effectiveScoreFor(expired, NOW)).toBeGreaterThan(0)
+  it('断言到期（invalidAt 已过）不归零', () => {
+    // 用 long 档（半衰期半年，age=10 天几乎不衰），避免 temporary 短半衰期把分衰减到 0
+    // 干扰「断言到期 vs 记忆遗忘」的区分。
+    expect(effectiveScoreFor(base({ retention: 'long', invalidAt: NOW - 1, expiresAt: null }), NOW)).toBeGreaterThan(0)
   })
   it('刚成立的事实保持 importance 满分', () => {
     const fresh = base({ validAt: NOW, createdAt: NOW })
     expect(effectiveScoreFor(fresh, NOW)).toBe(fresh.importance)
   })
   it('越老衰减越狠（指数半衰期）', () => {
-    const young = base({ validAt: NOW - 1_000 }) // 1 秒前
-    const old = base({ validAt: NOW - 30 * 24 * 60 * 60 * 1000 }) // 30 天前
+    const young = base({ validAt: NOW - 1_000 })
+    const old = base({ validAt: NOW - 180 * 24 * 60 * 60 * 1000 })
     expect(effectiveScoreFor(young, NOW)).toBeGreaterThan(effectiveScoreFor(old, NOW))
   })
   it('访问强化：最近被检索命中 → 抗衰（分数更高）', () => {
-    const accessed = base({ lastAccessedAt: NOW - 1_000 }) // 1 秒前访问
+    const accessed = base({ lastAccessedAt: NOW - 1_000 })
     const untouched = base({ lastAccessedAt: null })
     expect(effectiveScoreFor(accessed, NOW)).toBeGreaterThan(effectiveScoreFor(untouched, NOW))
   })
 })
 
 describe('toView 派生视图（三维正交）', () => {
-  it('到期事实：applicable=false 但 retained=true 且 effectiveScore>0', () => {
-    const v = toView(base({ importance: 80, invalidAt: NOW - 1 }), NOW)
+  it('断言到期：applicable=false 但 retained=true 且 score>0', () => {
+    const v = toView(base({ importance: 80, invalidAt: NOW - 1, retention: 'permanent', expiresAt: null }), NOW)
     expect(v.applicable).toBe(false)
     expect(v.retained).toBe(true)
     expect(v.effectiveScore).toBeGreaterThan(0)
-    expect(v.tier).toBe('archival') // importance 80 → archival，与到期无关
+  })
+  it('存续期耗尽：retained=false 且 score=0', () => {
+    const v = toView(base({ retention: 'temporary', expiresAt: NOW - 1 }), NOW)
+    expect(v.retained).toBe(false)
+    expect(v.effectiveScore).toBe(0)
   })
 })
 

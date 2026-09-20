@@ -2,8 +2,8 @@
  * @corum/corum-memory client half — 设置「扩展」里注册「记忆」面板。
  *
  * 面板职责（人工管理，非记忆来源）：
- *   - 浏览：按 scope / tier / 关键词过滤，按有效分降序。
- *   - 详情：事实文本 + 时间窗 + 来源 + 作者 + 证据链。
+ *   - 浏览：按 scope / 关键词过滤，按记忆强度降序。
+ *   - 详情：事实文本 + 时间窗 + 存续期 + 来源 + 作者 + 证据链。
  *   - 人工修剪三动作：失效标记 / 重要性上调下调 / 硬删除（二次确认）。
  *
  * 数据走 host memory RPC（connection.rpc.call → /api/memory/*）。
@@ -20,7 +20,7 @@ import type { ReactNode } from 'react'
 // ── 与 host 侧同形的投影类型（client bundle 独立，不 import host 值，避免跨 bundle 耦合）──
 
 type MemoryScope = 'agent' | 'project' | 'global'
-type MemoryTier = 'transient' | 'session' | 'long' | 'archival'
+type MemoryRetention = 'temporary' | 'short' | 'long' | 'permanent'
 
 interface MemoryFactView {
   id: string
@@ -32,12 +32,14 @@ interface MemoryFactView {
   invalidAt: number | null
   source: string
   scope: MemoryScope
+  retention: MemoryRetention
+  expiresAt: number | null
+  readCount: number
   supersedes: string[]
   evidence: string[]
   author: string
   createdAt: number
   lastAccessedAt: number | null
-  tier: MemoryTier
   effectiveScore: number
   applicable: boolean
   retained: boolean
@@ -53,11 +55,11 @@ function makeCall(connection: ConnectionHandle) {
 
 const MONO: React.CSSProperties = { fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 12 }
 
-const TIER_LABEL: Record<MemoryTier, string> = {
-  transient: '瞬态',
-  session: '会话',
+const RETENTION_LABEL: Record<MemoryRetention, string> = {
+  temporary: '临时',
+  short: '短期',
   long: '长期',
-  archival: '归档',
+  permanent: '永久',
 }
 
 const SCOPE_LABEL: Record<MemoryScope, string> = {
@@ -180,7 +182,7 @@ function MemoryPanel({ call }: { call: ReturnType<typeof makeCall> }) {
                 <span style={{ flex: 1 }} />
                 {!f.applicable && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600, color: 'var(--dsw-alias-label-dimmed)', border: '1px solid var(--corum-glass-border)' }}>已到期</span>}
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{SCOPE_LABEL[f.scope]}</span>
-                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{TIER_LABEL[f.tier]}</span>
+                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{RETENTION_LABEL[f.retention]}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--corum-glass-3)', overflow: 'hidden' }}>

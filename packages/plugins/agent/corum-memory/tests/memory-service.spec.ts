@@ -24,6 +24,7 @@ import {
   apply as storageDomainApply, Config as storageDomainConfig, inject as storageDomainInject, name as storageDomainName,
 } from '@deepseek-ai/dsh-storage-domain'
 import { MemoryService } from '../src/memory-service.ts'
+import { READ_PROMOTE_THRESHOLD } from '../src/memory-policy.ts'
 import type { MemoryFact, MemoryScope } from '../src/memory-entities.ts'
 
 let home: string
@@ -160,6 +161,60 @@ describe('MemoryService 业务层 — 写入与合并', () => {
   })
 })
 
+describe('MemoryService 业务层 — 持久化判定（4 规则）', () => {
+  it('规则1/2：显式 permanent（纪律/永久事实源）→ permanent 且 expiresAt=null', async () => {
+    const { mem } = await setup()
+    const { fact } = await mem.putFact(input({ fact: '用户纪律：所有代码必须走测试', retention: 'permanent' }))
+    expect(fact.retention).toBe('permanent')
+    expect(fact.expiresAt).toBeNull()
+    expect((await mem.getFact(fact.id))!.retained).toBe(true)
+  })
+
+  it('规则3：author=user（手动添加）→ long', async () => {
+    const { mem } = await setup()
+    const { fact } = await mem.putFact(input({ fact: '手动添加的事实', author: 'user' }))
+    expect(fact.retention).toBe('long')
+    expect(fact.expiresAt).not.toBeNull() // long 有 1 年 TTL
+  })
+
+  it('默认（agent 写入、未声明）→ temporary 且 2 天 TTL', async () => {
+    const { mem } = await setup()
+    const { fact } = await mem.putFact(input({ fact: '普通 agent 记忆', author: 'agent:s1' }))
+    expect(fact.retention).toBe('temporary')
+    expect(fact.expiresAt).toBe(fact.createdAt + 2 * 24 * 60 * 60 * 1000)
+  })
+
+  it('规则4：readCount 达阈值 → 升级为 long', async () => {
+    const { mem } = await setup()
+    const { fact } = await mem.putFact(input({ fact: '高频读取的事实', author: 'agent:s1' }))
+    expect(fact.retention).toBe('temporary')
+
+    // 连续检索 5 次（readCount 达阈值）。
+    for (let i = 0; i < READ_PROMOTE_THRESHOLD; i++) {
+      await mem.searchFacts({ query: '高频读取', mode: 'recall' })
+    }
+    const after = await mem.getFact(fact.id)
+    expect(after!.retention).toBe('long')
+    expect(after!.readCount).toBe(READ_PROMOTE_THRESHOLD)
+  })
+})
+
+describe('MemoryService 业务层 — 存续期遗忘（非持久化按 TTL 衰减）', () => {
+  it('temporary 写入时 expiresAt = createdAt + 2天（非持久化 TTL 落定）', async () => {
+    const { mem } = await setup()
+    const { fact } = await mem.putFact(input({ fact: '临时记忆', retention: 'temporary', author: 'agent:s1' }))
+    expect(fact.expiresAt).toBe(fact.createdAt + 2 * 24 * 60 * 60 * 1000)
+    expect((await mem.getFact(fact.id))!.retained).toBe(true) // 刚写入，未过期
+  })
+
+  it('permanent 永不过期（expiresAt=null → retained 恒 true）', async () => {
+    const { mem } = await setup()
+    const { fact } = await mem.putFact(input({ fact: '永久纪律', retention: 'permanent' }))
+    expect(fact.expiresAt).toBeNull()
+    expect((await mem.getFact(fact.id))!.retained).toBe(true)
+  })
+})
+
 describe('MemoryService 业务层 — 检索（applicable / recall 双模式，失效 ≠ 忘记）', () => {
   it('applicable 模式（默认）只返回当前适用的事实', async () => {
     const { mem } = await setup()
@@ -254,14 +309,12 @@ describe('MemoryService 业务层 — 人工修剪三动作', () => {
     expect((await mem.searchFacts({ mode: 'recall' })).map(f => f.id)).toContain(fact.id)
   })
 
-  it('setImportance 上调改变分层与记忆强度', async () => {
+  it('setImportance 上调改变记忆强度（importance 是衰减基数）', async () => {
     const { mem } = await setup()
     const { fact } = await mem.putFact(input({ fact: '待提升', importance: 10 }))
-    expect((await mem.getFact(fact.id))!.tier).toBe('transient')
-
     const raised = await mem.setImportance(fact.id, 90)
-    expect(raised!.tier).toBe('archival')
     expect(raised!.importance).toBe(90)
+    expect(raised!.effectiveScore).toBeGreaterThan(0)
   })
 
   it('deleteFact 硬删除后 recall 也召回不到（真正忘记，不可逆）', async () => {

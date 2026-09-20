@@ -22,9 +22,15 @@ import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 // 拉进 declare module '@deepseek-ai/cordis' { storageDomain: DomainFacility } 合并面，
 // 使 ctx.get('storageDomain') 有正确类型（与 corum-orchestration 同款 import type {}）。
 import type {} from '@deepseek-ai/dsh-storage-domain'
-import type { MemoryFact, MemoryFactView, MemoryScope } from './memory-entities.ts'
+import type { MemoryFact, MemoryFactView, MemoryRetention, MemoryScope } from './memory-entities.ts'
 import { memoryDomainSpec, memoryFactSchema } from './memory-entities.ts'
-import { conflictsToInvalidate, toView } from './memory-policy.ts'
+import {
+  conflictsToInvalidate,
+  expiresAtFor,
+  promoteRetentionOnRead,
+  resolveRetentionOnWrite,
+  toView,
+} from './memory-policy.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -52,6 +58,13 @@ export interface PutFactInput {
   invalidAt?: number
   source?: string
   scope: MemoryScope
+  /**
+   * 显式声明的存续期。缺省按「持久化判定」推导：
+   *   - 'permanent'：用户明确要求的纪律 / 可判定永久的事实来源；
+   *   - 未声明且 author='user'：手动添加 → long；
+   *   - 其余 → temporary。
+   */
+  retention?: MemoryRetention
   evidence?: string[]
   /** 写入者：'user' | 'system' | 'agent:<sessionId>'。 */
   author: string
@@ -117,6 +130,8 @@ export class MemoryService extends TypertRemoteService {
   async putFact(input: PutFactInput): Promise<PutFactResult> {
     const now = Date.now()
     const id = input.id ?? randomUUID()
+    // 持久化判定：显式声明 / 手动添加 / 默认。
+    const retention = resolveRetentionOnWrite(input.retention, input.author)
     const fact: MemoryFact = memoryFactSchema.parse({
       id,
       entity: input.entity ?? '',
@@ -127,6 +142,9 @@ export class MemoryService extends TypertRemoteService {
       invalidAt: input.invalidAt ?? null,
       source: input.source ?? '',
       scope: input.scope,
+      retention,
+      expiresAt: expiresAtFor(retention, now),
+      readCount: 0,
       supersedes: [],
       evidence: input.evidence ?? [],
       author: input.author,
@@ -157,11 +175,12 @@ export class MemoryService extends TypertRemoteService {
   // ── 读 ────────────────────────────────────────────────────────────
 
   /**
-   * 按条件检索事实，按记忆强度（effectiveScore）降序。命中即更新 lastAccessedAt
-   * （访问强化）。
+   * 按条件检索事实，按记忆强度（effectiveScore）降序。命中即更新 readCount /
+   * lastAccessedAt（读取阈值升级 + 访问强化）。
    *
-   * mode='applicable'（默认）只返回当前适用的事实；mode='recall' 返回全部（含
-   * 到期/失效）——「失效 ≠ 忘记」，到期事实仍作为「发生过的事」可被召回。
+   * mode='applicable'（默认）只返回当前适用（断言成立）的事实；
+   * mode='recall' 返回所有**仍被记住**（未到 expiresAt）的事实——「失效 ≠ 忘记」：
+   * 断言过期（invalidAt 已过）仍可召回，但存续期耗尽（expiresAt 已过）才是真正遗忘。
    */
   async searchFacts(input: SearchFactsInput = {}): Promise<MemoryFactView[]> {
     const table = await this.table()
@@ -177,20 +196,27 @@ export class MemoryService extends TypertRemoteService {
     for (const [, f] of table.entries()) {
       if (scope !== undefined && f.scope !== scope) continue
       if (q !== '' && !f.fact.toLowerCase().includes(q)) continue
-      if (mode === 'applicable' && !toView(f, now).applicable) continue
+      const view = toView(f, now)
+      if (mode === 'applicable' && !view.applicable) continue
+      if (!view.retained) continue // 存续期耗尽 = 真正遗忘，两种模式都不召回
       rows.push(f)
     }
 
     rows.sort((a, b) => toView(b, now).effectiveScore - toView(a, now).effectiveScore)
     const kept = rows.slice(0, limit)
 
-    // 访问强化：被返回（命中）的事实刷新 lastAccessedAt。await 落定——访问强化
-    // 是检索的副作用，应随检索返回时已持久化（否则调用方紧接着读会拿到旧值，
-    // 且「刚被用到」的强化语义在跨调用时不成立）。
+    // 命中副作用：readCount+1（达阈值 → 持久化升级 long）+ 访问强化 lastAccessedAt。
+    // await 落定——副作用应随检索返回时已持久化。
     for (const f of kept) {
-      if (f.lastAccessedAt === null || now - f.lastAccessedAt > 1000 * 60 * 60) {
-        await table.put(f.id, { ...f, lastAccessedAt: now })
+      const bumped: MemoryFact = { ...f, readCount: f.readCount + 1 }
+      const nextRetention = promoteRetentionOnRead(bumped)
+      const next: MemoryFact = {
+        ...bumped,
+        retention: nextRetention,
+        expiresAt: expiresAtFor(nextRetention, f.createdAt),
+        lastAccessedAt: now,
       }
+      await table.put(f.id, next)
     }
 
     return kept.map(f => toView(f, now))
@@ -204,7 +230,7 @@ export class MemoryService extends TypertRemoteService {
     return f === undefined ? null : toView(f, Date.now())
   }
 
-  /** 列出全部事实（可选 scope 过滤），供面板浏览/人工修剪。 */
+  /** 列出全部事实（可选 scope 过滤），供面板浏览/人工修剪。已遗忘（存续期耗尽）的不显示。 */
   async listFacts(scope?: MemoryScope): Promise<MemoryFactView[]> {
     const table = await this.table()
     if (table === undefined) return []
@@ -212,7 +238,9 @@ export class MemoryService extends TypertRemoteService {
     const views: MemoryFactView[] = []
     for (const [, f] of table.entries()) {
       if (scope !== undefined && f.scope !== scope) continue
-      views.push(toView(f, now))
+      const view = toView(f, now)
+      if (!view.retained) continue // 存续期耗尽 = 真正遗忘，不显示
+      views.push(view)
     }
     views.sort((a, b) => b.effectiveScore - a.effectiveScore)
     return views
