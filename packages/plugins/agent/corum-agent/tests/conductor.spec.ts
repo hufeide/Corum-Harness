@@ -81,28 +81,55 @@ describe('conductorExecutionDeny — 执行工具平台口径', () => {
 describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
   it('声明「无写工具」与五个工作阶段（英文提示词）', () => {
     // 2026-09-19 重写：旧文本是 "Iron rule: you never write code, edit files, or run
-    // commands yourself"；护栏语义保留（机制确实裁了 write/edit/bash），但开篇不再是
-    // 「我绝不干什么」，而是「我是技术负责人、必须亲自调查与验收」。
+    // commands yourself"；护栏语义保留（机制确实裁了 write/edit/test 工具）。
+    // 2026-09-20：阶段 1 由 "Investigate" 改名 "Frame" —— 见下面「调研委派」那条。
     expect(CONDUCTOR_PERSONA).toContain('you cannot edit files or run commands')
-    for (const stage of ['1. Investigate:', '2. Design:', '3. Delegate:', '4. Verify:', '5. Decide:']) {
+    for (const stage of ['1. Frame:', '2. Design:', '3. Delegate:', '4. Verify:', '5. Decide:']) {
       expect(CONDUCTOR_PERSONA).toContain(stage)
     }
     // 全英文：人格段不得含中日韩字符（2026-09-10 用户要求「提示词都以英文编写」）。
     expect(CONDUCTOR_PERSONA).not.toMatch(/[\u4e00-\u9fff]/)
   })
 
-  it('要求主 Agent 亲自调查与验收（2026-09-19 用户报障：退化成纯派活器）', () => {
+  it('要求主 Agent 亲自验收（2026-09-19 用户报障：退化成纯派活器）', () => {
     // 用户实测（会话 `corum-task-0b812630`）：20 次工具调用里 read/glob/grep **一次都没调**，
     // 全是 subagent/send_message 之类——主 Agent 不调查、不验收，只转述子报告。
-    // 人格段必须把「自己动手读」写成硬要求，否则模型只按最省力的「派活」模式跑。
+    // 但 2026-09-20 用户又指出反方向的代价：自己全包调研 ⇒ 思维链冗余、上下文快速耗尽。
+    // 故现在的口径是**分工**：点读与验收自己做，广域调研委派。两条断言都要在。
     expect(CONDUCTOR_PERSONA).toContain('A child agent\'s self-report is never proof')
     expect(CONDUCTOR_PERSONA).toContain('read the actual diff')
     expect(CONDUCTOR_PERSONA).toMatch(/read-only tools/)
   })
 
+  it('广域调研委派、点读自己做（2026-09-20 用户：自己全查会耗尽上下文）', () => {
+    // 用户原话：「我希望调研的任务还是能多委派给 research 做，然后带上自己的思考这样会好一点
+    // 如果自己完全调研 这个模式的思维链里冗余内容会比较长 上下文快速耗尽」。
+    // 实测（会话 corum-task-db663875）：主 Agent 自己 read/grep 18 次、只委派 2 次（9:1），
+    // 20 条 tool/result 灌进自己上下文 90,644 字符（≈22.7k tokens）。
+    expect(CONDUCTOR_PERSONA).toContain('Context is your scarcest resource')
+    expect(CONDUCTOR_PERSONA).toMatch(/Broad or exploratory investigation → delegate/)
+    expect(CONDUCTOR_PERSONA).toMatch(/Point reads → do yourself/)
+    // 旧文本里那句「绝不派子 Agent 去查你自己两次调用能查到的东西」是**过校正**，
+    // 它与下方「把探索自由地委派出去」直接打架 —— 必须已删除。
+    expect(CONDUCTOR_PERSONA).not.toContain('Never send a child to find out')
+  })
+
+  it('告诉它 worker 不能构建（否则 brief 会写「build 必须通过」把子 Agent 逼去自造工具链）', () => {
+    // 实测（会话 corum-task-db663875 → wt-40e4d1 的 worker）：brief 写着
+    // `pnpm --filter @corum/corum-ide-ui run build` 必须通过，而 worker 契约禁止构建
+    // ⇒ 子 Agent 在自己的推理里明确记下「Hmm. Conflict」，然后花了 11 次调用找一个能用的
+    // tsc，最后在 /tmp 手搓了一个 type-check harness —— 两边都没得到想要的结果。
+    expect(CONDUCTOR_PERSONA).toMatch(/cannot build or install/)
+    expect(CONDUCTOR_PERSONA).toMatch(/never put a build/)
+    // 验收标准要写成「终态描述」而不是「构建命令」。
+    expect(CONDUCTOR_PERSONA).toMatch(/end state|description of the correct end state/)
+  })
+
   it('不重复机制事实（隔离触发/模型锁/验收门禁由机制段单一事实源负责）', () => {
     // 并发感知隔离、声明式验收、notice 回传形态——这些属于机制段，人格段不得复述。
-    expect(CONDUCTOR_PERSONA).not.toContain('worktree')
+    // 例外（2026-09-20）：允许提 worktree **一次**，且只为解释「为什么 worker 不能构建」
+    // （构建产物不回主树）——那是 brief 作者必须知道的约束，不是复述隔离机制本身。
+    expect(CONDUCTOR_PERSONA.match(/worktree/g)?.length ?? 0).toBeLessThanOrEqual(1)
     expect(CONDUCTOR_PERSONA).not.toContain('并发')
     expect(CONDUCTOR_PERSONA).not.toContain('notice')
     expect(CONDUCTOR_PERSONA).not.toContain('autoIntegrate')
@@ -145,6 +172,18 @@ describe('CHILD_WORKER_ROLE — 执行者契约（2026-09-20 用户报障）', (
   it('brief 有错时必须回报而不是自行发挥', () => {
     expect(CHILD_WORKER_ROLE).toContain('do not improvise')
     expect(CHILD_WORKER_ROLE).toContain('blocked report')
+  })
+
+  it('不许去找工具链 / 不许为 brief 里的构建验收自造替代（2026-09-20 实测回归门禁）', () => {
+    // 实测（wt-40e4d1 的 worker）：worktree 没有 node_modules ⇒ tsc 必然报 module-not-found，
+    // 而 worker 为了完成 brief 里「build 必须通过」的验收，花了 11 次调用找可用的 tsc，
+    // 最后在 /tmp 手搓 type-check harness。用户定调（方案 A）：把这条指引**改成重读 diff**，
+    // 并明确「找不到工具就停下报告」，不留自造的余地。
+    expect(CHILD_WORKER_ROLE).toContain('Verify by re-reading your own diff')
+    expect(CHILD_WORKER_ROLE).toContain('Do not go looking for a usable toolchain')
+    expect(CHILD_WORKER_ROLE).toContain('do not attempt it')
+    // 旧指引（"若存在便宜的语法检查就跑"）已被删除 —— 它正是那 11 次往返的诱因。
+    expect(CHILD_WORKER_ROLE).not.toContain('If a cheap syntax-only check exists')
   })
 
   it('禁止构建与安装依赖（用户 2026-09-20 定调：worktree 上构建代价大且产物不回主树）', () => {
