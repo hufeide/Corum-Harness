@@ -39,7 +39,8 @@ interface MemoryFactView {
   lastAccessedAt: number | null
   tier: MemoryTier
   effectiveScore: number
-  active: boolean
+  applicable: boolean
+  retained: boolean
 }
 
 function makeCall(connection: ConnectionHandle) {
@@ -134,7 +135,7 @@ function MemoryPanel({ call }: { call: ReturnType<typeof makeCall> }) {
   }
 
   const count = filtered.length
-  const activeCount = filtered.filter(f => f.active).length
+  const applicableCount = filtered.filter(f => f.applicable).length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
@@ -154,7 +155,7 @@ function MemoryPanel({ call }: { call: ReturnType<typeof makeCall> }) {
             style={{ flex: 1, minWidth: 160, padding: '6px 10px', borderRadius: 8, fontSize: 12, border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)', color: 'var(--dsw-alias-label-primary)', outline: 'none' }}
           />
           <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', whiteSpace: 'nowrap' }}>
-            {facts === null ? '加载中…' : `共 ${count} 条 · 有效 ${activeCount} 条`}
+            {facts === null ? '加载中…' : `共 ${count} 条 · 适用 ${applicableCount} 条`}
           </span>
         </div>
       </Row>
@@ -171,13 +172,13 @@ function MemoryPanel({ call }: { call: ReturnType<typeof makeCall> }) {
             <div key={f.id} style={{
               display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px',
               borderRadius: 10, border: '1px solid var(--corum-glass-border)',
-              background: f.active ? 'var(--corum-glass-2)' : 'var(--corum-glass-1)',
-              opacity: f.active ? 1 : 0.65,
+              background: f.applicable ? 'var(--corum-glass-2)' : 'var(--corum-glass-1)',
+              opacity: f.applicable ? 1 : 0.65,
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{f.fact}</span>
                 <span style={{ flex: 1 }} />
-                {!f.active && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600, color: 'var(--dsw-alias-label-dimmed)', border: '1px solid var(--corum-glass-border)' }}>已失效</span>}
+                {!f.applicable && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600, color: 'var(--dsw-alias-label-dimmed)', border: '1px solid var(--corum-glass-border)' }}>已到期</span>}
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{SCOPE_LABEL[f.scope]}</span>
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{TIER_LABEL[f.tier]}</span>
               </div>
@@ -201,7 +202,7 @@ function MemoryPanel({ call }: { call: ReturnType<typeof makeCall> }) {
                   style={btnStyle(busyId === f.id)}>↑ 重要</button>
                 <button type="button" disabled={busyId === f.id} onClick={() => void pin(f.id, Math.max(0, f.importance - 10))}
                   style={btnStyle(busyId === f.id)}>↓ 压底</button>
-                {f.active && (
+                {f.applicable && (
                   <button type="button" disabled={busyId === f.id} onClick={() => void invalidate(f.id)}
                     style={{ ...btnStyle(busyId === f.id), border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>标失效</button>
                 )}

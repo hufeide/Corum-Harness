@@ -79,14 +79,16 @@ export function memoryDomainSpec() {
   })
 }
 
-/** 事实的派生视图：存储字段 + 读时计算的分层与有效分。 */
+/** 事实的派生视图：存储字段 + 读时计算的分层、记忆强度与适用/留存。 */
 export interface MemoryFactView extends MemoryFact {
   /** 分层（派生，不落库）：transient / session / long / archival。 */
   readonly tier: MemoryTier
-  /** 读时降权后的有效分（派生，不落库）：检索排序依据。 */
+  /** 读时降权后的记忆强度（派生，不落库）：检索排序依据；不因到期归零。 */
   readonly effectiveScore: number
-  /** 当前是否「有效」（未失效、未到期）。 */
-  readonly active: boolean
+  /** 当前是否「适用/成立」（派生，不落库）：validAt→invalidAt 窗口内为真。 */
+  readonly applicable: boolean
+  /** 是否「还被记住」（派生，不落库）：存在即真；忘记 = 显式删除。 */
+  readonly retained: boolean
 }
 
 /** 分层档位。 */

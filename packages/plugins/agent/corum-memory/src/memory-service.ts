@@ -62,8 +62,12 @@ export interface SearchFactsInput {
   scope?: MemoryScope
   /** 关键词（在 fact 文本上做子串匹配，大小写不敏感）。 */
   query?: string
-  /** 只返回有效事实（默认 true）；false 时含失效/到期事实，用于「查看历史」。 */
-  activeOnly?: boolean
+  /**
+   * 检索模式：
+   *   - 'applicable'（默认）：只返回当前适用/成立的事实，供 Agent 驱动当前行为。
+   *   - 'recall'：返回全部（含已到期/失效），回忆「发生过什么」——失效 ≠ 忘记。
+   */
+  mode?: 'applicable' | 'recall'
   /** 最多返回条数（默认 100）。 */
   limit?: number
 }
@@ -152,7 +156,13 @@ export class MemoryService extends TypertRemoteService {
 
   // ── 读 ────────────────────────────────────────────────────────────
 
-  /** 按条件检索事实，按有效分降序。命中即更新 lastAccessedAt（访问强化）。 */
+  /**
+   * 按条件检索事实，按记忆强度（effectiveScore）降序。命中即更新 lastAccessedAt
+   * （访问强化）。
+   *
+   * mode='applicable'（默认）只返回当前适用的事实；mode='recall' 返回全部（含
+   * 到期/失效）——「失效 ≠ 忘记」，到期事实仍作为「发生过的事」可被召回。
+   */
   async searchFacts(input: SearchFactsInput = {}): Promise<MemoryFactView[]> {
     const table = await this.table()
     if (table === undefined) return []
@@ -160,25 +170,26 @@ export class MemoryService extends TypertRemoteService {
     const now = Date.now()
     const scope = input.scope
     const q = input.query?.trim().toLowerCase() ?? ''
-    const activeOnly = input.activeOnly ?? true
+    const mode = input.mode ?? 'applicable'
     const limit = input.limit ?? 100
 
     const rows: MemoryFact[] = []
     for (const [, f] of table.entries()) {
       if (scope !== undefined && f.scope !== scope) continue
       if (q !== '' && !f.fact.toLowerCase().includes(q)) continue
-      const view = toView(f, now)
-      if (activeOnly && !view.active) continue
+      if (mode === 'applicable' && !toView(f, now).applicable) continue
       rows.push(f)
     }
 
-    rows.sort((a, b) => effectiveScoreSort(b, now) - effectiveScoreSort(a, now))
+    rows.sort((a, b) => toView(b, now).effectiveScore - toView(a, now).effectiveScore)
     const kept = rows.slice(0, limit)
 
-    // 访问强化：被返回（命中）的事实刷新 lastAccessedAt。fire-and-forget 不阻断读。
+    // 访问强化：被返回（命中）的事实刷新 lastAccessedAt。await 落定——访问强化
+    // 是检索的副作用，应随检索返回时已持久化（否则调用方紧接着读会拿到旧值，
+    // 且「刚被用到」的强化语义在跨调用时不成立）。
     for (const f of kept) {
       if (f.lastAccessedAt === null || now - f.lastAccessedAt > 1000 * 60 * 60) {
-        void table.put(f.id, { ...f, lastAccessedAt: now }).catch(() => {})
+        await table.put(f.id, { ...f, lastAccessedAt: now })
       }
     }
 
@@ -274,9 +285,4 @@ export class MemoryService extends TypertRemoteService {
   async deleteFactRemote(id: string): Promise<boolean> {
     return this.deleteFact(id)
   }
-}
-
-/** 排序键：读时降权有效分（从 toView 里抽，避免重复计算）。 */
-function effectiveScoreSort(f: MemoryFact, now: number): number {
-  return toView(f, now).effectiveScore
 }

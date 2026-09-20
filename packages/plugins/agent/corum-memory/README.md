@@ -7,12 +7,22 @@
 
 - **最小单元是「事实」而非消息/文档**：一条带元数据的原子断言
   （`entity` / `relation` / `fact` / `importance` / 时间窗 / `scope` / 证据链 / 作者）。
+- **「失效 ≠ 忘记」（对齐 Graphiti 的时间知识图语义）**：一条事实有**三个正交维度**——
+  - **适用窗口**（`validAt` → `invalidAt`）：事实断言何时为真；
+  - **适用性**（`applicable`）：当前是否成立、该驱动行为；到期 → 不再适用；
+  - **留存**（`retained`）：作为「发生过的事」是否还被记住；到期**永不**自动忘记，
+    忘记只来自**显式删除**。
+  - 例：用户要求「10月31日前每天提醒日程」→ 11/1 后不再 `applicable`（不提醒），
+    但作为记忆仍 `retained`、可被 `recall` 检索召回。
 - **四杠杆**（记忆区别于「存文件」的本质）：
   - **重要性** importance（0-100）：写入门槛 + 分层 + 衰减的单一事实源；
   - **合并** merge：同 `scope+entity+relation` 的 recency-wins，标失效不物理删（`supersedes` 溯源）；
   - **衰减** decay：**读时降权**（指数半衰期，分层定半衰期，访问强化抗衰），无后台任务；
+    度量「记忆强度」，**不因到期归零**；
   - **驱逐** eviction：`invalidAt` 失效标记（可逆）+ 硬删除（仅合规/用户显式要求）。
-- **分层** `transient / session / long / archival`：由 importance × 时间窗派生，不落库。
+- **分层** `transient / session / long / archival`：**只由 importance 决定**，不落库。
+- **检索双模式**：`applicable`（默认，只返回当前适用的事实，驱动当前行为）/
+  `recall`（返回全部含到期，回忆「发生过什么」）。
 - **持久化**：复用官方 `dsh-storage-domain`（单域 `corum_memory`、单表 `facts`），
   默认路由到全局 SQLite（`$CORUM_HOME/storages`）。
 
@@ -24,7 +34,7 @@
 ```
 src/
 ├─ memory-entities.ts   事实 schema 与存储域声明
-├─ memory-policy.ts     纯函数：分层派生 / 读时降权衰减 / 活跃判定 / 合并失效
+├─ memory-policy.ts     纯函数：分层派生 / 读时降权衰减 / 适用·留存判定 / 合并失效
 ├─ memory-service.ts    MemoryService（cordis 服务 + RPC 端点）
 ├─ index.ts             host apply
 └─ client/index.tsx     「设置 → 扩展 → 记忆」面板

@@ -18,7 +18,7 @@ export { MemoryService } from './memory-service.ts'
 export type { PutFactInput, PutFactResult, SearchFactsInput } from './memory-service.ts'
 export { memoryDomainSpec, memoryFactSchema } from './memory-entities.ts'
 export type { MemoryFact, MemoryFactView, MemoryScope, MemoryTier } from './memory-entities.ts'
-export { tierFor, effectiveScoreFor, isActive, toView, conflictsToInvalidate } from './memory-policy.ts'
+export { tierFor, effectiveScoreFor, isApplicable, isRetained, toView, conflictsToInvalidate } from './memory-policy.ts'
 
 /** Cordis 插件名。 */
 export const name = 'corum-memory'
