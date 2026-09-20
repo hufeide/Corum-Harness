@@ -38,7 +38,6 @@ import { useEffect, useState } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
-import { Switch } from '../Switch.tsx'
 import { Badge } from '../Badge.tsx'
 import { useCorumRpc, useCorumSettings } from '../shared.tsx'
 import { ReviewRetentionGroup, AgentStallGroup } from './general-groups.tsx'
@@ -57,14 +56,7 @@ const PRESETS_NS = 'agent-presets'
 
 /** corum-subagent 全局设置的用户层形（describe 镜像的 value/user 投影）。 */
 interface SubagentGlobalView {
-  isolationMode?: 'always' | 'write-tasks' | 'off'
-  worktreeRoot?: string
-  branchPrefix?: string
-  autoCleanup?: boolean
-  denyDirectFs?: boolean
   maxParallelChildren?: number
-  integrateChecks?: string[]
-  merger?: 'parent' | 'merger'
   defaultModel?: { provider: string; model: string; reasoningEffort?: string }
   defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
 }
@@ -381,30 +373,6 @@ export function AgentSettingsSection() {
             }}
           />
         </SettingRow>
-        <SettingRow
-          label="单轮工具调用次数上限"
-          desc="每轮工具调用总数上限。⚠️ 官方内核**不存在该字段**，需先在 corum 侧新增调度层。"
-          badge={<Badge label="未上线" variant="offline" />}
-          divider={false}
-        >
-          <SelectField value="none" options={[{ id: 'none', label: '未上线' }]} onChange={() => { /* 未上线，已禁用 */ }} disabled />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="子 Agent · 隔离与并行">
-        <SettingRow label="隔离模式" desc="可能并发的子 Agent 写任务隔离到独立 git worktree；单发前台写任务直接在主工作区改。需 git 工作区。⚠️ 机制不变式：后台/并发写任务**恒隔离**（任何模式下都不落父树），下方 off 仅对单发前台生效。">
-          <SelectField
-            value={subUser.isolationMode ?? ''}
-            options={[
-              { id: '', label: `默认（${subResolved.isolationMode ?? 'write-tasks'}）` },
-              { id: 'write-tasks', label: 'write-tasks · 并发写任务隔离' },
-              { id: 'always', label: 'always · 凡召唤必隔离' },
-              { id: 'off', label: 'off · 仅单发前台不隔离（后台并发恒隔离）' },
-            ]}
-            disabled={disabled}
-            onChange={v => { void apply(SUBAGENT_NS, 'isolationMode', v === '' ? undefined : v) }}
-          />
-        </SettingRow>
         <SettingRow label="并行子 Agent 上限" desc="会话级并行召唤数上限（超出拒绝新召唤）。">
           <input
             className={css.textInput}
@@ -418,40 +386,13 @@ export function AgentSettingsSection() {
             }}
           />
         </SettingRow>
-        <SettingRow label="自动清理" desc="集成或会话结束后自动删除 worktree 与分支。" divider={false}>
-          <Switch
-            checked={subUser.autoCleanup ?? subResolved.autoCleanup ?? true}
-            disabled={disabled}
-            onChange={v => { void apply(SUBAGENT_NS, 'autoCleanup', v) }}
-          />
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup title="子 Agent · 集成">
-        <SettingRow label="合并者策略" desc="parent=主 Agent 亲自合并（上下文全）；merger=集成专家身份汇报（当前为汇报格式差异，独立编排后续版本）。">
-          <SelectField
-            value={subUser.merger ?? ''}
-            options={[
-              { id: '', label: `默认（${subResolved.merger ?? 'parent'}）` },
-              { id: 'parent', label: 'parent · 主 Agent 合并' },
-              { id: 'merger', label: 'merger · 集成专家汇报' },
-            ]}
-            disabled={disabled}
-            onChange={v => { void apply(SUBAGENT_NS, 'merger', v === '' ? undefined : v) }}
-          />
-        </SettingRow>
-        <SettingRow label="集成核查命令（兜底）" desc="每行一条，仅在主 Agent 未声明验证方式时作为最低限度约束。留空 = 按仓库形态自动探测兜底。" divider={false}>
-          <textarea
-            className={css.textInput}
-            rows={3}
-            defaultValue={subUser.integrateChecks?.join('\n') ?? ''}
-            placeholder="（自动探测）"
-            disabled={disabled}
-            onBlur={e => {
-              const lines = e.target.value.split('\n').map(s => s.trim()).filter(s => s !== '')
-              void apply(SUBAGENT_NS, 'integrateChecks', lines.length > 0 ? lines : undefined)
-            }}
-          />
+        <SettingRow
+          label="单轮工具调用次数上限"
+          desc="每轮工具调用总数上限。⚠️ 官方内核**不存在该字段**，需先在 corum 侧新增调度层。"
+          badge={<Badge label="未上线" variant="offline" />}
+          divider={false}
+        >
+          <SelectField value="none" options={[{ id: 'none', label: '未上线' }]} onChange={() => { /* 未上线，已禁用 */ }} disabled />
         </SettingRow>
       </SettingGroup>
 
