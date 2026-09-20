@@ -66,24 +66,33 @@ describe('conductorExecutionDeny — 执行工具平台口径', () => {
     if (process.platform === 'win32') return
     expect(conductorExecutionDeny()).not.toContain('pwsh')
     expect(conductorExecutionDeny()).toEqual(
-      expect.arrayContaining(['str_replace_editor', 'write', 'edit', 'bash']),
+      expect.arrayContaining(['str_replace_editor', 'write', 'edit']),
     )
   })
 
-  it('deny 覆盖全部写/执行入口（主 Agent 物理上无法亲手执行）', () => {
+  it('deny 覆盖全部**写**入口（主 Agent 物理上无法亲手改代码）', () => {
     const deny = conductorExecutionDeny()
-    for (const tool of ['str_replace_editor', 'write', 'edit', 'bash']) {
+    for (const tool of ['str_replace_editor', 'write', 'edit']) {
       expect(deny).toContain(tool)
     }
+  })
+
+  it('**bash 不在 deny 里**（2026-09-20 用户定调：给它只读 shell，否则指挥模式太受限）', () => {
+    // 用户原话：「这里应该要给其 bash 的只读权限，否则指挥模式有点受限」。
+    // 只读性由**会话沙箱**保证（applyConductorMode 钉 read-only），而不是靠裁工具 ——
+    // `tool-bash` 自身没有只读档，裁掉它等于指挥者连 ls / git log 都做不了。
+    expect(conductorExecutionDeny()).not.toContain('bash')
   })
 })
 
 describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
   it('声明「无写工具」与五个工作阶段（英文提示词）', () => {
     // 2026-09-19 重写：旧文本是 "Iron rule: you never write code, edit files, or run
-    // commands yourself"；护栏语义保留（机制确实裁了 write/edit/test 工具）。
-    // 2026-09-20：阶段 1 由 "Investigate" 改名 "Frame" —— 见下面「调研委派」那条。
-    expect(CONDUCTOR_PERSONA).toContain('you cannot edit files or run commands')
+    // commands yourself"。
+    // 2026-09-20（任务 A）：从「cannot edit files **or run commands**」改为「cannot edit
+    // files」——bash 已放开但只读，措辞必须跟着改，否则又是「指令与能力矛盾」。
+    // 2026-09-20：阶段 1 由 "Investigate" 改名 "Frame"。
+    expect(CONDUCTOR_PERSONA).toContain('you cannot edit files')
     for (const stage of ['1. Frame:', '2. Design:', '3. Delegate:', '4. Verify:', '5. Decide:']) {
       expect(CONDUCTOR_PERSONA).toContain(stage)
     }
@@ -98,7 +107,9 @@ describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
     // 故现在的口径是**分工**：点读与验收自己做，广域调研委派。两条断言都要在。
     expect(CONDUCTOR_PERSONA).toContain('A child agent\'s self-report is never proof')
     expect(CONDUCTOR_PERSONA).toContain('read the actual diff')
-    expect(CONDUCTOR_PERSONA).toMatch(/read-only tools/)
+    // 2026-09-20（任务 A）：bash 已放开但只读，故不再有「只有 read-only tools」的说法；
+    // 改为断言「点读自己做的能力面」仍在（read/glob/grep）。
+    expect(CONDUCTOR_PERSONA).toMatch(/read \/ glob \/ grep/)
   })
 
   it('广域调研委派、点读自己做（2026-09-20 用户：自己全查会耗尽上下文）', () => {

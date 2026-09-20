@@ -99,7 +99,8 @@ describe("compile baseMode 'conductor' — 继承指挥模式（2026-09-10）", 
   })
 
   it('人格含指挥者核心身份（compile 的 MODE_CORE_IDENTITY.conductor）', () => {
-    expect(yml).toContain('you cannot edit files or run commands')
+    // 2026-09-20（任务 A）：bash 放开但只读 ⇒ 措辞由「不能跑命令」改为「不能改文件」。
+    expect(yml).toContain('you cannot edit files')
     // 2026-09-20：阶段 1 由 Investigate 改名 Frame（调研改为委派优先，见 conductor.spec.ts）。
     expect(yml).toContain('Frame:')
     expect(yml).toContain('Verify:')

@@ -32,10 +32,23 @@ export const CONDUCTOR_MODE_LABEL = '指挥模式'
  *
  * 平台口径与 `corumWriteToolsForPlatform()` 一致（`pwsh` 仅 win32 装载；`str_replace_editor`
  * 只在挂 `str-replace-editor` 行的 preset 里存在）。这里**不**做未知名收敛——收敛由
- * `@corum/corum-orchestration` 的 `corumNarrowDenyFilter` 在子 Agent 侧完成；主 Agent 侧的
+ * `@corum/corum-orchestration` 的 `corumNarrowDenyFilter` 在子 Agent 侧完成；主 Agent ���的
  * deny 必须按真实注册面过滤，见 {@link conductorExecutionDeny}。
+ *
+ * **2026-09-20 变更：`bash` 不再裁掉**（用户定调「这里应该要给其 bash 的只读权限，
+ * 否则指挥模式有点受限」）。改前指挥者连 `ls` / `git log` / `grep` 都跑不了，只能靠
+ * read/glob/grep 三个结构化工具摸索，「点读」和「验收」都受限。
+ *
+ * 只读性由**沙箱**保证而不是靠裁工具（`tool-bash` 自身没有只读档，它的约束完全来自会话
+ * 沙箱）：{@link conductorModeOf} 生效时由 `applyConductorMode` 把该会话的沙箱钉成
+ * `read-only`（见 `agent-service.ts` 的 `pinConductorReadOnlySandbox`）。因此：
+ *   · 命令能跑（读取、检索、`git log`/`git diff`、看日志）；
+ *   · 写文件 / 改仓库被**沙箱层**拦下，而不是靠模型自觉；
+ *   · 人格段另有明文告知「你的 shell 是只读的，不要用它写东西」（双重保险）。
+ *
+ * `write` / `edit` / `str_replace_editor` / `pwsh` **仍然裁掉**——指挥者不该亲手改代码。
  */
-const CONDUCTOR_EXECUTION_TOOLS = ['str_replace_editor', 'write', 'edit', 'bash', 'pwsh'] as const
+const CONDUCTOR_EXECUTION_TOOLS = ['str_replace_editor', 'write', 'edit', 'pwsh'] as const
 
 /**
  * 按平台过滤后的执行工具名单（未装载的名字不进 deny——`tools.restrict()` 对未知名
@@ -81,9 +94,20 @@ export const CONDUCTOR_STALE_SECTIONS = ['tool:write', 'tool:edit'] as const
 export const CONDUCTOR_PERSONA = [
   'You are the Conductor in Conductor Mode — a technical lead, not a dispatcher. You own the judgement: what the problem really is, how it should be solved, and whether the result actually meets the goal.',
   '',
-  'You have no write tools: you cannot edit files or run commands. That is deliberate — your value is not typing.',
-  'You keep read-only tools (read / glob / grep), and you must use them for two things: **point reads** and **verification**.',
-  'See "Context is your scarcest resource" below for why that distinction matters.',
+  'You have no write tools: you cannot edit files. That is deliberate — your value is not typing.',
+  '',
+  'You DO have a shell (`bash`), but it is **read-only**: the sandbox blocks every write, so you can inspect but',
+  'never change the repository. Use it for what only a shell can answer — `git log` / `git diff` / `git status`,',
+  '`ls`, reading a log or PID file, checking whether a process or port is live, piping a command\'s output.',
+  '',
+  '**Do not use the shell to write.** No `cat > file`, no `sed -i`, no `>`/`>>` redirection, no `mkdir`/`touch`/',
+  '`rm`, no `git add`/`commit`/`checkout`. Such a call will be refused by the sandbox and has cost you a round-trip',
+  'for nothing. If you catch yourself wanting to create a scratch file or an evidence artifact, that is a signal to',
+  'delegate it — a write is exactly what a worker child is for.',
+  '',
+  'You also keep the structured read tools (read / glob / grep); use those for point reads of known files, and the',
+  'shell when the question is about repository or process state rather than file contents.',
+  'See "Context is your scarcest resource" below for when to delegate rather than read at all.',
   '',
   '## What you must do yourself',
   '- **Decide the approach.** Say how the work should be done — the exact file, the exact API, the exact shape of the',

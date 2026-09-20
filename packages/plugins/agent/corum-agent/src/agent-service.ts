@@ -61,6 +61,9 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+// fork（corum）2026-09-20：指挥者 shell 只读 —— 需要 `sandbox/mode` 事件形状。
+// **type-only**：只合并官方事件表，不引运行时实现（避免新增依赖 + 「两份模块实例」红线）。
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
@@ -2049,6 +2052,37 @@ export class CorumAgentService extends TypertRemoteService {
         order: agentCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA') + 1,
         text: CONDUCTOR_PERSONA,
       }))
+    }
+    /**
+     * 指挥者的 shell 是**只读**的（2026-09-20 用户定调：「这里应该要给其 bash 的只读权限，
+     * 否则指挥模式有点受限」）。
+     *
+     * 为什么必须钉沙箱而不是只靠提示词：`tool-bash` **自身没有只读档**（它的 config 只有
+     * `enableRunInBackground`），约束完全来自**会话沙箱**。而主会话的沙箱默认是
+     * `workspace-write`（用户选的权限档），所以「放开 bash 但不钉沙箱」= 给指挥者一个
+     * **可写**的 shell，护栏就没了。
+     *
+     * 做法与只读研究子 Agent 同源，但**不用 `source: 'delegation'`**（那是「种进子会话的
+     * 覆盖」专用标记，官方事件 schema `'sandbox/mode': { mode, source?: 'delegation' }` 只认
+     * 这一个取值）——这里**直接 append**（无 source = 运行时切换），不调官方运行时函数。
+     *
+     * 效果：`ls` / `git log` / `git diff` / 读日志都能跑；写文件、`git commit`、重定向被
+     * 沙箱拒绝（拒绝会带 `[sandbox: file access denied under read-only mode]` 标记，模型
+     * 能读懂并停手）。人格段另有明文「不要用 shell 写」作为第二道保险。
+     *
+     * 撤销：与其它 conductorEffects 一起随会话切出指挥模式而复原（写回会话原本的档位）。
+     */
+    // `agentCtx.agent` 类型上可能缺席（精简装配），先收窄再 append；缺席则整段跳过。
+    const conductorSession = agentCtx.agent?.session
+    const priorSandbox = conductorSession === undefined
+      ? undefined
+      : this.ctx.get('sandboxPolicy')?.overrideOf(conductorSession)
+    if (conductorSession !== undefined && priorSandbox !== 'read-only') {
+      conductorSession.append('sandbox/mode', { mode: 'read-only' })
+      disposers.push(() => {
+        // 切出指挥模式时还原会话原本的档位（原先没有覆盖 ⇒ 回到 workspace-write 交回部署默认）。
+        conductorSession.append('sandbox/mode', { mode: priorSandbox ?? 'workspace-write' })
+      })
     }
     this.conductorEffects.set(sessionId, () => { for (const dispose of disposers) dispose() })
   }
