@@ -1435,13 +1435,15 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   min-width: 0;
 }
 
-/* SettingRow 右侧控件形态（智能体设置 · 模型对）：selectStack 默认 width:100% 会
+/* SettingRow 右侧控件形态（智能体设置 · 模型三元组）：selectStack 默认 width:100% 会
  * 占满整行、把行内 meta（label+desc，flex:1）挤成 0 宽 → 标签逐字竖排（实测）。
- * 此处改为内容自适应 + 上限，meta 恢复弹性；Agent 预设页的嵌套 form 列仍用默认 100%。 */
+ * 此处用**固定宽度**（而非 width:auto 的内容自适应）：三列（供应商/模型/思考等级）
+ * 等分该固定宽 ⇒ 「默认模型」三行控件的右边界与列宽逐行一致，desc 文案行数不同
+ * 也不影响控件宽度。Agent 预设页的嵌套 form 列仍用默认 100%。 */
 .selectStackControl {
-  width: auto;
   flex: none;
-  max-width: calc(360px * var(--corum-density-scale, 1));
+  width: calc(400px * var(--corum-density-scale, 1));
+  max-width: 100%;
 }
 
 .selectStackControl > * {
