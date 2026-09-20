@@ -92,15 +92,47 @@ type ModelTriple = { provider: string; model: string; reasoningEffort?: string }
 /** 下拉选项形（与 SelectField 的 options 对齐）。 */
 interface ModelOption { id: string; label: string }
 
-/** 模型目录形（provider 列表 + 按 provider 索引的模型列表）。 */
-interface ModelCatalog {
-  providers: ModelOption[]
-  modelsByProvider: Record<string, ModelOption[]>
+/** 某条路由（`provider/model`）的推理元数据（`session/modelCatalog` 投影）。 */
+interface ReasoningMeta {
+  efforts: { id: string; name: string; description?: string }[]
+  defaultEffort?: string
 }
 
 /**
- * 模型下拉兜底目录（`corumAgent/listModels` 不可用时；与 Agent 预设编辑页
+ * 模型目录形（provider 列表 + 按 provider 索引的模型列表 + 按路由索引的推理元数据）。
+ *
+ * `reasoningByRoute` 的 key 为 `${provider}/${model}`；无推理元数据的路由**没有键**
+ * ⇒「思考等级」列按路由有无元数据决定是否显示（无 = 保持两列）。
+ */
+interface ModelCatalog {
+  providers: ModelOption[]
+  modelsByProvider: Record<string, ModelOption[]>
+  reasoningByRoute: Record<string, ReasoningMeta>
+}
+
+/**
+ * `session/modelCatalog` 的返回投影（只声明本页消费到的字段）。
+ *
+ * ⚠️ 这是**带推理元数据**的目录源（渲染层范例：corum-ui-conversation
+ * `apply.ts` 的 `listModelCatalog`）；`corumAgent/listModels` 的投影只有
+ * `{id, name}`，**不含** reasoning ⇒ 无法支撑「思考等级」列。
+ */
+interface SessionCatalogModel {
+  id: string
+  name?: string
+  reasoning?: {
+    efforts?: { id: string; name: string; description?: string }[]
+    defaultEffort?: string
+  }
+}
+interface SessionCatalogGroup { id: string; name?: string; models?: SessionCatalogModel[] }
+interface SessionCatalogResult { groups?: SessionCatalogGroup[] }
+
+/**
+ * 模型下拉兜底目录（`session/modelCatalog` 调用失败/为空时；与 Agent 预设编辑页
  * `SettingsAgentPresetsSection.tsx` 的兜底目录一致）。
+ *
+ * ⚠️ 兜底目录**没有**推理元数据 ⇒ 此时「思考等级」列整体隐藏（保持两列形态）。
  */
 const FALLBACK_PROVIDERS: ModelOption[] = [
   { id: 'deepseek-official', label: 'deepseek-official' },
@@ -140,22 +172,46 @@ export function AgentSettingsSection() {
   }, [settings])
 
   // 模型目录（本页拉一次，三个 ModelPairField 共用；失败静默用兜底目录，页面不白屏）。
-  const [catalog, setCatalog] = useState<ModelCatalog>({ providers: FALLBACK_PROVIDERS, modelsByProvider: {} })
+  const [catalog, setCatalog] = useState<ModelCatalog>({ providers: FALLBACK_PROVIDERS, modelsByProvider: {}, reasoningByRoute: {} })
   useEffect(() => {
     if (rpc === null) return undefined
     let cancelled = false
     void (async () => {
       try {
-        const r = await rpc<{ providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }> }>('corumAgent', 'listModels', {})
-        if (cancelled || r.providers.length === 0) return
-        const providers: ModelOption[] = r.providers.map(p => ({ id: p.id, label: p.name !== '' ? p.name : p.id }))
+        // 目录源 = `session/modelCatalog`（与 composer 模型选择器同源，**带推理
+        // 元数据**）。`useCorumRpc` 就是 makeCorumRpcCall(connection)，与
+        // corum-ui-conversation 的 `connection.rpc.call('/api', 'session/modelCatalog',
+        // { args: {} })` 是**同通道同契约**，故直接经 rpc 调，不新造 IPC。
+        const r = await rpc<SessionCatalogResult>('session', 'modelCatalog', {})
+        const groups = r.groups ?? []
+        if (cancelled || groups.length === 0) return
+        const providers: ModelOption[] = []
         const modelsByProvider: Record<string, ModelOption[]> = {}
-        for (const p of r.providers) {
-          modelsByProvider[p.id] = p.models.map(m => ({ id: m.id, label: m.name !== '' ? m.name : m.id }))
+        const reasoningByRoute: Record<string, ReasoningMeta> = {}
+        for (const g of groups) {
+          const label = g.name !== undefined && g.name !== '' ? g.name : g.id
+          providers.push({ id: g.id, label })
+          const models: ModelOption[] = []
+          for (const m of g.models ?? []) {
+            const mLabel = m.name !== undefined && m.name !== '' ? m.name : m.id
+            models.push({ id: m.id, label: mLabel })
+            if (m.reasoning === undefined) continue
+            // exactOptionalPropertyTypes：可选属性不能显式传 undefined，故条件展开。
+            reasoningByRoute[`${g.id}/${m.id}`] = {
+              efforts: (m.reasoning.efforts ?? []).map(e => ({
+                id: e.id,
+                name: e.name,
+                ...(e.description === undefined ? {} : { description: e.description }),
+              })),
+              ...(m.reasoning.defaultEffort === undefined ? {} : { defaultEffort: m.reasoning.defaultEffort }),
+            }
+          }
+          modelsByProvider[g.id] = models
         }
-        setCatalog({ providers, modelsByProvider })
+        setCatalog({ providers, modelsByProvider, reasoningByRoute })
       } catch {
-        // 静默：RPC 失败时保留兜底目录，不阻断设置页。
+        // 静默：RPC 失败/为空时保留兜底目录（reasoningByRoute 为空对象 =
+        // 不显示「思考等级」列），不阻断设置页。
       }
     })()
     return () => { cancelled = true }
@@ -209,14 +265,44 @@ export function AgentSettingsSection() {
     }
   }
 
-  /** 两键同时写入（模型对：provider + model 必须成对）。 */
-  const applyPair = async (ns: string, a: string, av: unknown, b: string, bv: unknown): Promise<void> => {
+  /**
+   * 三键同时写入（模型三元组：provider + model 必须成对，reasoningEffort 可选）。
+   *
+   * 语义：
+   * - provider/model 任一为 `undefined`（含未设置）→ **三键全 unset**（成对语义）；
+   * - 两者都有 → 写 provider/model；reasoningEffort 为 `undefined` 时**unset**该键
+   *   （不写显式 undefined，exactOptionalPropertyTypes 合规）。
+   *
+   * @param ns - 目标 settings namespace。
+   * @param pk - provider 字段名。
+   * @param mv - model 字段名。
+   * @param v - 三元组；`undefined` = 全 unset。
+   * @param rk - reasoningEffort 字段名。
+   */
+  const applyTriple = async (
+    ns: string,
+    pk: string,
+    mv: string,
+    v: ModelTriple | undefined,
+    rk: string,
+  ): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      const ops = av === undefined || bv === undefined
-        ? [{ op: 'unset' as const, path: [a] }, { op: 'unset' as const, path: [b] }]
-        : [{ op: 'set' as const, path: [a], value: av }, { op: 'set' as const, path: [b], value: bv }]
+      const paired = v !== undefined && v.provider !== '' && v.model !== ''
+      const ops = !paired
+        ? [
+            { op: 'unset' as const, path: [pk] },
+            { op: 'unset' as const, path: [mv] },
+            { op: 'unset' as const, path: [rk] },
+          ]
+        : [
+            { op: 'set' as const, path: [pk], value: v.provider },
+            { op: 'set' as const, path: [mv], value: v.model },
+            ...(v.reasoningEffort === undefined
+              ? [{ op: 'unset' as const, path: [rk] }]
+              : [{ op: 'set' as const, path: [rk], value: v.reasoningEffort }]),
+          ]
       const res = await settings.mutate(ns, ops, entryOf(ns)?.revision)
       if (!res.ok) setError(res.error?.message ?? '写入失败')
       else if (res.value !== undefined) settings.describe.acceptView(res.value)
@@ -255,7 +341,7 @@ export function AgentSettingsSection() {
             catalog={catalog}
             disabled={disabled}
             onChange={v => {
-              void applyPair(DEFAULT_MODEL_NS, 'provider', v?.provider, 'model', v?.model)
+              void applyTriple(DEFAULT_MODEL_NS, 'provider', 'model', v, 'reasoningEffort')
             }}
           />
         </SettingRow>
@@ -393,31 +479,40 @@ export function AgentSettingsSection() {
 }
 
 /**
- * 模型对字段（provider/model 两列下拉；空 = 未设置跟随兜底）。
+ * 模型三元组字段（provider / model / 思考等级三列下拉；空 = 未设置跟随兜底）。
  *
  * ⚠️ provider 与 model 必须**成对**写入 —— `agent-default-model` 的 schema
- * 把两者都标为 `.required()`，只写一半会留下不合法的半成品。
+ * 把两者都标为 `.required()`，只写一半会留下不合法的半成品。`reasoningEffort`
+ * 在三个真源 schema 里都是**可选**键（`.default(undefined)`）⇒ 单独可 unset。
  *
  * 成对语义（纯受控，选择即生效，不再依赖 onBlur）：
- * - 两者都已选具体值 → `onChange({ provider, model })`；
- * - 任一选回「未设置」占位（id=''）→ `onChange(undefined)`（成对 unset）。
+ * - provider/model 都已选具体值 → `onChange({ provider, model[, reasoningEffort] })`；
+ * - 任一选回「未设置」占位（id=''）→ `onChange(undefined)`（三键全 unset）。
+ *
+ * 思考等级列（**条件列**）：
+ * - 仅当当前 `provider/model` 在 `catalog.reasoningByRoute` 里有推理元数据时渲染；
+ *   无元数据（含 RPC 失败/兜底目录）时该列整体隐藏，保持两列。
+ * - 置项为「默认档」（id=''）→ 提交**不带** reasoningEffort 键（unset，跟随模型默认档）。
+ * - provider 或 model 任一变更 → 档位重置为 ''（跟随**新模型**的默认档，不保留旧档）。
  *
  * provider 变更联动刷新 model 选项（按所选 provider 取目录）；若原 model
  * 不在新 provider 的目录里则重置为「未设置」。
  *
  * @param props - value / catalog / disabled / onChange。
- * @returns the two-column model select.
+ * @returns the model triple select.
  */
 function ModelPairField({ value, catalog, disabled, onChange }: {
   value: ModelTriple | undefined
-  /** 完整模型目录（providers + modelsByProvider；顶层 effect 拉取，RPC 失败时为兜底目录）。 */
+  /** 完整模型目录（providers + modelsByProvider + reasoningByRoute；顶层 effect 拉取，RPC 失败时为兜底目录）。 */
   catalog: ModelCatalog
   disabled: boolean
-  onChange: (v: { provider: string; model: string } | undefined) => void
+  onChange: (v: ModelTriple | undefined) => void
 }) {
   // 纯受控：选中值直接来自 props（'' = 「未设置」占位），无本地镜像 state。
   const provider = value?.provider ?? ''
   const model = value?.model ?? ''
+  // 推理元数据按路由（`${provider}/${model}`）取：无元数据 ⇒ 不渲染思考等级列。
+  const reasoning = provider !== '' && model !== '' ? catalog.reasoningByRoute[`${provider}/${model}`] : undefined
   // 选项派生：占位（未设置）置顶；provider 目录缺该 provider 时用兜底目录补位；
   // 已保存值不在目录里时并入临时项（label 用原值），避免下拉显示空白。
   const providerOptions = ensureOption(
@@ -430,10 +525,24 @@ function ModelPairField({ value, catalog, disabled, onChange }: {
       : FALLBACK_MODELS,
     model,
   )
-  /** 成对提交：两者都选了具体值才写 {provider, model}，任一为占位则成对 unset。 */
-  const commit = (p: string, m: string): void => {
-    onChange(p !== '' && m !== '' ? { provider: p, model: m } : undefined)
+  /**
+   * 三元组提交：provider/model 都选了具体值才写；任一为占位则整体 unset。
+   *
+   * `effort === ''`（默认档）⇒ 不展开 `reasoningEffort` 键（exactOptionalPropertyTypes
+   * 合规：可选属性不能显式传 undefined，unset 由写入层的条件展开负责）。
+   */
+  const commit = (p: string, m: string, effort: string): void => {
+    onChange(
+      p !== '' && m !== ''
+        ? { provider: p, model: m, ...(effort === '' ? {} : { reasoningEffort: effort }) }
+        : undefined,
+    )
   }
+  /** 档位选项：默认档置顶（label 标注落在哪个默认值），其后是目录中的各档。 */
+  const effortOptions: ModelOption[] = reasoning === undefined ? [] : [
+    { id: '', label: `默认档（${reasoning.defaultEffort ?? 'provider 默认'}）` },
+    ...reasoning.efforts.map(e => ({ id: e.id, label: e.name })),
+  ]
   return (
     <div className={`${css.selectStack} ${css.selectStackControl}`}>
       <SelectField
@@ -441,9 +550,10 @@ function ModelPairField({ value, catalog, disabled, onChange }: {
         options={[UNSET_OPTION, ...providerOptions]}
         onChange={id => {
           // 联动：provider 变更后原 model 不在新 provider 的目录里则重置为「未设置」。
+          // 档位一律重置为默认档（跟随新模型的默认档，不保留旧档）。
           const nextModels = id === '' ? undefined : catalog.modelsByProvider[id]
           const keep = nextModels !== undefined && model !== '' && nextModels.some(o => o.id === model)
-          commit(id, keep ? model : '')
+          commit(id, keep ? model : '', '')
         }}
         disabled={disabled}
         variant="fill"
@@ -451,10 +561,20 @@ function ModelPairField({ value, catalog, disabled, onChange }: {
       <SelectField
         value={model}
         options={[UNSET_OPTION, ...modelOptions]}
-        onChange={id => { commit(provider, id) }}
+        // model 变更同样重置档位（新模型未必支持旧档）。
+        onChange={id => { commit(provider, id, '') }}
         disabled={disabled}
         variant="fill"
       />
+      {reasoning !== undefined && (
+        <SelectField
+          value={value?.reasoningEffort ?? ''}
+          options={effortOptions}
+          onChange={id => { commit(provider, model, id) }}
+          disabled={disabled}
+          variant="fill"
+        />
+      )}
     </div>
   )
 }
