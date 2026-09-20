@@ -77,6 +77,21 @@
   B 渐进式调研 ✅ / C 集成者报告 ✅ / D1-D2 机制段能力感知 ✅ / **D3 指挥者挂 34 个 MCP 工具 ❌待拍板** /
   E AGENTS.md 瘦身 🔴 待与「项目记忆」功能一起讨论 / E′ fork 注入分档 ❌ 已放弃 /
   F worker 风格 ✅ / G master-key ❌待拍板）。
+- `docs/PLAN-2026-09-21-agent-service-architecture.md` — **最新（2026-09-21 架构拆分场）
+  —— 下个 session 从这里开始**。方案 + 执行进度 + 未完成项记账。
+  本轮：用户先审方案、拍板四条（Q1 先建安全网 / Q2 `createAgentForTask` 不动 /
+  **Q3 只到文件层面、不插件化** / Q4 D3+G 不混入），然后 P0→P3 执行。
+  **交付**：`tests/harness.ts`（造服务的唯一入口，状态搬家时 fail-loud 而不是静默失真）+
+  37 条特征化测试 + `tests/fold-equivalence.spec.ts`（拿历史版本原文跑等价判据）+
+  `scripts/verify-refactor-guard.sh`（25 项：RPC 面冻结 / 已知地雷 / 状态表直访预算只许降 /
+  不得反向依赖）。抽出 `subagent-progress` / `change-summary` / `agent-registry` / `task-lane`
+  四个模块；`agent-service.ts` 2877 → **2521** 行；测试 278 → **330**；**14 张可变表现在
+  每一张都有唯一所有者，服务里直访次数全部为 0**。
+  **三条本场学费**：① 测试台按状态表名字硬编码 ⇒ 搬家即静默失真（已收成契约点）；
+  ②「未知」是三态不是两态（harness 把 `ctx.get` 与属性合并 ⇒ 断言测错分支）；
+  ③ 判据会随代码布局失效，但**红≠该降标准**（两处文本守卫各变红一次，修法一律是扩大
+  取样面/按文件逐处断言，没有降阈值）。
+  **未完成**：`createAgentForTask`（Q2 裁定不动）、`conductor` 注册点仍 5 处（收敛需重排它）。
 - `docs/HANDOFF-2026-09-20-conductor-permission-and-refactor.md` — **最新交接入口**
   （2026-09-20 日场。**§1 = 一个实测坐实的安全漏洞已修复**：指挥模式「只读」原先用「钉会话沙箱」
   实现，而沙箱是 **last-write-wins 状态** ⇒ 用户切「完全权限」5 秒内即覆盖（实测会话
