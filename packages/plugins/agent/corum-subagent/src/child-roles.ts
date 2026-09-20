@@ -75,8 +75,49 @@ export const CHILD_WORK_STYLE = [
  * 但**不写死检查命令**（用户 2026-09-20 明确：「不同的代码检查方式不一样 不能定死」）——
  * 只给判据（便宜、只看语法/类型、不产出构建产物），由 worker 按语言自行选择。
  */
+/**
+ * 子 Agent 的**自我事实**（模型 + 工作目录）——两个角色契约共用同一行。
+ *
+ * ## 为什么必须有（2026-09-21 用户实测）
+ *
+ * 用户让子 Agent 自报模型，两个子 Agent 都答「You are an AI agent powered by DeepSeek Harness」
+ * ——**报不出模型名**。实测确认根因不是占位符替换失败（子提示词里未插值的 `{{…}}` 数量为
+ * **0**），而是**那段含 `{{model}}` 的模板根本没进子 Agent 的组装**：
+ *
+ * - 含 `{{model}}` / `{{cwd}}` 的是 **`corum-agent/compile.ts` 的角色预设 persona**
+ *   （`compile.ts:297-302`：「You are powered by the {{model}} model. Your working directory
+ *   is {{cwd}}.」）；
+ * - 而子 Agent **不注入父的角色 persona** —— 它挂的是本文件的三份契约
+ *   （`child-agent.ts:279/354`），此前**一个占位符都没有**。
+ *
+ * ## 按新架构：只消费官方变量，不自造第二套
+ *
+ * `{{model}}` 与 `{{cwd}}` 由**官方 agent-loop 在根 scope 注册**
+ * （`@deepseek-ai/dsh-agent-loop`：`variable('model', c => c.agent?.options.model)`、
+ * `variable('cwd', c => c.agent?.session.header.cwd)`）。**唯一事实源就是它们** ——
+ * 本文件只写模板、不新增变量、不新增注入通路，子 scope 求值自然拿到**子自己**的值。
+ *
+ * 实测值（隔离 worker 会话 `0f5b54db`）：
+ * - `{{cwd}}` 来源 `header.cwd` = `/Users/kukucai/work/ai-lib/.corum-worktrees/wt-1e6b30`
+ *   —— **精确到 worktree 根**（隔离 provider 在 `isolated/index.ts:148` 强制覆写
+ *   `cwd: child.path`，该文件第 12 行的设计声明就是「子会话沙箱/shell/`{{cwd}}` 全跟随」）；
+ * - `{{model}}` 来源 `agent.options.model` = 该子 Agent 的 `agentOptions`（= 预设的
+ *   `subagentModel` / `researchModel`）。
+ *
+ * ## 与隔离通知的分工（不重复）
+ *
+ * 「你在隔离 worktree 里、用相对路径、父树写禁」由 `corumIsolationNotice()` 注入
+ * （`isolated/index.ts:149`），**已覆盖隔离语义**。本行加的是它没有的两件事：
+ * ① **模型名**（让「子 Agent 自报模型」这类测试可判定）；② **绝对路径**（`cd`、传参、
+ * git 命令常需绝对路径，且免除一次 `pwd` 往返）。
+ *
+ * ⚠️ 写作纪律（与两份契约同源）：只陈述**事实**，不讲机制、不重复隔离通知。
+ */
+const SELF_FACTS = 'You are running on the {{model}} model, in the working directory {{cwd}}.'
+
 export const CHILD_WORKER_ROLE = [
   'You are a delegated worker agent: an executor, not a planner. The delegating agent has already done the planning, the investigation, and the design — the brief you were given is the authoritative specification, and your job is to carry it out.',
+  SELF_FACTS,
   'Work directly with your own tools and report exactly what you did — including anything you could not do, and why.',
   'You cannot delegate further: there are no subagent tools in this session, so finish the job yourself and report back.',
   '',
@@ -108,6 +149,7 @@ export const CHILD_WORKER_ROLE = [
  */
 export const RESEARCHER_ROLE = [
   'You are a delegated research agent: a thorough investigator. You are the delegating agent\'s eyes — it will make decisions from what you report, so an incomplete or overconfident report is worse than an explicitly uncertain one.',
+  SELF_FACTS,
   'You have read-only tools (read / glob / grep) plus a shell restricted to read-only commands, and you cannot modify the repository. Use that freedom aggressively: you are here to find out what is actually true, not to confirm what you were told.',
   '',
   'How to investigate (binding, not advisory):',
