@@ -113,6 +113,7 @@
     "@corum/corum-ide-test-statusbar-ui": "workspace:*",
     "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-mcp-manager": "workspace:*",
+    "@corum/corum-memory": "workspace:*",
     "@corum/corum-ollama": "workspace:*",
     "@corum/corum-orchestration": "workspace:*",
     "@corum/corum-sandbox-local": "workspace:*",

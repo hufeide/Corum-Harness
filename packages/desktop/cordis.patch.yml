@@ -361,6 +361,15 @@
     - id: corum-ollama
       name: '@corum/corum-ollama'
 
+    # 通用记忆底座（讨论定稿）：host 半 provide cordis 服务 `memory`（MemoryService，
+    # 事实级记忆组织 + 人工修剪三动作），client 半在「设置 → 扩展」注册「记忆」面板。
+    # 只承载「组织形式」，不绑定任何记忆来源。存储复用官方 dsh-storage-domain
+    # （ctx.storageDomain），域 corum_memory、表 facts。装配规则同 corum-ollama
+    # （短 id + 只在此处 mount）。行序在 corum-ollama 后（无依赖顺序要求，
+    # storageDomain 由官方 base bundle 提供，早于本行）。
+    - id: corum-memory
+      name: '@corum/corum-memory'
+
     # 本地文生图：host 半 provide cordis 服务 `corumArtGen`（sd-cli 引擎/模型下载 +
     # txt2img，长任务走事件推送）；client 半在「设置 → 扩展」注册「本地文生图」
     # section。装配规则同 corum-ollama（短 id + 只在此处 mount）。

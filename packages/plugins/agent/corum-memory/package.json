@@ -1,0 +1,52 @@
+{
+  "name": "@corum/corum-memory",
+  "version": "0.1.0",
+  "description": "corum 通用记忆底座插件：事实级记忆组织（重要性/合并/衰减/驱逐四杠杆 + valid_at/invalid_at 时间窗 + 分层），存储复用官方 dsh-storage-domain，host 半 provide MemoryService、client 半在「设置 → 扩展」注册「记忆」面板。本插件只承载「组织形式」，不绑定任何记忆来源。",
+  "private": true,
+  "type": "module",
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@corum/corum-api-remotes"
+      ],
+      "immediately": true
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@corum/corum-api-remotes": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-connection": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-storage": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.3-alpha.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "@types/react": "^18.0.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
+  }
+}
