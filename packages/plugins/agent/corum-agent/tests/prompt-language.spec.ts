@@ -79,7 +79,9 @@ describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', (
   })
 
   it('润色 / 翻译系统提示词无 CJK', () => {
-    const src = source('agent-service.ts')
+    // 2026-09-20：润色/翻译按关注点抽到 `polish-service.ts`（用户定调「提示词润色这种
+    // 其实就可以单独拆出来」）⇒ 断言跟着代码走，扫新模块。
+    const src = source('polish-service.ts')
     for (const marker of ['You are a prompt-polishing assistant', 'You are a translation assistant']) {
       expect(src).toContain(marker)
     }
