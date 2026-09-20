@@ -73,9 +73,25 @@
   「我在上一轮的报告中看到你**已经忘了**要优化指挥者的系统提示词了」——核实属实：我把指挥者提示词的
   三条评估结论只在对话里说了、没落盘，上下文压缩后彻底丢失。**纪律：凡在对话里说过「要做/该修」的事，
   必须落进这里**，否则视为没说过。
-  当前登记表（A 只读 bash 🟡卡在 import / B 渐进式调研 🔴 / C 集成者报告 ✅ / D 提示词优化三条 🔴 /
-  E AGENTS.md 对子 Agent 的注入 ❌待拍板 / F worker 风格 ✅ / G master-key ❌待拍板）。
-- `docs/HANDOFF-2026-09-19-model-ask-panel-and-restart-gate.md` — **最新交接入口**
+  当前登记表（**截至 2026-09-20 日场**：A 只读 bash ✅ 已修复（走 agent-scoped guard，见下条交接）/
+  B 渐进式调研 ✅ / C 集成者报告 ✅ / D1-D2 机制段能力感知 ✅ / **D3 指挥者挂 34 个 MCP 工具 ❌待拍板** /
+  E AGENTS.md 瘦身 🔴 待与「项目记忆」功能一起讨论 / E′ fork 注入分档 ❌ 已放弃 /
+  F worker 风格 ✅ / G master-key ❌待拍板）。
+- `docs/HANDOFF-2026-09-20-conductor-permission-and-refactor.md` — **最新交接入口**
+  （2026-09-20 日场。**§1 = 一个实测坐实的安全漏洞已修复**：指挥模式「只读」原先用「钉会话沙箱」
+  实现，而沙箱是 **last-write-wins 状态** ⇒ 用户切「完全权限」5 秒内即覆盖（实测会话
+  `corum-task-e72b1a8f`；全会话普查 read-only 存活 **0** 次）。根因是 `agent-service.ts` 里
+  「权限档位」与「指挥模式」两个方法**各自写同一份沙箱、互不知情**。修法 = 把约束改到
+  **正交且不可覆盖**的轴（agent-scoped `tools.guard`）⇒ 主 Agent 与 research 恒只读、
+  worker 仍拿到用户档位。附 **70 条回归网**（9 组合全覆盖）。
+  **§3 = 🚧 正在进行的架构拆分（4/8 簇已抽，`agent-service.ts` 3209→2877）** —— 用户最终目标
+  「将架构调整到合理为止」；剩 `agent-lifecycle` / `child-progress` / `change-summary` 三簇
+  （深耦合类内状态，需单独一轮）。
+  **§6 = 三条最贵认知**：「状态」与「策略」必须分开（补 if 无用，收成单一写入者才行）；
+  机械重构**不能以「编译过+测试绿」收口**（实测 `return undefined` 被删后两者都发现不了，
+  只有 `git diff` 对照 HEAD 能拦下）；凡说过「要做/该修」的事**必须落进登记册**。
+  **下个 session 从这里开始。**）
+- `docs/HANDOFF-2026-09-19-model-ask-panel-and-restart-gate.md` — 上一份交接
   （2026-09-19 夜场，用户换会话执行重启。**§1 = 重启前必须先重打包**：主实例跑的是打包态
   （`run/pack-9222.pid`），打包快照 13:41:37，而本场改动 21:31~22:02 ⇒ **直接重启看不到任何效果**
   （新插件 `@corum/corum-ui-model-ask` 根本不在闭包里、打包 patch 也没有它的注册行）；
