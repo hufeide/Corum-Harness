@@ -543,6 +543,59 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           },
           selectTaskAgent: async (sessionId, profileId) => {
             await call('corumAgent', 'selectTaskAgentProfile', { sessionId, profileId })
+            /**
+             * ★ 2026-09-21 修：把**该 Agent 的模型**补写进会话的 `model/selection` 投影。
+             *
+             * ## 用户实测缺陷（指挥模式会话的空态）
+             *
+             * 截图现场：Agent chip = 「指挥模式-编排指挥」（预设 `conductor-lead`，其
+             * `model` = `localhost/kimi-k3-1 · high`），而模型 chip 显示
+             * **`glm-5.3-flash · Default`**。经 RPC 实证：
+             *   · `session/modelCatalog.default` = `localhost/glm-5.3-flash` ← 就是它；
+             *   · `conductor-lead` 自己的模型 = `localhost/kimi-k3-1 · high`。
+             *
+             * ## 根因
+             *
+             * composer 的模型 chip 取值口径是 `projected.next ?? catalog.default`
+             * （见 `corum-ui-model-selection/directory.ts:174`）。而本函数此前只调
+             * `selectTaskAgentProfile` —— 那只改 **host 侧的 request 覆盖**
+             * （`selection.current`，见 agent-service 的 `installTaskModelSelection`），
+             * **从不写会话的 `modelSelection` 投影**。于是 `projected.next` 一直是空，
+             * chip 恒落回部署默认。
+             *
+             * 这不是「覆盖没生效」—— 请求侧其实是对的；是**显示与请求不一致**，
+             * 而用户看到的就是显示。
+             *
+             * ## 为什么用官方 `session/selectModel`（而不是自造一套）
+             *
+             * 与新建任务流程的 `applyFormModel` **完全同一条通路、同一语义**（见上方
+             * 那段注释：它修的是「表单填 Kimi-k3 · High，进会话显示部署默认」的同一个
+             * 家族缺陷）。官方 `selectModel` 会落 `model/selection` 事件 ⇒ 投影 `next`
+             * 成立 ⇒ chip 显示该项，且与真实请求一致。
+             *
+             * 失败不阻断切换：Agent 已换成功（请求侧覆盖已生效），只是 chip 可能仍显示
+             * 部署默认 —— 如实告警，不静默吞。
+             */
+            try {
+              const { profiles } = await call<{ profiles: Array<{ id: string, model?: { provider: string, model: string, reasoningEffort?: string } }> }>(
+                'corumAgent', 'listProfiles', {},
+              )
+              const model = profiles.find(p => p.id === profileId)?.model
+              if (model === undefined) return
+              const result = await connection.rpc.call('/api', 'session/selectModel', {
+                args: {
+                  request: {
+                    sessionId,
+                    provider: model.provider,
+                    model: model.model,
+                    ...(model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }),
+                  },
+                },
+              })
+              if (!result.ok) console.warn('[conversation] switch agent → selectModel rejected', result.error)
+            } catch (error) {
+              console.warn('[conversation] switch agent → selectModel failed', error)
+            }
           },
           pickDirectory: pickDir,
           listWorkspaces: async () => {
