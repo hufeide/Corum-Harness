@@ -620,6 +620,24 @@ type ForegroundToolResult = {
 }
 
 /**
+ * fork（corum）2026-09-20：把一次前台委派产出的 content blocks 折成纯文本。
+ *
+ * 用途：`integrate` 收尾时把集成者的报告正文带回 `orchestrate` 的工具结果（见 `runIntegrate`
+ * 的注释）。此前集成者的 `output` 拿到了却被丢弃，主 Agent 只看到 `integrated: true`。
+ *
+ * 只取 text block 并拼接（与 `withDiagnosticAndPartialText` 同一口径）；非 text block
+ * （图片等）不进报告——集成报告是给人读的结论，不是原始回执。
+ * @param output - 子 Agent 产出（`ForegroundToolResult['output']`）。
+ * @returns 拼接后的正文；无文本 block 时为空串。
+ */
+function corumOutputText(output: readonly ContentBlock[] | readonly JsonValue[]): string {
+  return (output as readonly ContentBlock[])
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text)
+    .join('')
+}
+
+/**
  * Collect and release one foreground run without letting disposal replace an
  * independent result failure.
  */
@@ -2677,7 +2695,7 @@ export function apply(ctx: Context, config: Config): void {
                   results?: Array<{ index: number; label?: string; ok: boolean; aborted?: boolean; output?: string; error?: string }>
                   script?: { name: string; agentsStarted: number; value?: unknown }
                   /** `childSessionId` = 集成者子会话（合并成功时才有；卡片「进入会话」按钮用）。 */
-                  integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string; rejected?: 'unmerged' | 'verify' }
+                  integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string; rejected?: 'unmerged' | 'verify'; report?: string }
                   /** 跑在父主工作区（没隔离）的任务序号与判据（见上）。 */
                   parentTreeTasks?: { indexes: number[]; boundary: 'parent-tree' | 'skipped-non-git' }
                 }
@@ -2711,6 +2729,8 @@ export function apply(ctx: Context, config: Config): void {
                     ...(out.integration.childSessionId !== undefined ? { childSessionId: out.integration.childSessionId } : {}),
                     ...(out.integration.error !== undefined ? { error: out.integration.error } : {}),
                     ...(out.integration.rejected !== undefined ? { rejected: out.integration.rejected } : {}),
+                    // fork（corum）2026-09-20：集成者报告正文（含「需要委派方注意的几点」）。
+                    ...(out.integration.report !== undefined ? { report: out.integration.report } : {}),
                   }
                 }
                 if (out.parentTreeTasks !== undefined && out.parentTreeTasks.indexes.length > 0) {
@@ -2770,7 +2790,7 @@ export function apply(ctx: Context, config: Config): void {
                 throw new Error('orchestrate tool requires a calling agent (exec.agent was undefined)')
               }
               /** 合并台账里待集成的隔离分支（声明 merge 时由机制调用）。 */
-              const runIntegrate = async (merge: { verify?: string } | undefined): Promise<{ pendingBranches: string[]; integrated: boolean; childSessionId?: string }> => {
+              const runIntegrate = async (merge: { verify?: string } | undefined): Promise<{ pendingBranches: string[]; integrated: boolean; childSessionId?: string; report?: string }> => {
                 const pending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
                 if (pending.length === 0) return { pendingBranches: [], integrated: false }
                 const branches = pending.map(entry => entry.branch)
@@ -2810,7 +2830,30 @@ export function apply(ctx: Context, config: Config): void {
                 // fork（corum）：把集成者子会话 id 带进结果——编排卡的「进入会话」按钮要它。
                 // 运行期由 `corum/subagent/child` 帧（label 'integrate'）给出，但**推送帧不重放**
                 // （刷新/重启后丢失）；写进工具结果 = durable，刷新后按钮仍在。
-                return { pendingBranches: branches, integrated: true, childSessionId: String(integrateOutcome.runId) }
+                //
+                // fork（corum）2026-09-20：**同时带回集成者的报告正文**（用户实测报障）。
+                //
+                // 报障原话：「orchestrate 的结果只给了 integrated: true，没有 verify 输出……
+                // 我希望机制上能够让最后合并者将合并结果、前面所有子 Agent 执行中提及需要注意的
+                // 点都汇总后报告给主 Agent」。
+                //
+                // 实测（会话 corum-task-36e24826）：集成者**确实写了**一份 1864 字符的报告，
+                // 含「分支落地确认」表 + 「需要委派方注意的几点」（构建产物在 `lib/` 不是 `dist/`、
+                // 某分支内含 auto-commit 等）；而 `settleForegroundRun` 已把正文放在
+                // `integrateOutcome.output` 交到手上，此处**只取了 runId 就把它丢了** ⇒ 主 Agent
+                // 只看到 `integrated: true`，全部风险提示搁浅在子会话里，用户只能自己进去翻
+                // （他正是这么说的：「我必须亲眼核对，不能凭子报告定论」）。
+                //
+                // 修法：原样透传（用户定调「直接透传集成者报告」——不另跑汇总者、不改集成者人格）。
+                // 注意这里补的是**人能读懂的集成结论**；`verify` 的成败不走这条文本通路，
+                // 它由机制真值门禁执行、失败直接抛错（见 corumIntegrationVerdict）。
+                const integrateReport = corumOutputText(integrateOutcome.output)
+                return {
+                  pendingBranches: branches,
+                  integrated: true,
+                  childSessionId: String(integrateOutcome.runId),
+                  ...integrateReport === '' ? {} : { report: integrateReport },
+                }
               }
 
               // fork（corum）：SCRIPTED 模式（2026-09-10 用户定调「把 workflow 的设计语义
@@ -2957,7 +3000,7 @@ export function apply(ctx: Context, config: Config): void {
               // 这里捕获 integrate 错误：results（已算好）与 `integration: { integrated:false,
               // error }` 一起返回——**集成失败仍 fail-loud**（结果里带错误标记 + pending 通知），
               // 但 per-task results 不丢。
-              let integration: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string; rejected?: 'unmerged' | 'verify' }
+              let integration: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string; rejected?: 'unmerged' | 'verify'; report?: string }
               try {
                 integration = await runIntegrate(args.merge as { verify?: string } | undefined)
               } catch (integrateError: unknown) {

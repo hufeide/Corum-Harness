@@ -581,3 +581,46 @@ describe('corumReapOrphanWorktrees — 台账之外的孤儿 worktree 清扫（2
     expect(existsSync(outside)).toBe(true)
   })
 })
+
+/**
+ * fork（corum）2026-09-20：**集成者报告必须带回主 Agent**（用户实测报障）。
+ *
+ * 用户原话：「orchestrate 的结果只给了 integrated: true，没有 verify 输出……我希望机制上
+ * 能够让最后合并者将合并结果、前面所有子 Agent 执行中提及需要注意的点都汇总后报告给主 Agent」。
+ *
+ * 实测（会话 corum-task-36e24826）：集成者**确实写了** 1864 字符的报告，含「分支落地确认」表
+ * 与「需要委派方注意的几点」（构建产物在 lib/ 不是 dist/、某分支含 auto-commit），而
+ * `settleForegroundRun` 已把正文放在 `integrateOutcome.output`，代码却**只取 runId 就丢弃**。
+ * ⇒ 主 Agent 只看到 `integrated: true`，用户只能自己进子会话翻。
+ *
+ * 这些断言钉住「报告进结果」这条通路；`corumOutputText` 的折文本口径与
+ * `withDiagnosticAndPartialText` 同源（只取 text block 拼接）。
+ */
+describe('集成者报告透传（2026-09-20 用户报障）', () => {
+  const src = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+
+  it('integrate 的返回值带上集成者报告正文', () => {
+    expect(src).toContain('const integrateReport = corumOutputText(integrateOutcome.output)')
+    expect(src).toMatch(/integrateReport === '' \? \{\} : \{ report: integrateReport \}/)
+  })
+
+  it('report 一路透到 orchestrate 的工具结果（schema + payload）', () => {
+    // runIntegrate 的返回类型、外层 integration 变量、结构化输出 schema 三处都要有 report。
+    expect(src).toMatch(/runIntegrate = async[^\n]*report\?: string/)
+    expect(src).toMatch(/integration\?: \{[^\n]*report\?: string/)
+    expect(src).toContain('...(out.integration.report !== undefined ? { report: out.integration.report } : {})')
+  })
+
+  it('报告为空时不写该键（不产生空 report 噪声）', () => {
+    // 与既有 omission 纪律一致：无内容就不物化键。
+    expect(src).toContain("integrateReport === '' ? {} : { report: integrateReport }")
+  })
+
+  it('折文本只取 text block（与 withDiagnosticAndPartialText 同口径）', () => {
+    const i = src.indexOf('function corumOutputText')
+    expect(i).toBeGreaterThan(-1)
+    const body = src.slice(i, src.indexOf('\n}', i))
+    expect(body).toContain("block.type === 'text'")
+    expect(body).toContain('.join(\'\')')
+  })
+})
