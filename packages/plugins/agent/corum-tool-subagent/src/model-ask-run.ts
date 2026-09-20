@@ -199,6 +199,84 @@ export async function corumAskAboutModelFailure(
 }
 
 /**
+ * 「同一父会话同一角色**只问一次**」的在飞表（2026-09-21 用户实测后定调）。
+ *
+ * ## 为什么需要它（实机现场）
+ *
+ * 用户会话 `corum-task-1b927cf3` 的 step 27 里，主 Agent 在**同一条消息**里发了两个并行
+ * `subagent` 调用（`:187` / `:188`）。用户配置的 `deepseek-v4.1-flash` 不可用，于是：
+ *
+ * | seq | 事实 |
+ * |---|---|
+ * | 190 | 「Your Agent preset was updated permanently… now **localhost/glm-5.3-flash**」——用户答了第 1 个 |
+ * | 191 | 「Subagent model unavailable (模型卡片纵向布局) … **No choice was made**」——第 2 个兄弟**又问了**一遍 |
+ *
+ * 两个子 Agent 都在决定落地**之前**就已用旧模型起跑，于是各自失败、各自弹窗；用户被同一个
+ * 根因连问两次（且他的永久设置对**已在跑的**那个兄弟无效 —— 那是必然的，它早已起跑）。
+ *
+ * ## 语义
+ *
+ * 同一 `(父会话, 角色)` 在前一次询问**尚未落地**期间，后续失败者**共享那一个决定**，
+ * 不再另起一问。落地后锁即刻释放 ⇒ 之后新起的失败仍然可以问（不是「一次会话只问一次」）。
+ *
+ * ⚠️ 刻意**不**按 label/委派批次分键：用户面对的是「我这个会话的子 Agent 模型坏了」这一件
+ * 事，按批次分会把同一件事拆成多个弹窗 —— 那正是本条要消灭的形态。
+ *
+ * 键含角色（`worker` / `research`）：两者写的是预设里**不同的键**
+ * （`subagentModel` / `researchModel`），把它们并成一次询问会答非所问。
+ */
+const inFlightAsks = new Map<string, Promise<CorumModelAskOutcome>>()
+
+/** 在飞表的键（父会话 + 角色；角色不同 ⇒ 写的是不同预设键，不能并）。 */
+function askKeyOf(parent: Agent, role: 'worker' | 'research'): string {
+  return `${String(parent.session.id)}::${role}`
+}
+
+/**
+ * 清空在飞表（**仅供测试**）。
+ *
+ * 为什么需要显式清理：本表是模块级状态（跨测试用例存活），若不在用例间清，第二条用例会
+ * 拿到第一条遗留的 promise ⇒ 假绿。生产代码不需要调它（键随会话结束自然失效，
+ * 且表只在「有询问在飞」期间有条目）。
+ */
+export function corumResetModelAskLocks(): void {
+  inFlightAsks.clear()
+}
+
+/**
+ * 至多一次询问的入口：同一「父会话 × 角色」已有询问在飞时**共享**它，否则发起一次。
+ *
+ * @param deps - 同 {@link corumAskAboutModelFailure}。
+ * @param parent - 委派方 Agent（键的会话来源）。
+ * @param facts - 失败事实（`role` 进键）。
+ * @param signal - 取消信号。
+ * @param logger - 告警出口。
+ * @returns 决定与生效结果（共享者拿到的是**同一个**结果）。
+ */
+export function corumAskAboutModelOnce(
+  deps: Parameters<typeof corumAskAboutModelFailure>[0],
+  parent: Agent,
+  facts: CorumModelFailureFacts,
+  signal: AbortSignal,
+  logger: { warn: (message: string) => void, info?: (message: string) => void },
+): Promise<CorumModelAskOutcome> {
+  const key = askKeyOf(parent, facts.role)
+  const existing = inFlightAsks.get(key)
+  if (existing !== undefined) {
+    // 共享而不是再问：用户被同一个根因连问两次是实机报障的形态。
+    logger.info?.(`corum model-ask: sharing the in-flight decision for ${key} instead of asking again`)
+    return existing
+  }
+  const ask = corumAskAboutModelFailure(deps, parent, facts, signal, logger)
+  inFlightAsks.set(key, ask)
+  // 落地即释放锁（`.finally` 保证异常路径也释放，否则一次抛错会把该会话永久锁死）。
+  void ask.finally(() => {
+    if (inFlightAsks.get(key) === ask) inFlightAsks.delete(key)
+  })
+  return ask
+}
+
+/**
  * 把机制决定落到状态/配置上（纯副作用；与「问」分离以便单测直接驱动）。
  *
  * @param deps - 同 {@link corumAskAboutModelFailure}。

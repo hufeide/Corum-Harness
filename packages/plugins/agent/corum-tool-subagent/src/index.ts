@@ -51,6 +51,7 @@ import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selec
 import { registerListSubagentModels } from './list-models.ts'
 import {
   corumAskAboutModelFailure,
+  corumAskAboutModelOnce,
   type CorumDelegationPolicyState,
   type CorumModelAskChannel,
   type CorumModelCatalog,
@@ -1368,6 +1369,31 @@ export function apply(ctx: Context, config: Config): void {
     signal: AbortSignal,
     notify: boolean,
   ): Promise<{ route: CorumRoute | undefined; summary: string }> => {
+    /**
+     * ★ 2026-09-21：**陈旧失败不问**。
+     *
+     * 实机现场（会话 `corum-task-1b927cf3`）：主 Agent 同时发两个 subagent，两个都拿
+     * `deepseek-v4.1-flash` 起跑。用户在第 1 个弹窗选了「永久改为 glm-5.3-flash」⇒
+     * 会话级覆盖已写、预设已改。但**第 2 个兄弟的失败在那之前就已产生**，它带着
+     * 「配置模型 = deepseek-v4.1-flash」这一**已经过时**的事实来问，于是用户被同一个根因
+     * 又问了一遍（seq 191「No choice was made」）。
+     *
+     * 判据：本次失败声称的「配置模型」若**已不等于**该会话当前生效的路由，说明用户/机制
+     * 已经换过了 —— 这条失败是旧路由的遗留，再问一次毫无信息量。直接返回「无决议」，
+     * 让调用方按原样把失败交回主 Agent（**不重跑**：这次失败本身没有用户许可）。
+     *
+     * ⚠️ 只在「当前生效路由与失败路由**不同**」时才跳过：相同 ⇒ 换了也还是坏的，
+     * 那时必须问（那是真·新的信息）。
+     */
+    const effectiveNow = corumPolicyState.modelOverrideOf(String(parent.session.id))
+    if (effectiveNow !== undefined
+      && (effectiveNow.provider !== configuredModel.provider || effectiveNow.model !== configuredModel.model)) {
+      ctx.logger.info(
+        `subagent (${label}): stale model failure ignored — configured ${configuredModel.provider}/${configuredModel.model} `
+        + `is no longer this session's child route (now ${effectiveNow.provider}/${effectiveNow.model})`,
+      )
+      return { route: undefined, summary: '' }
+    }
     // 回退路由 = 父 Agent 的真实路由（用户要的「和主 Agent 一样」）。拿不到就只报告。
     const parentOptions = parentAgentOptionsForDelegation(parent)
     if (parentOptions.provider === undefined || parentOptions.model === undefined) {
@@ -1387,7 +1413,11 @@ export function apply(ctx: Context, config: Config): void {
     // 写 `ctx.root.get` 在实测里取不到（首次实机「永久档」报 no writable profile 即此因）。
     // 按红线 3 用窄接口收窄，不 import @corum/corum-agent。
     const profile = ctx.get('corumAgent') as unknown as CorumProfileWriteFace | undefined
-    const outcome = await corumAskAboutModelFailure(
+    // ★ 2026-09-21：走「至多问一次」入口 —— 同一父会话同一角色的并行失败**共享一个决定**。
+    // 实机现场：主 Agent 在同一消息里发两个并行 subagent（会话 corum-task-1b927cf3 的
+    // step 27 的 :187/:188），两个子 Agent 都用坏模型起跑 ⇒ 各自失败 ⇒ 用户被同一个根因
+    // 连问两次（seq 190 已答、seq 191 又问）。共享后只问一次。
+    const outcome = await corumAskAboutModelOnce(
       {
         state: corumPolicyState,
         channel: corumModelAskChannel(ctx),

@@ -391,6 +391,27 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     expect(COMPILE_SRC).toContain("corumSubagentConfig('research', profile, mcpDenyNames)")
   })
 
+  it('★★ 陈旧失败不再问：会话级路由已换过 ⇒ 那条失败已过时（2026-09-21 实机）', () => {
+    // 实机现场（会话 corum-task-1b927cf3）：两个并行 subagent 都拿 deepseek-v4.1-flash
+    // 起跑；用户在第 1 个弹窗选了「永久改为 glm-5.3-flash」；第 2 个兄弟带着**已过时**的
+    // 「配置模型」事实来问 ⇒ 用户被同一个根因连问两次（seq 191「No choice was made」）。
+    const guard = between('const effectiveNow = corumPolicyState.modelOverrideOf', 'const parentOptions =')
+    expect(guard).toContain('effectiveNow.provider !== configuredModel.provider')
+    expect(guard).toContain('effectiveNow.model !== configuredModel.model')
+    // 跳过时必须返回「无决议」而不是伪造一个 route —— 伪造等于替用户同意重跑。
+    expect(guard).toContain('route: undefined')
+    expect(guard).not.toContain('fallback')
+    // 相同 ⇒ 仍然要问（换了也还是坏的，那是真·新信息）：判据必须是「不同才跳过」。
+    expect(guard).toMatch(/effectiveNow !== undefined/)
+  })
+
+  it('★★ 同一父会话同一角色只问一次：走 corumAskAboutModelOnce（并行兄弟共享决定）', () => {
+    // 实机同一现场的另一半：两个并行失败各自弹窗。共享后只问一次。
+    expect(SRC).toContain('await corumAskAboutModelOnce(')
+    // 不许退回直接调 failure 版（那会绕过共享锁）。
+    expect(SRC).not.toContain('await corumAskAboutModelFailure(')
+  })
+
   it('★ 机制提示词不再宣告 per-task model（否则等于教模型用已删的参数）', () => {
     expect(SRC).not.toContain('a per-task `model` on an `orchestrate` task wins')
   })
