@@ -78,19 +78,19 @@ RPC_NAMES_FROZEN="createAgent createAgentForType createTaskAgent deleteProfile g
 # 格式：每行 `表名 预算 用途说明`（用普通字符串而非关联数组——macOS 自带 bash 3.2
 # **不支持 `declare -A`**，本仓脚本一律要能在系统 bash 下跑）。
 STATE_BUDGET="\
-agents 8 profileId → root Agent
-typeAgents 5 泳道会话表
-sessionLaneIndex 2 sessionId → 泳道归属
-taskAgents 10 sessionId → task 会话
-taskSelections 5 sessionId → 模型选择 ref
 pendingPermissions 3 待兑现权限档位
 conductor 6 指挥模式运行时
-agentCreationsInFlight 3 在飞创建去重
-agentCreationTimes 2 重建风暴记账
 laneSetupHooks 2 泳道装配钩子"
 
 # 已经收走的表：必须出现 **0** 次（格式同上，预算恒为 0）。
 EXPECTED_ABSENT="\
+agents root Agent 表（P3-a 收进 AgentRegistry）
+typeAgents 泳道会话表（P3-a 收进 AgentRegistry）
+sessionLaneIndex 泳道归属索引（P3-a 收进 AgentRegistry）
+taskAgents task 会话表（P3-a 收进 AgentRegistry）
+taskSelections 模型选择 ref 表（P3-a 收进 AgentRegistry）
+agentCreationsInFlight 在飞创建去重（P3-a 收进 AgentRegistry）
+agentCreationTimes 重建风暴记账（P3-a 收进 AgentRegistry）
 subagentProgress 子会话进度折叠表（P1-b 收进 SubagentProgressTracker）
 subagentRoles 委派角色（P1-b 收进 SubagentProgressTracker）
 subagentParents 子会话父会话（P1-b 收进 SubagentProgressTracker）
@@ -177,11 +177,22 @@ fi
 group "② 已知地雷不得复活"
 
 # ② -a findLaneAgent 必须有显式 return undefined
-LANE_BODY="$(awk '/private findLaneAgent\(/,/^  }$/' "$SERVICE")"
-if printf '%s' "$LANE_BODY" | grep -q 'return undefined'; then
-  pass "findLaneAgent 保留显式 return undefined（上场被误删过的那个）"
+# ⚠️ 实际实现已随 P3-a 搬进 AgentRegistry.findLaneBySession（服务侧只剩一跳），
+# 故检查**实现文件**而不是服务文件 —— 判据本身不变（「必须有显式 return undefined」）。
+REGISTRY="$PKG_DIR/src/agent-registry.ts"
+if [ ! -f "$REGISTRY" ]; then
+  fail "找不到 agent-registry.ts（findLaneBySession 的家）—— 搬家后请更新本检查"
 else
-  fail "findLaneAgent 缺少 return undefined（返回类型是 | undefined，编译与测试都发现不了！）"
+  LANE_BODY="$(awk '/findLaneBySession\(sessionId: string\)/,/^  }$/' "$REGISTRY")"
+  if printf '%s' "$LANE_BODY" | grep -q 'return undefined'; then
+    pass "findLaneBySession 保留显式 return undefined（上场被误删过的那个）"
+  else
+    fail "findLaneBySession 缺少 return undefined（返回类型是 | undefined，编译与测试都发现不了！）"
+  fi
+  # 服务侧只该剩一跳，不得自己再实现一遍循环
+  if grep -q 'for (const entry of this.lanes.values())' "$SERVICE" 2>/dev/null; then
+    fail "agent-service 里又出现了泳道表遍历（应经 registry.findLaneBySession）"
+  fi
 fi
 
 # ② -b agents.list 两形态兼容（三处独立实现）。

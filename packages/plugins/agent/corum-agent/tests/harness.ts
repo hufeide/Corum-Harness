@@ -53,6 +53,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { CorumAgentService } from '../src/agent-service.ts'
 import type { AgentLaneDescriptor } from '../src/agent-service.ts'
 import { ConductorRuntime } from '../src/conductor-runtime.ts'
+import { AgentRegistry, type TaskAgentEntry, type TaskSelectionRef } from '../src/agent-registry.ts'
 import { SubagentProgressTracker } from '../src/subagent-progress.ts'
 import type { AgentProfile } from '../src/profile.ts'
 import type { ProgressState } from '../src/child-progress.ts'
@@ -65,10 +66,7 @@ import type { ProgressState } from '../src/child-progress.ts'
  * 之后，这里改成 `'registry'`（或实现方选定的名字）**即可**——这是本文件与实现之间
  * 唯一需要同步的一个字面量。
  */
-export const STATE_CONTAINER_KEY: string | undefined = undefined
-
-/** 一张存活表对外的最小形状（harness 只做读写与遍历，不关心值类型）。 */
-type StateMap = Map<string, unknown>
+export const STATE_CONTAINER_KEY: string | undefined = 'registry'
 
 /**
  * 服务状态的可访问视图——spec 通过它读写存活表，而不是直接 `svc.taskAgents`。
@@ -111,22 +109,6 @@ export interface HarnessState {
   notifiedInterrupted: Set<string>
   /** 待兑现的权限档位。 */
   pendingPermissions: StateMap
-  /** profileId → 在飞创建 promise。 */
-  agentCreationsInFlight: StateMap
-  /** profileId → 最近创建时刻序列。 */
-  agentCreationTimes: StateMap
-}
-
-/** 服务状态字段名 → 新值工厂（**本文件与实现之间的唯一契约**）。 */
-const STATE_FIELDS: Record<string, () => unknown> = {
-  agents: () => new Map<string, unknown>(),
-  typeAgents: () => new Map<string, unknown>(),
-  taskAgents: () => new Map<string, unknown>(),
-  taskSelections: () => new Map<string, unknown>(),
-  sessionLaneIndex: () => new Map<string, unknown>(),
-  pendingPermissions: () => new Map<string, unknown>(),
-  agentCreationsInFlight: () => new Map<string, unknown>(),
-  agentCreationTimes: () => new Map<string, unknown>(),
 }
 
 /** 一条被 mock ctx 记下来的推送帧。 */
@@ -174,12 +156,8 @@ export interface Harness {
     profileId?: string
     agent?: Agent
   }): Agent
-  /** 往 `typeAgents` 表登记一个泳道会话。 */
-  registerLaneAgent(instanceKey: string, opts: {
-    sessionId: string
-    lane: AgentLaneDescriptor
-    agent?: Agent
-  }): Agent
+  /** 往泳道表登记一个泳道会话（同时维护泳道归属索引）。 */
+  registerLaneAgent(projectId: string, profileId: string, lane: AgentLaneDescriptor, sessionId: string, agent?: Agent): Agent
   /** 写一个 profile 到本次 home 的 `.agent-presets/<id>/agent.json`。 */
   writeProfile(profile: AgentProfile): void
   /**
@@ -187,8 +165,6 @@ export interface Harness {
    *
    * 只实现被真正用到的 seam：`open(id, 'read') → { read(fromSeq), header, close() }`
    * —— 与官方 0.1.3 的 handle seam 同形（顶层 `readFrom` 已删）。
-   *
-   * @param sessions - sessionId → { events, parentSession? }。
    */
   usePersistence(sessions: Record<string, FakeSessionRecord>): void
   /** 删掉本次 home（`afterEach` 用；幂等）。 */
@@ -199,14 +175,14 @@ export interface Harness {
 export interface FakeSessionRecord {
   /** 该会话持久化的事件（按 seq 升序）。 */
   events?: readonly SessionEvent[]
-  /** `header.parentSession`（子会话的父；`childParentSession` 的持久化兜底源）。 */
+  /** `header.parentSession`（子会话的父；`childSessionOf` 的持久化兜底源）。 */
   parentSession?: string
   /** `header.cwd`（`childWorktreeIsolation` 的持久化兜底源）。 */
   cwd?: string
 }
 
 /**
- * 测试用的 mock ctx。
+ * mock ctx。
  *
  * ⚠️ 两个必备形状（都是实机踩过的，不是洁癖）：
  *  ① **必须有 `get()`**——真 cordis ctx 上取服务走 `ctx.get(name)`；直接属性访问在
@@ -216,9 +192,7 @@ export interface FakeSessionRecord {
  */
 export interface MockCtx {
   logger: { info: (...a: unknown[]) => void, warn: (...a: unknown[]) => void, error: (...a: unknown[]) => void, debug: (...a: unknown[]) => void }
-  /** 记录 `ctx.emit` 的帧（harness 断言用）。 */
   emit: (type: string, payload?: unknown) => void
-  /** 事件订阅登记（harness 不主动触发；需要时用 {@link MockCtx.emitTo}）。 */
   on: (type: string, handler: (...a: unknown[]) => void) => () => void
   /** 手动把一条事件喂给订阅者（测事件接线用）。 */
   emitTo: (type: string, ...args: unknown[]) => void
@@ -275,43 +249,18 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     ...options.ctx,
   }
 
-  /**
-   * 提供服务的**两条通道**（2026-09-21 实测踩到，必须分开）。
-   *
-   * 服务里两种取用方式同时存在，mock 必须按**各自真实的语义**提供，不能图省事合并：
-   *
-   * | 取用方式 | 例子 | 真 cordis 上的形态 | 对应方法 |
-   * |---|---|---|---|
-   * | `ctx.<name>`（属性） | `this.ctx.sessionPersistence`（`getSubagentSessionMetaRemote`） | 服务在 `static inject` 里 ⇒ 属性可读 | `provide()` |
-   * | `ctx.get('<name>')` | `this.ctx.get('corumReview')`（**可选**服务，无 inject） | **属性访问会抛**，只有 `get` 能读 | `provideGet()` |
-   *
-   * ⚠️ 合并二者会踩两个**方向相反**的坑，都实测过：
-   *
-   * - 只写 `get` 侧：`getSubagentSessionMetaRemote` 在 `this.ctx.sessionPersistence` 上
-   *   拿到 `undefined`，被它自己的 `try/catch` 吞掉 ⇒ **测试悄悄拿到 `{}`**，看起来像
-   *   「实现没读到事件」，真因却是 mock 少了一条通道。
-   * - 把 `get` 也一并提供（**本文件第一版就是这么写的，是错的**）：`agentRunning` 里
-   *   `agents?.list === undefined ? undefined : …` 的**三态**判据被压成两态
-   *   ⇒「问不到」（`undefined`）与「确认没在跑」（`false`）不再可分 ⇒ 中断判据的
-   *   `not-running` / `pre-boot` 分支被静默换掉，而**实机上是 `undefined`**。
-   *   于是测试断言的 `pre-boot` 变成了 `not-running` —— 测的是另一个世界。
-   *
-   * ⇒ 一句话：**`ctx.get` 必须保持「只认 get」**，那正是实现里用 `get` 而非属性访问的理由
-   * （`applySubagentModelForSession` 的事故注释写得很清楚）。
-   */
+  /** 提供已 inject 的服务（属性 + get 双向可读，与真 cordis 一致）。 */
   const provideInjected = (name: string, value: unknown): void => {
     provided[name] = value
     ctx[name] = value
   }
-
-  /** 只提供 `ctx.get(name)`，**不**挂原始属性（无 inject 的可选服务）。 */
+  /** 只提供 `ctx.get(name)`（无 inject 的可选服务）。 */
   const provideGetOnly = (name: string, value: unknown): void => {
     provided[name] = value
   }
 
   const service = Object.create(CorumAgentService.prototype) as CorumAgentService
   // `ctx` 是类的 `protected readonly` 字段；Object.create 绕过构造器 ⇒ 这里补上。
-  // 用 defineProperty 而非赋值：字段是 readonly，且要在不触发 setter 的前提下钉死。
   Object.defineProperty(service, 'ctx', { value: ctx, writable: true })
 
   const state = installState(service, ctx, events)
@@ -340,10 +289,11 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       })
       return agent
     },
-    registerLaneAgent: (instanceKey, opts) => {
-      const agent = opts.agent ?? makeAgent(opts.sessionId)
-      state.typeAgents.set(instanceKey, { agent, sessionId: SessionId(opts.sessionId), lane: opts.lane })
-      return agent
+    registerLaneAgent: (projectId, profileId, lane, sessionId, agent) => {
+      const a = agent ?? makeAgent(sessionId)
+      const registry = (service as unknown as Record<string, AgentRegistry>)[STATE_CONTAINER_KEY ?? '']
+      registry.registerLane(projectId, profileId, lane, a, SessionId(sessionId))
+      return a
     },
     writeProfile: (profile: AgentProfile) => {
       const dir = join(home, '.agent-presets', profile.id)
@@ -360,8 +310,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
               ...(record.parentSession === undefined ? {} : { parentSession: record.parentSession }),
               ...(record.cwd === undefined ? {} : { cwd: record.cwd }),
             },
-            read: async (fromSeq: number) =>
-              (record.events ?? []).filter(e => e.seq >= fromSeq),
+            read: async (fromSeq: number) => (record.events ?? []).filter(e => e.seq >= fromSeq),
             close: async () => {},
           }
         },
@@ -375,96 +324,135 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
 }
 
 /**
- * 把状态表挂到被测服务上（**本文件与实现之间唯一的契约点**）。
+ * 一张存活表对外的**最小形状**。
  *
- * ## 契约
+ * 刻意用接口而非 `Map`：P3-a 之后部分表由 `AgentRegistry` 的**语义方法**持有
+ * （见 {@link stateViewOf}），能提供的只有 get/set/keys 这几件——声明成 `Map` 会逼着
+ * harness 伪造 `forEach`/`entries` 之类没人用的方法，也会让「视图是代理还是拷贝」变含糊。
+ */
+interface StateMap {
+  get(key: string): unknown
+  set(key: string, value: unknown): void
+  delete(key: string): void
+  keys(): string[]
+  readonly size: number
+}
+
+/**
+ * 服务状态的**可访问视图**——spec 通过它读写存活表，而不是直接 `svc.agents`。
  *
- * 实现方有两条合法的表达方式，本函数**两种都认**：
+ * ## 为什么这些视图是「适配器」而不是裸 Map（2026-09-21，P3-a）
  *
- * 1. **状态表是服务自有字段**（当前实现，`STATE_CONTAINER_KEY === undefined`）：
- *    直接挂在服务实例上，名字就是 {@link HarnessState} 的四个键。
- *    校验方式：`'taskAgents' in service`（原型上的字段声明也在 ⇒ 必须先有构造器
- *    侧的定义；`Object.create` 会带上字段声明的初始化吗？**不会**——故这里用
- *    `Object.getOwnPropertyNames` 之外的判据：直接无条件挂上，因为读它的一定是
- *    被测代码自己）。
- * 2. **状态表收在容器对象里**（P3 之后，`STATE_CONTAINER_KEY === 'registry'`）：
- *    造一个容器实例、把四张表塞进去、整体挂到服务上。
+ * P3-a 把六张表收进 `AgentRegistry` 并**刻意只给语义方法**（`registerTask` /
+ * `findLaneBySession` / …），不再暴露 Map——理由见 `agent-registry.ts` 头注（把 Map
+ * 交出去等于把「谁都能改」制度化）。于是这里也**不能**再往容器里塞 Map（塞了没人读）。
+ * 视图改为**薄适配器**：每个方法直通一条语义方法。spec 的写法
+ * （`h.state.taskAgents.set(...)`）因此保持不变，实现换内部结构只影响本文件。
  *
- * ## fail-loud（本文件的重点）
+ * ⚠️ 视图**代理容器**、不是拷贝：spec 写进去服务立刻读得到（否则就是本文件要消灭的
+ * 静默失真）。少数表（泳道两表、选择表）**故意不给 `set`**——它们有「两张表必须同步」
+ * 这类不变式，只能经 `registerLaneAgent` 之类的整体登记写。想绕过时**抛错**，
+ * 而不是静默写一张不同步的表。
+ */
+function stateViewOf(registry: AgentRegistry): HarnessState {
+  return {
+    agents: {
+      get: id => registry.profileAgent(id),
+      set: (id, agent) => { registry.registerProfileAgent(id, agent as Agent) },
+      delete: id => { registry.forgetProfileAgent(id) },
+      keys: () => registry.profileIds(),
+      get size() { return registry.profileIds().length },
+    },
+    typeAgents: {
+      // 泳道表的键是拼接串；测试真正关心的是「这个 sessionId 有没有登记」，
+      // 而那正是 registry 的 findLaneBySession 的职责。
+      get: key => registry.findLaneBySession(key),
+      set: () => { throw new Error('harness: 泳道表请用 registerLaneAgent（它同时维护 lanes 与 laneIndex）') },
+      delete: () => { throw new Error('harness: 泳道表不支持直接删除') },
+      keys: () => [],
+      get size() { return 0 },
+    },
+    taskAgents: {
+      get: id => registry.task(id),
+      set: (id, entry) => { registry.registerTask(entry as TaskAgentEntry) },
+      delete: () => { throw new Error('harness: task 表不支持直接删除') },
+      keys: () => [],
+      get size() { return registry.taskCount },
+    },
+    taskSelections: {
+      get: id => registry.taskSelection(id),
+      set: (id, ref) => { registry.setTaskSelection(id, ref as TaskSelectionRef) },
+      delete: () => { throw new Error('harness: 选择表不支持直接删除') },
+      keys: () => [],
+      get size() { return 0 },
+    },
+    sessionLaneIndex: {
+      get: id => registry.laneOf(id),
+      set: () => { throw new Error('harness: 泳道归属请用 registerLaneAgent（它保证两表同步）') },
+      delete: () => { throw new Error('harness: 泳道归属不支持直接删除') },
+      keys: () => [],
+      get size() { return 0 },
+    },
+  }
+}
+
+/**
+ * 把状态装到被测服务上（**本文件与实现之间唯一的契约点**）。
  *
- * 若 `STATE_CONTAINER_KEY` 指名的容器**取不到**，**必须抛错**，不许退回「在服务上挂字段」
- * ——那正是本文件要消灭的静默失真：挂上去照样成功、被测代码却读自己的空表。
+ * ## 契约：容器有两种形态
+ *
+ * 1. **字段形态**（`STATE_CONTAINER_KEY === undefined`）：状态表是服务的自有字段。
+ * 2. **容器形态**（当前：`'registry'`）：状态收在一个对象里。
+ *
+ * ⚠️ 容器形态下**不能**去读 `service[key]` 再指望它存在：`Object.create` 不跑构造器，
+ * 带初始值的字段（`= new AgentRegistry()`）**根本没被创建**。故容器必须**由本文件造出来
+ * 并挂上去**。本文件第一版曾写成「读不到就抛」，结果契约检查永远失败——那是**好的**
+ * 那种失败（fail-loud），但根因是这一条，已写进注释。
  */
 function installState(service: CorumAgentService, ctx: Context, events: RecordedEvent[]): HarnessState {
-  const container: Record<string, unknown> = STATE_CONTAINER_KEY === undefined
-    ? service as unknown as Record<string, unknown>
-    : (() => {
-        const found = (service as unknown as Record<string, unknown>)[STATE_CONTAINER_KEY]
-        if (found === undefined) {
-          throw new Error(
-            `corum-agent harness: 状态容器 "${STATE_CONTAINER_KEY}" 不在服务上 —— `
-            + '实现改了状态归属而 harness 未同步（见 tests/harness.ts 的 STATE_CONTAINER_KEY）。'
-            + '请更新该常量与 installState，而不是在本函数里退回「直接挂字段」。',
-          )
-        }
-        return found as Record<string, unknown>
-      })()
-
-  // ⚠️ 为什么必须把**每一个**状态字段都造出来（2026-09-21 实测踩到）：
-  //
-  // `Object.create(CorumAgentService.prototype)` **不执行构造器**，而本仓的
-  // `useDefineForClassFields` 未开 ⇒ **带初始值的字段（`= new Map()`）的初始化表达式
-  // 也长在构造器里**，同样不执行。于是 `this.subagentProgress` 等字段全是 `undefined`，
-  // 首个 `this.subagentProgress.get(...)` 就抛 `Cannot read properties of undefined`。
-  //
-  // 这个坑的表现极具误导性：报错指向实现的某一行，而真因是「测试台没造出那张表」——
-  // 实测本轮就把它误读成「实现有 bug」。故这里按 {@link STATE_FIELDS} **穷举**造全，
-  // 谁都不许少。
-  for (const [name, make] of Object.entries(STATE_FIELDS)) {
-    Object.defineProperty(container, name, { value: make(), writable: true, configurable: true })
+  const container = service as unknown as Record<string, unknown>
+  let registryView: Partial<HarnessState> = {}
+  if (STATE_CONTAINER_KEY !== undefined) {
+    const registry = new AgentRegistry()
+    Object.defineProperty(service, STATE_CONTAINER_KEY, { value: registry, writable: true, configurable: true })
+    registryView = stateViewOf(registry)
   }
-  // `laneSetupHooks` 是数组、语义上不是「状态表」，但同属构造器初始化 ⇒ 一并补上
+  // ⚠️ 为什么必须把**每一个**仍是字段的状态都造出来（2026-09-21 实测踩到）：
+  // `Object.create` **不执行构造器**，而带初始值的字段（`= new Map()`）的初始化表达式
+  // 也长在构造器里 ⇒ 同样不执行 ⇒ 字段全是 `undefined`，首个 `.get(...)` 就抛
+  // `Cannot read properties of undefined`。这个坑极具误导性：报错指向实现的某一行，
+  // 而真因是「测试台没造出那张表」——本轮实测就把它误读成「实现有 bug」。
+  Object.defineProperty(container, 'pendingPermissions', { value: new Map<string, unknown>(), writable: true, configurable: true })
+  // `laneSetupHooks` 是数组、不是「状态表」，但同属构造器初始化 ⇒ 一并补上
   // （`registerLaneSetupHook` 会 push，缺了它会抛）。
   Object.defineProperty(container, 'laneSetupHooks', { value: [], writable: true, configurable: true })
+  const registry = container[STATE_CONTAINER_KEY ?? '']
+  void registry
   // `conductor` 与 `progress` 都是**有自己状态的对象**（已分别抽到
-  // `conductor-runtime.ts` / `subagent-progress.ts`）。构造器不跑 ⇒ 这里必须造真实例，
-  // 否则任何走到 `conductor.apply(...)` / `progress.fold(...)` 的路径都会抛。
-  Object.defineProperty(container, 'conductor', {
-    value: new ConductorRuntime(),
-    writable: true,
-    configurable: true,
-  })
+  // `conductor-runtime.ts` / `subagent-progress.ts`）。构造器不跑 ⇒ 必须造真实例，
+  // 否则走到 `conductor.apply(...)` / `progress.fold(...)` 的路径都会抛。
+  Object.defineProperty(container, 'conductor', { value: new ConductorRuntime(), writable: true, configurable: true })
   // 跟踪器的两个 emit 回调接到本文件的帧记录器上（spec 因此能断言推送帧）。
-  // ⚠️ 这里**不是**在复刻生产的接线：生产由 CorumAgentService 构造器接线，本文件只保证
-  // 「tracker 发出来的帧」能被 spec 看到。事件**接线本身**（谁在什么事件上调 tracker）
-  // 属服务构造器，由 characterization/spec 经 `ctx.emitTo` 触发来验。
+  // ⚠️ 这**不是**在复刻生产的接线：生产由 CorumAgentService 构造器接线，本文件只保证
+  // 「tracker 发出来的帧」能被 spec 看到。事件**接线本身**由 spec 经 `ctx.emitTo` 触发来验。
   const tracker = new SubagentProgressTracker(ctx, {
     emitProgress: (frame) => { events.push({ type: 'corum/subagent/progress', payload: frame }) },
     emitInterrupted: (info) => { events.push({ type: 'corum/subagent/interrupted', payload: info }) },
   })
   Object.defineProperty(container, 'progress', { value: tracker, writable: true, configurable: true })
-
-  // 视图**直接取自容器**（不是另造一份）：否则 spec 写进视图、服务读容器，两边各说各话
-  // ——那正是本文件要消灭的失真形态。
-  const pick = <T>(name: string): T => container[name] as T
   const trackerState = tracker.state
+  const pick = <T>(name: string): T => container[name] as T
   return {
-    agents: pick('agents'),
-    typeAgents: pick('typeAgents'),
-    taskAgents: pick('taskAgents'),
-    taskSelections: pick('taskSelections'),
-    sessionLaneIndex: pick('sessionLaneIndex'),
+    ...registryView as HarnessState,
+    pendingPermissions: pick('pendingPermissions'),
     subagentProgress: {
       get size(): number { return tracker.size },
-      seed: (sessionId, state) => { pick<SubagentProgressTracker>('progress').seed(sessionId, state) },
+      seed: (sessionId, state) => { tracker.seed(sessionId, state) },
     },
     subagentRoles: trackerState.roles as unknown as StateMap,
     subagentParents: trackerState.parents as unknown as StateMap,
     notifiedInterrupted: trackerState.notified,
-    pendingPermissions: pick('pendingPermissions'),
-    agentCreationsInFlight: pick('agentCreationsInFlight'),
-    agentCreationTimes: pick('agentCreationTimes'),
-  }
+  } as HarnessState
 }
 
 /**

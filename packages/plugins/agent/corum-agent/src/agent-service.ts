@@ -23,6 +23,8 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
 import { installTaskModelSelection } from './task-model-selection.ts'
 import { childRunInterruptOf, foldProgressAll } from './child-progress.ts'
+// fork（corum）2026-09-21：Agent 存活登记册按关注点抽出（六张状态表 + 语义方法）。
+import { AgentRegistry } from './agent-registry.ts'
 // fork（corum）2026-09-21：终态改动摘要按关注点抽出（两个 host 来源 + 降级路径）。
 import { buildChangeSummary as buildChangeSummaryOf, emitChangeSummary as emitChangeSummaryOf } from './change-summary.ts'
 // fork（corum）2026-09-21：子 Agent 进度按关注点抽出（四张状态表 + 事件接线归它持有）。
@@ -425,42 +427,33 @@ export interface SaveProfileInput {
  *
  * 同时继承 TypertRemoteService，暴露 /api/corumAgent/* RPC 端点供 UI 调用。
  */
-/** 泳道描述：路由标签（key）+ 工作类型语义（type）+ 可选需求段。 */
-export interface AgentLaneDescriptor {
-  /** 泳道路由键：关联需求为 `<requirementId>:<type>`，兼容任务为 `<type>`。 */
-  readonly key: string
-  /** 工作类型 slug（泳道语义；路由键是 key）。 */
-  readonly type: string
-  /** 关联需求 id（标签泳道的需求段）。 */
-  readonly requirementId?: string
-}
+/**
+ * 泳道描述：路由标签（key）+ 工作类型语义（type）+ 可选需求段。
+ *
+ * 2026-09-21：类型本体已随「Agent 存活登记册」搬到 `agent-registry.ts`（泳道表是它持有
+ * 的六张表之一），此处**re-export** 保持既有 import 面不变（`index.ts` 与 contract 都
+ * 从这里取它）。这也消掉了 registry → agent-service 的一处循环依赖。
+ */
+export type { AgentLaneDescriptor } from './agent-registry.ts'
+// ⚠️ `export type { X } from './y'` 只**转发**、不把 X 带进本文件作用域 —— 本文件仍要在
+// 签名里用这个类型，故必须再来一条 type-only 引入。
+import type { AgentLaneDescriptor } from './agent-registry.ts'
 
 export class CorumAgentService extends TypertRemoteService {
   static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore']
 
-  /** 已创建的角色 root Agent（按 profile id）。 */
-  private readonly agents = new Map<string, Agent>()
-
   /**
-   * 已存活的「项目 × 角色 × 工作类型」会话 Agent（instanceKey =
-   * `${projectId}${profileId}${type}`）。调度层模拟单实例多会话的活跃实例表。
+   * **Agent 存活登记册**（六张按 id 索引的表：root Agent / 泳道会话 / 泳道归属索引 /
+   * task 会话 / task 模型选择 ref / 在飞创建与重建记账）。
+   *
+   * 2026-09-21 按关注点抽到 `agent-registry.ts`（用户定调「至少要在文件层面切分清晰」）。
+   * 抽出的核心理由：**状态的所有者必须显式** —— 这六张表此前散在本类字段里、被 25 处
+   * 方法体直接读写，「谁在写这张表」只能靠全文搜索回答；而那正是上场只读护栏漏洞的结构性成因。
+   *
+   * 服务层一律经**语义方法**访问（`registerTask` / `findLaneBySession` / …），不再碰 Map。
+   * `scripts/verify-refactor-guard.sh` 的 ③ 组把这些表的直访预算钉为 0。
    */
-  private readonly typeAgents = new Map<string, { agent: Agent; sessionId: SessionId; lane: AgentLaneDescriptor }>()
-
-  /** sessionId → 「项目 × 角色 × 泳道标签」反查索引（权限网关用；仅本进程存活会话）。 */
-  private readonly sessionLaneIndex = new Map<string, { projectId: string; profileId: string; type: string; laneKey: string; requirementId?: string }>()
-
-  /** 已存活的 task 模式会话（keyed by sessionId；一个工作区可多个）。 */
-  private readonly taskAgents = new Map<string, { agent: Agent; sessionId: SessionId; cwd: string; profileId: string }>()
-
-  /**
-   * task 泳道的模型选择 ref（sessionId → createAgentForTask 装的那个 ModelSelectionRef）。
-   * installTaskModelSelection 每次请求实时读 `selection.current`——
-   * `selectTaskAgentProfile` 换绑 preset 后改这个 ref 的 current 即切换模型
-   * （不能靠重装：cordis waterfall 先注册的是外层，后装的监听会被创建时的外层盖回）。
-   * 只在内存：进程重启后由 setup 按 profile 重新装配。
-   */
-  private readonly taskSelections = new Map<string, ModelSelectionRef>()
+  private readonly registry = new AgentRegistry()
 
   /**
    * 待定的访问权限档位（sessionId → preset 名），**只存内存、不落盘**。
@@ -619,7 +612,7 @@ export class CorumAgentService extends TypertRemoteService {
     ctx.on('session/event', (session, event) => {
       if (event.type !== 'user/message') return
       const sid = String(session.id)
-      const entry = this.taskAgents.get(sid)
+      const entry = this.registry.task(sid)
       if (entry === undefined) return
       this.flushPendingPermission(entry.agent.session, sid)
     })
@@ -696,23 +689,6 @@ export class CorumAgentService extends TypertRemoteService {
     }) as never, { global: true })
   }
 
-  /** 子 Agent 进度折叠的每会话 O(1) 状态（session/event 增量维护）。 */
-  /**
-   * fork（corum）：子会话 → 委派角色（调研/执行/分叉）。
-   *
-   * 为什么要有这张表：角色来自父侧 `tool/call` 的工具名，随 `corum/subagent/child`
-   * 帧推送；而推送帧**不重放**（刷新/重启/切走后丢失）——会话条花名册的 mode/isolated
-   * 今天就有同样的缺口。卡片走父会话日志（durable）不受影响；花名册由本表经
-   * `getChildSessionProgress` 的冷启动补标拿到（与 stopReason 的种子同一条路）。
-   */
-  /**
-   * 同一 profile 的**在飞创建**（并发去重；见 `createAgent`）。
-   */
-  private readonly agentCreationsInFlight = new Map<string, Promise<CreateAgentResult>>()
-  /**
-   * profile → 最近创建时刻（ms），用于重建风暴护栏与取证（见 `agent-lifecycle-guard.ts`）。
-   */
-  private readonly agentCreationTimes = new Map<string, readonly number[]>()
 
   /**
    * 记录一次 agent 创建；窗口内反复重建同一 profile ⇒ warn + 调用栈（点名驱动者）。
@@ -722,8 +698,8 @@ export class CorumAgentService extends TypertRemoteService {
    */
   private noteAgentCreated(profileId: string): void {
     const stack = new Error().stack
-    const verdict = noteAgentRecreate(this.agentCreationTimes.get(profileId) ?? [], Date.now())
-    this.agentCreationTimes.set(profileId, verdict.recent)
+    const verdict = noteAgentRecreate(this.registry.creationTimesOf(profileId), Date.now())
+    this.registry.setCreationTimes(profileId, verdict.recent)
     this.appendLifecycleDiag({ kind: 'created', profileId, count: verdict.recent.length, stack })
     if (verdict.warn) this.ctx.logger.warn(agentRecreateWarning(profileId, verdict.recent.length, stack))
   }
@@ -795,20 +771,21 @@ export class CorumAgentService extends TypertRemoteService {
     profileId: string,
     extraSetup?: (agentCtx: Context) => void,
   ): Promise<CreateAgentResult> {
-    const existing = this.agents.get(profileId)
+    const existing = this.registry.profileAgent(profileId)
     if (existing !== undefined) return { agent: existing, presetId: profileId }
 
     // ① 并发去重（2026-09-18 护栏）：同一 profile 的创建在飞时复用同一个 promise。
     // 风暴形态是「销毁 → 重建」的串行循环，但并发请求也会把同一个 profile 建出多份、
     // 各挂一套 MCP；去重让「一份 profile 一个 agent」这条不变式在并发下也成立。
-    const inFlight = this.agentCreationsInFlight.get(profileId)
+    const inFlight = this.registry.inFlightOf<CreateAgentResult>(profileId)
     if (inFlight !== undefined) return inFlight
     const task = this.createAgentUncached(profileId, extraSetup)
-    this.agentCreationsInFlight.set(profileId, task)
+    this.registry.setInFlight(profileId, task)
     try {
       return await task
     } finally {
-      this.agentCreationsInFlight.delete(profileId)
+      // 无论成败都清（`finally` 语义）——失败的创建把键永久占住会让该 profile 再也建不出来。
+      this.registry.clearInFlight(profileId)
     }
   }
 
@@ -870,7 +847,7 @@ export class CorumAgentService extends TypertRemoteService {
       },
     })
 
-    this.agents.set(profileId, handle.agent)
+    this.registry.registerProfileAgent(profileId, handle.agent)
     this.ctx.logger.info(`corum-agent: root agent created for profile "${profileId}" — ${sessionId}`)
     this.noteAgentCreated(profileId)
     return { agent: handle.agent, presetId: profile.id }
@@ -912,9 +889,11 @@ export class CorumAgentService extends TypertRemoteService {
   ): Promise<CreateAgentResult & { sessionId: SessionId }> {
     if (!isValidProjectId(projectId)) throw new Error(`dev-agent: invalid project id "${projectId}"`)
     if (!isValidWorkTypeSlug(lane.type)) throw new Error(`dev-agent: invalid work type slug "${lane.type}"`)
-    const instanceKey = `${projectId}${profileId}${lane.key}`
-    const existing = this.typeAgents.get(instanceKey)
-    if (existing !== undefined) return { agent: existing.agent, presetId: profileId, sessionId: existing.sessionId }
+    const existing = this.registry.laneAgent(projectId, profileId, lane.key)
+    if (existing !== undefined) {
+      const entry = this.registry.findLaneBySession(String(existing.session.id))
+      return { agent: existing, presetId: profileId, sessionId: entry?.sessionId ?? SessionId(String(existing.session.id)) }
+    }
 
     const profile = loadProfile(profileId)
     if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
@@ -975,14 +954,7 @@ export class CorumAgentService extends TypertRemoteService {
       this.ctx.logger.info(`corum-agent: created agent — ${sessionId}`)
     }
 
-    this.typeAgents.set(instanceKey, { agent: handle.agent, sessionId, lane })
-    this.sessionLaneIndex.set(String(sessionId), {
-      projectId,
-      profileId,
-      type: lane.type,
-      laneKey: lane.key,
-      ...(lane.requirementId !== undefined ? { requirementId: lane.requirementId } : {}),
-    })
+    this.registry.registerLane(projectId, profileId, lane, handle.agent, sessionId)
     return { agent: handle.agent, presetId: profileId, sessionId }
   }
 
@@ -991,17 +963,17 @@ export class CorumAgentService extends TypertRemoteService {
    * 只识别本服务创建/恢复、且当前仍登记在存活表里的泳道会话。
    */
   resolveLaneBySessionId(sessionId: string): { projectId: string; profileId: string; type: string; laneKey: string; requirementId?: string } | undefined {
-    return this.sessionLaneIndex.get(sessionId)
+    return this.registry.laneOf(sessionId)
   }
 
   /** 获取一个已存活的 (project, profile, type) 会话 Agent。 */
   getAgentForType(projectId: string, profileId: string, type: string = GENERAL_WORK_TYPE): Agent | undefined {
-    return this.typeAgents.get(`${projectId}${profileId}${type}`)?.agent
+    return this.registry.laneAgent(projectId, profileId, type)
   }
 
   /** 获取一个已存活的泳道会话 Agent（按路由标签）。 */
   getAgentForLane(projectId: string, profileId: string, laneKey: string): Agent | undefined {
-    return this.typeAgents.get(`${projectId}${profileId}${laneKey}`)?.agent
+    return this.registry.laneAgent(projectId, profileId, laneKey)
   }
 
   /**
@@ -1043,7 +1015,7 @@ export class CorumAgentService extends TypertRemoteService {
 
   /** 获取已创建的 Agent（未创建返回 undefined）。 */
   getAgent(profileId: string): Agent | undefined {
-    return this.agents.get(profileId)
+    return this.registry.profileAgent(profileId)
   }
 
   /**
@@ -1209,7 +1181,7 @@ export class CorumAgentService extends TypertRemoteService {
 
     // 清掉旧 Agent 使下次重建
     this.noteAgentTeardown(input.id, 'saveProfile')
-    this.agents.delete(input.id)
+    this.registry.forgetProfileAgent(input.id)
     const saved = loadProfile(input.id)!
     return {
       profile: {
@@ -1267,7 +1239,7 @@ export class CorumAgentService extends TypertRemoteService {
     // 存活表（taskAgents / typeAgents）只登记 corum 自己创建的泳道会话；而 IDE 侧
     // 直接经官方 sessions/agents 建起的会话在本进程**确实存活**，却不在那两张表里。
     // 官方 registry 才是「本进程存活」的权威口径（同文件 2083 行恢复逻辑也用它）。
-    const live = this.taskAgents.get(sessionId)
+    const live = this.registry.task(sessionId)
       ?? this.findLaneAgent(sessionId)
       ?? (() => {
         const agent = this.ctx.agents.get(SessionId(sessionId))
@@ -1325,7 +1297,7 @@ export class CorumAgentService extends TypertRemoteService {
       throw new Error(`corum-agent: profile "${id}" 是系统级预置 Agent，不可删除`)
     }
     this.noteAgentTeardown(id, 'deleteProfile')
-    this.agents.delete(id)
+    this.registry.forgetProfileAgent(id)
     deleteProfile(id)
     return { ok: true }
   }
@@ -1333,7 +1305,7 @@ export class CorumAgentService extends TypertRemoteService {
   /** 获取已创建 Agent 的会话事件快照（从指定 seq 开始）。 */
   @Remote('getEvents')
   getEventsRemote(profileId: string, fromSeq: number): { events: SessionEventDto[] } {
-    const agent = this.agents.get(profileId)
+    const agent = this.registry.profileAgent(profileId)
     if (agent === undefined) return { events: [] }
     const events: SessionEventDto[] = []
     for (const event of agent.session.snapshotEvents()) {
@@ -1524,7 +1496,7 @@ export class CorumAgentService extends TypertRemoteService {
           if (!isOfficialPreset) writeAgentDirOf(profile, agentDirPath(profile.id))
           await this.ctx.agentPresets.select(resolved.agent, profile.id)
           registerTaskSessionOf(resolved.sessionId, resolved.cwd, profile.id)
-          this.taskAgents.set(String(resolved.sessionId), { ...resolved, profileId: profile.id })
+          this.registry.registerTask({ ...resolved, profileId: profile.id })
           // fork（corum）：换绑后指挥模式口径必须跟随新 preset（旧限制先撤销）。
           this.conductor.apply(
             String(resolved.sessionId),
@@ -1542,7 +1514,7 @@ export class CorumAgentService extends TypertRemoteService {
           assembled: undefined,
         }
         installTaskModelSelection(resolved.agent.ctx, reuseSelection)
-        this.taskSelections.set(String(resolved.sessionId), reuseSelection)
+        this.registry.setTaskSelection(String(resolved.sessionId), reuseSelection)
         // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
         this.rememberPendingPermission(String(resolved.sessionId), permission)
         return { agent: resolved.agent, presetId: profile.id, sessionId: resolved.sessionId }
@@ -1600,8 +1572,8 @@ export class CorumAgentService extends TypertRemoteService {
     this.rememberPendingPermission(String(sessionId), permission)
     this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${root})`)
 
-    this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd: root, profileId: profile.id })
-    this.taskSelections.set(String(sessionId), selection)
+    this.registry.registerTask({ agent: handle.agent, sessionId, cwd: root, profileId: profile.id })
+    this.registry.setTaskSelection(String(sessionId), selection)
     return { agent: handle.agent, presetId: profile.id, sessionId }
   }
 
@@ -1692,7 +1664,7 @@ export class CorumAgentService extends TypertRemoteService {
    * 已存活直接返回；未存活但已持久化则 resume（官方 session-persistence 冷恢复历史）。
    */
   private async resolveTaskAgent(sessionId: string): Promise<{ agent: Agent; sessionId: SessionId; cwd: string; profileId: string } | undefined> {
-    const live = this.taskAgents.get(sessionId)
+    const live = this.registry.task(sessionId)
     if (live !== undefined) return live
     const index = readTaskSessionIndexOf()
     const meta = index[sessionId]
@@ -1712,7 +1684,7 @@ export class CorumAgentService extends TypertRemoteService {
     const activated = this.ctx.agents.get(sid0)
     if (activated !== undefined) {
       const entry = { agent: activated, sessionId: sid0, cwd: meta.cwd, profileId: meta.profileId }
-      this.taskAgents.set(sessionId, entry)
+      this.registry.registerTask(entry)
       this.conductor.apply(sessionId, activated.ctx, conductor)
       return entry
     }
@@ -1738,8 +1710,8 @@ export class CorumAgentService extends TypertRemoteService {
     const handle = await this.ctx.agents.resume({ resumeSessionId: sid, agentOptions, setup })
     this.ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
     const entry = { agent: handle.agent, sessionId: sid, cwd: meta.cwd, profileId: meta.profileId }
-    this.taskAgents.set(sessionId, entry)
-    this.taskSelections.set(sessionId, selection)
+    this.registry.registerTask(entry)
+    this.registry.setTaskSelection(sessionId, selection)
     return entry
   }
 
@@ -1772,7 +1744,7 @@ export class CorumAgentService extends TypertRemoteService {
     // select 自己判 blank（turnBoundary 投影）——非 blank 泳道抛 locked，原样上抛给 UI。
     await this.ctx.agentPresets.select(resolved.agent, profileId)
     registerTaskSessionOf(resolved.sessionId, resolved.cwd, profileId)
-    this.taskAgents.set(String(sessionId), { ...resolved, profileId })
+    this.registry.registerTask({ ...resolved, profileId })
     // fork（corum）：指挥模式口径随切换重算（切出指挥模式即撤销裁剪与人格段）。
     this.conductor.apply(
       String(sessionId),
@@ -1788,7 +1760,7 @@ export class CorumAgentService extends TypertRemoteService {
     // 正解 = 改**创建时那个 selection ref 的 current**（installTaskModelSelection 每次
     // 请求都实时读它），而不是再装一层。ref 在 createAgentForTask 里按 sessionId 存着。
     {
-      const selection = this.taskSelections.get(String(sessionId))
+      const selection = this.registry.taskSelection(String(sessionId))
       const switchModel = profile === undefined
         ? this.ctx.agentDefaultModel.currentSelection()
         : profile.model
@@ -1810,7 +1782,7 @@ export class CorumAgentService extends TypertRemoteService {
           assembled: undefined,
         }
         installTaskModelSelection(resolved.agent.ctx, fallbackSelection)
-        this.taskSelections.set(String(sessionId), fallbackSelection)
+        this.registry.setTaskSelection(String(sessionId), fallbackSelection)
       }
     }
     this.ctx.logger.info(`corum-agent(task): preset switched — ${sessionId} → ${profileId}`)
@@ -1956,7 +1928,7 @@ export class CorumAgentService extends TypertRemoteService {
       const target = provider !== undefined && model !== undefined
         ? { provider, model }
         : (() => {
-            const live = this.taskAgents.get(sessionId)
+            const live = this.registry.task(sessionId)
             const projections = (this.ctx as unknown as { sessionProjections?: ModelSelectionProjections }).sessionProjections
             const state = live === undefined || projections === undefined
               ? undefined
@@ -2279,7 +2251,7 @@ export class CorumAgentService extends TypertRemoteService {
     const rows = await this.taskListRows()
     for (const [sessionId, meta] of Object.entries(index)) {
       if (wantCwd !== undefined && canonicalWorkspaceKey(meta.cwd) !== wantCwd) continue
-      const live = this.taskAgents.get(sessionId)
+      const live = this.registry.task(sessionId)
       // 标题/最后活动**只读投影缓存**（零 I/O）；未命中按官方口径回退，不读历史。
       // 空串与缺失同义（title 行的 null 也是「尚无标题」）——都要走回退。
       const row = rows.get(sessionId)
@@ -2480,7 +2452,7 @@ export class CorumAgentService extends TypertRemoteService {
   /** 列出已创建的 Agent 的 profile id。 */
   @Remote('listAgents')
   listAgentsRemote(): { agents: AgentStatus[] } {
-    return { agents: [...this.agents.keys()].map(id => ({ profileId: id, created: true })) }
+    return { agents: this.registry.profileIds().map(id => ({ profileId: id, created: true })) }
   }
 
   /**
@@ -2560,15 +2532,12 @@ export class CorumAgentService extends TypertRemoteService {
     writeAgentDirOf(loadProfile(profile.id)!, agentDirPath(profile.id))
     // 清掉旧 Agent 使下次重建
     this.noteAgentTeardown(profile.id, 'verify')
-    this.agents.delete(profile.id)
+    this.registry.forgetProfileAgent(profile.id)
   }
 
   /** 按 sessionId 反查泳道/项目模式的存活会话（taskAgents 之外的存活表）。 */
   private findLaneAgent(sessionId: string): { agent: Agent; sessionId: SessionId } | undefined {
-    for (const entry of this.typeAgents.values()) {
-      if (String(entry.sessionId) === sessionId) return entry
-    }
-    return undefined
+    return this.registry.findLaneBySession(sessionId)
   }
 
 }

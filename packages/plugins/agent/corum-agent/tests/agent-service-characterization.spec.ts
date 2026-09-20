@@ -506,11 +506,10 @@ describe('特征化 · buildChangeSummary / emitChangeSummary（簇 8 / P2）', 
 describe('特征化 · 泳道存活表查找（簇 6 / P3）', () => {
   it('getAgentForType / getAgentForLane 走同一条 instanceKey 拼接（含缺省 type）', () => {
     h = makeHarness()
-    const lane = { key: 'dev', type: 'dev' }
-    const agent = h.registerLaneAgent('proj1profile1dev', { sessionId: 'sess-lane-1', lane })
+    const agent = h.registerLaneAgent('proj1', 'profile1', { key: 'dev', type: 'dev' }, 'sess-lane-1')
     expect(h.service.getAgentForType('proj1', 'profile1', 'dev')).toBe(agent)
     expect(h.service.getAgentForLane('proj1', 'profile1', 'dev')).toBe(agent)
-    // 缺省 type = GENERAL_WORK_TYPE
+    // 缺省 type = GENERAL_WORK_TYPE ⇒ 与登记的 'dev' 不同键
     expect(h.service.getAgentForType('proj1', 'profile1')).toBeUndefined()
     expect(h.service.getAgentForLane('proj1', 'profile1', 'nope')).toBeUndefined()
   })
@@ -518,7 +517,7 @@ describe('特征化 · 泳道存活表查找（簇 6 / P3）', () => {
   it('resolveLaneBySessionId 只认登记过的会话（未登记 → undefined）', () => {
     h = makeHarness()
     expect(h.service.resolveLaneBySessionId('unknown')).toBeUndefined()
-    h.state.sessionLaneIndex.set('sess-lane-2', { projectId: 'p', profileId: 'a', type: 'dev', laneKey: 'dev' })
+    h.registerLaneAgent('p', 'a', { key: 'dev', type: 'dev' }, 'sess-lane-2')
     expect(h.service.resolveLaneBySessionId('sess-lane-2')).toEqual({
       projectId: 'p', profileId: 'a', type: 'dev', laneKey: 'dev',
     })
@@ -529,7 +528,7 @@ describe('特征化 · 泳道存活表查找（簇 6 / P3）', () => {
     const find = (h.service as unknown as Record<string, (s: string) => unknown>).findLaneAgent
     // **正向控制**（必须先有）：证明这条断言不是空转 —— 若 findLaneAgent 被搬坏成
     // 永远返回 undefined，仅断言「未命中 → undefined」会照常绿。
-    h.registerLaneAgent('k-lane', { sessionId: 'sess-found', lane: { key: 'dev', type: 'dev' } })
+    h.registerLaneAgent('proj', 'prof', { key: 'dev', type: 'dev' }, 'sess-found')
     expect(find.call(h.service, 'sess-found')).toMatchObject({ sessionId: 'sess-found' })
     // 未命中 → undefined
     expect(find.call(h.service, 'definitely-not-a-lane')).toBeUndefined()

@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { AgentRegistry } from '../src/agent-registry.ts'
 import {
   STATE_CONTAINER_KEY,
   assertStateContract,
@@ -35,10 +36,11 @@ describe('harness — 状态契约（本轮安全网的地基）', () => {
   it('② 契约断了必须 fail-loud（不许静默降级成假服务）', () => {
     const h = makeHarness()
     try {
-      // 模拟「状态搬进容器，但 harness 仍往服务实例上挂字段」：把服务上那份表**换掉**，
-      // 使 harness 持有的表与服务读的表不再同源。
-      Object.defineProperty(h.service, 'agents', {
-        value: new Map<string, unknown>(),
+      // 模拟「harness 的视图与服务的容器脱钩」：把服务上的 registry 换成另一个实例
+      // （实现里读的是服务自己那个属性），于是 harness 写进的条目服务再也看不到。
+      const key = STATE_CONTAINER_KEY!
+      Object.defineProperty(h.service, key, {
+        value: new AgentRegistry(),
         writable: true,
         configurable: true,
       })
@@ -50,10 +52,10 @@ describe('harness — 状态契约（本轮安全网的地基）', () => {
   })
 
   it('③ STATE_CONTAINER_KEY 与当前实现的形态一致', () => {
-    // 当前实现：状态表是 CorumAgentService 的自有字段 ⇒ 契约键为 undefined。
-    // P3 把它们收进 AgentRegistry 时，这里会一起变红 —— 那正是提醒「去改 harness」的信号
-    // （而不是让 278 个测试静默失真）。
-    expect(STATE_CONTAINER_KEY).toBeUndefined()
+    // 当前实现（P3-a）：六张存活表收在 `AgentRegistry` 里，服务上的容器属性名是 'registry'。
+    // 实现再改状态归属时，这里会一起变红 —— 那正是提醒「去改 harness」的信号
+    // （而不是让 300+ 个测试静默失真）。本文件是这条契约的**唯一**落点。
+    expect(STATE_CONTAINER_KEY).toBe('registry')
   })
 
   it('④ 临时 home 已生效（profile 真实落盘到本次 home）', () => {
