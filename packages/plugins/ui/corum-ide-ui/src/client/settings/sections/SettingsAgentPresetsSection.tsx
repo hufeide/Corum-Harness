@@ -334,13 +334,19 @@ interface EditDraft {
   prompt: string
   provider: string
   model: string
+  /** 主 Agent 推理等级（'' = 默认档；无 reasoning 元数据的路由不渲染该列）。 */
+  mainEffort: string
   subEnabled: boolean
   subProvider: string
   subModel: string
+  /** 子 Agent 推理等级（'' = 默认档）。 */
+  subEffort: string
   /** 研究子 Agent 模型（subagent_research 只读实例；缺省同子 Agent）。 */
   researchEnabled: boolean
   researchProvider: string
   researchModel: string
+  /** 调查 Agent 推理等级（'' = 默认档）。 */
+  researchEffort: string
   /** 自定义设置开关（设计稿 v4 card-模型与并发：关闭 = 跟随系统统一设置）。 */
   customEnabled: boolean
   /** 「模型与并发」卡片是否展开（设计稿 v4：默认折叠）。 */
@@ -379,14 +385,18 @@ function emptyDraft(template?: { sub?: { provider: string; model: string } | und
     name: '', nickname: '', title: '', dimension: '研发', experience: '',
     personaPreset: DEFAULT_PERSONA_PRESET, personaCustom: '', persona: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
+    // 推理等级一律以「默认档」起步（跟随新模型的默认档，不预填旧档）。
+    mainEffort: '',
     // 模板命中 ⇒ 预填并**打开**该项（让用户看得见「这个预设用了全局模板的模型」）；
     // 模板缺省 ⇒ subEnabled=false = 菜单里的「（同主 Agent）」，即第二档。
     subEnabled: sub !== undefined,
     subProvider: sub?.provider ?? 'deepseek-official',
     subModel: sub?.model ?? 'deepseek-v4-flash',
+    subEffort: '',
     researchEnabled: research !== undefined,
     researchProvider: research?.provider ?? 'deepseek-official',
     researchModel: research?.model ?? 'deepseek-v4-flash',
+    researchEffort: '',
     customEnabled: sub !== undefined || research !== undefined, modelCardExpanded: sub !== undefined || research !== undefined, maxParallel: '',
     terminal: 'sandbox', memoryEnabled: false, skills: [], mcpServers: [], trust: 'user',
   }
@@ -408,14 +418,17 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     prompt: p.prompt,
     provider: p.model.provider,
     model: p.model.model,
+    mainEffort: p.model.reasoningEffort ?? '',
     // 子 Agent 模型回填：已配 → subEnabled + 回填 provider/model；未配 → subEnabled=false
     // （否则编辑已配子模型的 Agent 再保存会把 subagentModel 静默冲掉）。
     subEnabled: p.subagentModel !== undefined,
     subProvider: p.subagentModel?.provider ?? 'deepseek-official',
     subModel: p.subagentModel?.model ?? 'deepseek-v4-flash',
+    subEffort: p.subagentModel?.reasoningEffort ?? '',
     researchEnabled: p.researchModel !== undefined,
     researchProvider: p.researchModel?.provider ?? 'deepseek-official',
     researchModel: p.researchModel?.model ?? 'deepseek-v4-flash',
+    researchEffort: p.researchModel?.reasoningEffort ?? '',
     // 自定义设置：任一覆盖项已配（子/研究模型或并发上限）即视为开启，并默认展开卡片。
     customEnabled: p.subagentModel !== undefined || p.researchModel !== undefined
       || p.parallelWork?.maxParallelChildren !== undefined,
@@ -703,6 +716,43 @@ const FALLBACK_MODELS = [
 /** 子 Agent 模型未启用时的占位项（设计稿 iUSeO「（同主 Agent）」）。 */
 const SAME_AS_MAIN = { id: '', label: '（同主 Agent）' }
 
+/** 某条路由（`provider/model`）的推理元数据（`session/modelCatalog` 投影）。 */
+interface ReasoningMeta {
+  efforts: { id: string; name: string; description?: string }[]
+  defaultEffort?: string
+}
+
+/**
+ * `session/modelCatalog` 的返回投影（只声明本页消费到的字段）。
+ *
+ * ⚠️ 这是**带推理元数据**的目录源（与 composer 模型选择器同源）；
+ * `corumAgent/listModels` 的投影只有 `{id, name}`，**不含** reasoning
+ * ⇒ 撑不起「推理等级」列。
+ */
+interface SessionCatalogModel {
+  id: string
+  name?: string
+  reasoning?: {
+    efforts?: { id: string; name: string; description?: string }[]
+    defaultEffort?: string
+  }
+}
+interface SessionCatalogGroup { id: string; name?: string; models?: SessionCatalogModel[] }
+interface SessionCatalogResult { groups?: SessionCatalogGroup[] }
+
+/**
+ * 「推理等级」列的档位选项：默认档置顶（label 标注落在哪个默认值），其后是目录中的各档。
+ *
+ * @param meta - 当前路由的推理元数据；无元数据（不渲染该列）时返回空数组。
+ * @returns SelectField 选项。
+ */
+function effortOptionsOf(meta: ReasoningMeta): Array<{ id: string; label: string }> {
+  return [
+    { id: '', label: `默认档（${meta.defaultEffort ?? 'provider 默认'}）` },
+    ...meta.efforts.map(e => ({ id: e.id, label: e.name })),
+  ]
+}
+
 function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
   profile: AgentProfileSummary | undefined
   rpc: CorumRpcCall
@@ -726,23 +776,53 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
   const developerMode = useDeveloperMode()
   const fileRef = useRef<HTMLInputElement | null>(null)
 
-  // 模型目录（corumAgent/listModels 动态加载；失败用兜底静态目录）。
-  const [catalog, setCatalog] = useState<{ providers: typeof FALLBACK_PROVIDERS; modelsByProvider: Record<string, typeof FALLBACK_MODELS> }>(
-    { providers: FALLBACK_PROVIDERS, modelsByProvider: {} },
+  /**
+   * 模型目录（`session/modelCatalog` 动态加载；失败用兜底静态目录）。
+   *
+   * ⚠️ 目录源必须是 **`session/modelCatalog`**（与 composer 模型选择器同源，**带
+   * reasoning 元数据**），而不是 `corumAgent/listModels`（投影只有 `{id,name}`）
+   * ——后者撑不起设计稿 v4 的「推理等级」第三列。
+   * 兜底目录没有 reasoning ⇒ `reasoningByRoute` 为空对象 ⇒ 三档都保持两列，不白屏。
+   */
+  const [catalog, setCatalog] = useState<{
+    providers: typeof FALLBACK_PROVIDERS
+    modelsByProvider: Record<string, typeof FALLBACK_MODELS>
+    reasoningByRoute: Record<string, ReasoningMeta>
+  }>(
+    { providers: FALLBACK_PROVIDERS, modelsByProvider: {}, reasoningByRoute: {} },
   )
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const r = await rpc<{ providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }> }>('corumAgent', 'listModels', {})
+        const r = await rpc<SessionCatalogResult>('session', 'modelCatalog', {})
         if (cancelled) return
-        const providers = r.providers.map(p => ({ id: p.id, label: p.name !== '' ? p.name : p.id }))
+        const groups = r.groups ?? []
+        if (groups.length === 0) return
+        const providers: typeof FALLBACK_PROVIDERS = []
         const modelsByProvider: Record<string, typeof FALLBACK_MODELS> = {}
-        for (const p of r.providers) modelsByProvider[p.id] = p.models.map(m => ({ id: m.id, label: m.name !== '' ? m.name : m.id }))
-        setCatalog({ providers, modelsByProvider })
+        const reasoningByRoute: Record<string, ReasoningMeta> = {}
+        for (const p of groups) {
+          providers.push({ id: p.id, label: p.name !== undefined && p.name !== '' ? p.name : p.id })
+          const models = (p.models ?? []).map(m => ({ id: m.id, label: m.name !== undefined && m.name !== '' ? m.name : m.id }))
+          modelsByProvider[p.id] = models
+          for (const m of p.models ?? []) {
+            if (m.reasoning === undefined) continue
+            // exactOptionalPropertyTypes：可选属性不能显式传 undefined，故条件展开。
+            reasoningByRoute[`${p.id}/${m.id}`] = {
+              efforts: (m.reasoning.efforts ?? []).map(e => ({
+                id: e.id,
+                name: e.name,
+                ...(e.description === undefined ? {} : { description: e.description }),
+              })),
+              ...(m.reasoning.defaultEffort === undefined ? {} : { defaultEffort: m.reasoning.defaultEffort }),
+            }
+          }
+        }
+        setCatalog({ providers, modelsByProvider, reasoningByRoute })
       } catch {
-        // 静默用兜底目录（不阻断编辑页）。
+        // 静默用兜底目录（不阻断编辑页；reasoningByRoute 保持为空 ⇒ 不显示推理等级列）。
       }
     })()
     return () => { cancelled = true }
@@ -791,6 +871,12 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
     ? [SAME_AS_MAIN, ...(catalog.modelsByProvider[draft.subProvider] ?? FALLBACK_MODELS)]
     : [SAME_AS_MAIN]
 
+  // 推理等级元数据（三档各自按当前「供应商/模型」路由查表）：无元数据 ⇒ 该档不渲染
+  // 「推理等级」列，保持两列形态（设计稿 v4 + 参照 ModelPairField 的条件渲染语义）。
+  const mainReasoning = catalog.reasoningByRoute[`${draft.provider}/${draft.model}`]
+  const subReasoning = catalog.reasoningByRoute[`${draft.subProvider}/${draft.subModel}`]
+  const researchReasoning = catalog.reasoningByRoute[`${draft.researchProvider}/${draft.researchModel}`]
+
   const set = <K extends keyof EditDraft>(k: K, v: EditDraft[K]) => setDraft(prev => ({ ...prev, [k]: v }))
 
   const handleAvatarFile = (e: ChangeEvent<HTMLInputElement>) => {
@@ -837,12 +923,17 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
           ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
           baseMode: draft.baseMode as EditDraft['baseMode'],
           prompt: draft.prompt,
-          model: { provider: draft.provider, model: draft.model },
+          // 主 Agent 模型三元组：推理等级为空（默认档）时不展开该键。
+          model: {
+            provider: draft.provider,
+            model: draft.model,
+            ...(draft.mainEffort !== '' ? { reasoningEffort: draft.mainEffort } : {}),
+          },
           // 自定义设置关闭时不覆盖系统统一设置：不写子/研究模型与并发键。
           ...(draft.customEnabled && draft.subEnabled
-            ? { subagentModel: { provider: draft.subProvider, model: draft.subModel } } : {}),
+            ? { subagentModel: { provider: draft.subProvider, model: draft.subModel, ...(draft.subEffort !== '' ? { reasoningEffort: draft.subEffort } : {}) } } : {}),
           ...(draft.customEnabled && draft.researchEnabled
-            ? { researchModel: { provider: draft.researchProvider, model: draft.researchModel } } : {}),
+            ? { researchModel: { provider: draft.researchProvider, model: draft.researchModel, ...(draft.researchEffort !== '' ? { reasoningEffort: draft.researchEffort } : {}) } } : {}),
           ...buildParallelWork(draft),
           skills: draft.skills,
           mcpServers: draft.mcpServers,
@@ -1211,19 +1302,40 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
             <>
               <div className={css.modelCardDivider} />
 
-              {/* 三档执行模型（关闭自定义时只读） */}
+              {/* 三档执行模型（关闭自定义时只读）；「推理等级」列按当前路由有无
+                  reasoning 元数据条件渲染（无元数据 = 保持两列，见 mainReasoning 等）。 */}
               <div className={css.formColsStretch}>
                 <div className={css.formCol} style={{ gap: 4 }}>
                   <label className={css.fieldLabelSm}>主 Agent 模型</label>
                   <div className={css.selectStack}>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>供应商</label>
-                      <SelectField value={draft.provider} options={mainProviderOptions} onChange={v => set('provider', v)} disabled={!draft.customEnabled} variant="fill" />
+                      <SelectField
+                        value={draft.provider}
+                        options={mainProviderOptions}
+                        // 联动：provider 变更后原模型若不在新目录里则回落兜底列表；
+                        // 推理等级一律重置为默认档（新模型的档位未必兼容）。
+                        onChange={v => { set('provider', v); set('mainEffort', '') }}
+                        disabled={!draft.customEnabled}
+                        variant="fill"
+                      />
                     </div>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>模型</label>
-                      <SelectField value={draft.model} options={mainModelOptions} onChange={v => set('model', v)} disabled={!draft.customEnabled} variant="fill" />
+                      <SelectField
+                        value={draft.model}
+                        options={mainModelOptions}
+                        onChange={v => { set('model', v); set('mainEffort', '') }}
+                        disabled={!draft.customEnabled}
+                        variant="fill"
+                      />
                     </div>
+                    {mainReasoning !== undefined && (
+                      <div className={css.formCol} style={{ gap: 3 }}>
+                        <label className={css.fieldLabelSm}>推理等级</label>
+                        <SelectField value={draft.mainEffort} options={effortOptionsOf(mainReasoning)} onChange={v => set('mainEffort', v)} disabled={!draft.customEnabled} variant="fill" />
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className={css.formCol} style={{ gap: 4 }}>
@@ -1231,12 +1343,18 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                   <div className={css.selectStack}>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>供应商</label>
-                      <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v) }} disabled={!draft.customEnabled} variant="fill" />
+                      <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v); set('subEffort', '') }} disabled={!draft.customEnabled} variant="fill" />
                     </div>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>模型</label>
-                      <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v) }} disabled={!draft.customEnabled || !draft.subEnabled} variant="fill" />
+                      <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v); set('subEffort', '') }} disabled={!draft.customEnabled || !draft.subEnabled} variant="fill" />
                     </div>
+                    {subReasoning !== undefined && (
+                      <div className={css.formCol} style={{ gap: 3 }}>
+                        <label className={css.fieldLabelSm}>推理等级</label>
+                        <SelectField value={draft.subEffort} options={effortOptionsOf(subReasoning)} onChange={v => set('subEffort', v)} disabled={!draft.customEnabled || !draft.subEnabled} variant="fill" />
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className={css.formCol} style={{ gap: 4 }}>
@@ -1244,12 +1362,18 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                   <div className={css.selectStack}>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>供应商</label>
-                      <SelectField value={draft.researchEnabled ? draft.researchProvider : ''} options={subProviderOptions} onChange={v => { set('researchEnabled', v !== ''); if (v !== '') set('researchProvider', v) }} disabled={!draft.customEnabled} variant="fill" />
+                      <SelectField value={draft.researchEnabled ? draft.researchProvider : ''} options={subProviderOptions} onChange={v => { set('researchEnabled', v !== ''); if (v !== '') set('researchProvider', v); set('researchEffort', '') }} disabled={!draft.customEnabled} variant="fill" />
                     </div>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>模型</label>
-                      <SelectField value={draft.researchEnabled ? draft.researchModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('researchModel', v) }} disabled={!draft.customEnabled || !draft.researchEnabled} variant="fill" />
+                      <SelectField value={draft.researchEnabled ? draft.researchModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('researchModel', v); set('researchEffort', '') }} disabled={!draft.customEnabled || !draft.researchEnabled} variant="fill" />
                     </div>
+                    {researchReasoning !== undefined && (
+                      <div className={css.formCol} style={{ gap: 3 }}>
+                        <label className={css.fieldLabelSm}>推理等级</label>
+                        <SelectField value={draft.researchEffort} options={effortOptionsOf(researchReasoning)} onChange={v => set('researchEffort', v)} disabled={!draft.customEnabled || !draft.researchEnabled} variant="fill" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
