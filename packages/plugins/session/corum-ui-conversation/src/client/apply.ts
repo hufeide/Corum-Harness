@@ -459,6 +459,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
               ...(p.dimension === undefined ? {} : { dimension: p.dimension }),
             }))
           },
+          defaultAgentPreset: async () => {
+            // 复用同一条 listProfiles RPC（host 侧已把 agent-presets.default
+            // 解析进 result.defaultProfileId）——不新造 RPC 端点（RPC 面冻结）。
+            const result = await call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {})
+            return result.defaultProfileId
+          },
           listModels: async () => {
             const result = await call<ListModelsResult>('corumAgent', CORUM_AGENT_METHODS.listModels, {})
             return (result.providers ?? []).map((p) => ({ id: p.id, name: p.name, models: p.models ?? [] }))

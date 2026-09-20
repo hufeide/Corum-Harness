@@ -209,6 +209,27 @@ export function AgentSettingsSection() {
     return () => { cancelled = true }
   }, [rpc])
 
+  // 在册 Agent 列表（corumAgent/listProfiles）——用于「默认 Agent 预设」下拉。
+  // rpc === null 时跳过；失败静默留空数组，页面不白屏。
+  const [agentOptions, setAgentOptions] = useState<ModelOption[]>([])
+  useEffect(() => {
+    if (rpc === null) return undefined
+    let cancelled = false
+    void (async () => {
+      try {
+        const r = await rpc<{ profiles: Array<{ id: string; nickname?: string; source?: string }> }>('corumAgent', 'listProfiles', {})
+        if (cancelled) return
+        setAgentOptions((r.profiles ?? []).map(p => ({
+          id: p.id,
+          label: `${p.nickname ?? p.id}（${p.source === 'official' ? '官方' : 'corum'}）`,
+        })))
+      } catch {
+        // 静默：RPC 失败时留空数组，下拉仅显示「未设置」+ 已保存值（ensureOption 补位）。
+      }
+    })()
+    return () => { cancelled = true }
+  }, [rpc])
+
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -397,16 +418,13 @@ export function AgentSettingsSection() {
       </SettingGroup>
 
       <SettingGroup title="Agent 预设">
-        <SettingRow label="默认 Agent 预设" desc="新会话默认挂载哪个预设（`agent-presets.default`）。留空 = 用机制内置默认。" divider={false}>
-          <input
-            className={css.textInput}
-            defaultValue={presetsUser.default ?? ''}
-            placeholder="预设 id（如 corum-dev）"
+        <SettingRow label="默认 Agent 预设" desc="新建任务/会话默认挂载的 Agent 预设（`agent-presets.default`）。改动对**之后新建**的会话生效，已运行的会话不受影响。" divider={false}>
+          <SelectField
+            value={presetsUser.default ?? ''}
+            options={[{ id: '', label: '未设置（机制内置默认）' }, ...ensureOption(agentOptions, presetsUser.default)]}
+            onChange={id => { void apply(PRESETS_NS, 'default', id === '' ? undefined : id) }}
             disabled={disabled}
-            onBlur={e => {
-              const raw = e.target.value.trim()
-              void apply(PRESETS_NS, 'default', raw === '' ? undefined : raw)
-            }}
+            variant="fill"
           />
         </SettingRow>
       </SettingGroup>

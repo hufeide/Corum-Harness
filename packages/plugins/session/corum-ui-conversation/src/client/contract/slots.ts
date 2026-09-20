@@ -259,6 +259,10 @@ export interface ConversationInjected {
     newTask: (options?: NewTaskOptions) => Promise<void>
     /** 可选的 Agent profile 列表（corumAgent.listProfiles，含各 Agent 默认模型）。 */
     listAgents: () => Promise<readonly AgentOption[]>
+    /** 已配置的默认 Agent 预设 id（`agent-presets.default` settings；host 侧热更新生效）。
+     *  未配置时返回 undefined——调用方回落列表第一项。空态新建任务表单用它初始化
+     *  Agent 下拉的默认选中值。与 listAgents 同源（listProfiles RPC 顶层字段）。 */
+    defaultAgentPreset: () => Promise<string | undefined>
     /** 可选模型目录（corumAgent.listModels，provider→models）。新建任务表单模型
      *  下拉的数据源：选定 Agent 后默认取该 Agent 的默认模型，用户仍可改。 */
     listModels: () => Promise<readonly ModelProviderOption[]>

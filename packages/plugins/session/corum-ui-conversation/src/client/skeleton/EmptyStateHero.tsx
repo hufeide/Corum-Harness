@@ -121,8 +121,21 @@ function NewTaskForm({ emptyActions, onClose }: {
 
   useEffect(() => {
     let alive = true
-    emptyActions.listAgents()
-      .then((list) => { if (!alive) return; setAgents(list); setProfileId((cur) => cur === '' ? (list[0]?.id ?? '') : cur) })
+    // Agent 列表与默认预设并行拉取（同源 listProfiles RPC）：默认选中
+    // agent-presets.default 指定的预设（在列表里找到才用；找不到或为空回落第一项）。
+    Promise.all([
+      emptyActions.listAgents(),
+      emptyActions.defaultAgentPreset().catch(() => undefined),
+    ])
+      .then(([list, defaultId]) => {
+        if (!alive) return
+        setAgents(list)
+        setProfileId((cur) => {
+          if (cur !== '') return cur
+          if (defaultId !== undefined && list.some(a => a.id === defaultId)) return defaultId
+          return list[0]?.id ?? ''
+        })
+      })
       .catch(() => { /* Agent 列表拉取失败：留空，提交时 host 用内置 task profile */ })
     emptyActions.listModelCatalog()
       .then((list) => { if (alive) setModelGroups(list) })

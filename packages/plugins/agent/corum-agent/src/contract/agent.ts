@@ -109,9 +109,12 @@ export interface ListPermissionPresetsResult {
   defaultPreset: string
 }
 
-/** listProfiles 返回：全部 AgentProfile 摘要。 */
+/** listProfiles 返回：全部 AgentProfile 摘要 + 已配置的默认预设 id（缺省 undefined）。 */
 export interface ListProfilesResult {
   profiles: ProfileSummary[]
+  /** `agent-presets.default` settings 解析出的默认 task 预设 id（未配置时 undefined）。
+   *  供空态新建任务表单初始化 Agent 下拉的默认选中值——host 侧读 settings 热更新生效。 */
+  defaultProfileId?: string
 }
 
 /** listTaskAgents 入参：可按 cwd 过滤（缺省列出全部 task 会话）。 */

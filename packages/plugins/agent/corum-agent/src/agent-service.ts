@@ -1103,7 +1103,8 @@ export class CorumAgentService extends TypertRemoteService {
       trust: p.trust,
       source: 'official' as const,
     }))
-    return { profiles: [...corumProfiles, ...officialProfiles] }
+    const configuredDefault = this.readConfiguredDefaultPreset()
+    return { profiles: [...corumProfiles, ...officialProfiles], ...(configuredDefault !== undefined ? { defaultProfileId: configuredDefault } : {}) }
   }
 
   /** 创建（或复用）一个 root Agent，返回状态。 */
@@ -1384,6 +1385,58 @@ export class CorumAgentService extends TypertRemoteService {
   // ── task 模式泳道（单任务会话，corum-task-* session id，与 project 泳道隔离） ──
 
   /**
+   * 未显式指定时的 task 默认预设：读 `agent-presets` settings 命名空间的 `default` 字段。
+   *
+   * 通路选择说明（AGENTS.md 红线 4）：`ctx.get('settings')` 是只读获取未注入的 settings
+   * 服务的安全路径——参照同文件 `outputLanguageVariable` 的先例（约 569 行，同样用
+   * `ctx.get('settings')` 读 `locale` 命名空间）。settings 服务在 boot 早期可能尚未挂载
+   * ⇒ `ctx.get` 返回 undefined，此处容忍并回落。**热更新生效**：settings 文档每次
+   * `get()` 都重新读取（uSES 源），故改了默认预设后**下一次** `createAgentForTask` 即生效。
+   *
+   * 与官方 `AgentPresets.defaultId` 的差异：`defaultId` 在用户未配置时回落到
+   * `config.default`（部署默认，可能是 `standard` 等官方模式）；而 task 泳道在
+   * 用户未配置时应回落 `TASK_PROFILE_ID`（内置 task profile），语义不同——
+   * 「未配置 = 用机制内置 task 默认」，不是「用部署默认 preset」。
+   *
+   * 配置的预设 id 只做**corum profile 存在性校验**（`loadProfile`）；官方 preset id
+   * 不做同步校验（本服务不持有官方 preset 目录，mount 时会校验），失效的官方 id
+   * 会在 mount 处抛 `agent-preset/not-found`，错误可诊断。corum profile 不存在时
+   * 回落 `TASK_PROFILE_ID` + warn 日志——建任务链路不该被一条陈旧配置卡死。
+   */
+  private resolveDefaultTaskProfileId(): string {
+    const settings = this.ctx.get('settings') as { get?: (ns: string) => unknown } | undefined
+    const view = settings?.get?.('agent-presets') as { value?: { default?: string }; user?: { default?: string } } | undefined
+    const configured = view?.user?.default ?? view?.value?.default
+    if (typeof configured === 'string' && configured.trim() !== '') {
+      const id = configured.trim()
+      // 配置的预设必须在册（corum profile），否则静默回落会让用户以为生效了。
+      if (loadProfile(id) !== undefined) return id
+      // 官方 preset：本服务不持有目录（在 ctx.agentPresets），mount/resolve 会在
+      // 后面校验；此处无法同步确认其存在 ⇒ 放行（沿用 isOfficialPreset 分支判定）。
+      // 失效的官方 id 会在 mount 处抛 agent-preset/not-found，错误可诊断。
+      this.ctx.logger.warn(`corum-agent(task): configured default "${id}" not found in corum profiles — may be official preset (will validate on mount)`)
+      return id
+    }
+    return TASK_PROFILE_ID
+  }
+
+  /**
+   * 读 `agent-presets.default` 的**用户配置值**（不做 TASK_PROFILE_ID 回落）。
+   *
+   * 供 `listProfilesRemote` 把默认值透传给 UI（空态表单用它初始化下拉选中项）。
+   * 与 {@link resolveDefaultTaskProfileId} 的差异：后者在建任务时回落
+   * `TASK_PROFILE_ID`（机制内置默认），而 UI 侧「未配置」应回落列表第一项
+   * （由调用方处理），故这里返回 `undefined`。
+   */
+  private readConfiguredDefaultPreset(): string | undefined {
+    const settings = this.ctx.get('settings') as { get?: (ns: string) => unknown } | undefined
+    const view = settings?.get?.('agent-presets') as { value?: { default?: string }; user?: { default?: string } } | undefined
+    const configured = view?.user?.default ?? view?.value?.default
+    if (typeof configured === 'string' && configured.trim() !== '') return configured.trim()
+    return undefined
+  }
+
+  /**
    * 创建（或按 cwd+profile 恢复）一个 task 模式单任务会话 Agent。
    *
    * task 模式与 project 模式的差异：task 会话是「用户在某工作区直接发起的单任务
@@ -1406,7 +1459,9 @@ export class CorumAgentService extends TypertRemoteService {
    * 「blank 仅当前选中时可见」）。
    *
    * @param cwd - 工作区目录（task 会话的工作现场，创建后不可改）。
-   * @param profileId - Agent profile id（缺省用内置 task profile）。
+   * @param profileId - Agent profile id（可选，缺省解析 `agent-presets.default` settings）。
+   *   未传时走 {@link resolveDefaultTaskProfileId}：读 settings 命名空间
+   *   `agent-presets` 的 `default` 字段；配置存在且在册用之，否则回落 `TASK_PROFILE_ID`。
    * @param permission - 访问权限档位（`read-only`/`workspace-write`/
    *   `danger-full-access`，缺省沿用全局默认）。经官方 `permissionPresets.set`
    *   写入：先落 `permission/preset` 事件，再由 `setSandboxMode`/`setApprovalPolicy`
@@ -1414,7 +1469,8 @@ export class CorumAgentService extends TypertRemoteService {
    *   覆盖全局默认值。
    * @returns 创建/恢复结果 + 该会话的 sessionId（corum-task-<rand>）。
    */
-  async createAgentForTask(cwd: string, profileId: string = TASK_PROFILE_ID, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
+  async createAgentForTask(cwd: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
+    const effectiveProfileId = profileId ?? this.resolveDefaultTaskProfileId()
     // 判定表门禁（不变式 C：互斥）——**本方法是「task 模式」入口**，故按 task 口径校验。
     // 用户 2026-09-14 裁定：「如果是 task 模式打开一个 project 项目，则提示用户是项目
     // 模式，是否按照项目模式开启。**拒绝按照 task 模式开启**。」
@@ -1430,17 +1486,17 @@ export class CorumAgentService extends TypertRemoteService {
         )
       }
     }
-    // profileId 双源（2026-09-02 并列展示）：corum profile（研发/PM 助理/测试/Task
+    // effectiveProfileId 双源（2026-09-02 并列展示）：corum profile（研发/PM 助理/测试/Task
     // 助理，loadProfile 加载）或**官方 preset**（cordis/minimal/ptc/standard，
     // agentPresets 目录——直接 mount preset id，无 corum profile 实体）。
-    const isOfficialPreset = profileId !== TASK_PROFILE_ID && loadProfile(profileId) === undefined
+    const isOfficialPreset = effectiveProfileId !== TASK_PROFILE_ID && loadProfile(effectiveProfileId) === undefined
     let profile: AgentProfile
     if (isOfficialPreset) {
       // 官方 preset：persona 在组合里（profile.prompt 只用于 UI 显示/校验占位）；
       // 模型跟随部署默认（official preset 不绑定固定模型）。
       const dm = this.ctx.agentDefaultModel.currentSelection()
       profile = {
-        id: profileId,
+        id: effectiveProfileId,
         baseMode: 'standard',
         prompt: '',
         model: model ?? {
@@ -1456,8 +1512,8 @@ export class CorumAgentService extends TypertRemoteService {
         trust: 'system',
       }
     } else {
-      const loaded = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
-      if (loaded === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
+      const loaded = effectiveProfileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(effectiveProfileId)
+      if (loaded === undefined) throw new Error(`dev-agent: profile "${effectiveProfileId}" not found`)
       profile = loaded
     }
     if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
