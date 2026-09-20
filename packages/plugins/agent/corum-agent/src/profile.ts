@@ -72,31 +72,17 @@ export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor'
 
 /**
  * 并行开发策略（多子 Agent 硬隔离编排，docs/plan/PLAN-subagent-isolation.md §4）。
- * 编译进 fork #10（@corum/corum-tool-subagent）双实例行的 config；缺省键由
- * host settings namespace `corum-subagent` 兜底（三级配置模型 §1.6）。
+ * 编译进 fork #10（@corum/corum-tool-subagent）双实例行的 config。
+ *
+ * 2026-09-21 裁定：**隔离 / 合并相关键（原 `isolation` / `worktreeRoot` / `branchPrefix` /
+ * `merger` / `autoCleanup` / `denyDirectFs` / `integrateChecks`）已从本接口移除**——这些
+ * 机制已恒定生效（凡写委派恒隔离、自动清理、deny 直连 FS、按父 cwd 探测核查命令、父 Agent
+ * 合并），不再允许 preset 覆盖，属**死键清除**。存量 preset yaml 里的旧键**忽略不迁移**
+ * （宽松处理：读到时丢弃，不报错、不做转换）。
  */
 export interface ParallelWorkPolicy {
-  /**
-   * 隔离模式：'always' 与非 'always' 对**写任务等价**（都隔离）。
-   *
-   * 2026-09-16 不变式⑤（凡写委派恒隔离）后 `off` 已清除——没有逃生口。保留 `write-tasks`
-   * 取值只是为了不动存量配置（它现在是「写任务隔离」的同义词）。
-   */
-  isolation?: 'always' | 'write-tasks'
-  /** worktree 根目录（相对会话 cwd 或绝对路径，默认 '.corum-worktrees'）。 */
-  worktreeRoot?: string
-  /** 分支名前缀（默认 'wt/'）。 */
-  branchPrefix?: string
-  /** 合并者：'parent' 父 Agent 合并（默认）；'merger' 专职 merger 子 Agent。 */
-  merger?: 'parent' | 'merger'
   /** 会话级并行子 Agent 上限（默认 4，超限拒绝新召唤）。 */
   maxParallelChildren?: number
-  /** 合并后自动清理 worktree+分支（默认 true）。 */
-  autoCleanup?: boolean
-  /** worktree 模式子 Agent deny str_replace_editor（硬隔离补漏，默认 true）。 */
-  denyDirectFs?: boolean
-  /** integrate 召唤的固定核查命令（默认 ['pnpm -r typecheck']；编码规范类核查在此配置）。 */
-  integrateChecks?: string[]
 }
 
 /** Agent 岗位维度（名片筛选维度；`通用` = 不限编程/跨领域岗位，2026-09-10 新增）。 */
