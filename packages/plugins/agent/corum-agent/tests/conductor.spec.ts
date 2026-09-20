@@ -112,17 +112,26 @@ describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
     expect(CONDUCTOR_PERSONA).toMatch(/read \/ glob \/ grep/)
   })
 
-  it('广域调研委派、点读自己做（2026-09-20 用户：自己全查会耗尽上下文）', () => {
+  it('三阶段渐进式调研 + 可判定停止点（2026-09-20 用户定调）', () => {
     // 用户原话：「我希望调研的任务还是能多委派给 research 做，然后带上自己的思考这样会好一点
-    // 如果自己完全调研 这个模式的思维链里冗余内容会比较长 上下文快速耗尽」。
-    // 实测（会话 corum-task-db663875）：主 Agent 自己 read/grep 18 次、只委派 2 次（9:1），
-    // 20 条 tool/result 灌进自己上下文 90,644 字符（≈22.7k tokens）。
-    expect(CONDUCTOR_PERSONA).toContain('Context is your scarcest resource')
-    expect(CONDUCTOR_PERSONA).toMatch(/Broad or exploratory investigation → delegate/)
-    expect(CONDUCTOR_PERSONA).toMatch(/Point reads → do yourself/)
-    // 旧文本里那句「绝不派子 Agent 去查你自己两次调用能查到的东西」是**过校正**，
-    // 它与下方「把探索自由地委派出去」直接打架 —— 必须已删除。
+    // 如果自己完全调研 这个模式的思维链里冗余内容会比较长 上下文快速耗尽」+
+    // 「思考者肯定要自己去看一下大概的，然后深入它就不做，交给 research 进行，
+    // 最终收到报告后，做到心里有数即可」。
+    //
+    // 实测两次都证实**二分法无效**（db663875 自己 18 次 : 委派 2 次；36e24826 自己 38 次 :
+    // 委派 1 次，上下文 225,621 字符），根因是**没有停止点** —— 模型总能说「再看一处」。
+    expect(CONDUCTOR_PERSONA).toContain('investigate in three phases')
+    for (const phase of ['1. **Orient', '2. **Go deep', '3. **Close']) {
+      expect(CONDUCTOR_PERSONA).toContain(phase)
+    }
+    // 核心：可判定的停止点。
+    expect(CONDUCTOR_PERSONA).toContain('once you can already write the brief, you are done reading')
+    // 配套的漂移判据（实测里 grep 第 17-18 次已跑到无关话题）。
+    expect(CONDUCTOR_PERSONA).toContain('Watch for drift')
+    // 旧文本那句「绝不派子 Agent 去查你自己两次调用能查到的东西」是**过校正**，必须已删除。
     expect(CONDUCTOR_PERSONA).not.toContain('Never send a child to find out')
+    // 旧二分法措辞已被三阶段取代（两套口径并存会互相打架）。
+    expect(CONDUCTOR_PERSONA).not.toContain('Broad or exploratory investigation → delegate')
   })
 
   it('告诉它 worker 不能构建（否则 brief 会写「build 必须通过」把子 Agent 逼去自造工具链）', () => {

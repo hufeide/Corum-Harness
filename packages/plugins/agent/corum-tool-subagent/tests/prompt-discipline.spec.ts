@@ -165,3 +165,36 @@ describe('I 沙箱升级 — 被拒 → 同回合升级一次 → 由用户裁�
     }
   })
 })
+
+/**
+ * fork（corum）2026-09-20：机制段的**能力感知**（用户报障，见待办登记册 §D1/D2）。
+ *
+ * 本段同时注入主会话与子会话。原文两处假设读者「能跑构建」，实测与指挥模式的工具面矛盾：
+ *
+ *   D1 「run the repo guard ONCE in full」—— 指挥模式的主 Agent 被裁掉写工具、shell 只读，
+ *      物理上跑不了仓库守卫；该指令与人格段「you cannot edit files」直接冲突
+ *      （与 worker 那次「你没有写工具 vs 工具表里有 write」是同一类病）。
+ *   D2 「a child ... cannot produce independent evidence」—— 对**重复同一校验**成立，但对
+ *      `subagent_research` 不成立（它有独立上下文、自己读代码）。原措辞会抵消用户定的
+ *      「广域调研交给 research」三阶段引导。
+ */
+describe('机制段能力感知（2026-09-20 D1/D2 修复）', () => {
+  const source = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+
+  it('D1：守卫命令按能力表述，不再假定读者能跑构建', () => {
+    expect(source).toContain('run the repository guard ONCE in full **if you can run commands**')
+    // 跑不了的人**不许跳过验证**，但要说明谁负责。
+    expect(source).toContain('you do not get to skip verification')
+    expect(source).toContain('state plainly which checks you could not run and who owns them')
+    // 旧的无条件措辞必须已消失。
+    expect(source).not.toContain('run the repo guard ONCE in full, (3)')
+  })
+
+  it('D2：断言收窄到「重复同一校验」，并明确 research 的独立调查是有效证据', () => {
+    expect(source).toContain('REPEATING A CHECK IS NOT VERIFICATION')
+    expect(source).toContain('This is about **re-running a check you already ran**, not about investigation')
+    expect(source).toContain('an independent `subagent_research` child reads the code itself in its own context and **is** valid evidence')
+    // 旧的过强措辞必须已消失（它会抵消三阶段引导）。
+    expect(source).not.toContain('DELEGATION IS NOT VERIFICATION')
+  })
+})

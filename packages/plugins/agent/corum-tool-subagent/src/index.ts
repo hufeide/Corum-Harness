@@ -1090,8 +1090,21 @@ export function corumEfficiencyDisciplineLines(): string[] {
     '- KEEP EACH COMMAND ON ONE LINE, statements joined with `;` or `&&`, so that a loosely delimited fragment cannot do something other than what you intended.',
     '- EVERY CALL GETS A FRESH SHELL. No cwd, variable or function persists between calls, so never rely on a `cd` from an earlier call: chain `cd <dir> && <cmd>` inside one call, or pass `workdir`.',
     '- PUT LONG-RUNNING OR NOT-YET-NEEDED COMMANDS IN THE BACKGROUND. A server, a watcher, a long build or a long test suite belongs behind `run_in_background: true`, so the call returns a handle at once and the conversation is not blocked; read that handle with `job_output` and stop it with `job_kill`. Never replace that handle with "wait a moment, then look again". Do not background a command whose result you need before the next step; do not background an operation that would stop or restart the runtime this session depends on; do not start a background process whose output cannot be retrieved.',
-    '- BUDGET YOUR OWN VERIFICATION. Self-checking your work means exactly three things: (1) read your own diff, (2) run the repo guard ONCE in full, (3) at most 3 targeted checks on the riskiest points you touched. That is the entire budget.',
-    '- DELEGATION IS NOT VERIFICATION. A child started from the same context reads the same code and cannot produce independent evidence, so re-running a check through another delegation buys no confidence. Spend the verification budget on your own diff and a few targeted checks.',
+    // fork（corum）2026-09-20 修正（用户报障，见 docs/PENDING-conductor-...md §D1/D2）：
+    //
+    // 本段**同时注入主会话与子会话**（preset scope 共享），但原文两处假设了「读者能跑构建」：
+    //   D1 「run the repo guard ONCE in full」—— 指挥模式的主 Agent **被裁掉了写工具、
+    //       shell 也只读**，它物理上跑不了仓库守卫；实测该指令与人格段「you cannot edit
+    //       files」直接矛盾（指令与能力不符，与 worker 那次「你没有写工具 vs 工具表里有
+    //       write」是同一类病）。
+    //   D2 「a child ... cannot produce independent evidence」—— 对**重复同一个校验**成立，
+    //       但对 `subagent_research` 不成立：它有独立上下文、自己读代码，**能**产生独立
+    //       证据。原措辞会抵消「把广域调研委派出去」的引导（用户 2026-09-20 定的三阶段）。
+    //
+    // 修法：D1 改为**按能力表述**（能跑命令的读者才跑守卫；跑不了的读者读报告 + 点读 diff，
+    // 验证归委派方），D2 收窄到「重复同一校验」并明确 research 的独立调查**是**有效证据。
+    '- BUDGET YOUR OWN VERIFICATION. Self-checking means at most three things: (1) read your own diff, (2) run the repository guard ONCE in full **if you can run commands**, (3) at most 3 targeted checks on the riskiest points you touched. That is the entire budget. If your tools do not let you run the guard — a read-only shell, or no shell at all — you do not get to skip verification: check what you can read, and state plainly which checks you could not run and who owns them.',
+    '- REPEATING A CHECK IS NOT VERIFICATION. Re-running the same check through another delegation, from the same context, reads the same code and produces no new evidence — that buys no confidence, so spend the budget on your own diff and a few targeted checks. This is about **re-running a check you already ran**, not about investigation: an independent `subagent_research` child reads the code itself in its own context and **is** valid evidence, which is exactly why broad investigation belongs with it.',
     '- REPORT SCOPE. State how many steps and how many tool calls the run took, so the cost and the progress of the work are legible to whoever reads the result.',
   ]
 }
