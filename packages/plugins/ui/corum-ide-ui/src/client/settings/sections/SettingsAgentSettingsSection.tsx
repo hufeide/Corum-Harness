@@ -219,10 +219,11 @@ export function AgentSettingsSection() {
       try {
         const r = await rpc<{ profiles: Array<{ id: string; nickname?: string; source?: string }> }>('corumAgent', 'listProfiles', {})
         if (cancelled) return
-        setAgentOptions((r.profiles ?? []).map(p => ({
-          id: p.id,
-          label: `${p.nickname ?? p.id}（${p.source === 'official' ? '官方' : 'corum'}）`,
-        })))
+        // 官方基础模式不可作为默认预设（设置页定调：官方模式是继承模板，不可直接选中）。
+        // 用 !== 'official' 而非 === 'corum'：防御未来 source 维度扩展时 corum 侧新值不被误滤。
+        setAgentOptions((r.profiles ?? [])
+          .filter(p => p.source !== 'official')
+          .map(p => ({ id: p.id, label: p.nickname ?? p.id })))
       } catch {
         // 静默：RPC 失败时留空数组，下拉仅显示「未设置」+ 已保存值（ensureOption 补位）。
       }

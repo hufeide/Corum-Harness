@@ -129,11 +129,15 @@ function NewTaskForm({ emptyActions, onClose }: {
     ])
       .then(([list, defaultId]) => {
         if (!alive) return
-        setAgents(list)
+        // 官方基础模式不可作为新建任务入口（设置页定调：官方模式是继承模板，不可直接选中）。
+        // 过滤只影响选项列表，不影响 defaultAgentPreset 的默认选中逻辑：若配置的默认预设
+        // 被滤掉（官方 id），下方 list.some 判定自然落空 ⇒ 回落第一项，不写特例。
+        const filtered = list.filter(a => a.source !== 'official')
+        setAgents(filtered)
         setProfileId((cur) => {
           if (cur !== '') return cur
-          if (defaultId !== undefined && list.some(a => a.id === defaultId)) return defaultId
-          return list[0]?.id ?? ''
+          if (defaultId !== undefined && filtered.some(a => a.id === defaultId)) return defaultId
+          return filtered[0]?.id ?? ''
         })
       })
       .catch(() => { /* Agent 列表拉取失败：留空，提交时 host 用内置 task profile */ })
