@@ -45,6 +45,63 @@ function sameSelection(left: ModelSelection | null, right: ModelSelection): bool
     && left.reasoningEffort === right.reasoningEffort
 }
 
+/**
+ * 装配返回的段形状（只声明本文件用到的两个字段）。
+ *
+ * 之所以在本地收窄而不是 import 官方类型：本文件只**搬运** `assembled.sections`，
+ * 对段的其余字段（order 等）一无所知，也必须原样透传。
+ */
+interface AssembledSection {
+  readonly name: string
+  readonly text: string
+}
+
+/**
+ * 把视觉能力段**恰好放一份**进本次装配（`enabled === false` 时一份都不放）。
+ *
+ * ## 为什么不能直接 append（2026-09-21 实机缺陷）
+ *
+ * 本函数所在的 acceptor 是 `system-prompt/assemble` 的**一层**。该事件是 cordis
+ * **waterfall**：每层 `await next()` 拿到的都是**外层已完成**的装配，于是「直接 append」
+ * 在**装了两层**时就写出两份段 —— 实测用户会话 `corum-task-5b48662f` 的 system prompt 里
+ * 「You can see images in this conversation…」**逐字节重复两遍**。
+ *
+ * ## 为什么不靠「重装前先撤销上一次监听」来修（我第一版就是这么写的，已撤回）
+ *
+ * 那种改法动的是**监听器的生死**，而本文件的 acceptor 与 `agent/request` 的模型绑定同属
+ * 一次 install —— 撤销语义一改，模型绑定的 waterfall 行为随之改变
+ * （下游注释明写「创建时的外层监听会兜住后装的」）。**那是另一个关注点，不该被这条修动到。**
+ *
+ * ## 现在这个改法
+ *
+ * 幂等性放在**装配层**（语义真正发生的地方）：先剔除同名的 `VISION_SECTION` 段，再按需插入
+ * 一份 ⇒ 无论本 acceptor 被装几层、谁先谁后，最终**恰好一份**。于是：
+ *   · 不碰 disposer / 监听数量；模型绑定语义逐字不变；
+ *   · 将来再多一处 install 也不会重现（幂等是结构性的，不是调用方纪律）。
+ *
+ * ## 哨兵为什么是**段名**而不是内容
+ *
+ * cordis 的段名本就唯一，且名称是唯一标识；**按内容比对会引入一个真 bug**：
+ * 模型换掉后视觉能力可能由「支持」变「不支持」（或反之），内容比对会把该**更新**误判成
+ * 「重复」而不刷新，于是模型能力换了、提示词却留在旧状态。
+ *
+ * ## 顺序
+ *
+ * 与旧行为一致：有该段时它排在**末尾**（旧代码就是 append 到末尾）。
+ *
+ * @param sections - 外层装配给出的段列表（**原样保留**除视觉段外的所有段及顺序）。
+ * @param enabled - 目标模型是否确认支持图片输入。
+ * @returns 新段列表。
+ */
+function withVisionSection(
+  sections: readonly AssembledSection[],
+  enabled: boolean,
+): AssembledSection[] {
+  const withoutVision = sections.filter(section => section.name !== VISION_SECTION)
+  if (!enabled) return withoutVision
+  return [...withoutVision, { name: VISION_SECTION, text: VISION_CAPABILITY }]
+}
+
 /** `ctx.llm` 的最小能力面（按需取，避免加载顺序耦合）。 */
 interface ModelInfoProbe {
   resolveModelInfo: (provider: string, model: string) => Promise<{ inputModalities?: readonly string[] }>
@@ -104,9 +161,7 @@ export function installTaskModelSelection(agentCtx: Context, selection: ModelSel
     const vision = await supportsImageModel(agentCtx, selected.provider, selected.model)
     return {
       ...assembled,
-      sections: vision
-        ? [...assembled.sections, { name: VISION_SECTION, text: VISION_CAPABILITY }]
-        : assembled.sections,
+      sections: withVisionSection(assembled.sections, vision),
       variables: {
         ...assembled.variables,
         provider: selected.provider,
