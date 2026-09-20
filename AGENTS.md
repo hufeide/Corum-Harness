@@ -68,6 +68,13 @@
   fork packages).
 - `docs/HANDOFF-2026-09-10-orchestration-unification.md` — 编排统一化交接（官方四模式 +
   指挥模式 + orchestrate 双模式 + 隔离下沉 provider 层 + 提示词英文 + 非 git 降级核查）。
+- `docs/PENDING-conductor-readonly-bash-and-progressive-research.md` — **指挥模式待办登记册
+  （开工前必读）**（2026-09-20 起）。**本文件是「指挥模式相关待办」的单一事实源**，起因是用户指出
+  「我在上一轮的报告中看到你**已经忘了**要优化指挥者的系统提示词了」——核实属实：我把指挥者提示词的
+  三条评估结论只在对话里说了、没落盘，上下文压缩后彻底丢失。**纪律：凡在对话里说过「要做/该修」的事，
+  必须落进这里**，否则视为没说过。
+  当前登记表（A 只读 bash 🟡卡在 import / B 渐进式调研 🔴 / C 集成者报告 ✅ / D 提示词优化三条 🔴 /
+  E AGENTS.md 对子 Agent 的注入 ❌待拍板 / F worker 风格 ✅ / G master-key ❌待拍板）。
 - `docs/HANDOFF-2026-09-19-model-ask-panel-and-restart-gate.md` — **最新交接入口**
   （2026-09-19 夜场，用户换会话执行重启。**§1 = 重启前必须先重打包**：主实例跑的是打包态
   （`run/pack-9222.pid`），打包快照 13:41:37，而本场改动 21:31~22:02 ⇒ **直接重启看不到任何效果**
