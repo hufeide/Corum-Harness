@@ -73,41 +73,12 @@ async function supportsImageModel(ctx: Context, provider: string, model: string)
 }
 
 /**
- * 已安装监听的 disposer（**按 agentCtx 记账**，只作为 WeakMap 的键，不读它的成员）。
- *
- * ## 为什么必须有这张表（2026-09-21 实机缺陷）
- *
- * 一个 agentCtx 上重复安装会**各 append 一次** `system-prompt/assemble` 的结果：
- * cordis 是 waterfall，`await next()` 拿到的是**外层已完成**的装配，第二层再 append
- * 一次视觉能力段 ⇒ prompt 里同一段出现两遍。
- *
- * 实机现场（用户主实例会话 `corum-task-1b927cf3`）：建会话时按 `corum-dev` 装了一层，
- * 用户切 preset 到 `conductor-lead` 时走了 `selectTaskAgentProfileRemote` 的 fallback
- * 分支（进程重启后内存登记丢失）**又装一层** ⇒ 组装出的 system prompt 里
- * 「You can see images in this conversation…」逐字节重复两遍。
- *
- * 根因不是那一处 append，而是**本函数返回 disposer 却没有任何调用方接住它**
- * （4 个调用点全部丢弃）⇒ 重装 = 多留一层永不撤销的旧监听；旧 selection ref 的
- * `agent/request` 强制绑定也还活着。
- *
- * ⇒ 所有权收在这里：{@link installTaskModelSelection} 自己负责「重装即替换」。
- * 用 WeakMap 而不是在 Context 上挂字段：ctx 生命周期结束时表项自然回收，不留痕。
- */
-const installedDisposers = new WeakMap<object, () => void>()
-
-/**
  * 安装一个「用户显式选择优先」的模型绑定。
- *
- * **幂等**：同一个 `agentCtx` 再次安装会**先撤销上一次**（见 {@link installedDisposers}）。
- * 调用方不需要（也无法）自己接住 disposer。
- *
  * @param agentCtx - 目标 Agent 的作用域上下文。
  * @param selection - 调用方持有的可变选择（current/assembled）。
- * @returns 撤销本次安装的 disposer（已登记进 WeakMap，调用方丢弃也无妨）。
+ * @returns 两个作用域监听的 disposer。
  */
 export function installTaskModelSelection(agentCtx: Context, selection: ModelSelectionRef): () => void {
-  // 重装前先撤销上一次：否则两个监听器都在，装配结果会被 append 两遍。
-  installedDisposers.get(agentCtx)?.()
   // 投影服务是可选依赖：没有它（精简组合）就退化成官方行为。
   const projections = (): ProjectionReader | undefined => {
     const service = (agentCtx as unknown as { sessionProjections?: ProjectionReader }).sessionProjections
@@ -163,10 +134,8 @@ export function installTaskModelSelection(agentCtx: Context, selection: ModelSel
       }
     },
   )
-  const dispose = (): void => {
+  return () => {
     disposeAssembly()
     disposeRequest()
   }
-  installedDisposers.set(agentCtx, dispose)
-  return dispose
 }
