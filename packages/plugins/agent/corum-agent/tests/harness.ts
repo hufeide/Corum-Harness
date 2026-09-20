@@ -53,7 +53,9 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { CorumAgentService } from '../src/agent-service.ts'
 import type { AgentLaneDescriptor } from '../src/agent-service.ts'
 import { ConductorRuntime } from '../src/conductor-runtime.ts'
+import { SubagentProgressTracker } from '../src/subagent-progress.ts'
 import type { AgentProfile } from '../src/profile.ts'
+import type { ProgressState } from '../src/child-progress.ts'
 
 /**
  * 状态容器的契约键。
@@ -85,8 +87,22 @@ export interface HarnessState {
   taskSelections: StateMap
   /** sessionId → 泳道归属索引。 */
   sessionLaneIndex: StateMap
-  /** 子会话进度折叠表（键 → 折叠态）。 */
-  subagentProgress: StateMap
+  /**
+   * 子会话进度折叠表 —— **注意它不再是一张可直接读写的 Map**。
+   *
+   * P1-b 把四张子会话记账表收进了 `SubagentProgressTracker`（它持有折叠表并独占
+   * 容量淘汰 / LRU 置顶），故这里只给一个**窄视图**：
+   *   · `size`   —— 条目数（容量守卫的可观测面）
+   *   · `seed()` —— 种一条折叠态（测试需要「会话已有终态」的起点时用）
+   *
+   * 之所以不再交出 Map：直接把可变 Map 递给测试，会让「谁在写这张表」重新变含糊
+   * ——那正是抽出 tracker 要解决的问题（见 `subagent-progress.ts` 的 `state` getter 注释）。
+   * 角色 / 父会话 / 去重集仍是真的活视图（它们没有额外不变式）。
+   */
+  subagentProgress: {
+    readonly size: number
+    seed(sessionId: string, state: ProgressState): void
+  }
   /** childSessionId → 委派角色。 */
   subagentRoles: StateMap
   /** childSessionId → 父会话 id。 */
@@ -108,10 +124,6 @@ const STATE_FIELDS: Record<string, () => unknown> = {
   taskAgents: () => new Map<string, unknown>(),
   taskSelections: () => new Map<string, unknown>(),
   sessionLaneIndex: () => new Map<string, unknown>(),
-  subagentProgress: () => new Map<string, unknown>(),
-  subagentRoles: () => new Map<string, unknown>(),
-  subagentParents: () => new Map<string, unknown>(),
-  notifiedInterrupted: () => new Set<string>(),
   pendingPermissions: () => new Map<string, unknown>(),
   agentCreationsInFlight: () => new Map<string, unknown>(),
   agentCreationTimes: () => new Map<string, unknown>(),
@@ -302,7 +314,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   // 用 defineProperty 而非赋值：字段是 readonly，且要在不触发 setter 的前提下钉死。
   Object.defineProperty(service, 'ctx', { value: ctx, writable: true })
 
-  const state = installState(service)
+  const state = installState(service, ctx, events)
 
   const harness: Harness = {
     service,
@@ -383,7 +395,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
  * 若 `STATE_CONTAINER_KEY` 指名的容器**取不到**，**必须抛错**，不许退回「在服务上挂字段」
  * ——那正是本文件要消灭的静默失真：挂上去照样成功、被测代码却读自己的空表。
  */
-function installState(service: CorumAgentService): HarnessState {
+function installState(service: CorumAgentService, ctx: Context, events: RecordedEvent[]): HarnessState {
   const container: Record<string, unknown> = STATE_CONTAINER_KEY === undefined
     ? service as unknown as Record<string, unknown>
     : (() => {
@@ -414,27 +426,41 @@ function installState(service: CorumAgentService): HarnessState {
   // `laneSetupHooks` 是数组、语义上不是「状态表」，但同属构造器初始化 ⇒ 一并补上
   // （`registerLaneSetupHook` 会 push，缺了它会抛）。
   Object.defineProperty(container, 'laneSetupHooks', { value: [], writable: true, configurable: true })
-  // `conductor` 是**有自己状态的对象**（已抽到 `conductor-runtime.ts`）。构造器不跑
-  // ⇒ 这里也造一个真实例，否则任何走到 `conductor.apply(...)` 的路径都会抛。
+  // `conductor` 与 `progress` 都是**有自己状态的对象**（已分别抽到
+  // `conductor-runtime.ts` / `subagent-progress.ts`）。构造器不跑 ⇒ 这里必须造真实例，
+  // 否则任何走到 `conductor.apply(...)` / `progress.fold(...)` 的路径都会抛。
   Object.defineProperty(container, 'conductor', {
     value: new ConductorRuntime(),
     writable: true,
     configurable: true,
   })
+  // 跟踪器的两个 emit 回调接到本文件的帧记录器上（spec 因此能断言推送帧）。
+  // ⚠️ 这里**不是**在复刻生产的接线：生产由 CorumAgentService 构造器接线，本文件只保证
+  // 「tracker 发出来的帧」能被 spec 看到。事件**接线本身**（谁在什么事件上调 tracker）
+  // 属服务构造器，由 characterization/spec 经 `ctx.emitTo` 触发来验。
+  const tracker = new SubagentProgressTracker(ctx, {
+    emitProgress: (frame) => { events.push({ type: 'corum/subagent/progress', payload: frame }) },
+    emitInterrupted: (info) => { events.push({ type: 'corum/subagent/interrupted', payload: info }) },
+  })
+  Object.defineProperty(container, 'progress', { value: tracker, writable: true, configurable: true })
 
   // 视图**直接取自容器**（不是另造一份）：否则 spec 写进视图、服务读容器，两边各说各话
   // ——那正是本文件要消灭的失真形态。
   const pick = <T>(name: string): T => container[name] as T
+  const trackerState = tracker.state
   return {
     agents: pick('agents'),
     typeAgents: pick('typeAgents'),
     taskAgents: pick('taskAgents'),
     taskSelections: pick('taskSelections'),
     sessionLaneIndex: pick('sessionLaneIndex'),
-    subagentProgress: pick('subagentProgress'),
-    subagentRoles: pick('subagentRoles'),
-    subagentParents: pick('subagentParents'),
-    notifiedInterrupted: pick('notifiedInterrupted'),
+    subagentProgress: {
+      get size(): number { return tracker.size },
+      seed: (sessionId, state) => { pick<SubagentProgressTracker>('progress').seed(sessionId, state) },
+    },
+    subagentRoles: trackerState.roles as unknown as StateMap,
+    subagentParents: trackerState.parents as unknown as StateMap,
+    notifiedInterrupted: trackerState.notified,
     pendingPermissions: pick('pendingPermissions'),
     agentCreationsInFlight: pick('agentCreationsInFlight'),
     agentCreationTimes: pick('agentCreationTimes'),

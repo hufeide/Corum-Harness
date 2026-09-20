@@ -85,16 +85,16 @@ taskAgents 10 sessionId → task 会话
 taskSelections 5 sessionId → 模型选择 ref
 pendingPermissions 3 待兑现权限档位
 conductor 6 指挥模式运行时
-subagentProgress 11 子会话进度折叠表
-subagentRoles 2 委派角色
-subagentParents 3 子会话父会话
-notifiedInterrupted 2 中断广播去重
 agentCreationsInFlight 3 在飞创建去重
 agentCreationTimes 2 重建风暴记账
 laneSetupHooks 2 泳道装配钩子"
 
 # 已经收走的表：必须出现 **0** 次（格式同上，预算恒为 0）。
-EXPECTED_ABSENT=""
+EXPECTED_ABSENT="\
+subagentProgress 子会话进度折叠表（P1-b 收进 SubagentProgressTracker）
+subagentRoles 委派角色（P1-b 收进 SubagentProgressTracker）
+subagentParents 子会话父会话（P1-b 收进 SubagentProgressTracker）
+notifiedInterrupted 中断广播去重（P1-b 收进 SubagentProgressTracker）"
 
 # 允许 import agent-service.ts 的**包内其他模块**。格式：`文件名|理由`。
 BACKREF_ALLOW="\

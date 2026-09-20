@@ -51,10 +51,9 @@ function provideRunningChild(harness: Harness, childId: string): void {
 describe('特征化 · getChildSessionProgressRemote（簇 7 / P1）', () => {
   it('恒存在的 identity 字段：role 来自内存表、isolated 来自会话 cwd', async () => {
     h = makeHarness()
-    // role 记在内存表里（subagentRoles），isolated 走 childWorktreeIsolation。
-    const svc = h.service as unknown as Record<string, unknown>
-    const roles = svc.subagentRoles as Map<string, string>
-    roles.set('child-a', 'worker')
+    // role 记在内存表里（tracker 的 roles），isolated 走 childWorktreeIsolation。
+    // 表已随 P1-b 搬进 SubagentProgressTracker，spec 一律经 harness 视图访问。
+    h.state.subagentRoles.set('child-a', 'worker')
     h.usePersistence({ 'child-a': { cwd: '/repo/.corum-worktrees/wt-1', events: [] } })
 
     const out = await h.service.getChildSessionProgressRemote('child-a')
@@ -228,8 +227,7 @@ describe('特征化 · getChildSessionProgressRemote（簇 7 / P1）', () => {
 
   it('中断广播带 parentSessionId（内存表命中时）', async () => {
     h = makeHarness()
-    const parents = (h.service as unknown as Record<string, unknown>).subagentParents as Map<string, string>
-    parents.set('child-j', 'parent-1')
+    h.state.subagentParents.set('child-j', 'parent-1')
     h.usePersistence({
       'child-j': { events: [sessionEvent('turn/start', { turn: 1 }, LONG_AGO, 1)] },
     })
@@ -485,8 +483,7 @@ describe('特征化 · buildChangeSummary / emitChangeSummary（簇 8 / P2）', 
   it('emitChangeSummary：有进度态 → 补发一帧带 changeSummary 的终态帧', async () => {
     h = makeHarness()
     h.provideGet('corumReview', { snapshot: async () => ({ files: [{ path: 'a', added: 1, removed: 0 }] }) })
-    const progress = (h.service as unknown as Record<string, unknown>).subagentProgress as Map<string, unknown>
-    progress.set('child-10', { turn: 3, step: 7, done: true, stopReason: 'completed' })
+    h.state.subagentProgress.seed('child-10', { turn: 3, step: 7, done: true, stopReason: 'completed' })
 
     call(h, 'emitChangeSummary', 'child-10')
     await new Promise(r => setTimeout(r, 10))

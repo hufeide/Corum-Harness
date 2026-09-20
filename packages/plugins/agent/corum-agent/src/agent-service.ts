@@ -22,7 +22,9 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // fork（corum）：官方 installModelSelection 会用安装时的选择覆盖用户显式换的模型，
 // 见 task-model-selection.ts 文件头（2026-09-09 用户实测：换模型后仍打旧模型）。
 import { installTaskModelSelection } from './task-model-selection.ts'
-import { childRunInterruptOf } from './child-progress.ts'
+import { childRunInterruptOf, foldProgressAll } from './child-progress.ts'
+// fork（corum）2026-09-21：子 Agent 进度按关注点抽出（四张状态表 + 事件接线归它持有）。
+import { SubagentProgressTracker } from './subagent-progress.ts'
 import { TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
 import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
 import {
@@ -159,7 +161,8 @@ import type { SkillEntry } from './skill-entry.ts'
 // （自包含在 fork 包 corum-api-remotes；type-only import 只拉编译面，不进运行时依赖图）。
 import type {} from '@corum/corum-api-remotes/corum-events'
 // 值导入 stopReasonOfTurnEnd：turn/end.reason.kind → SubagentStopReason（同口径，同包依赖已存在）。
-import { stopReasonOfTurnEnd, type SubagentStopReason, type SubagentTodoItem, type SubagentChangeSummary } from '@corum/corum-api-remotes/corum-events'
+// fork（corum）2026-09-21：折叠本体移入 `child-progress.ts`（纯函数），此处只留类型面。
+import type { SubagentStopReason, SubagentTodoItem, SubagentChangeSummary } from '@corum/corum-api-remotes/corum-events'
 // 模块增强：加载 dsh-tool-todo 的 'todo/write' SessionEventMap 扩展声明
 // （corum-agent 在 compile.ts 里把 dsh-tool-todo 编进工具表，但 TS 不会自动
 // 拉取其类型增强——这里显式 import 只触发 declare module 合并，无运行时开销）。
@@ -473,6 +476,17 @@ export class CorumAgentService extends TypertRemoteService {
    */
   private readonly conductor = new ConductorRuntime()
 
+  /**
+   * 子 Agent 进度跟踪器（四张按 sessionId 索引的记账表 + 中断广播去重）。
+   *
+   * 2026-09-21 按关注点抽到 `subagent-progress.ts`（用户定调「至少要在文件层面切分
+   * 清晰」）。抽出的理由与 `conductor` 同源：**状态的所有者必须显式** —— 这四张表此前
+   * 与 RPC 方法体混在同一个类里，「谁在读、谁在写」只能靠全文搜索回答。
+   *
+   * 在构造器里赋值（emit 回调需要 `this.ctx` 已可用）。
+   */
+  private readonly progress: SubagentProgressTracker
+
   /** 该会话此刻是否处于指挥模式（供 `corumConductor` 服务消费）。 */
   private isConductorSession(sessionId: string): boolean {
     return this.conductor.isConductor(sessionId)
@@ -566,6 +580,21 @@ export class CorumAgentService extends TypertRemoteService {
       text: outputLanguageSectionText(),
     })
     /**
+     * 子 Agent 进度跟踪器：持有四张记账表，并经两个窄回调与宿主交互。
+     *
+     * 事件名与载荷的收窄声明面留在本服务（`corum/subagent/*` 的声明在 fork 包
+     * `@corum/corum-api-remotes`，本插件不 import 它的运行时声明面）。窄回调让 tracker
+     * 不反向依赖 CorumAgentService（`verify-refactor-guard.sh` 的 ④ 组）。
+     */
+    this.progress = new SubagentProgressTracker(this.ctx, {
+      emitProgress: (frame) => this.ctx.emit('corum/subagent/progress', frame),
+      // 两个 emit 都走 `as never` 收窄：`corum/subagent/*` 的事件声明在 fork 包
+      // `@corum/corum-api-remotes` 里，本插件不 import 它的运行时声明面（避免「两份模块
+      // 实例」红线）。与本文件其它同类 emit（`corum/subagent/child` 等）同一手法。
+      emitInterrupted: (info) => (this.ctx.emit as never as (t: string, d: unknown) => void)('corum/subagent/interrupted', info),
+    })
+
+    /**
      * `corumConductor` 服务：把「这个会话是不是指挥模式」暴露给子 Agent 组装方。
      *
      * 为什么必须经服务：子 Agent 的组装点在 `@corum/corum-subagent`（跨包），而指挥模式的
@@ -623,13 +652,13 @@ export class CorumAgentService extends TypertRemoteService {
       }
       if (session.header.origin !== 'subagent') return
       const sid = String(session.id)
-      const frame = this.foldSubagentProgress(sid, event)
+      const frame = this.progress.fold(sid, event)
       if (frame !== undefined) this.ctx.emit('corum/subagent/progress', frame)
       // 终态帧（turn/end → stopReason 写入）发出后 → 异步补发改动摘要。
       if (frame !== undefined && frame.stopReason !== undefined) this.emitChangeSummary(sid)
     })
     ctx.on('session/disposed', (session) => {
-      this.subagentProgress.delete(String(session.id))
+      this.progress.clear(String(session.id))
     })
     /**
      * 委派角色记账（`corum/subagent/child` 帧 → childSessionId → 角色）。
@@ -643,13 +672,8 @@ export class CorumAgentService extends TypertRemoteService {
       readonly parentSessionId?: string
       readonly role?: 'worker' | 'research' | 'fork'
     }) => {
-      // 父会话归属与角色分开记：角色可能缺省（取不到工具名的路径），但父会话 id 一直有——
-      // 中断广播要靠它给出通知的跳转目标（2026-09-13）。
-      if (info.childSessionId !== undefined && info.parentSessionId !== undefined) {
-        this.subagentParents.set(info.childSessionId, info.parentSessionId)
-      }
-      if (info.childSessionId === undefined || info.role === undefined) return
-      this.subagentRoles.set(info.childSessionId, info.role)
+      // 记账归 tracker（父会话归属与角色分开记的理由见 `subagent-progress.ts`）。
+      this.progress.noteChild(info)
     }) as never, { global: true })
 
     /**
@@ -662,28 +686,9 @@ export class CorumAgentService extends TypertRemoteService {
      */
     ctx.on('subagent/end' as never, ((info: { readonly id: unknown; readonly stopReason: string }) => {
       const sid = String(info.id)
-      const state = this.subagentProgress.get(sid)
-      // 已有终态帧（turn/end 已写入 stopReason）→ 不覆盖。
-      if (state?.stopReason !== undefined) {
-        // 已有终态帧：补发改动摘要（turn/end 路径里也补发，此处兜底重复幂等）。
-        this.emitChangeSummary(sid)
-        return
-      }
-      const reason = info.stopReason as SubagentStopReason
-      const turn = state?.turn ?? 0
-      const step = state?.step ?? 0
-      const todos = state?.todos
-      this.subagentProgress.delete(sid)
-      this.subagentProgress.set(sid, { turn, step, done: true, stopReason: reason, ...todos === undefined ? {} : { todos } })
-      this.ctx.emit('corum/subagent/progress', {
-        sessionId: sid,
-        turn,
-        step,
-        done: true,
-        stopReason: reason,
-        lastActive: Date.now(),
-        ...todos === undefined ? {} : { todos },
-      })
+      // 补发终态帧（已有终态帧则不覆盖）。两种情况都要补发改动摘要——`turn/end` 路径里
+      // 也补发，此处兜底重复幂等。
+      this.progress.markTerminal(sid, info.stopReason as SubagentStopReason)
       // 终态帧已发出 → 异步补发改动摘要（corumReview.snapshot + 台账状态）。
       this.emitChangeSummary(sid)
     }) as never, { global: true })
@@ -752,116 +757,6 @@ export class CorumAgentService extends TypertRemoteService {
     this.appendLifecycleDiag({ kind: 'torn-down', profileId, where, stack })
   }
 
-  private readonly subagentRoles = new Map<string, 'worker' | 'research' | 'fork'>()
-  /** childSessionId → 父会话 id（中断广播的通知跳转目标；来自 `corum/subagent/child` 帧）。 */
-  private readonly subagentParents = new Map<string, string>()
-  /**
-   * 已广播过「半途失去运行」的子会话（进程内去重）。
-   * 判定发生在**读取**路径上，同一子会话会被反复拉取（花名册种子 + 卡片），
-   * 不去重就会每拉一次刷一条通知。
-   */
-  private readonly notifiedInterrupted = new Set<string>()
-
-  private readonly subagentProgress = new Map<string, {
-    turn: number
-    step: number
-    currentAction?: string
-    done: boolean
-    stopReason?: SubagentStopReason
-    /** 子 Agent 的当前计划列表（todo/write 折叠；turn/start 重置为 undefined）。 */
-    todos?: readonly SubagentTodoItem[]
-  }>()
-
-  /** 进度折叠表容量上限（超出时淘汰最久未活动条目；dispose 已精确清理）。 */
-  private static readonly SUBAGENT_PROGRESS_CAP = 200
-
-  /**
-   * 把一条子会话事件增量折叠进进度状态；快照变化时返回推送帧，否则 undefined。
-   * 折叠口径与 getChildSessionProgressRemote 的全量扫描一致（同一份事件语义）。
-   */
-  private foldSubagentProgress(sessionId: string, event: SessionEvent): {
-    sessionId: string
-    turn: number
-    step: number
-    currentAction?: string
-    done: boolean
-    stopReason?: SubagentStopReason
-    lastActive: number
-    todos?: readonly SubagentTodoItem[]
-  } | undefined {
-    let state = this.subagentProgress.get(sessionId)
-    if (state === undefined) {
-      if (this.subagentProgress.size >= CorumAgentService.SUBAGENT_PROGRESS_CAP) {
-        // Map 迭代序 = 插入序，首项即最久未活动（每次变更都 delete+set 置顶）。
-        const oldest = this.subagentProgress.keys().next().value
-        if (oldest !== undefined) this.subagentProgress.delete(oldest)
-      }
-      state = { turn: 0, step: 0, done: false }
-    }
-    const prev = state
-    let turn = prev.turn
-    let step = prev.step
-    let currentAction = prev.currentAction
-    let done = prev.done
-    let stopReason = prev.stopReason
-    let todos = prev.todos
-    switch (event.type) {
-      case 'turn/start': {
-        const t = (event.data as { turn?: number }).turn ?? 0
-        if (t > turn) { turn = t; step = 0 }
-        done = false
-        stopReason = undefined // 新一轮开始＝不再有终态
-        todos = undefined // 投影语义：turn/start 重置 todos 为 null（空列表）
-        break
-      }
-      case 'step/end': {
-        const t = (event.data as { turn?: number }).turn ?? 0
-        const s = (event.data as { step?: number }).step ?? 0
-        if (t === turn && s >= step) step = s
-        break
-      }
-      case 'tool/call': {
-        const name = (event.data as { name?: string }).name
-        if (name !== undefined && name !== '') currentAction = name
-        break
-      }
-      case 'assistant/message': {
-        // 一条 assistant 正文闭合 = 当前 step 的生成结束，清掉工具动作避免滞留。
-        const content = (event.data as { message?: { content?: Array<{ type: string }> } }).message?.content ?? []
-        if (content.some(b => b.type === 'text' || b.type === 'reasoning')) currentAction = undefined
-        break
-      }
-      case 'turn/end': {
-        done = true
-        stopReason = stopReasonOfTurnEnd((event.data as { reason?: { kind?: string } }).reason?.kind)
-        currentAction = undefined
-        break
-      }
-      case 'todo/write': {
-        // 与 dsh-tool-todo 投影同口径：last-write-wins，turn/start 重置。
-        todos = (event.data as { todos?: SubagentTodoItem[] }).todos ?? undefined
-        break
-      }
-      default:
-        return undefined // 非进度事件（user/message、step/start 等）不产生帧。
-    }
-    if (turn === prev.turn && step === prev.step && currentAction === prev.currentAction && done === prev.done && stopReason === prev.stopReason && todos === prev.todos) {
-      return undefined // 折叠无变化（如乱序/重复事件），不广播。
-    }
-    // 置顶为最近活动（容量淘汰的 LRU 依据）。
-    this.subagentProgress.delete(sessionId)
-    this.subagentProgress.set(sessionId, { turn, step, ...currentAction === undefined ? {} : { currentAction }, done, ...stopReason === undefined ? {} : { stopReason }, ...todos === undefined ? {} : { todos } })
-    return {
-      sessionId,
-      turn,
-      step,
-      ...currentAction === undefined ? {} : { currentAction },
-      done,
-      ...stopReason === undefined ? {} : { stopReason },
-      lastActive: event.time,
-      ...todos === undefined ? {} : { todos },
-    }
-  }
 
   /**
    * 终态改动摘要：从 host corumReview.snapshot(childSessionId) 取改动文件列表
@@ -979,18 +874,8 @@ export class CorumAgentService extends TypertRemoteService {
     void (async () => {
       const summary = await this.buildChangeSummary(childSessionId)
       if (summary === undefined) return
-      const state = this.subagentProgress.get(childSessionId)
-      if (state === undefined) return // 会话已 dispose，进度表已清。
-      this.ctx.emit('corum/subagent/progress', {
-        sessionId: childSessionId,
-        turn: state.turn,
-        step: state.step,
-        ...state.currentAction === undefined ? {} : { currentAction: state.currentAction },
-        done: true,
-        ...state.stopReason === undefined ? {} : { stopReason: state.stopReason },
-        lastActive: Date.now(),
-        changeSummary: summary,
-      })
+      // 终态帧的补发归 tracker（它持有折叠表；会话已 dispose 时它自己会拒发）。
+      this.progress.emitTerminalFrame(childSessionId, summary)
     })()
   }
 
@@ -2342,7 +2227,7 @@ export class CorumAgentService extends TypertRemoteService {
     // role/isolated 与「子会话事件窗口」无关（角色来自父侧工具名、隔离来自子会话 cwd），
     // 故先算好、所有返回路径都带上——否则事件读不到时（返回 {}）花名册的角色/隔离徽标会
     // 一起消失（2026-09-12 用户实测：「下拉的悬浮窗中无法看到隔离任务的分类了」）。
-    const role = this.subagentRoles.get(sessionId)
+    const role = this.progress.roleOf(sessionId)
     const isolated = await this.childWorktreeIsolation(sessionId)
     const identity: { role?: 'worker' | 'research' | 'fork'; isolated?: boolean } = {
       ...role === undefined ? {} : { role },
@@ -2356,51 +2241,17 @@ export class CorumAgentService extends TypertRemoteService {
       return identity
     }
     if (stored.length === 0) return identity
-    let turn = 0
-    let step = 0
-    let done = false
-    let currentAction: string | undefined
-    let stopReason: SubagentStopReason | undefined
-    let todos: readonly SubagentTodoItem[] | undefined
-    for (const event of stored) {
-      switch (event.type) {
-        case 'turn/start': {
-          const t = (event.data as { turn?: number }).turn ?? 0
-          if (t > turn) { turn = t; step = 0 }
-          done = false
-          stopReason = undefined // 新一轮开始＝不再有终态
-          todos = undefined // 投影语义：turn/start 重置 todos
-          break
-        }
-        case 'step/end': {
-          const t = (event.data as { turn?: number }).turn ?? 0
-          const s = (event.data as { step?: number }).step ?? 0
-          if (t === turn && s >= step) step = s
-          break
-        }
-        case 'tool/call': {
-          const name = (event.data as { name?: string }).name
-          if (name !== undefined && name !== '') currentAction = name
-          break
-        }
-        case 'assistant/message': {
-          // 一条 assistant 正文闭合 = 当前 step 的生成结束，清掉工具动作避免滞留。
-          const content = (event.data as { message?: { content?: Array<{ type: string }> } }).message?.content ?? []
-          if (content.some(b => b.type === 'text' || b.type === 'reasoning')) currentAction = undefined
-          break
-        }
-        case 'turn/end': {
-          done = true
-          stopReason = stopReasonOfTurnEnd((event.data as { reason?: { kind?: string } }).reason?.kind)
-          currentAction = undefined
-          break
-        }
-        case 'todo/write': {
-          todos = (event.data as { todos?: SubagentTodoItem[] }).todos ?? undefined
-          break
-        }
-      }
-    }
+    /**
+     * 折叠走 `child-progress.ts` 的**纯函数**——与增量路径（`session/event` 逐条折）
+     * 共用同一份实现。
+     *
+     * ⚠️ 2026-09-21 之前这里是一份**独立复制**的 6-case switch，与
+     * `foldSubagentProgress` 各写一遍、靠一句注释人肉维持一致（改一边不会红）。
+     * 现在两条路径都调 `foldProgressAll` / `foldProgressEvent` ⇒ **漂移在结构上不可能**。
+     * 等价性由 `tests/fold-equivalence.spec.ts` 对着 HEAD 原文逐字段+逐键钉住。
+     */
+    const folded = foldProgressAll(stored)
+    const { turn, step, done, currentAction, stopReason, todos } = folded
     const lastActive = stored[stored.length - 1].time
     /**
      * 被进程退出杀掉 / 中途失去运行的子会话：log 里有 `turn/start` 却没有 `turn/end`，
@@ -2421,7 +2272,7 @@ export class CorumAgentService extends TypertRemoteService {
     // 「中断」不是事件（它是读取时的判定），而通知桥只消费推送帧 → 在**发现点**补一次
     // 广播（进程内按子会话去重）。用户 2026-09-13 定调：这种情况要有通知，不能静默。
     if (interruptReason !== undefined) {
-      await this.broadcastInterrupted(sessionId, { reason: interruptReason, turn, step, lastActive })
+      await this.progress.broadcastInterrupted(sessionId, { reason: interruptReason, turn, step, lastActive })
     }
     return {
       ...identity,
@@ -2439,57 +2290,6 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 「半途失去运行」的一次性广播（进程内按子会话去重）。
-   *
-   * 为什么在读取路径上发：这条事实**不是事件**——它是宿主对「上一个进程生命周期留下的
-   * 未闭合 turn」的判定，只能在读持久化事件时得出。通知桥只订阅推送帧，所以此前这种
-   * 子 Agent 完全静默（2026-09-12 实测：8 张卡里 1 张「已中断」，通知栏一条都没有）。
-   * 广播失败绝不影响进度读取——辅助信息不得打挂主 RPC（2026-09-12 的教训）。
-   */
-  /**
-   * 子会话的父会话 id（通知的跳转目标，也是「同一批合并成一条」的键）。
-   *
-   * 先查本进程记的 `corum/subagent/child` 帧；**帧不重放**（重启后一条都没有），
-   * 于是退回**持久化 header** 的 `parentSession` —— 那是会话自身 durable 的事实，
-   * 重启/刷新后依然在（2026-09-13 实测：只靠帧的话 9 个被中断的子 Agent 会各成一条
-   * 通知，因为它们都没有父会话可归并）。
-   */
-  private async childParentSession(sessionId: string): Promise<string | undefined> {
-    const known = this.subagentParents.get(sessionId)
-    if (known !== undefined) return known
-    try {
-      const handle = await this.ctx.sessionPersistence.open(SessionId(sessionId), 'read')
-      try {
-        const parent = handle.header.parentSession
-        if (parent === undefined) return undefined
-        const id = String(parent)
-        this.subagentParents.set(sessionId, id)
-        return id
-      } finally {
-        await handle.close()
-      }
-    } catch {
-      return undefined
-    }
-  }
-
-  private async broadcastInterrupted(
-    sessionId: string,
-    info: { readonly reason: 'not-running' | 'pre-boot'; readonly turn: number; readonly step: number; readonly lastActive: number },
-  ): Promise<void> {
-    if (this.notifiedInterrupted.has(sessionId)) return
-    // 先占位再 await：并发两次拉同一条进度时也只广播一次。
-    this.notifiedInterrupted.add(sessionId)
-    const parentSessionId = await this.childParentSession(sessionId)
-    try {
-      this.ctx.emit('corum/subagent/interrupted', {
-        sessionId,
-        ...parentSessionId === undefined ? {} : { parentSessionId },
-        ...info,
-      })
-    } catch {
-      // 广播失败不影响读取（同上）。
-    }
   }
 
   /**
