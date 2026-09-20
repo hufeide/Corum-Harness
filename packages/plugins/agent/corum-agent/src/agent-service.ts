@@ -61,7 +61,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import { compilePreset, workStyleTextOf } from './compile.ts'
+import { compilePreset } from './compile.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
 import { GENERAL_WORK_TYPE, canonicalWorkspaceKey, isValidProjectId, isValidWorkTypeSlug, isGroupMember, projectTypeOf } from './project.ts'
@@ -174,13 +174,6 @@ declare module '@deepseek-ai/cordis' {
 export interface CorumConductorFace {
   /** 该会话此刻是否处于指挥模式。 */
   isConductor: (sessionId: string) => boolean
-  /**
-   * 该会话所属 profile 的**工作风格人格**（「怎么干活」），供子 Agent 继承。
-   *
-   * 2026-09-20 起子 Agent 的**角色**契约由 `@corum/corum-subagent` 按 `kind` 决定，本服务
-   * 不再提供角色人格（用户定调：所有子 Agent 都不继承主 Agent 人格）。
-   */
-  workStyleFor: (sessionId: string) => string | undefined
 }
 
 /** 创建结果。 */
@@ -515,25 +508,6 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 某个会话所属 profile 的**工作风格人格**（设置里那个「专业干练」），供子 Agent 继承。
-   *
-   * 为什么只给风格、不再给角色（2026-09-20 用户定调）：用户要求「**所有**子 Agent 都不能
-   * 单独继承主 Agent 的人格」——子 Agent 的**角色**契约改由 `@corum/corum-subagent` 按
-   * `kind`（worker / researcher）唯一决定，本服务不再参与角色选取，只提供「怎么干活」这一半。
-   *
-   * ⚠️ 本方法**不再依赖** {@link isConductorSession}（那是纯内存表，宿主重启后为空 ⇒ 旧实现
-   * 会因此整段失效，见 `child-agent.ts` 的注释）。风格查询只看 profile 本身，任何模式下都成立。
-   * @param sessionId - 父会话 id。
-   * @returns 工作风格人格文本；查不到 profile 或未设风格时 undefined。
-   */
-  private workStyleForSession(sessionId: string): string | undefined {
-    const profileId = this.taskAgents.get(sessionId)?.profileId
-    if (profileId === undefined) return undefined
-    const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
-    return profile === undefined ? undefined : workStyleTextOf(profile)
-  }
-
-  /**
    * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
    * 调度派活的执行会话）在 create/resume 的 setup 里统一经过这些钩子装配。
    * AgentRuntime 借此给每个会话装调度工具（assign_task/list_team_tasks/
@@ -630,7 +604,6 @@ export class CorumAgentService extends TypertRemoteService {
      */
     ctx.provide('corumConductor', {
       isConductor: (sessionId: string): boolean => this.isConductorSession(sessionId),
-      workStyleFor: (sessionId: string): string | undefined => this.workStyleForSession(sessionId),
     } satisfies CorumConductorFace)
     /**
      * 用户发出第一条真实消息时，兑现待定的访问权限档位。

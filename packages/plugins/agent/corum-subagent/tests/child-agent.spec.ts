@@ -141,21 +141,25 @@ describe('childPersonaOf — 子 Agent 角色人格选取', () => {
 
   it('kind 未声明且父非指挥模式 ⇒ undefined（不替换人格，维持既有继承行为）', () => {
     expect(childPersonaOf(ctx, parent, {}, undefined)).toBeUndefined()
-    const notConductor = { isConductor: () => false, workStyleFor: () => undefined }
+    const notConductor = { isConductor: () => false }
     expect(childPersonaOf(ctx, parent, {}, notConductor)).toBeUndefined()
   })
 
   it('kind 未声明但父是指挥模式 ⇒ 退化为执行者契约（兼容 2026-09-11 语义）', () => {
-    const conductor = { isConductor: () => true, workStyleFor: () => undefined }
+    const conductor = { isConductor: () => true }
     expect(childPersonaOf(ctx, parent, {}, conductor)).toContain('executor, not a planner')
   })
 
-  it('工作风格人格被保留（用户 2026-09-11：子 Agent 继承「怎么干活」，不继承「你是谁」）', () => {
-    const conductor = { isConductor: () => true, workStyleFor: () => 'WORK-STYLE-SENTINEL' }
-    const text = childPersonaOf(ctx, parent, { kind: 'worker' }, conductor)
-    expect(text).toContain('WORK-STYLE-SENTINEL')
+  it('工作风格固定为「高效务实」，不再继承父的设置（用户 2026-09-20 定调）', () => {
+    // 旧行为是继承父 profile 的 personaPreset，实测把 `steady-coach`（「经验丰富的团队导师……
+    // 来自下属的不成熟方案先肯定再指出问题」）传给了一个没有下属、被禁止重新设计的执行者，
+    // 风格与角色相冲。用户定调：子 Agent 一律「高效务实」，父选什么风格都不再影响它。
+    const text = childPersonaOf(ctx, parent, { kind: 'worker' }, undefined)
+    expect(text).toContain('be efficient and pragmatic')
+    // 固定风格对两类子 Agent 都生效。
+    expect(childPersonaOf(ctx, parent, { kind: 'researcher' }, undefined)).toContain('be efficient and pragmatic')
     // 风格段必须在角色契约**之后**（顺序固定：角色 → 风格 → 注入）。
-    expect(text!.indexOf('executor, not a planner')).toBeLessThan(text!.indexOf('WORK-STYLE-SENTINEL'))
+    expect(text!.indexOf('executor, not a planner')).toBeLessThan(text!.indexOf('be efficient and pragmatic'))
   })
 
   it('personaHint 追加在最后（叠加层不可覆盖机制层）', () => {

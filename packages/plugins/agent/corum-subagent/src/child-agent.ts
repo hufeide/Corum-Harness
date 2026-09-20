@@ -27,7 +27,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
-import { CHILD_WORKER_ROLE, RESEARCHER_ROLE } from './child-roles.ts'
+import { CHILD_WORKER_ROLE, CHILD_WORK_STYLE, RESEARCHER_ROLE } from './child-roles.ts'
 import { delegationDepthOf } from './depth.ts'
 
 /** Thrown when starting a child would exceed the requested depth cap. */
@@ -333,8 +333,6 @@ export function childPersonaOf(
   conductor: ConductorFace | undefined,
 ): string | undefined {
   const parentId = String(parent.session.id)
-  // 工作风格人格（「怎么干活」）——两类子 Agent 都保留继承。
-  const style = conductor?.workStyleFor(parentId)
   const parts: string[] = []
   if (composition.kind === 'researcher') parts.push(RESEARCHER_ROLE)
   else if (composition.kind === 'worker') parts.push(CHILD_WORKER_ROLE)
@@ -344,7 +342,16 @@ export function childPersonaOf(
   } else {
     return undefined
   }
-  if (style !== undefined && style.trim() !== '') parts.push(style)
+  /**
+   * 工作风格（「怎么干活」）——**固定为「高效务实」，不再继承父的设置**（用户 2026-09-20
+   * 定调「工作风格都固定为 高效务实」）。
+   *
+   * 旧行为是继承父 profile 的 `personaPreset`，实测会把 `steady-coach`（「经验丰富的团队
+   * 导师……来自下属的不成熟方案先肯定再指出问题」）传给一个没有下属、被禁止重新设计的执行者
+   * ——风格与角色相冲。用户定调后子 Agent 一律用 `CHILD_WORK_STYLE`；父在设置里选什么风格
+   * 都不再影响子 Agent（主 Agent 自身仍按设置走）。
+   */
+  parts.push(CHILD_WORK_STYLE)
   if (composition.personaHint !== undefined && composition.personaHint.trim() !== '') {
     parts.push(composition.personaHint.trim())
   }
@@ -356,17 +363,13 @@ export function childPersonaOf(
 /**
  * `corumConductor` 服务的**本地能力接口**（红线 3：跨 bundle 用能力接口收窄，不耦合实现包）。
  * 服务由 `@corum/corum-agent` provide；本包按可选服务消费（缺席 = 无指挥模式语义）。
+ *
+ * 2026-09-20：**只保留 `isConductor`**。原先还有一个 `workStyleFor`（向父索取工作风格人格），
+ * 自用户定调「工作风格都固定为 高效务实」后子 Agent 一律用本包的 {@link CHILD_WORK_STYLE}，
+ * 不再向父方索取风格，故该成员连同 `corum-agent` 侧的实现一并删除（避免留死接口）。
  */
 interface ConductorFace {
   isConductor: (sessionId: string) => boolean
-  /**
-   * 该会话所属 profile 的**工作风格人格**（设置里那个「专业干练」），供子 Agent 继承。
-   *
-   * 与「角色人格」严格区分（用户 2026-09-11 定调）：子 Agent 继承「怎么干活」，不继承
-   * 「你是谁」。2026-09-20 起子 Agent 的**角色**契约改由本包按 `kind` 决定，故这里只取
-   * 风格段——角色不再向父方索取。
-   */
-  workStyleFor: (sessionId: string) => string | undefined
 }
 
 /**

@@ -34,6 +34,34 @@
 export const PERSONA_INJECTION_MAX_CHARS = 2000
 
 /**
+ * 子 Agent 的**固定工作风格**（用户 2026-09-20 定调：「工作风格都固定为 高效务实」）。
+ *
+ * ## 为什么不继承父的工作风格（这是本条取代的旧行为）
+ *
+ * 旧实现让子 Agent 继承父 profile 的 `personaPreset`（如 `steady-coach`）。用户实测发现
+ * 会继承到**与执行者语境相冲**的风格：`conductor-lead` 用的是「经验丰富的团队导师……来自
+ * 下属的不成熟方案先肯定再指出问题」——而拿到它的 worker 契约写的是
+ * `You cannot delegate further`（没有下属）、`Do not re-plan it`（别重新设计）、
+ * 活儿是改代码。两边指向相反的角色。
+ *
+ * 用户定调：子 Agent 一律用**高效务实**，不跟随父的设置。父在设置里选什么风格都不再影响
+ * 子 Agent（主 Agent 自身仍按设置走，不受本常量影响）。
+ *
+ * ## 写作纪律
+ *
+ * 与两份角色契约同源：只讲「怎么干活」，不重复机制事实（隔离/模型锁/沙箱口径归各自机制段），
+ * 也不与角色契约打架——它**叠加**在 `CHILD_WORKER_ROLE` / `RESEARCHER_ROLE` 之后，只调节语气
+ * 与取舍，不改变职责边界。全英文（2026-09-10 提示词纪律）。
+ */
+export const CHILD_WORK_STYLE = [
+  'How you work: be efficient and pragmatic. Lead with the result — say what you did, what you found,',
+  'or what is blocking you, and put the reasoning after it only to the extent it is needed.',
+  'Prefer the shortest path that solves the actual problem: no preamble, no restating the brief,',
+  'no narrating options you have already ruled out, no summarising what the reader can already see.',
+  'When something is uncertain, state it plainly in one sentence rather than hedging at length.',
+].join(' ')
+
+/**
  * worker（写型子 Agent）的角色契约：**忠实执行者**。
  *
  * 用户定调（2026-09-20）：「对于隔离分支的子 Agent 我的要求一直都是只干活 不做构建 因为
