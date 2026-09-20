@@ -65,6 +65,8 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 // **type-only**：只合并官方事件表，不引运行时实现（避免新增依赖 + 「两份模块实例」红线）。
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { compilePreset } from './compile.ts'
+// fork（corum）2026-09-20：权限合成（主体 × 用户档位 × 模式约束）——解决「只读被用户档位覆盖」。
+import { conductorMainReadonlyGuard } from './permission-policy.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
 import { GENERAL_WORK_TYPE, canonicalWorkspaceKey, isValidProjectId, isValidWorkTypeSlug, isGroupMember, projectTypeOf } from './project.ts'
@@ -1953,6 +1955,28 @@ export class CorumAgentService extends TypertRemoteService {
       this.ctx.logger.warn(`corum-agent(task): unknown permission preset "${permission}" — skip`)
       return
     }
+    /**
+     * ⚠️ fork（corum）2026-09-20 **权限合成**（实测漏洞修复，见 `permission-policy.ts` 头注）。
+     *
+     * ## 这里**故意保持写入用户原档位**
+     *
+     * 我第一版写成「把合成结果写回预设」，那是**错的**：一份会话状态要同时表达两件事——
+     *   (a) **用户选了什么**（worker 子 Agent 要用它：用户定调「完全权限只能生效给 work 子 Agent」）
+     *   (b) **主 Agent 现在被约束成什么**（指挥模式恒只读）
+     * 用同一个字段表达两者 ⇒ **必然互相踩**，这正是原漏洞的形态。若在此覆盖成 `read-only`，
+     * worker 就再也读不到用户真正的选择了。
+     *
+     * ## 因此本方法只做一件事：如实记录用户的选择
+     *
+     * 主 Agent 的只读约束走**另一条正交的轴** —— agent-scoped 的 `tools.guard`
+     * （官方语义：注册在 `agent.ctx` 的 guard **只对该 agent 生效**，不沿 scope 链泄漏给
+     * 子 Agent ⇒ worker 天然不受影响）。于是：
+     *   · 预设置维持用户原意（worker 由此取档位）；
+     *   · 约束在门禁层表达（主 Agent 的写操作被拒）；
+     *   · 两者**不争同一个字段** ⇒ 写入者仍只有一个，且不再有 last-write-wins 之争。
+     *
+     * @see applyConductorMode 注册该 guard 的地方。
+     */
     try {
       presets.set(session as never, permission)
       this.ctx.logger.info(`corum-agent(task): permission preset pinned — ${permission}`)
@@ -2054,36 +2078,27 @@ export class CorumAgentService extends TypertRemoteService {
       }))
     }
     /**
-     * 指挥者的 shell 是**只读**的（2026-09-20 用户定调：「这里应该要给其 bash 的只读权限，
-     * 否则指挥模式有点受限」）。
+     * ⚠️ fork（corum）2026-09-20 **本段原先在这里钉沙箱，已移除**（实测漏洞）。
      *
-     * 为什么必须钉沙箱而不是只靠提示词：`tool-bash` **自身没有只读档**（它的 config 只有
-     * `enableRunInBackground`），约束完全来自**会话沙箱**。而主会话的沙箱默认是
-     * `workspace-write`（用户选的权限档），所以「放开 bash 但不钉沙箱」= 给指挥者一个
-     * **可写**的 shell，护栏就没了。
+     * 原实现：在此 append 一条 `sandbox/mode: read-only`。**那是错的** —— 它让本方法与
+     * `applyTaskPermission` 成为**同一份会话沙箱的两个无协调写入者**，而沙箱投影是
+     * last-write-wins（`sandbox-policy/src/index.ts:137`）⇒ **谁后写谁赢**。实测用户切
+     * 「完全权限」5 秒内即覆盖只读（会话 `corum-task-e72b1a8f`），全会话普查 conductor
+     * 会话 read-only **存活 0 次** —— 护栏实际上从未生效。
      *
-     * 做法与只读研究子 Agent 同源，但**不用 `source: 'delegation'`**（那是「种进子会话的
-     * 覆盖」专用标记，官方事件 schema `'sandbox/mode': { mode, source?: 'delegation' }` 只认
-     * 这一个取值）——这里**直接 append**（无 source = 运行时切换），不调官方运行时函数。
+     * ## 现在的治理：改走 agent-scoped 门禁，不再争沙箱
      *
-     * 效果：`ls` / `git log` / `git diff` / 读日志都能跑；写文件、`git commit`、重定向被
-     * 沙箱拒绝（拒绝会带 `[sandbox: file access denied under read-only mode]` 标记，模型
-     * 能读懂并停手）。人格段另有明文「不要用 shell 写」作为第二道保险。
-     *
-     * 撤销：与其它 conductorEffects 一起随会话切出指挥模式而复原（写回会话原本的档位）。
+     * 约束放在 {@link CONDUCTOR_MAIN_READONLY_GUARD} 注册的 `tools.guard` 上，理由：
+     *   1. **只能加严、不能被覆盖**：官方语义是「deny or abstain, never allow」，
+     *      且 guard 是**单调**的（后续监听者无法复活被拒的调用）——不像沙箱状态可以被
+     *      一次合法的用户操作 last-write-wins 掉；
+     *   2. **天然只作用于主 Agent**：注册在 `agentCtx` 上的 guard **不沿 scope 链泄漏**给
+     *      子 Agent ⇒ 用户选的完全权限对 worker 依然生效（用户定调「完全权限只能生效给
+     *      work 子 Agent」，主 Agent 与 research 必须只读）；
+     *   3. **不必改造沙箱表达**：预设维持用户原意（worker 要读它），约束在门禁层表达
+     *      ⇒ 两者不争同一个字段。
      */
-    // `agentCtx.agent` 类型上可能缺席（精简装配），先收窄再 append；缺席则整段跳过。
-    const conductorSession = agentCtx.agent?.session
-    const priorSandbox = conductorSession === undefined
-      ? undefined
-      : this.ctx.get('sandboxPolicy')?.overrideOf(conductorSession)
-    if (conductorSession !== undefined && priorSandbox !== 'read-only') {
-      conductorSession.append('sandbox/mode', { mode: 'read-only' })
-      disposers.push(() => {
-        // 切出指挥模式时还原会话原本的档位（原先没有覆盖 ⇒ 回到 workspace-write 交回部署默认）。
-        conductorSession.append('sandbox/mode', { mode: priorSandbox ?? 'workspace-write' })
-      })
-    }
+    disposers.push(agentCtx.tools.guard(conductorMainReadonlyGuard()))
     this.conductorEffects.set(sessionId, () => { for (const dispose of disposers) dispose() })
   }
 

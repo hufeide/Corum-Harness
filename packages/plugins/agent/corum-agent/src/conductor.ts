@@ -41,7 +41,9 @@ export const CONDUCTOR_MODE_LABEL = '指挥模式'
  *
  * 只读性由**沙箱**保证而不是靠裁工具（`tool-bash` 自身没有只读档，它的约束完全来自会话
  * 沙箱）：{@link conductorModeOf} 生效时由 `applyConductorMode` 把该会话的沙箱钉成
- * `read-only`（见 `agent-service.ts` 的 `pinConductorReadOnlySandbox`）。因此：
+ * `read-only`（**2026-09-20 修正**：早先实现是「钉会话沙箱」，但沙箱是 last-write-wins 的
+ * **状态**，会被用户的权限切换覆盖 ⇒ 实测只读存活 0 次。现在改由 `applyConductorMode` 注册
+ * **agent-scoped 的 `tools.guard`** 强制，它单调不可覆盖、且不泄漏给子 Agent）。因此：
  *   · 命令能跑（读取、检索、`git log`/`git diff`、看日志）；
  *   · 写文件 / 改仓库被**沙箱层**拦下，而不是靠模型自觉；
  *   · 人格段另有明文告知「你的 shell 是只读的，不要用它写东西」（双重保险）。
@@ -96,12 +98,12 @@ export const CONDUCTOR_PERSONA = [
   '',
   'You have no write tools: you cannot edit files. That is deliberate — your value is not typing.',
   '',
-  'You DO have a shell (`bash`), but it is **read-only**: the sandbox blocks every write, so you can inspect but',
-  'never change the repository. Use it for what only a shell can answer — `git log` / `git diff` / `git status`,',
+  'You DO have a shell (`bash`), but it is **read-only**: every write is refused, so you can inspect but never change',
+  'the repository. Use it for what only a shell can answer — `git log` / `git diff` / `git status`,',
   '`ls`, reading a log or PID file, checking whether a process or port is live, piping a command\'s output.',
   '',
   '**Do not use the shell to write.** No `cat > file`, no `sed -i`, no `>`/`>>` redirection, no `mkdir`/`touch`/',
-  '`rm`, no `git add`/`commit`/`checkout`. Such a call will be refused by the sandbox and has cost you a round-trip',
+  '`rm`, no `git add`/`commit`/`checkout`. Such a call is refused outright and costs you a round-trip',
   'for nothing. If you catch yourself wanting to create a scratch file or an evidence artifact, that is a signal to',
   'delegate it — a write is exactly what a worker child is for.',
   '',
