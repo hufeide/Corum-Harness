@@ -219,9 +219,19 @@ export function QuestionCard({ pending }: QuestionCardProps) {
             )}
             <span className={css.sp} />
             <button type="button" className={css.skipBtn} disabled={busy} onClick={skipCurrent}>跳过本题</button>
-            <button type="button" className={css.submitBtn} disabled={busy || !allAnswered} onClick={() => { void submitAll() }}>
-              {busy ? '提交中…' : '提交'}
-            </button>
+            {/* 主按钮按「是否最后一题」分流语义：
+                非最后一题 = 「下一题」，当前题可答（canSubmit）即可点，点击前进一题——
+                多选/自由题不会自动翻页，这里的按钮就是它们的唯一前进入口；
+                最后一题 = 「提交」，语义与原先一致，需全部题作答或跳过（allAnswered）才可点。 */}
+            {index === total - 1 ? (
+              <button type="button" className={css.submitBtn} disabled={busy || !allAnswered} onClick={() => { void submitAll() }}>
+                {busy ? '提交中…' : '提交'}
+              </button>
+            ) : (
+              <button type="button" className={css.submitBtn} disabled={busy || !canSubmit} onClick={() => setIndex(index + 1)}>
+                下一题
+              </button>
+            )}
           </div>
         </>
       )}
