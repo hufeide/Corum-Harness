@@ -114,51 +114,21 @@ export function agentDirPath(id: string): string {
   return agentDir(id)
 }
 
-/* ── 官方基础模式覆盖（official overrides）────────────────────────────
- * 官方 preset（standard/ptc/minimal/cordis）本体只读，但允许用户覆盖
- * 「模型 / 子 Agent 模型 / 技能 / MCP」四项。覆盖存于
- * `.agent-presets/_official-overrides.json`（不进 profile 目录，避免被
- * listProfiles 当成一个 Agent）。 */
-
-export interface OfficialModeOverride {
-  model?: AgentProfile['model']
-  subagentModel?: AgentProfile['subagentModel']
-  skills?: AgentProfile['skills']
-  mcpServers?: string[]
-}
-
-type OfficialOverrideMap = Record<string, OfficialModeOverride>
-
-function officialOverridesPath(): string {
-  return join(agentsRoot(), '_official-overrides.json')
-}
-
-/** 读取全部官方模式覆盖（缺文件/坏 JSON 回落空表）。 */
-export function loadOfficialOverrides(): OfficialOverrideMap {
-  const path = officialOverridesPath()
-  if (!existsSync(path)) return {}
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as OfficialOverrideMap
-  } catch {
-    return {}
-  }
-}
-
-/** 写入某官方模式的覆盖（四字段全空时删除该键，保持文件干净）。 */
-export function saveOfficialOverride(id: string, override: OfficialModeOverride): void {
-  const map = loadOfficialOverrides()
-  const empty = override.model === undefined
-    && override.subagentModel === undefined
-    && (override.skills === undefined || override.skills.length === 0)
-    && (override.mcpServers === undefined || override.mcpServers.length === 0)
-  if (empty) {
-    delete map[id]
-  } else {
-    map[id] = override
-  }
-  mkdirSync(agentsRoot(), { recursive: true })
-  writeFileSync(officialOverridesPath(), JSON.stringify(map, null, 2))
-}
+/*
+ * fork（corum）2026-09-21：**官方基础模式的覆盖已删除**（曾存
+ * `.agent-presets/_official-overrides.json`）。
+ *
+ * 删除理由：`loadOfficialOverrides` **全库零消费方**（只被它自己的 `saveOfficialOverride`
+ * 调用），而 `saveOfficialOverride` **零调用点**、28 个 `@Remote` 里也没有任何保存入口
+ * —— 读写两端都没接线，属死代码。且设置页早已定调（`OfficialModeDetailView` 的原文）：
+ * 「官方基础模式是新建 / 编辑 Agent 时的继承模板（baseMode），**不可直接选中、不可编辑**」
+ * ⇒「给官方模式配模型」这个动作在 UI 上本就不存在，删掉与设计意图一致。
+ *
+ * 用户 2026-09-21 裁决：「官方模式本来就不该配模型，删掉那套死代码更干净」。
+ *
+ * 磁盘上遗留的 `_official-overrides.json` **不必手动删**：`listProfiles` 只遍历目录
+ * （`d.isDirectory()`），该文件既不会被当成 Agent、也不会被任何代码读取（无害残留）。
+ */
 
 /* ── AI 润色配置（polish config）────────────────────────────────────
  * 「AI 润色」用哪个已配置的 provider/model 来润色提示词，存于
