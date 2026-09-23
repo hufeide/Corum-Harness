@@ -21,7 +21,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import {
-  Archive, Bell, Box, Brain, ChevronDown, Code, Command, Cpu, Layers,
+  Archive, Bell, Bot, Box, Brain, ChevronDown, Code, Command, Cpu, FolderOpen, Layers,
   Lock, Plug, Search, Settings as SettingsIcon, Shield, Sparkles,
   Star, Sun, Terminal, Trash2, User, Webhook, Repeat, Wrench, X,
 } from 'lucide-react'
@@ -60,7 +60,10 @@ function navIcon(id: string): ReactNode {
     permissions: <Lock className={cls} size={14} />,
     // ➖ rules 图标已随该分区移除（用户裁定：以 Agent 为单位管控，见
     //    SettingsSections.tsx 的 SECTION_DEFS 注释）。
-    memory: <Brain className={cls} size={14} />,
+    // 记忆组三项（2026-09-21）：全局设置 = 齿轮、智能体记忆 = 大脑、项目记忆 = 文件夹。
+    'memory-settings': <Brain className={cls} size={14} />,
+    'memory-agent': <Bot className={cls} size={14} />,
+    'memory-project': <FolderOpen className={cls} size={14} />,
     terminal: <Terminal className={cls} size={14} />,
     hooks: <Webhook className={cls} size={14} />,
     'agent-settings': <Repeat className={cls} size={14} />,
@@ -78,8 +81,9 @@ function navIcon(id: string): ReactNode {
 
 /**
  * 导航分组：从注册的 section rows 中读每个 section 自声明的 `navGroup`（经
- * NAV_GROUP_BY_ID 数据源），缺省归 'extensions'（扩展）。5 组标题/顺序保持现状
- * （通用→AGENT→数据与隐私→扩展→高级），不再有「其他」桶——所有 section 都有归属。
+ * NAV_GROUP_BY_ID 数据源），缺省归 'extensions'（扩展）。6 组标题/顺序：
+ * 通用 → 智能体 → 记忆 → 数据与隐私 → 扩展 → 高级，不再有「其他」桶——所有
+ * section 都有归属。
  */
 /**
  * 导航分组定义：`titleKey` 是 locale key（不是显示文本）——分组标题必须跟随语言，
@@ -89,6 +93,10 @@ function navIcon(id: string): ReactNode {
 const NAV_GROUPS: { key: SettingsNavGroup; titleKey: SettingsKey }[] = [
   { key: 'general', titleKey: 'group.general' },
   { key: 'agent', titleKey: 'group.agent' },
+  // ➕ 记忆独立成组（2026-09-21 用户裁定「将记忆单独列一个项，放在智能体下方」）：
+  //    含「全局设置 / 智能体记忆 / 项目记忆」三个 section（由 @corum/corum-memory
+  //    插件自注册，归属见 SettingsSections.NAV_GROUP_BY_ID）。
+  { key: 'memory', titleKey: 'group.memory' },
   { key: 'data', titleKey: 'group.data' },
   { key: 'extensions', titleKey: 'group.extensions' },
   { key: 'advanced', titleKey: 'group.advanced' },

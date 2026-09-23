@@ -18,6 +18,7 @@ export const zh = {
   // 导航分组标题（SettingsShell 的 NAV_GROUPS）
   'group.general': '通用',
   'group.agent': '智能体',
+  'group.memory': '记忆',
   'group.data': '数据与隐私',
   'group.extensions': '扩展',
   'group.advanced': '高级',
@@ -55,6 +56,7 @@ export const en = {
   'scope.project': 'Project',
   'group.general': 'General',
   'group.agent': 'Agents',
+  'group.memory': 'Memory',
   'group.data': 'Data & Privacy',
   'group.extensions': 'Extensions',
   'group.advanced': 'Advanced',

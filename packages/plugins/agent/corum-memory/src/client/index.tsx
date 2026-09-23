@@ -1,12 +1,53 @@
 /**
- * @corum/corum-memory client half — 设置「扩展」里注册「记忆」面板。
+ * @corum/corum-memory client half —— 在设置中心「记忆」分组注册**三个** section。
  *
- * 面板职责（人工管理，非记忆来源）：
- *   - 浏览：按 scope / 关键词过滤，按记忆强度降序。
- *   - 详情：事实文本 + 时间窗 + 存续期 + 来源 + 作者 + 证据链。
- *   - 人工修剪三动作：失效标记 / 重要性上调下调 / 硬删除（二次确认）。
+ * ## 导航结构（用户 2026-09-21 裁定）
  *
- * 数据走 host memory RPC（connection.rpc.call → /api/memory/*）。
+ * > 「我建议直接将记忆单独列一个项，放在智能体下方，将全局设置、智能体记忆、项目记忆
+ * > 这些 section 放进去。」
+ *
+ * 故「记忆」是**独立的导航分组**（紧邻「智能体」下方），组内三项：
+ *
+ * ```
+ * 设置 › 记忆
+ *   ├─ 全局设置     （id 'memory-settings'，order 60）—— 全局策略
+ *   ├─ 智能体记忆   （id 'memory-agent'，   order 61）—— Agent 列表 → 三维记忆空间
+ *   └─ 项目记忆     （id 'memory-project'， order 62）—— scope='project' 库
+ * ```
+ *
+ * **「智能体记忆」是两步流程**（用户 2026-09-21 裁定：「先有个 Agent 列表，列出已经
+ * 开启记忆的 Agent，点击进去后，可以进入一个三维的 Agent 记忆空间」）：
+ *
+ * ```
+ * Agent 列表（MemoryAgentList）──点某个 Agent──▶ 该 Agent 的三维记忆空间（MemorySpace）
+ *        ▲                                                    │
+ *        └────────────────  ‹ Agent 列表  ────────────────────┘
+ * ```
+ *
+ * 「项目记忆」仍是**平铺的库视图**（MemoryLibrary）：项目没有「一个项目一个空间」的分层
+ * 需求强度——它更像一张表。两者共用同一套后端与操作，差别只在展现。若将来项目也需要
+ * 空间视图，{@link MemorySpace} 只需多传一个 `projectId`。
+ *
+ * ⚠️ **记忆维度只有 Agent 和项目**（同一次裁定：「不做全局记忆」）——底座 `scope`
+ * 枚举里的 `global` 已删除，曾有过的 `memory-store` 单页（内含三库 Tab）也随之拆开。
+ *
+ * 分组归属由壳的 `NAV_GROUP_BY_ID` 决定（`memory-settings` / `memory-agent` /
+ * `memory-project` → `'memory'`）——壳侧已同步声明 `group.memory` 组标题（中/英）。
+ *
+ * ## 数据通路
+ *
+ * - 记忆数据：host RPC `/api/memory/*`。信封与 `@corum/corum-rpc-client` 的
+ *   `makeCorumRpcCall` 逐字相同（`connection.rpc.call('/api', '<ns>/<method>', { args })`
+ *   → `!ok` 抛 `<code>: <message>`），但**本地内联**而不引该包：为一个几行的函数新增
+ *   workspace 依赖不值得（包越少、打包闭包越小）。
+ * - 参数持久化：官方 settings 面 —— `ctx.settingsScope.bind({ namespace: 'corum-memory' })`。
+ *   host 侧 boot 常驻注册行见 `@corum/corum-memory/settings-registrar`（不在 boot 注册
+ *   则冷启动读不到已存参数，同 corum-subagent 的实测教训）。
+ *
+ * ## 视觉
+ *
+ * 组件全部自备（`./ui.tsx`，内联 style + 壳 token）——红线 §3.5：插件**不得**静态
+ * value-import 壳 client bundle 的组件（`corum-ollama` 同款做法）。
  *
  * @module @corum/corum-memory/client
  */
@@ -15,219 +56,124 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
+import { MemorySettingsPage } from './MemorySettingsPage.tsx'
+import type { MemoryCall, MemorySettingsFace } from './MemorySettingsPage.tsx'
+import { MemoryLibrary } from './MemoryLibrary.tsx'
+import { MemoryAgentList } from './MemoryAgentList.tsx'
+import type { AgentSummary } from './MemoryAgentList.tsx'
+import { MemorySpace } from './MemorySpace.tsx'
 
-// ── 与 host 侧同形的投影类型（client bundle 独立，不 import host 值，避免跨 bundle 耦合）──
+/** host settings namespace（与 memory-config.ts 的常量同值；client 不 import host 值）。 */
+export const MEMORY_SETTINGS_NS = 'corum-memory'
 
-type MemoryScope = 'agent' | 'project' | 'global'
-type MemoryRetention = 'temporary' | 'short' | 'long' | 'permanent'
-
-interface MemoryFactView {
-  id: string
-  entity: string
-  relation: string
-  fact: string
-  importance: number
-  validAt: number | null
-  invalidAt: number | null
-  source: string
-  scope: MemoryScope
-  retention: MemoryRetention
-  expiresAt: number | null
-  readCount: number
-  supersedes: string[]
-  evidence: string[]
-  author: string
-  createdAt: number
-  lastAccessedAt: number | null
-  effectiveScore: number
-  applicable: boolean
-  retained: boolean
-}
-
-function makeCall(connection: ConnectionHandle) {
-  return async function call<T>(method: string, args: Record<string, unknown>): Promise<T> {
-    const result = await connection.rpc.call('/api', `memory/${method}`, { args })
+/**
+ * 基于官方 ConnectionHandle 构造 RPC 调用函数（`@corum/corum-rpc-client` 的同款信封）。
+ *
+ * @param connection - 官方 client connection 服务。
+ * @returns 命名空间化调用函数；`!result.ok` 时抛 `<code>: <message>`。
+ */
+function makeCall(connection: ConnectionHandle): MemoryCall {
+  return async function call<T, A extends object = Record<string, unknown>>(
+    service: string,
+    method: string,
+    args: A,
+  ): Promise<T> {
+    const result = await connection.rpc.call('/api', `${service}/${method}`, { args })
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
     return result.value as T
   }
 }
 
-const MONO: React.CSSProperties = { fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 12 }
+/** corum Agent profile 列表端点（取 agentId → 展示名）。 */
+type ProfilesReply = { profiles: Array<{ id: string; nickname?: string; title?: string }> }
+/** corum 项目列表端点（取 projectId → 展示名）。 */
+type ProjectsReply = { projects: Array<{ id: string; name?: string }> }
 
-const RETENTION_LABEL: Record<MemoryRetention, string> = {
-  temporary: '临时',
-  short: '短期',
-  long: '长期',
-  permanent: '永久',
+/**
+ * 「记忆 › 全局设置」的 React 包装。
+ *
+ * @param props.settings - 已绑定的 settings scope（调用面）。
+ * @param props.call - host RPC。
+ * @returns 设置页。
+ */
+function SettingsSectionHost({ settings, call }: { settings: MemorySettingsFace; call: MemoryCall }) {
+  return <MemorySettingsPage settings={settings} call={call} />
 }
 
-const SCOPE_LABEL: Record<MemoryScope, string> = {
-  agent: 'Agent',
-  project: '项目',
-  global: '全局',
-}
-
-function Row({ label, desc, children }: { label: string; desc?: string; children?: ReactNode }) {
+/**
+ * 「记忆 › 智能体记忆」：**两步流程**（Agent 列表 ⇄ 三维记忆空间）。
+ *
+ * `openAgent` 是这一步的全部状态——为 null 显示列表，非 null 显示该 Agent 的空间。
+ * 用组件内 state 而不是新增 section：用户口径是「点进去」，即**同一入口内的下钻**，
+ * 不是导航里多一个分区（多一个分区还要处理「从列表进的空间，返回时高亮哪个导航项」）。
+ *
+ * @param props.call - host RPC。
+ * @returns 列表或空间。
+ */
+function AgentSectionHost({ call }: { call: MemoryCall }) {
+  const [openAgent, setOpenAgent] = useState<AgentSummary | null>(null)
+  if (openAgent === null) {
+    return <MemoryAgentList call={call} onOpen={setOpenAgent} />
+  }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 2px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{label}</span>
-        {desc !== undefined && <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }}>{desc}</span>}
-      </div>
-      {children}
-    </div>
+    <MemorySpace
+      call={call}
+      agentId={openAgent.id}
+      agentName={openAgent.nickname ?? openAgent.title ?? openAgent.id}
+      onBack={() => setOpenAgent(null)}
+    />
   )
 }
 
-function fmtTime(ms: number | null): string {
-  if (ms === null) return '—'
-  return new Date(ms).toLocaleString()
-}
+/**
+ * 「记忆 › 项目记忆」的 React 包装：额外拉 Agent / 项目名册，把归属 id 显示成人能读的名字。
+ *
+ * 为什么在这里拉而不是在记忆 RPC 里 join：底座**不认识** Agent / 项目（它只知道
+ * `agentId` / `projectId` 字符串，这是刻意的解耦——底座不绑定任何来源）。名字映射
+ * 属于展现层，故由 client 侧用 corum 自己的两个端点拼。
+ *
+ * ⚠️ 与「智能体记忆」各自拉一次名册（两个 React 实例），这是**有意的**：名册是廉价的
+ * 本地索引读取，而为共享它引入一个跨 section 的缓存服务，收益不抵复杂度（红线 1
+ * 的教训是「别用模块级单例做跨 bundle 共享」，不是「别重复读一次本地索引」）。
+ *
+ * @param props.call - host RPC（同一个 call 面，换 service 名）。
+ * @returns 项目维度的记忆库页。
+ */
+function ProjectSectionHost({ call }: { call: MemoryCall }) {
+  const [profileNames, setProfileNames] = useState<Record<string, string>>({})
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({})
 
-/** 有效分 → 色条长度百分比。 */
-function barPercent(score: number): number {
-  return Math.max(0, Math.min(100, score))
-}
-
-function MemoryPanel({ call }: { call: ReturnType<typeof makeCall> }) {
-  const [facts, setFacts] = useState<MemoryFactView[] | null>(null)
-  const [scope, setScope] = useState<MemoryScope | 'all'>('all')
-  const [query, setQuery] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
-
-  const refresh = async () => {
-    try {
-      const all = await call<MemoryFactView[]>('listFacts', {})
-      setFacts(all)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      // 名册拉不到不是致命错误——回落显示 id（记忆库必须仍然可用）。
+      const [profiles, projects] = await Promise.all([
+        call<ProfilesReply>('corumAgent', 'listProfiles', {}).catch(() => ({ profiles: [] })),
+        call<ProjectsReply>('corumProject', 'listProjects', {}).catch(() => ({ projects: [] })),
+      ])
+      if (!alive) return
+      const pm: Record<string, string> = {}
+      for (const p of profiles.profiles ?? []) pm[p.id] = p.nickname ?? p.title ?? p.id
+      const jm: Record<string, string> = {}
+      for (const p of projects.projects ?? []) jm[p.id] = p.name ?? p.id
+      setProfileNames(pm)
+      setProjectNames(jm)
     }
-  }
-
-  useEffect(() => { void refresh() }, [])
-
-  const filtered = (facts ?? []).filter(f => {
-    if (scope !== 'all' && f.scope !== scope) return false
-    if (query.trim() !== '' && !f.fact.toLowerCase().includes(query.trim().toLowerCase())) return false
-    return true
-  })
-
-  const invalidate = async (id: string) => {
-    setBusyId(id)
-    try { await call('invalidate', { id }); await refresh() }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
-    finally { setBusyId(null) }
-  }
-
-  const pin = async (id: string, importance: number) => {
-    setBusyId(id)
-    try { await call('setImportance', { id, importance }); await refresh() }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
-    finally { setBusyId(null) }
-  }
-
-  const remove = async (id: string) => {
-    setBusyId(id)
-    try { await call('deleteFact', { id }); await refresh() }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
-    finally { setBusyId(null) }
-  }
-
-  const count = filtered.length
-  const applicableCount = filtered.filter(f => f.applicable).length
+    void load()
+    return () => { alive = false }
+  }, [call])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
-      <Row label="记忆底座" desc="事实级记忆组织（重要性 / 时间窗 / 分层 / 衰减）。此处只做人工管理，记忆来源由使用者接入。">
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={scope} onChange={e => setScope(e.target.value as MemoryScope | 'all')}
-            style={{ padding: '6px 10px', borderRadius: 8, fontSize: 12, border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)', color: 'var(--dsw-alias-label-primary)', outline: 'none' }}>
-            <option value="all">全部作用域</option>
-            <option value="agent">Agent</option>
-            <option value="project">项目</option>
-            <option value="global">全局</option>
-          </select>
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="搜索事实文本…"
-            style={{ flex: 1, minWidth: 160, padding: '6px 10px', borderRadius: 8, fontSize: 12, border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-2)', color: 'var(--dsw-alias-label-primary)', outline: 'none' }}
-          />
-          <span style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', whiteSpace: 'nowrap' }}>
-            {facts === null ? '加载中…' : `共 ${count} 条 · 适用 ${applicableCount} 条`}
-          </span>
-        </div>
-      </Row>
-
-      {error !== null && <span style={{ fontSize: 11, color: 'var(--dsw-alias-state-error-primary)' }}>{error}</span>}
-
-      {facts === null ? (
-        <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>加载事实列表…</span>
-      ) : filtered.length === 0 ? (
-        <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-dimmed)' }}>暂无记忆事实。</span>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {filtered.map(f => (
-            <div key={f.id} style={{
-              display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px',
-              borderRadius: 10, border: '1px solid var(--corum-glass-border)',
-              background: f.applicable ? 'var(--corum-glass-2)' : 'var(--corum-glass-1)',
-              opacity: f.applicable ? 1 : 0.65,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{f.fact}</span>
-                <span style={{ flex: 1 }} />
-                {!f.applicable && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 600, color: 'var(--dsw-alias-label-dimmed)', border: '1px solid var(--corum-glass-border)' }}>已到期</span>}
-                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{SCOPE_LABEL[f.scope]}</span>
-                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--corum-glass-border)', color: 'var(--dsw-alias-label-tertiary)' }}>{RETENTION_LABEL[f.retention]}</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--corum-glass-3)', overflow: 'hidden' }}>
-                  <div style={{ width: `${barPercent(f.effectiveScore)}%`, height: '100%', background: 'var(--dsw-alias-brand-primary)' }} />
-                </div>
-                <span style={{ ...MONO, fontSize: 10, color: 'var(--dsw-alias-brand-primary)', minWidth: 40, textAlign: 'right' }}>{f.effectiveScore.toFixed(0)}</span>
-                <span style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary)' }}>重要 {f.importance}</span>
-              </div>
-              <div style={{ display: 'flex', gap: 12, fontSize: 10, color: 'var(--dsw-alias-label-tertiary)', flexWrap: 'wrap' }}>
-                {f.entity !== '' && <span>实体 {f.entity}</span>}
-                {f.relation !== '' && <span>关系 {f.relation}</span>}
-                {f.source !== '' && <span>来源 {f.source}</span>}
-                <span>作者 {f.author}</span>
-                <span>创建 {fmtTime(f.createdAt)}</span>
-                {f.invalidAt !== null && <span>失效 {fmtTime(f.invalidAt)}</span>}
-              </div>
-              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                <button type="button" disabled={busyId === f.id} onClick={() => void pin(f.id, Math.min(100, f.importance + 10))}
-                  style={btnStyle(busyId === f.id)}>↑ 重要</button>
-                <button type="button" disabled={busyId === f.id} onClick={() => void pin(f.id, Math.max(0, f.importance - 10))}
-                  style={btnStyle(busyId === f.id)}>↓ 压底</button>
-                {f.applicable && (
-                  <button type="button" disabled={busyId === f.id} onClick={() => void invalidate(f.id)}
-                    style={{ ...btnStyle(busyId === f.id), border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' }}>标失效</button>
-                )}
-                <button type="button" disabled={busyId === f.id} onClick={() => void remove(f.id)}
-                  style={{ ...btnStyle(busyId === f.id), border: '1px solid var(--dsw-alias-state-error-primary)', color: 'var(--dsw-alias-state-error-primary)' }}>删除</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <MemoryLibrary
+      scope="project"
+      call={call}
+      profileNames={profileNames}
+      projectNames={projectNames}
+    />
   )
 }
 
-function btnStyle(disabled: boolean): React.CSSProperties {
-  return {
-    padding: '4px 10px', borderRadius: 8, fontSize: 11, cursor: disabled ? 'wait' : 'pointer',
-    border: '1px solid var(--corum-glass-border)', background: 'var(--corum-glass-3)',
-    color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap',
-  }
-}
-
-export const inject = ['slots', 'connection', 'remote']
+export const inject = ['slots', 'connection', 'remote', 'settingsScope']
 
 export function apply(ctx: ClientContext): void {
   let slots: ClientContext['slots'] | undefined
@@ -238,10 +184,27 @@ export function apply(ctx: ClientContext): void {
   }
   const connection = ctx.get('connection') as ConnectionHandle
   const call = makeCall(connection)
+  // settings 面：绑本 ns（读走共享 mirror，写走官方序列化写链 —— 不自己拼 RPC）。
+  const settings = ctx.settingsScope.bind({ namespace: MEMORY_SETTINGS_NS }) as unknown as MemorySettingsFace
+
   slots.inject('settings.section', () => slots.register({
     name: 'settings.section',
-    id: 'memory',
-    order: 196,
-    label: '记忆',
-  }, () => <MemoryPanel call={call} />))
+    id: 'memory-settings',
+    order: 60,
+    label: '全局设置',
+  }, () => <SettingsSectionHost settings={settings} call={call} />))
+
+  slots.inject('settings.section', () => slots.register({
+    name: 'settings.section',
+    id: 'memory-agent',
+    order: 61,
+    label: '智能体记忆',
+  }, () => <AgentSectionHost call={call} />))
+
+  slots.inject('settings.section', () => slots.register({
+    name: 'settings.section',
+    id: 'memory-project',
+    order: 62,
+    label: '项目记忆',
+  }, () => <ProjectSectionHost call={call} />))
 }

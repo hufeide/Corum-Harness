@@ -18,7 +18,6 @@ import { ShortcutsSection } from './sections/SettingsShortcutsSection.tsx'
 import { TerminalSection } from './sections/SettingsTerminalSection.tsx'
 import { AgentSettingsSection } from './sections/SettingsAgentSettingsSection.tsx'
 import { PermissionsSection } from './sections/SettingsPermissionsSection.tsx'
-import { MemorySection } from './sections/SettingsMemorySection.tsx'
 import { PrivacySection } from './sections/SettingsPrivacySection.tsx'
 import { DataSection } from './sections/SettingsDataSection.tsx'
 import { HooksSection } from './sections/SettingsHooksSection.tsx'
@@ -50,8 +49,14 @@ export type { CorumSettingsFace, FontPrefsFace, FontPrefsService, NotificationPr
 
 /* ── 导出 section 组件映射 ──────────────────────────────────────────── */
 
-/** 设置中心导航分组（5 组，现状保持）。 */
-export type SettingsNavGroup = 'general' | 'agent' | 'data' | 'extensions' | 'advanced'
+/**
+ * 设置中心导航分组。
+ *
+ * `memory` 是 2026-09-21 新增的第 6 组（用户裁定「将记忆单独列一个项，放在智能体下方，
+ * 将全局设置、智能体记忆、项目记忆这些 section 放进去」）—— 记忆自成一组，与
+ * 「智能体」并列，而不是挤在智能体组里当子项。
+ */
+export type SettingsNavGroup = 'general' | 'agent' | 'memory' | 'data' | 'extensions' | 'advanced'
 
 export interface SectionDef {
   id: string
@@ -105,7 +110,13 @@ export const SECTION_DEFS: SectionDef[] = [
   //   进行管控」+ B4「移除系统提示词前缀」⇒ 全局提示词注入不提供用户可写出口，
   //   「全局自定义指令」与「人格 Personality」两个入口一并取消（PRD §4.1 / §6.4 / §11 C1）。
   //   ⚠️ 不要恢复：本分区在设计与正确性上都已被 Agent 预设取代。
-  { id: 'memory', order: 60, label: 'nav.memory', navGroup: 'agent', Component: MemorySection },
+  // ➖ memory（记忆）分区已移交插件自注册（2026-09-21，用户拍板三层信息架构）。
+  //   依据：底座 `@corum/corum-memory` 已落地（事实级存储 + 存续期 + 衰减 + 检索），
+  //   而壳里的 SettingsMemorySection 是「dsh 内核无 memory」时代的 **19 项全 disabled
+  //   假清单** —— 两套语义并存会让用户看到 disabled 的假开关（旧文件已删除）。
+  //   现由插件注册**两个** section：`memory`（记忆 · 全局设置，order 60，接管本行删掉的
+  //   id）/ `memory-store`（记忆 · 记忆库，order 61）。归属分组见下方 NAV_GROUP_BY_ID。
+  //   ⚠️ 不要恢复本行：壳不再持有记忆分区。
   { id: 'terminal', order: 18, label: 'nav.terminal', navGroup: 'general', Component: TerminalSection },
   { id: 'hooks', order: 90, label: 'nav.hooks', navGroup: 'agent', Component: HooksSection },
   // ✏️ M2 重构：原 `agent-loop`（「高级 Agent Loop」）改名并扩容为 `agent-settings`（「智能体设置」），
@@ -151,4 +162,11 @@ export const NAV_GROUP_BY_ID: Record<string, SettingsNavGroup> = {
   // 缺了这条它会落默认 extensions 组（实测导航跑到「数据管理」之后）。
   appearance: 'general',
   models: 'agent',
+  // 记忆三个 section 由 @corum/corum-memory 插件自注册（不在 SECTION_DEFS 里），
+  // 缺了这三条会落默认 extensions 组（导航跑到「扩展」区）。
+  // ⚠️ id 必须与插件 slots.register 的 id 一致（memory-settings / memory-agent /
+  //    memory-project）。三者同归 `memory` 组 ⇒ 导航里「记忆」自成一组。
+  'memory-settings': 'memory',
+  'memory-agent': 'memory',
+  'memory-project': 'memory',
 }
