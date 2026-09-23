@@ -930,6 +930,41 @@ fi
 # LocalFileSystem 的子类 —— fork 必须通过 pnpm-workspace.yaml 的 link: override 生效，
 # 否则 fork 编好、测试全绿、应用里却一行都没跑到（静默失效）。
 fi  # ← select_section 15
+
+# ── 15a. 「cordis 行挂的 @corum 包必须进 desktop-host 依赖」的通例断言 ──────────
+# 由来（2026-09-21 实测的发布阻断）：@corum/corum-memory 的 host 半在 cordis.patch.yml
+# 有挂载行、也进了 packages/desktop/package.json，但**漏了 desktop-host/package.json**
+# —— 于是 pack-macos 的 top-up（按 desktop-host 声明的 workspace:* 清单补齐闭包）不知道
+# 要补它，打包闭包 `build/host/node_modules/@corum/` 里**没有 corum-memory** ⇒
+# 打包态启动时那行 cordis 挂载解析不到包 ⇒ 记忆功能整体缺失（而 dev 态一切正常）。
+#
+# ⚠️ 上面 15 节那三条硬编码断言（sandbox-local / fs-local / tools）**只覆盖 fork 包**，
+# 对「新插件漏登记」这类漏检完全无感 —— 正是本插件踩中的缺口。故这里补一条**通例**：
+# 扫 cordis.patch.yml 里所有 `name: '@corum/…'` 的挂载行，要求每个包都出现在
+# desktop-host 依赖里。这样「以后再加插件时忘了登记」会被当场拦下，而不是等到打包态
+# 才发现功能整块不见。
+if select_section 15a; then
+section "[15a] cordis 挂载的 @corum 包 ↦ desktop-host 依赖（打包闭包不漏包）"
+PATCH_YML="$REPO_ROOT/packages/desktop/cordis.patch.yml"
+DESKTOP_HOST_PKG="$REPO_ROOT/packages/desktop/desktop-host/package.json"
+# 只取**真实挂载行**（剥注释），避免被注释里的包名骗过（§8 的历史教训）。
+mounted_corum=$(uncomment_all "$PATCH_YML" \
+  | grep -oE "name:[[:space:]]*'@corum/[a-z0-9-]+'" \
+  | grep -oE "@corum/[a-z0-9-]+" \
+  | sort -u)
+missing_host=''
+for pkg in $mounted_corum; do
+  if ! code_has "\"$pkg\"" "$DESKTOP_HOST_PKG"; then
+    missing_host="$missing_host $pkg"
+  fi
+done
+if [ -z "$missing_host" ]; then
+  pass "cordis 挂载的 $(printf '%s\n' "$mounted_corum" | wc -l | tr -d ' ') 个 @corum 包全部登记在 desktop-host 依赖"
+else
+  fail "desktop-host/package.json 缺这些 cordis 挂载的包：$missing_host —— 打包闭包不会带它们（pack-macos 的 top-up 只按 desktop-host 声明补齐）⇒ 打包态该行解析不到包、功能整块缺失。修法：把包名加进 packages/desktop/desktop-host/package.json 的 dependencies"
+fi
+fi  # ← select_section 15a
+
 if select_section 15b; then
 section "[15b] fork #14（@corum/corum-fs-local）：edit 定位提示 + 解析面 override"
 FS_LOCAL_FORK="$REPO_ROOT/packages/plugins/agent/corum-fs-local"
