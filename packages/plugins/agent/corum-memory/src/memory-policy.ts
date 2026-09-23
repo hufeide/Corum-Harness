@@ -29,9 +29,27 @@
  */
 
 import type { MemoryFact, MemoryFactView, MemoryRetention } from './memory-entities.ts'
+import { DECAY_STRENGTH_MULTIPLIER, MEMORY_CONFIG_DEFAULTS } from './memory-config.ts'
+import type { DecayStrength } from './memory-config.ts'
 
-/** 读取阈值：readCount 达到该值 → 持久化升级到 long。 */
-export const READ_PROMOTE_THRESHOLD = 5
+/** 读取阈值：readCount 达到该值 → 持久化升级到 long（= 设置面默认档）。 */
+export const READ_PROMOTE_THRESHOLD = MEMORY_CONFIG_DEFAULTS.readPromoteThreshold
+
+/**
+ * 策略覆盖面（设置中心三个参数的注入点）。
+ *
+ * 为什么是「可选参数」而不是「模块级可变单例」：红线 1 —— 跨 bundle 的模块级状态
+ * 会被复制成多份。这里全部走**显式传参**：服务持有 resolved config，每次调用时
+ * 传入。纯函数保持纯净，单测可任意组合；未传时回落到内置默认（老调用点零破坏）。
+ */
+export interface PolicyOverrides {
+  /** 写入时未声明存续期的回落档（默认 temporary）。 */
+  readonly defaultRetention?: MemoryRetention
+  /** 读取升级阈值（默认 {@link READ_PROMOTE_THRESHOLD}）。 */
+  readonly readPromoteThreshold?: number
+  /** 衰减强度档（默认 standard，倍率 1）。 */
+  readonly decayStrength?: DecayStrength
+}
 
 /** 各存续期的 TTL（毫秒；expiresAt = createdAt + TTL）。permanent 永不 expire。 */
 export const RETENTION_TTL_MS: Record<MemoryRetention, number | null> = {
@@ -67,25 +85,37 @@ export function expiresAtFor(retention: MemoryRetention, createdAt: number): num
  * 规则（用户拍板）：
  *   1. 显式声明 permanent（纪律 / 永久事实源）→ permanent（写方已声明）；
  *   2. author='user'（手动添加）→ 至少 long；
- *   3. 其余 → 保持写方声明的 retention（默认 temporary）。
+ *   3. 其余 → 保持写方声明的 retention（缺省取 `overrides.defaultRetention`，
+ *      再退到内置 `temporary`）。
+ *
+ * @param requested - 写方显式声明的存续期（undefined = 未声明）。
+ * @param author - 写入者（`'user'` = 手动添加）。
+ * @param overrides - 设置面覆盖（「存续期默认档」）。
+ * @returns 最终存续期。
  */
 export function resolveRetentionOnWrite(
   requested: MemoryRetention | undefined,
   author: string,
+  overrides: PolicyOverrides = {},
 ): MemoryRetention {
   if (requested === 'permanent') return 'permanent'
   if (requested === 'long') return 'long'
   if (author === 'user') return 'long' // 手动添加 → long
-  return requested ?? 'temporary'
+  return requested ?? overrides.defaultRetention ?? 'temporary'
 }
 
 /**
  * 持久化升级（读时）：readCount 达到阈值 → 至少 long。
  * 永久（permanent）不降级；long/permanent 之外才升级。
+ *
+ * @param fact - 当前事实。
+ * @param overrides - 设置面覆盖（「读取升级阈值」）。
+ * @returns 升级后的存续期。
  */
-export function promoteRetentionOnRead(fact: MemoryFact): MemoryRetention {
+export function promoteRetentionOnRead(fact: MemoryFact, overrides: PolicyOverrides = {}): MemoryRetention {
   if (fact.retention === 'permanent' || fact.retention === 'long') return fact.retention
-  if (fact.readCount >= READ_PROMOTE_THRESHOLD) return 'long'
+  const threshold = overrides.readPromoteThreshold ?? READ_PROMOTE_THRESHOLD
+  if (fact.readCount >= threshold) return 'long'
   return fact.retention
 }
 
@@ -112,14 +142,25 @@ export function isRetained(fact: MemoryFact, now: number = Date.now()): boolean 
  * 读时降权后的记忆强度（0-100），**不因断言到期归零**。
  *
  * 指数衰减：score = importance × 0.5^(age / halfLife)。
- *   - 半衰期由 retention 决定（临时快衰、永久微衰）。
+ *   - 半衰期由 retention 决定（临时快衰、永久微衰），再乘「衰减强度」档位倍率
+ *     （快 0.5× ⇒ 衰得更快、更偏「近的优先」；慢 2× ⇒ 更偏「重要的优先」）。
  *   - age 由 validAt（缺省 createdAt）起算。
  *   - 访问强化：lastAccessedAt 在窗口内则半衰期翻倍。
  *   - 记忆被遗忘（expiresAt 已过）→ 0（真正不参与排序）。
+ *
+ * @param fact - 事实记录。
+ * @param now - 参照时刻（默认 Date.now()）。
+ * @param overrides - 设置面覆盖（「衰减强度」）。
+ * @returns 记忆强度（两位小数）。
  */
-export function effectiveScoreFor(fact: MemoryFact, now: number = Date.now()): number {
+export function effectiveScoreFor(
+  fact: MemoryFact,
+  now: number = Date.now(),
+  overrides: PolicyOverrides = {},
+): number {
   if (!isRetained(fact, now)) return 0
-  const halfLife = RETENTION_HALF_LIFE_MS[fact.retention]
+  const baseHalfLife = RETENTION_HALF_LIFE_MS[fact.retention]
+  const halfLife = baseHalfLife * DECAY_STRENGTH_MULTIPLIER[overrides.decayStrength ?? 'standard']
   const born = fact.validAt ?? fact.createdAt
   const age = Math.max(0, now - born)
 
@@ -132,11 +173,22 @@ export function effectiveScoreFor(fact: MemoryFact, now: number = Date.now()): n
   return Math.round(score * 100) / 100
 }
 
-/** 合并成派生视图。 */
-export function toView(fact: MemoryFact, now: number = Date.now()): MemoryFactView {
+/**
+ * 合并成派生视图。
+ *
+ * @param fact - 事实记录。
+ * @param now - 参照时刻（默认 Date.now()）。
+ * @param overrides - 设置面覆盖（「衰减强度」）。
+ * @returns 派生视图（含 effectiveScore / applicable / retained）。
+ */
+export function toView(
+  fact: MemoryFact,
+  now: number = Date.now(),
+  overrides: PolicyOverrides = {},
+): MemoryFactView {
   return {
     ...fact,
-    effectiveScore: effectiveScoreFor(fact, now),
+    effectiveScore: effectiveScoreFor(fact, now, overrides),
     applicable: isApplicable(fact, now),
     retained: isRetained(fact, now),
   }

@@ -55,7 +55,7 @@ async function setup(): Promise<{ ctx: Context; mem: MemoryService }> {
 function input(overrides: Partial<Parameters<MemoryService['putFact']>[0]> = {}) {
   return {
     fact: '用户偏好深色模式',
-    scope: 'global' as MemoryScope,
+    scope: 'agent' as MemoryScope,
     author: 'test',
     ...overrides,
   }
@@ -262,15 +262,18 @@ describe('MemoryService 业务层 — 检索（applicable / recall 双模式，�
     expect((await mem.searchFacts({ mode: 'recall' })).map(f => f.id)).toContain(fact.id)
   })
 
-  it('scope 过滤只返回对应作用域', async () => {
+  it('scope 过滤只返回对应维度（只有 agent / project 两个）', async () => {
     const { mem } = await setup()
-    await mem.putFact(input({ fact: 'global 事实', scope: 'global' }))
     await mem.putFact(input({ fact: 'project 事实', scope: 'project' }))
     await mem.putFact(input({ fact: 'agent 事实', scope: 'agent' }))
 
     const projectOnly = await mem.searchFacts({ scope: 'project', mode: 'recall' })
     expect(projectOnly).toHaveLength(1)
     expect(projectOnly[0].fact).toBe('project 事实')
+
+    const agentOnly = await mem.searchFacts({ scope: 'agent', mode: 'recall' })
+    expect(agentOnly).toHaveLength(1)
+    expect(agentOnly[0].fact).toBe('agent 事实')
   })
 
   it('query 关键词子串匹配（大小写不敏感）', async () => {

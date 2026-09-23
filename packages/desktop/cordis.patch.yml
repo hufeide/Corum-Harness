@@ -361,14 +361,26 @@
     - id: corum-ollama
       name: '@corum/corum-ollama'
 
-    # 通用记忆底座（讨论定稿）：host 半 provide cordis 服务 `memory`（MemoryService，
-    # 事实级记忆组织 + 人工修剪三动作），client 半在「设置 → 扩展」注册「记忆」面板。
+    # 通用记忆底座（讨论定稿；产品形态见 docs/PLAN-memory-settings-product-design.md）：
+    # host 半 provide cordis 服务 `memory`（MemoryService —— 事实级记忆组织 + 人工修剪），
+    # client 半在「设置 → 智能体」组注册**两个** section（记忆 · 全局设置 order 60，顶掉
+    # 壳里那个 19 项全 disabled 的假清单；记忆 · 记忆库 order 61）。
     # 只承载「组织形式」，不绑定任何记忆来源。存储复用官方 dsh-storage-domain
     # （ctx.storageDomain），域 corum_memory、表 facts。装配规则同 corum-ollama
     # （短 id + 只在此处 mount）。行序在 corum-ollama 后（无依赖顺序要求，
     # storageDomain 由官方 base bundle 提供，早于本行）。
     - id: corum-memory
       name: '@corum/corum-memory'
+
+    # ⚠️ `corum-memory` settings namespace **必须 boot 常驻**（同 corum-subagent-settings
+    # 的实测教训）：该 ns 只在「按需打开的设置页」里注册的话，冷启动时
+    # `settings/describe` 里没有它 ⇒ 设置中心「记忆」页的参数读不到 settings.yaml 里
+    # 已存的值、写入报 `settings namespace "corum-memory" is not registered`、
+    # 「恢复默认」也无从判断哪些键被覆盖过。
+    # 行序在 corum-memory 之前 ⇒ 本行先注册；服务侧走 `acquireMemorySettingsScope`
+    # （容忍「已被注册」——官方 register 对重复注册抛错）。
+    - id: corum-memory-settings
+      name: '@corum/corum-memory/settings-registrar'
 
     # 本地文生图：host 半 provide cordis 服务 `corumArtGen`（sd-cli 引擎/模型下载 +
     # txt2img，长任务走事件推送）；client 半在「设置 → 扩展」注册「本地文生图」
