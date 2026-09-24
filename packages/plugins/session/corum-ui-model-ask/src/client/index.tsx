@@ -103,7 +103,13 @@ function ModelAskDock({ sessionId, pendingInteractions }: {
     return null
   })
   if (pending === null) return null
-  return <ModelAskPanel pending={pending} />
+  // `key` 绑定 pending 身份（**不是**可选优化，是正确性）。缺了它，同位置的新询问会被
+  // React 复用上一个实例的组件 state：上一轮点击留下的 `applying=true`（还有 kind /
+  // picked）会带进新面板 ⇒ 新面板一出生就只能显示 disabled 的「应用中…」，用户永远
+  // 点不动（实机证据：重跑都已 `turn/end`，面板仍卡在 applying，且该 pending 的
+  // `answer()` 从未被调用过）。官方 `QuestionComposer` 对 PlanReviewPanel 用的是同一
+  // 手法（`key={question.key}`）。
+  return <ModelAskPanel key={pending.key} pending={pending} />
 }
 
 /**

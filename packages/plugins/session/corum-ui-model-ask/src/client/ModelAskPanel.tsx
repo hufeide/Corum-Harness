@@ -161,7 +161,12 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
     setApplying(true)
     void pending.answer(modelAskAnswerOf(kind, picked === undefined
       ? undefined
-      : { provider: picked.provider, model: picked.model }))
+      : { provider: picked.provider, model: picked.model })).catch(() => {
+      // 回传失败（pending 已被结算/已失效）⇒ **必须把按钮放开**。否则 `applying` 停在
+      // true、按钮永久 disabled，用户被卡在一个点不动的面板里（J+K 的第二个失败形态：
+      // `void promise` 把 rejection 吞掉，界面上看不到任何异常，只表现为「应用中…」）。
+      setApplying(false)
+    })
   }
 
   if (!expanded) {
