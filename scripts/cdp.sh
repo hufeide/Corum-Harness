@@ -35,7 +35,7 @@ resolve_repo() {
   return 1
 }
 if ! ROOT="$(resolve_repo)"; then
-  echo "[cdp] 错误：找不到主 checkout（本脚本在 $SCRIPT_DIR，cwd 是 $PWD）。" >&2
+  echo "[cdp] 错误：找不到主 checkout（本脚本在 ${SCRIPT_DIR}，cwd 是 ${PWD}）。" >&2
   echo "[cdp] 可执行下一步：cd 到含 packages/desktop/lib/cli.js 的主 checkout，或设 CORUM_REPO=<主 checkout 根> 后重试。" >&2
   exit 1
 fi

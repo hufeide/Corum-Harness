@@ -189,7 +189,7 @@ case "$CMD" in
     sed -n '2,22p' "${BASH_SOURCE[0]}"
     ;;
   *)
-    echo "未知命令: $CMD（支持 restart/build/start/stop）" >&2
+    echo "未知命令: ${CMD}（支持 restart/build/start/stop）" >&2
     exit 2
     ;;
 esac

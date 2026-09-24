@@ -72,7 +72,7 @@ const MCP_JSON_PLACEHOLDERS: Record<AddTransport, string> = {
   'stdio': `{
   "command": "npx",
   "args": ["-y", "@modelcontextprotocol/server-filesystem",
-    "/Users/kukucai/work"],
+    "/path/to/your/workspace"],
   "env": {
     "API_KEY": "your-key-here"
   }

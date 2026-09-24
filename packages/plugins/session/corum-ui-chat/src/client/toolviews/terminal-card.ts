@@ -2,8 +2,9 @@
  * fork（corum）：终端卡纯派生 —— 不导入官方 `terminal-card-model.ts`（它非公开，
  * 不在 `@deepseek-ai/dsh-client-ui-tool/client` 的导出面），在此按同等语义 vendoring。
  *
- * 官方源（唯一契约）：`/Users/kukucai/dsh/dsh/packages/client/ui-tool/src/client/tool/
- * models/terminal-card-model.ts`（307 行）。本模块复刻其语义：
+ * 官方源（唯一契约）：dsh 检出的
+ * `packages/client/ui-tool/src/client/tool/models/terminal-card-model.ts`（307 行）。
+ * 本模块复刻其语义：
  *   - 给定 `ToolCallBlock`（+ session cwd），返回 `null`（不可渲染 → 走通用行）
  *     或一个携带 command / output / exitCode / signal / running / copy 的 model。
  *   - 覆盖官方两道门：`bash`/`pwsh`（含同样的参数校验 + `background` 排除）

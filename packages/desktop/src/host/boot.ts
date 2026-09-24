@@ -142,13 +142,18 @@ const OFFICIAL_SHIPPED_PRESETS = fileURLToPath(new URL('../shipped-presets/offic
 // when the packaged `shipped-presets/corum` staging has not been materialized
 // (a plain `node lib/cli.js` run before `pack`).
 const CORUM_DEV_PRESETS = fileURLToPath(new URL('../../../.agent-presets/', import.meta.url))
-// Dev fallback for the official shipped set: read it from the local dsh
-// checkout (the same place the `link:` deps resolve from). `DSH_CHECKOUT`
-// overrides the checkout root, mirroring the pack scripts.
-const OFFICIAL_DEV_PRESETS = join(
-  process.env.DSH_CHECKOUT ?? '/Users/kukucai/dsh',
-  'apps', 'cli', 'config', 'agent-presets',
-)
+// Dev fallback for the official shipped set: read it from a local dsh checkout
+// (the same place the `link:` deps resolve from). `DSH_CHECKOUT` overrides the
+// checkout root, mirroring the pack scripts.
+//
+// When `DSH_CHECKOUT` is unset the path is intentionally left undefined rather
+// than defaulting to the author's own machine: `resolveAgentPresetRoots()` skips
+// a missing root, so a checkout-less machine still boots on the packaged
+// `shipped-presets/official` set. Baking in an absolute path would instead make
+// every clone inherit one developer's directory layout.
+const OFFICIAL_DEV_PRESETS = process.env.DSH_CHECKOUT === undefined
+  ? undefined
+  : join(process.env.DSH_CHECKOUT, 'apps', 'cli', 'config', 'agent-presets')
 
 /**
  * Resolve the agent-preset roots the CLI would have injected during its own
@@ -172,7 +177,10 @@ const OFFICIAL_DEV_PRESETS = join(
 function resolveAgentPresetRoots(): Array<{ path: string; trust: 'system' | 'user' }> {
   const roots: Array<{ path: string; trust: 'system' | 'user' }> = []
   const officialRoot = existsSync(OFFICIAL_SHIPPED_PRESETS) ? OFFICIAL_SHIPPED_PRESETS : OFFICIAL_DEV_PRESETS
-  if (existsSync(officialRoot)) roots.push({ path: officialRoot, trust: 'system' })
+  // `OFFICIAL_DEV_PRESETS` is undefined when no `DSH_CHECKOUT` is configured —
+  // the packaged official set above is then the only source, which is the
+  // normal case outside the author's machine.
+  if (officialRoot !== undefined && existsSync(officialRoot)) roots.push({ path: officialRoot, trust: 'system' })
   const corumRoot = existsSync(CORUM_SHIPPED_PRESETS) ? CORUM_SHIPPED_PRESETS : CORUM_DEV_PRESETS
   if (existsSync(corumRoot)) roots.push({ path: corumRoot, trust: 'user' })
   return roots

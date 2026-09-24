@@ -208,7 +208,7 @@ while IFS='|' read -r file want why; do
   [ -z "$file" ] && continue
   f="$PKG_DIR/src/$file"
   if [ ! -f "$f" ]; then
-    fail "agents.list 兼容检查：找不到 $file（搬家后请更新本清单，别删条目）"
+    fail "agents.list 兼容检查：找不到 ${file}（搬家后请更新本清单，别删条目）"
     continue
   fi
   # ⚠️ 排除**注释行**：这几个模块的头注里会引用该兼容写法作为说明（实测就这样把 1 处

@@ -95,7 +95,7 @@
       }
     }
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@corum/corum-agent": "workspace:*",
     "@corum/corum-api-remotes": "workspace:*",

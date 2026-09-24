@@ -145,7 +145,7 @@ export function apply(ctx: Context): void {
     editorCtx.provide('corumFsClient', corumFs)
 
     // ── 资源管理器根目录跟随当前工作区/会话（2026-09-04 用户定调：空态不该
-    // 默认打开 host cwd /Users/kukucai/dsh——树/编辑器必须关联当前项目/任务
+    // 默认打开 host cwd——树/编辑器必须关联当前项目/任务
     // 的工作区）。优先级：当前会话 cwd > 首个工作区 path；**都没有（未打开
     // 项目/无会话）→ 广播空态**（资源管理器显示「未打开项目」提示，不开
     // host cwd）。

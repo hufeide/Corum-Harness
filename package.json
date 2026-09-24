@@ -14,5 +14,6 @@
     "shell:dev": "pnpm --filter corum-desktop run start",
     "shell:smoke": "pnpm --filter corum-desktop run smoke",
     "pack": "pnpm --filter corum-desktop run pack"
-  }
+  },
+  "license": "Apache-2.0"
 }

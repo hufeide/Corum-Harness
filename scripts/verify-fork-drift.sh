@@ -42,7 +42,9 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DSH_CHECKOUT="${DSH_CHECKOUT:-/Users/kukucai/dsh}"
+# 官方检出根。**不预置机器专属路径**：未设置时留空，所有「逐字节一致」类断言会因文件
+# 不存在走 skip 分支；事件一致性断言不依赖检出，仍然执行（见文件头说明）。
+DSH_CHECKOUT="${DSH_CHECKOUT:-}"
 FORK_API_REMOTES="$REPO_ROOT/packages/plugins/agent/corum-api-remotes"
 OFFICIAL_API_REMOTES="$DSH_CHECKOUT/packages/api/remotes"
 AGENT_EVENTS="$REPO_ROOT/packages/plugins/agent/corum-agent/src/events.ts"
@@ -340,7 +342,7 @@ if [ -d "$OFFICIAL_API_REMOTES/src" ]; then
     if [ ! -f "$FORK_API_REMOTES/src/$f" ]; then
       fail "fork 缺文件 src/$f"
     elif [ ! -f "$OFFICIAL_API_REMOTES/src/$f" ]; then
-      skip "官方无 src/$f（官方改名？需人工核对台账）"
+      skip "官方无 src/${f}（官方改名？需人工核对台账）"
     elif cmp -s "$FORK_API_REMOTES/src/$f" "$OFFICIAL_API_REMOTES/src/$f"; then
       pass "src/$f 逐字节一致"
     else
@@ -351,7 +353,7 @@ if [ -d "$OFFICIAL_API_REMOTES/src" ]; then
   ver=$(python3 -c "import json;print(json.load(open('$OFFICIAL_API_REMOTES/package.json'))['version'])" 2>/dev/null || echo '?')
   printf '  i 官方基线版本：%s\n' "$ver"
 else
-  skip "官方检出不存在（$OFFICIAL_API_REMOTES）——跳过逐字节断言"
+  skip "官方检出不存在（${OFFICIAL_API_REMOTES}）——跳过逐字节断言"
 fi
 
 # ── 2. corum 事件：声明 ↔ 转发 allowlist 双向一致 ──────────────────────────
@@ -1443,7 +1445,7 @@ if [ -d "$SKILL_DIR/scripts" ]; then
   skill_bad=0
   for asset in $SKILL_ASSETS; do
     if [ ! -f "$REPO_ROOT/scripts/$asset" ]; then
-      fail "仓库缺 scripts/$asset（技能打包的源）"
+      fail "仓库缺 scripts/${asset}（技能打包的源）"
       skill_bad=1
       continue
     fi

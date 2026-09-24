@@ -7,7 +7,7 @@
 另列出「刻意保留」的类别，避免把有意的回退语义当垃圾清掉。
 
 权威口径（三源并集）：
-  · 官方 `/Users/kukucai/dsh/packages/client/ui-theme/src/styles/design-platform.css`
+  · 官方 dsh 检出 `<DSH_REPO>/packages/client/ui-theme/src/styles/design-platform.css`
     与其编译产物 `lib/client.js`（运行时真正生效的那份）
   · corum 侧覆盖 `packages/plugins/ui/corum-ide-ui/src/client/theme-layer.ts`（键名即 token 名）
   · 本仓 CSS/TS 里自己声明过的 token
@@ -81,17 +81,29 @@ def scan(repo: str) -> tuple[dict, set[str]]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--repo', default=os.environ.get('CORUM_REPO', os.getcwd()))
-    ap.add_argument('--dsh', default=os.environ.get('DSH_REPO', '/Users/kukucai/dsh'))
+    # 官方检出根。**不预置机器专属路径**：未提供时留空，官方侧 token 集合为空
+    # （collect_defined 对不存在的文件已做跳过），此时只对账本仓自有的 token。
+    ap.add_argument('--dsh', default=os.environ.get('DSH_REPO', ''))
     ap.add_argument('--json', default=None)
     args = ap.parse_args()
 
-    repo, dsh = os.path.abspath(args.repo), os.path.abspath(args.dsh)
+    repo = os.path.abspath(args.repo)
+    dsh = os.path.abspath(args.dsh) if args.dsh else ''
     if not os.path.exists(os.path.join(repo, 'packages/desktop/package.json')):
         sys.stderr.write(f'[audit] {repo} 不像 corum checkout（缺 packages/desktop/package.json）；'
                          '用 --repo 指定。\n')
         return 2
 
     official, corum, _ = collect_defined(dsh, repo)
+    if not official:
+        # 没有官方基线时「不存在的 token」会把**全部**官方 token 误报成不存在
+        # （实测 275 处 vs 有基线的 1 处）——那是有害的假信号，宁可拒绝出报告。
+        sys.stderr.write(
+            '[audit] 拿不到官方 token 基线（未设 --dsh / DSH_REPO，或该检出缺 '
+            'packages/client/ui-theme）。\n'
+            '        没有基线时本工具会把官方 token 全部误报为「不存在」，故拒绝出报告。\n'
+            '        用法：DSH_REPO=/path/to/dsh python3 scripts/audit-dsw-tokens.py\n')
+        return 2
     usage, declared = scan(repo)
     known = official | corum | declared
 

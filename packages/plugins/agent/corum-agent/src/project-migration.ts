@@ -167,7 +167,7 @@ function migrateOne(
     return
   }
   // 共享 cwd 归属仲裁：历史脏数据里两个索引条目可指向同一目录（实测：
-  // fresh-check 与 project 都指 /Users/kukucai/work/dsh_test）。项目侧
+  // fresh-check 与 project 都指同一个临时工作区）。项目侧
   // ProjectInfo/events 归「先迁入者」（ownerId 落盘）；后来者保持旧形态
   // 存储（读路径回退兜底），绝不覆盖先到者的数据。
   const claimed = ownedCwds.get(cwd)

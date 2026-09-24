@@ -318,7 +318,7 @@ assert_no_dev_instance() {
     cmd="$(pgrep -fl "$REPO_ROOT/packages/desktop/lib/main.js" 2>/dev/null | grep "^$pid " || true)"
     # dev 实例的 userData 里带端口（-9222/-9333），据此判断是否占着本端口
     if [[ "$cmd" == *"-${CORUM_PACK_PORT}"* ]]; then
-      log "拒绝启动：dev 态实例（pid $pid）正占用端口 $CORUM_PACK_PORT 与同一个 CORUM_HOME。"
+      log "拒绝启动：dev 态实例（pid ${pid}）正占用端口 ${CORUM_PACK_PORT} 与同一个 CORUM_HOME。"
       log "先停它（例如 ./scripts/cdp.sh stop 或 ./scripts/verify-instance.sh stop），再跑本脚本。"
       return 1
     fi

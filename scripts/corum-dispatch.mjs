@@ -71,8 +71,9 @@ if (/[\r\n]/.test(brief)) console.error('⚠️ 任务文本含换行，已折�
   const tokens = new Set()
   for (const m of brief.matchAll(/(?:^|[\s`(（【])((?:packages|docs|scripts|skills|\.corum-scratch)\/[A-Za-z0-9._/@-]+)/g)) tokens.add(m[1].replace(/[.,;:)`）」】]+$/, ''))
   // 第二根：**官方 dsh checkout**（派单里常引用官方包的路径，如 packages/core/agent/src/inbox.ts）。
-  // 默认 /Users/kukucai/dsh，可用 CORUM_OFFICIAL_DSH 覆盖；不存在就跳过该根。
-  const officialRoot = process.env.CORUM_OFFICIAL_DSH ?? '/Users/kukucai/dsh'
+  // 用 CORUM_OFFICIAL_DSH 指定；**未设置则不启用该根**（不预置机器专属路径），
+  // 此时只在仓库根下校验路径存在性。
+  const officialRoot = process.env.CORUM_OFFICIAL_DSH
   const existsUnder = (root, rel) => {
     try { statSync(join(root, rel)); return true } catch { return false }
   }
@@ -80,10 +81,13 @@ if (/[\r\n]/.test(brief)) console.error('⚠️ 任务文本含换行，已折�
   for (const t of tokens) {
     if (/[*?]/.test(t)) continue
     if (existsUnder(REPO, t)) continue
-    if (officialRoot !== REPO && existsUnder(officialRoot, t)) continue
+    if (officialRoot !== undefined && officialRoot !== REPO && existsUnder(officialRoot, t)) continue
     missing.push(t)
   }
-  if (tokens.size > 0) console.log(`[dispatch] 路径体检：抽出 ${tokens.size} 个路径（本仓 + 官方 ${officialRoot}），其中 ${missing.length} 个两处都不存在`)
+  if (tokens.size > 0) {
+    const roots = officialRoot === undefined ? '本仓（未设 CORUM_OFFICIAL_DSH，未含官方检出）' : `本仓 + 官方 ${officialRoot}`
+    console.log(`[dispatch] 路径体检：抽出 ${tokens.size} 个路径（${roots}），其中 ${missing.length} 个不存在`)
+  }
   for (const m of missing) console.log(`[dispatch]   ⚠️ 不存在（可能是错路径，也可能是本轮要新建的文件）：${m}`)
 }
 console.log(`[dispatch] port=${PORT} home=${HOME} ws=${WORKSPACE} agent=${AGENT} perm=${PERMISSION} brief=${brief.length} 字`)
