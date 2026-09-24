@@ -57,7 +57,18 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
-- `docs/HANDOFF-2026-09-21-memory-settings-and-starfield.md` — **最新交接**
+- `docs/HANDOFF-2026-09-25-model-ask-key-and-memory-mechanism.md` — **最新交接**
+  （2026-09-22/25 场：① **J+K 决策面板卡死真因修复**；② 记忆机制方案定稿；③ 台账大清账；
+  已推送 `origin/main`）。
+  **§2 = 本场最值钱的部分**：同一缺陷**两次归因都错**（旧交接判「等待链过长」；用户测试
+  后判「可能已消失」——实测完整复现）→ 真因是**面板缺 React `key` ⇒ 组件实例被复用**
+  （上一轮的 `applying=true` 被带进新面板，故与重跑长度无关，**K 不需要做**）。
+  **定位靠对照实验而非推理**：手动调一次 `answer()` 面板立刻消失 ⇒ 同时排除结算链与
+  摘除管线两条假设。**§3 = 记忆机制**（入口 `docs/PLAN-memory-mechanism-design.md`，
+  只定方案未实施）；**§6 = 本场核实的技术事实**（RPC 调用形态已变、verify 实例沙箱限制、
+  **fork-drift 有 24 项既存失败与本事无关**）。
+  **下个 session 从这里开始。**
+- `docs/HANDOFF-2026-09-21-memory-settings-and-starfield.md` — 上一份交接
   （2026-09-21 记忆场：设置中心三页 + WebGL 球壳星云 + 列表视图；测试 64 → 137）。
   **§2 = 用户四次修正的轨迹**（我三次方向性判断错：「未实现」误判为「该删除」/
   信息架构层级猜错 / 「三维·粒子」的几何与渲染选型没先确认 —— CSS 3D 层板 →
@@ -69,7 +80,6 @@
   **§7 = 下个 session 起点**（最关键缺口 = 记忆来源尚未接入，`compile.ts:425` 的
   `TODO(memory)`；那也是「注入策略」整组标未上线的唯一原因）。
   功能事实源是同名的 `docs/PLAN-memory-settings-product-design.md`（六轮演进 + 缺陷清单）。
-  **下个 session 从这里开始。**
 - `docs/audit/NEXT-PHASE-DEFERRED.md` — deferred/closed architecture items
   (sidebarMode service done, slot-registry service done). Note
   `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md` §C1 was corrected in place
@@ -86,10 +96,11 @@
   「我在上一轮的报告中看到你**已经忘了**要优化指挥者的系统提示词了」——核实属实：我把指挥者提示词的
   三条评估结论只在对话里说了、没落盘，上下文压缩后彻底丢失。**纪律：凡在对话里说过「要做/该修」的事，
   必须落进这里**，否则视为没说过。
-  当前登记表（**截至 2026-09-20 日场**：A 只读 bash ✅ 已修复（走 agent-scoped guard，见下条交接）/
-  B 渐进式调研 ✅ / C 集成者报告 ✅ / D1-D2 机制段能力感知 ✅ / **D3 指挥者挂 34 个 MCP 工具 ❌待拍板** /
-  E AGENTS.md 瘦身 🔴 待与「项目记忆」功能一起讨论 / E′ fork 注入分档 ❌ 已放弃 /
-  F worker 风格 ✅ / G master-key ❌待拍板）。
+  当前登记表（**截至 2026-09-25**：A 只读 bash ✅ / B 渐进式调研 ✅（**L 实测未生效，待测试**）/
+  C 集成者报告 ✅ / D1-D2 机制段能力感知 ✅ / **D3 指挥者可操作 MCP ✅ 已拍板关闭** /
+  E AGENTS.md 瘦身 🔴 **改挂「项目文档治理场」** / E′ fork 注入分档 ❌ 已放弃 /
+  F worker 风格 ✅ / **G master-key 🔴 待评估正式打包版** /
+  **J+K 决定面板卡死 ✅ 已修复（真因=缺 React key，K 不需要做）**）。
 - `docs/PLAN-2026-09-21-agent-service-architecture.md` — **上一场（2026-09-21 架构拆分场）
   的方案与进度记账**（已收口；见下方「最新交接」为当前入口）。方案 + 执行进度 + 未完成项记账。
   本轮：用户先审方案、拍板四条（Q1 先建安全网 / Q2 `createAgentForTask` 不动 /
