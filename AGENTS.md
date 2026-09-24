@@ -57,6 +57,19 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
+- `docs/HANDOFF-2026-09-21-memory-settings-and-starfield.md` — **最新交接**
+  （2026-09-21 记忆场：设置中心三页 + WebGL 球壳星云 + 列表视图；测试 64 → 137）。
+  **§2 = 用户四次修正的轨迹**（我三次方向性判断错：「未实现」误判为「该删除」/
+  信息架构层级猜错 / 「三维·粒子」的几何与渲染选型没先确认 —— CSS 3D 层板 →
+  平面环星空 → 球壳星云，走了两段弯路）；**§3 = 六个实测缺陷**（三个连环「全黑」
+  同症状不同根因：实例化属性越界 / `premultipliedAlpha` 合成异常 / 世界半径量级算错
+  —— GL 状态全绿且拾取命中 557 次却整片黑，**唯一可信判据是「同一帧内 readPixels」**）；
+  **§6 = 两条验证环境假象**（窗口未聚焦 ⇒ `document.hidden` ⇒ 「两帧像素一致」假绿；
+  合成 pointer 事件缺 `pointermove` ⇒ 点击测不出）+ **断言不带 `expect` 等于没断言**；
+  **§7 = 下个 session 起点**（最关键缺口 = 记忆来源尚未接入，`compile.ts:425` 的
+  `TODO(memory)`；那也是「注入策略」整组标未上线的唯一原因）。
+  功能事实源是同名的 `docs/PLAN-memory-settings-product-design.md`（六轮演进 + 缺陷清单）。
+  **下个 session 从这里开始。**
 - `docs/audit/NEXT-PHASE-DEFERRED.md` — deferred/closed architecture items
   (sidebarMode service done, slot-registry service done). Note
   `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md` §C1 was corrected in place
@@ -77,8 +90,8 @@
   B 渐进式调研 ✅ / C 集成者报告 ✅ / D1-D2 机制段能力感知 ✅ / **D3 指挥者挂 34 个 MCP 工具 ❌待拍板** /
   E AGENTS.md 瘦身 🔴 待与「项目记忆」功能一起讨论 / E′ fork 注入分档 ❌ 已放弃 /
   F worker 风格 ✅ / G master-key ❌待拍板）。
-- `docs/PLAN-2026-09-21-agent-service-architecture.md` — **最新（2026-09-21 架构拆分场）
-  —— 下个 session 从这里开始**。方案 + 执行进度 + 未完成项记账。
+- `docs/PLAN-2026-09-21-agent-service-architecture.md` — **上一场（2026-09-21 架构拆分场）
+  的方案与进度记账**（已收口；见下方「最新交接」为当前入口）。方案 + 执行进度 + 未完成项记账。
   本轮：用户先审方案、拍板四条（Q1 先建安全网 / Q2 `createAgentForTask` 不动 /
   **Q3 只到文件层面、不插件化** / Q4 D3+G 不混入），然后 P0→P3 执行。
   **交付**：`tests/harness.ts`（造服务的唯一入口，状态搬家时 fail-loud 而不是静默失真）+
@@ -92,8 +105,10 @@
   ③ 判据会随代码布局失效，但**红≠该降标准**（两处文本守卫各变红一次，修法一律是扩大
   取样面/按文件逐处断言，没有降阈值）。
   **未完成**：`createAgentForTask`（Q2 裁定不动）、`conductor` 注册点仍 5 处（收敛需重排它）。
-- `docs/HANDOFF-2026-09-20-conductor-permission-and-refactor.md` — **最新交接入口**
-  （2026-09-20 日场。**§1 = 一个实测坐实的安全漏洞已修复**：指挥模式「只读」原先用「钉会话沙箱」
+- `docs/HANDOFF-2026-09-20-conductor-permission-and-refactor.md` — 指挥模式权限护栏 + 架构拆分场
+  （**已被下方「最新交接」超越；其 §3 架构拆分也已在 PLAN-2026-09-21 执行完毕**。
+  留档价值：**§1 一个实测坐实的安全漏洞已修复**（用户口径见下），**§6 三条最贵认知**仍适用。
+  2026-09-20 日场。**§1 = 一个实测坐实的安全漏洞已修复**：指挥模式「只读」原先用「钉会话沙箱」
   实现，而沙箱是 **last-write-wins 状态** ⇒ 用户切「完全权限」5 秒内即覆盖（实测会话
   `corum-task-e72b1a8f`；全会话普查 read-only 存活 **0** 次）。根因是 `agent-service.ts` 里
   「权限档位」与「指挥模式」两个方法**各自写同一份沙箱、互不知情**。修法 = 把约束改到
@@ -104,8 +119,7 @@
   （深耦合类内状态，需单独一轮）。
   **§6 = 三条最贵认知**：「状态」与「策略」必须分开（补 if 无用，收成单一写入者才行）；
   机械重构**不能以「编译过+测试绿」收口**（实测 `return undefined` 被删后两者都发现不了，
-  只有 `git diff` 对照 HEAD 能拦下）；凡说过「要做/该修」的事**必须落进登记册**。
-  **下个 session 从这里开始。**）
+  只有 `git diff` 对照 HEAD 能拦下）；凡说过「要做/该修」的事**必须落进登记册**。）
 - `docs/HANDOFF-2026-09-19-model-ask-panel-and-restart-gate.md` — 上一份交接
   （2026-09-19 夜场，用户换会话执行重启。**§1 = 重启前必须先重打包**：主实例跑的是打包态
   （`run/pack-9222.pid`），打包快照 13:41:37，而本场改动 21:31~22:02 ⇒ **直接重启看不到任何效果**
