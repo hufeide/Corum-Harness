@@ -95,13 +95,19 @@ function QuestionDock({ sessionId, pendingInteractions }: {
     return null
   })
   if (pending === null) return null
+  // `key` 绑定 pending 身份（**不是**可选优化，是正确性）。缺了它，同位置的后一次提问
+  // 会被 React 复用前一个实例的组件 state：`index`（当前题号）/ `drafts`（已填未提交的
+  // 草稿）/ `busy` / `collapsed` 都会带进新卡片 ⇒ 新提问一打开就停在上一题的题号上、
+  // 带着无关草稿，`busy` 为真时还会渲染成按钮点不动的样子。这和 corum-ui-model-ask
+  // 的「应用中…」卡死是同一个根因（那边已实测复现并修复）；官方与
+  // corum-ui-approval（`key={approval.key}`）都用同一手法。
   // plan-review 分流（todo.questions.plan-review.renderer-missing）：
   // 窄化出 review → 渲染「计划待审」决定卡（含计划正文）；否则走通用提问卡。
   if (pending.kind === 'plan-review') {
     const review = planReviewOf(pending.questions)
-    if (review !== undefined) return <PlanReviewCard pending={pending} review={review} />
+    if (review !== undefined) return <PlanReviewCard key={pending.key} pending={pending} review={review} />
   }
-  return <QuestionCard pending={pending} />
+  return <QuestionCard key={pending.key} pending={pending} />
 }
 
 /**
