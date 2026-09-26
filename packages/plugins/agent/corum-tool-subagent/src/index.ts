@@ -823,16 +823,18 @@ function corumNotifyForegroundResult(
   childId: string,
   label: string,
   outcome: ForegroundToolResult,
+  toolName: string,
   logger: { warn: (message: string) => void },
 ): void {
   try {
-    const report = outputValueText(outcome.output).trim()
-    const summary = `Subagent ${childId} finished (${label}) — final report:`
+    const { summary, blocks } = corumForegroundSettlementText(
+      childId,
+      label,
+      outputValueText(outcome.output).trim(),
+      toolName,
+    )
     parent.inject(createUserMessage({
-      content: [
-        { type: 'text', text: summary },
-        { type: 'text', text: report === '' ? 'It left no closing message.' : report },
-      ],
+      content: blocks.map(text => ({ type: 'text' as const, text })),
       // fork #9 的 source 声明在 @corum/corum-subagent 的模块增补里，本包的程序
       // 里看不到那个 MessageSourceMap 合并——按 dev-conventions §4a 的跨包类型
       // 口径收窄（与同一文件里 `subagent/end` 监听同款）。
@@ -1153,7 +1155,7 @@ export function corumSchedulingDescription(options: { readonly backgroundEnabled
     return ' This call waits for the subagent and returns its result.'
   }
   if (options.continuable) {
-    return ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child\'s nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result.'
+    return ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child\'s nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result — a foreground run is one-shot and TERMINAL when it settles, so `send_message` cannot reach it afterwards.'
   }
   return ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
 }
@@ -1174,7 +1176,67 @@ export function corumSchedulingSectionText(options: { readonly backgroundEnabled
   if (options.readonlyResearch) {
     return ptcPrefix + 'This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass `run_in_background: true` (it is rejected) — a backgrounded investigation leaves you guessing or repeating work. It has a shell for read-only commands (`git log`, `ls`, reading PID/log files, a verify script\'s `status`) but its sandbox is pinned to `read-only` and write/edit are denied, so it can never modify the repo. Fan out several research calls in ONE message when you need answers from different angles.'
   }
-  return ptcPrefix + `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message. IMPORTANT: when you need to fan out SEVERAL parallel sub-tasks (especially parallel WRITE tasks), use the \`orchestrate\` tool instead of issuing multiple ${toolName} calls — one orchestrate call gives every task its own isolated worktree AND a final integrator that merges + verifies + commits them for you; multiple bare ${toolName} calls leave you to integrate each branch by hand.`
+  return ptcPrefix + `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result — a foreground run is one-shot and TERMINAL when it settles, so \`send_message\` cannot reach it afterwards. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message. IMPORTANT: when you need to fan out SEVERAL parallel sub-tasks (especially parallel WRITE tasks), use the \`orchestrate\` tool instead of issuing multiple ${toolName} calls — one orchestrate call gives every task its own isolated worktree AND a final integrator that merges + verifies + commits them for you; multiple bare ${toolName} calls leave you to integrate each branch by hand.`
+}
+
+/**
+ * fork（corum）2026-09-26：**前台一次性子 Agent 是终态**这条机制事实的单一事实源。
+ *
+ * ## 由来（实机报障，会话 `corum-task-ef3f751e`）
+ *
+ * 主 Agent 用 `subagent { run_in_background: false }` 派了一个前台子 Agent；子 Agent 汇报
+ * 「被沙箱挡住、未执行」后，主 Agent**紧接着调 `send_message` 去授权它继续**（line 81）
+ * ——被机制以 `NOT_RESUMABLE` 拒绝（line 82：
+ * `subagent "bca632cd-…" has no supported continuation state and cannot be resumed`）。
+ * 白烧一次往返，且「授权继续」这个意图完全没送达。
+ *
+ * ## 根因：模型可见文本只讲了「能续」的一半
+ *
+ * `subagent` 实例的 `backgroundMode` 是 `continuable`，于是工具描述与机制段都写着
+ * 「`send_message` steers the child's nearest step while it is running and starts a turn
+ * while it is idle」——**没有限定这句话只对后台（continuable）子 Agent 成立**。而
+ * `run_in_background: false` 走的是 `ctx.subagents.start()`（官方 one-shot 契约：
+ * 子会话不驻留、不落可续描述符）⇒ 它**天生不可续接**。模型读到的是无条件承诺。
+ *
+ * 措辞纪律（与 §「提示词不得承诺机制里不存在的通路」同源）：只补**已存在**的事实，
+ * 不改机制能力；并给出**可执行的替代路径**（而不是只说「不行」）。
+ *
+ * @param toolName - 本实例的工具名（同一段文本服务 `subagent` / `subagent_fork` 等）。
+ * @returns 机制段里的一行（无前导空行；调用方按需拼装）。
+ */
+export function corumOneShotTerminalLine(toolName: string): string {
+  return `A FOREGROUND one-shot child (\`run_in_background: false\` via ${toolName}) is TERMINAL once it settles: its conversation is not kept, so \`send_message\` to it is rejected. When a foreground child reports a blocker and you need it to keep going WITH ITS CONTEXT, you cannot resume it — either delegate a fresh child and hand it the context you need carried, or delegate in the background next time when you expect to steer it again.`
+}
+
+/**
+ * fork（corum）：前台一次性子 Agent settle 时的通知正文。
+ *
+ * 在既有的「汇报」之上追加一条**机制事实**：这次是一次性运行、不可续接（见
+ * {@link corumOneShotTerminalLine} 的根因）。放在通知里而不是只放工具结果里，是因为
+ * 结算通知是**子 Agent 刚结束时**模型最可能读到的那条消息——实测 id 也是从这里被拿去
+ * 调 `send_message` 的（`corum-task-ef3f751e` line 68 → 81）。
+ *
+ * @param childId - 子会话 id。
+ * @param label - 委托标签。
+ * @param report - 子 Agent 的最终汇报正文（已 trim；空串表示没留收尾话）。
+ * @param toolName - 本实例的工具名（用于给出正确的替代路径措辞）。
+ * @returns 结算通知的文本块（summary 行 + 汇报 + 机制事实行）。
+ */
+export function corumForegroundSettlementText(
+  childId: string,
+  label: string,
+  report: string,
+  toolName: string,
+): { summary: string; blocks: string[] } {
+  const summary = `Subagent ${childId} finished (${label}) — final report:`
+  return {
+    summary,
+    blocks: [
+      summary,
+      report === '' ? 'It left no closing message.' : report,
+      `NOTE: ${corumOneShotTerminalLine(toolName)}`,
+    ],
+  }
 }
 
 /**
@@ -1193,7 +1255,7 @@ export function corumRunInBackgroundDescription(options: { readonly continuable:
     return 'Not supported for this read-only research tool: it always runs in the foreground and `true` is rejected — omit it.'
   }
   return options.continuable
-    ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it.'
+    ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it — but note a foreground run is one-shot and TERMINAL when it settles: you cannot `send_message` it afterwards.'
     : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.'
 }
 
@@ -2566,7 +2628,7 @@ export function apply(ctx: Context, config: Config): void {
         // Agent 的同款「settlement notice」形态再注入一条正式消息（form:'notice'，
         // 会话流里渲染成一条可见的注入行），汇报以一等消息出现。
         if (args.notifyParent !== false) {
-          corumNotifyForegroundResult(parent, settledRunId, args.label, outcome, runtimeCtx.logger)
+          corumNotifyForegroundResult(parent, settledRunId, args.label, outcome, toolName, runtimeCtx.logger)
         }
         // fork（corum）：把「这次改动落在哪」附在**工具结果**上（用户 2026-09-13 定调）。
         // 只在没隔离时附（worktree 是常规路径，报告由 integrate 负责）。
@@ -3350,7 +3412,7 @@ export function apply(ctx: Context, config: Config): void {
           lines.push(
             '',
             'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.',
-            'A BACKGROUND subagent is NOT a job: there is no job id to poll and no `job_output` to read. Track it with `list_agents` (list running/known children), steer or follow up with `send_message`, and wait for its settlement notice — or simply keep working and act when the notice arrives.',
+            'A BACKGROUND subagent is NOT a job: there is no job id to poll and no `job_output` to read. Track it with `list_agents` (list running/known children), steer or follow up with `send_message`, and wait for its settlement notice — or simply keep working and act when the notice arrives. `send_message` reaches BACKGROUND (continuable) children only: a foreground one-shot child (`run_in_background: false`) is terminal once it settles, and messaging it is rejected.',
           )
           return lines.join('\n')
         },
