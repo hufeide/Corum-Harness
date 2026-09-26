@@ -87,6 +87,15 @@ export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBas
   readonly kind?: ChildKind
   /** fork（corum）：主 Agent 注入的叠加层人格——resume 时一并还原。 */
   readonly personaHint?: string
+  /**
+   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记——**必须 durable**。
+   *
+   * 与 `kind` 同一条理由：门禁装在子 scope 上、随 Activation 一起消失，而 resume 会
+   * 用本描述符**重建** composition（见 `continuation.ts` 的 `coldResume`）。若不落盘，
+   * 冷恢复后的子会话会丢掉纵深防御那一层。边界根不在此（它取子会话持久化的
+   * `header.cwd`），故这里只是一个布尔。
+   */
+  readonly confined?: boolean
   /** Child tool scoping reapplied on resume. */
   readonly toolFilter?: ToolRestriction
 }
@@ -137,6 +146,14 @@ export interface ContinuableSubagentDescriptorInput extends SubagentDescriptorIn
    * 还原同一份上下文，否则子 Agent 会丢失它被告知的约定。
    */
   readonly personaHint?: string
+  /**
+   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记（**必须 durable**）。
+   *
+   * 门禁装在子 scope 上、随 Activation 消失；resume 用本描述符重建 composition，
+   * 不落盘则冷恢复的子会话丢掉纵深防御那一层。边界根本身取子会话持久化的
+   * `header.cwd`，故这里只是布尔。
+   */
+  readonly confined?: boolean
   /** Requested child tool scoping. */
   readonly toolFilter?: ToolRestriction
 }
@@ -162,6 +179,8 @@ const CONTINUABLE_DESCRIPTOR_KEYS = new Set([
   // fork（corum）2026-09-20：种类与注入层必须 durable（否则 resume 后人格漂移）。
   'kind',
   'personaHint',
+  // fork（corum）2026-09-22：隔离写边界门禁标记（布尔）——不落盘则冷恢复丢防御层。
+  'confined',
   'toolFilter',
 ])
 const TOOL_FILTER_KEYS = new Set(['allow', 'deny'])
@@ -185,6 +204,16 @@ function optionalString(value: Record<string, unknown>, key: string): string | u
   const field = value[key]
   if (typeof field !== 'string') {
     throw new Error(`persisted subagent descriptor ${key} must be a string`)
+  }
+  return field
+}
+
+/** Read one optional boolean field from a persisted descriptor record. */
+function optionalBoolean(value: Record<string, unknown>, key: string): boolean | undefined {
+  if (!Object.hasOwn(value, key)) return undefined
+  const field = value[key]
+  if (typeof field !== 'boolean') {
+    throw new Error(`persisted subagent descriptor ${key} must be a boolean`)
   }
   return field
 }
@@ -264,6 +293,8 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
   // fork（corum）2026-09-20：种类与注入层同样从持久化描述符读回（否则 resume 后人格漂移）。
   const kind = optionalString(value, 'kind') as ChildKind | undefined
   const personaHint = optionalString(value, 'personaHint')
+  // fork（corum）2026-09-22：隔离写边界标记（不落盘则冷恢复丢防御层）。
+  const confined = optionalBoolean(value, 'confined')
   const toolFilter = Object.hasOwn(value, 'toolFilter')
     ? parseToolFilter(value['toolFilter'])
     : undefined
@@ -278,6 +309,7 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
     ...persona !== undefined ? { persona } : {},
     ...kind !== undefined ? { kind } : {},
     ...personaHint !== undefined ? { personaHint } : {},
+    ...confined !== undefined ? { confined } : {},
     ...toolFilter !== undefined ? { toolFilter } : {},
   }
 }
@@ -322,6 +354,7 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
       ...input.persona !== undefined ? { persona: input.persona } : {},
       ...input.kind !== undefined ? { kind: input.kind } : {},
       ...input.personaHint !== undefined ? { personaHint: input.personaHint } : {},
+      ...input.confined !== undefined ? { confined: input.confined } : {},
       ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
     }
   const snapshot = snapshotJsonValue(candidate)

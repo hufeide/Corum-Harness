@@ -98,6 +98,9 @@ import {
 } from './polish-service.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
+// fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
+// 调用失败」是两个概念）——事前校验 + 回落全局默认 + 显式告知。见该模块头注的分界表。
+import { deliverModelFallbackNotice, resolveUsableModel, type ModelFallback } from './model-availability.ts'
 import { GENERAL_WORK_TYPE, canonicalWorkspaceKey, isValidProjectId, isValidWorkTypeSlug, isGroupMember, projectTypeOf } from './project.ts'
 import { loadProject, findProjectByCwd } from './project-store.ts'
 // 统一会话索引（两模式共用；键 = sessionId，按 cwd 分组）——
@@ -482,6 +485,21 @@ export class CorumAgentService extends TypertRemoteService {
   private readonly pendingPermissions = new Map<string, string>()
 
   /**
+   * fork（corum）2026-09-26：**模型回落告知的去重集**（`sessionId → 已告知的失效路由`）。
+   *
+   * 为什么需要：回落告知走 `agent.inject`（不开 turn，故泳道仍是 blank、可复用），而用户
+   * 「连点新建任务」时会**复用同一个 blank 泳道**——实测（`corum-task-5d1fe37e`）两次创建
+   * 各注入一条完全相同的告知，用户第一句话就会连着看到两条。同一会话、同一失效路由只说一次。
+   *
+   * 键取值用「失效路由」而不是布尔：用户换了另一个也不存在的模型时**应当**再告知一次
+   * （那是新事实，不是重复）。
+   *
+   * 不落盘（与 `pendingPermissions` 同档）：进程重启后内存态清空，此时再告知一次是可接受的
+   * ——宁可多一条也不静默。
+   */
+  private readonly notifiedModelFallbacks = new Set<string>()
+
+  /**
    * 指挥模式运行时（两张按 sessionId 索引的内存表 + 生效/撤销）。
    *
    * 2026-09-20 按关注点抽到 `conductor-runtime.ts`（用户定调「至少要在文件层面切分清晰」）。
@@ -838,13 +856,17 @@ export class CorumAgentService extends TypertRemoteService {
     // 模型选择走官方 ModelSelection 通道：`agentOptions` 只有 provider/model/
     // maxTokens，reasoningEffort 由 installModelSelection 在 setup 里安装（官方
     // headless / api-proxy 同款做法）。塞进 agentOptions 会被 buildRequest 忽略。
+    //
+    // fork（corum）2026-09-26：预设模型可能已被删除（确定性配置缺失）——事前校验并回落
+    // 全局默认，见 `model-availability.ts` 的概念分界表。
+    const profileModel = (await resolveUsableModel(this.ctx, profile.model)).model
     const selection: ModelSelectionRef = {
       current: {
-        provider: profile.model.provider,
-        model: profile.model.model,
-        ...(profile.model.reasoningEffort === undefined
+        provider: profileModel.provider,
+        model: profileModel.model,
+        ...(profileModel.reasoningEffort === undefined
           ? {}
-          : { reasoningEffort: ReasoningEffortId(profile.model.reasoningEffort) }),
+          : { reasoningEffort: ReasoningEffortId(profileModel.reasoningEffort) }),
       },
       assembled: undefined,
     }
@@ -853,8 +875,8 @@ export class CorumAgentService extends TypertRemoteService {
       sessionId,
       meta: { cwd: process.cwd(), agentPreset: profile.id },
       agentOptions: {
-        provider: profile.model.provider,
-        model: profile.model.model,
+        provider: profileModel.provider,
+        model: profileModel.model,
       },
       setup: async (agentCtx) => {
         // 官方组装链路：mount preset，把 persona / 工具 / skill / MCP 全挂上。
@@ -936,13 +958,16 @@ export class CorumAgentService extends TypertRemoteService {
 
     // resume 与 create 共用同一份 setup（preset 挂载 + 能力注入 + 模型选择）。
     // resume 时 session 历史由 persistence 加载，能力仍经 setup 重新组装。
+    // fork（corum）2026-09-26：项目泳道同样事前校验预设模型是否还存在（确定性配置缺失
+    // ⇒ 回落全局默认）。见 `model-availability.ts`。
+    const laneModel = (await resolveUsableModel(this.ctx, profile.model)).model
     const selection: ModelSelectionRef = {
       current: {
-        provider: profile.model.provider,
-        model: profile.model.model,
-        ...(profile.model.reasoningEffort === undefined
+        provider: laneModel.provider,
+        model: laneModel.model,
+        ...(laneModel.reasoningEffort === undefined
           ? {}
-          : { reasoningEffort: ReasoningEffortId(profile.model.reasoningEffort) }),
+          : { reasoningEffort: ReasoningEffortId(laneModel.reasoningEffort) }),
       },
       assembled: undefined,
     }
@@ -952,7 +977,7 @@ export class CorumAgentService extends TypertRemoteService {
       extraSetup?.(agentCtx)
       installTaskModelSelection(agentCtx, selection)
     }
-    const agentOptions = { provider: profile.model.provider, model: profile.model.model }
+    const agentOptions = { provider: laneModel.provider, model: laneModel.model }
 
     let handle: { agent: Agent }
     if (persisted !== undefined) {
@@ -1539,7 +1564,22 @@ export class CorumAgentService extends TypertRemoteService {
     if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
     // 设计稿「新建任务表单可选模型」：默认用 profile.model，调用方可覆盖
     // （「选好工作区和 Agent 后自动加载默认模型，用户仍可改」）。
-    const effectiveModel = model ?? profile.model
+    //
+    // fork（corum）2026-09-26：**预设引用的模型可能已被删除**（用户手动删模型 / 换供应商 /
+    // 清理目录）。那是**确定性的配置缺失**，与「运行期调用失败」是两个概念——后者才走
+    // 「问用户」（2026-09-18 用户拍板），前者必须在**创建之前**就识别并回落全局默认，
+    // 否则每个新会话都在第一句硬失败（实测 corum-task-b36de140：`UNKNOWN_MODEL`）。
+    // 见 `model-availability.ts` 头的概念分界表。
+    const resolvedModel = await resolveUsableModel(this.ctx, model ?? profile.model)
+    const effectiveModel = resolvedModel.model
+    if (resolvedModel.fallback !== undefined) {
+      // 告知责任交给「会话建好之后」的那一步（见下方 notifyModelFallback）——此刻会话
+      // 还不存在，且这里不能发消息（会把 blank 泳道变成非 blank，破坏泳道复用）。
+      this.ctx.logger.warn(
+        `corum-agent(task): configured model ${resolvedModel.fallback.configured.provider}/${resolvedModel.fallback.configured.model} `
+        + `is unavailable (${resolvedModel.fallback.reason}); falling back to ${effectiveModel.provider}/${effectiveModel.model}`,
+      )
+    }
 
     // 目录 realpath 归一：workspace.attachSession 硬要求 realpath(cwd) === ws.path，
     // 否则抛错 → 会话落「未分组」（macOS /tmp→/private/tmp 一类 symlink 会踩）。
@@ -1595,6 +1635,11 @@ export class CorumAgentService extends TypertRemoteService {
         this.registry.setTaskSelection(String(resolved.sessionId), reuseSelection)
         // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
         this.rememberPendingPermission(String(resolved.sessionId), permission)
+        // fork（corum）2026-09-26：复用路径同样要告知模型回落（用户选的是「新建任务」，
+        // 走哪条内部路径对用户不可见）。
+        if (resolvedModel.fallback !== undefined) {
+          this.notifyModelFallbackOnce(String(resolved.sessionId), resolved.agent, resolvedModel.fallback, `新建任务（${profile.id}）`)
+        }
         return { agent: resolved.agent, presetId: profile.id, sessionId: resolved.sessionId }
       }
     }
@@ -1652,7 +1697,35 @@ export class CorumAgentService extends TypertRemoteService {
 
     this.registry.registerTask({ agent: handle.agent, sessionId, cwd: root, profileId: profile.id })
     this.registry.setTaskSelection(String(sessionId), selection)
+    // fork（corum）2026-09-26：把「预设模型不可用 ⇒ 已回落全局默认」**显式告知**用户。
+    // 时机在会话建好之后（见 `deliverModelFallbackNotice` 的注释：必须用 inject 而非
+    // followup，否则会把 blank 泳道变成非 blank、破坏泳道复用）。
+    if (resolvedModel.fallback !== undefined) {
+      this.notifyModelFallbackOnce(String(sessionId), handle.agent, resolvedModel.fallback, `新建任务（${profile.id}）`)
+    }
     return { agent: handle.agent, presetId: profile.id, sessionId }
+  }
+
+  /**
+   * fork（corum）2026-09-26：**按会话 + 失效路由去重**地投递模型回落告知。
+   *
+   * 见 {@link notifiedModelFallbacks} 的说明：blank 泳道会被复用，不去重则用户连点两次
+   * 「新建任务」就会在第一句话前看到两条一模一样的告知。
+   * @param sessionId - 目标会话 id（去重键的主体）。
+   * @param agent - 目标会话的 Agent。
+   * @param fallback - 回落事实。
+   * @param origin - 触发位置描述。
+   */
+  private notifyModelFallbackOnce(
+    sessionId: string,
+    agent: { inject: (message: ReturnType<typeof createUserMessage>) => void },
+    fallback: ModelFallback,
+    origin: string,
+  ): void {
+    const key = `${sessionId}|${fallback.configured.provider}/${fallback.configured.model}`
+    if (this.notifiedModelFallbacks.has(key)) return
+    this.notifiedModelFallbacks.add(key)
+    deliverModelFallbackNotice(agent, fallback, origin, this.ctx.logger)
   }
 
   /**
@@ -1810,25 +1883,41 @@ export class CorumAgentService extends TypertRemoteService {
       const switchModel = profile === undefined
         ? this.ctx.agentDefaultModel.currentSelection()
         : profile.model
+      // fork（corum）2026-09-26：切到的 preset 可能配着一个**已被删除的模型**
+      // （用户实测：composer 切「指挥模式」→ kimi-k3-1 已删 → 之后每次请求都失败）。
+      // 与创建路径同一条处置：事前校验、不可用则回落全局默认并显式告知。
+      const switchResolved = await resolveUsableModel(this.ctx, {
+        provider: switchModel.provider,
+        model: switchModel.model,
+        ...(switchModel.reasoningEffort === undefined ? {} : { reasoningEffort: switchModel.reasoningEffort }),
+      })
+      const switchEffective = switchResolved.model
       if (selection !== undefined) {
         selection.current = {
-          provider: switchModel.provider,
-          model: switchModel.model,
-          ...(switchModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(switchModel.reasoningEffort) }),
+          provider: switchEffective.provider,
+          model: switchEffective.model,
+          ...(switchEffective.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(switchEffective.reasoningEffort) }),
         }
       } else {
         // 无登记（进程重启后内存态丢失、或泳道不是本进程所建）：退回重装一层。
         // 此时创建时的外层监听已随宿主进程消亡，新装的这一层就是唯一绑定。
         const fallbackSelection: ModelSelectionRef = {
           current: {
-            provider: switchModel.provider,
-            model: switchModel.model,
-            ...(switchModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(switchModel.reasoningEffort) }),
+            provider: switchEffective.provider,
+            model: switchEffective.model,
+            ...(switchEffective.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(switchEffective.reasoningEffort) }),
           },
           assembled: undefined,
         }
         installTaskModelSelection(resolved.agent.ctx, fallbackSelection)
         this.registry.setTaskSelection(String(sessionId), fallbackSelection)
+      }
+      if (switchResolved.fallback !== undefined) {
+        this.ctx.logger.warn(
+          `corum-agent(task): preset "${profileId}" model ${switchResolved.fallback.configured.provider}/${switchResolved.fallback.configured.model} `
+          + `is unavailable (${switchResolved.fallback.reason}); falling back to ${switchEffective.provider}/${switchEffective.model}`,
+        )
+        this.notifyModelFallbackOnce(String(sessionId), resolved.agent, switchResolved.fallback, `切换 Agent（${profileId}）`)
       }
     }
     this.ctx.logger.info(`corum-agent(task): preset switched — ${sessionId} → ${profileId}`)

@@ -1,0 +1,251 @@
+/**
+ * `@corum/corum-orchestration` 的**隔离写边界**单测（2026-09-22）。
+ *
+ * 由来：用户核对指挥模式 kimi 会话（`corum-task-ef3f751e`）时发现**硬隔离在
+ * `danger-full-access` 下不成立**——隔离的第 2 层（fs 写沙箱）按档位开关，而档位是
+ * 用户可覆盖的状态；实测同一个 brief 结构，`workspace-write` 派出的 worker 写主树
+ * 报 EPERM（硬隔离生效），`danger-full-access` 派出的 worker 删掉 19 个 worktree 并对
+ * 主树执行 `git -C <主树> merge --no-ff`。
+ *
+ * 修法 1+2（用户拍板）：
+ *   ① 正交轴（`confinedSandbox`）——本文件不测（它在 corum-subagent 的 policy 捕获面）；
+ *   ② 纵深防御门禁——**本文件测**：`confinementGuard` 的放行/拦截面。
+ *
+ * 本文件同时钉住那个**实测误报**：`echo '===a->b==='` 里的 `->` 曾被重定向正则当成
+ * 重定向，导致一条纯只读命令被只读门禁拒绝（白烧一次往返）。
+ */
+import { describe, expect, it } from 'vitest'
+import { join } from 'node:path'
+import {
+  absolutePathsIn,
+  confinementGuard,
+  confinementTempRoots,
+  detectBashWrite,
+  isPathInside,
+  stripQuoted,
+} from '../src/index.ts'
+
+/** 一个稳定的「worktree 根」缓存（只在词法层用，不需要真建目录）。 */
+const WORKTREE = '/repo/.corum-worktrees/wt-abc123'
+/** 同一仓的**主树**（= 越界目标）。 */
+const MAIN = '/repo'
+
+describe('stripQuoted — 引号字面量必须先剥（实测误报的根因）', () => {
+  it('★ 单引号里的 `->` 不再被当成重定向（会话 corum-task-ef3f751e 的原始误报）', () => {
+    // 原命令（真实来自该会话 turn 4 step 5，被 read-only 门禁误拒）
+    const command = "cd /repo; echo '===saveProfileRemote->persist callsite==='; grep -n 'x' f.ts"
+    expect(detectBashWrite(command)).toBeUndefined()
+  })
+
+  it('剥引号后引号内容被清空、引号本身保留', () => {
+    expect(stripQuoted("echo 'a>b' \"c>d\"")).toBe("echo '' \"\"")
+  })
+
+  it('引号外的重定向仍然照旧被识别（不因剥引号而漏判）', () => {
+    expect(detectBashWrite("echo 'a>b' > /tmp/out")).toBe('shell redirection writes to a file')
+  })
+
+  it('内联解释器的写盘特征长在引号里，故必须用未剥引号的原文判定', () => {
+    // 若错误地对剥完引号的文本做 INLINE_WRITE_PATTERNS 判定，这条会漏判
+    expect(detectBashWrite(`node -e "require('fs').writeFileSync('a','b')"`)).toBe('inline script writes to a file')
+  })
+})
+
+describe('detectBashWrite — 承继既有语义（只读门禁与写边界门禁共用这一份）', () => {
+  const reads: readonly string[] = [
+    'ls -la',
+    'git log --oneline -5',
+    'git status --porcelain',
+    'git diff HEAD~1',
+    'grep -n "rm " f.ts',
+    'cat f.ts | head -20',
+    'echo done 2>&1',
+    'grep -rn foo . > /dev/null',
+  ]
+  for (const command of reads) {
+    it(`放行只读：${command}`, () => {
+      expect(detectBashWrite(command)).toBeUndefined()
+    })
+  }
+
+  const writes: readonly string[] = [
+    'echo hi > /tmp/x',
+    'rm -rf build',
+    'git commit -m x',
+    'git merge other',
+    'sed -i s/a/b/ f.ts',
+    'pnpm install',
+    'mkdir -p out',
+  ]
+  for (const command of writes) {
+    it(`拦下写形态：${command}`, () => {
+      expect(detectBashWrite(command)).toBeDefined()
+    })
+  }
+
+  describe('★ 选项带取值的形态（改动前就存在的漏判，2026-09-22 一并修掉）', () => {
+    // 原实现取「第二个词」当子命令，于是 `git -C <dir> merge` 的第二个词是 `-C`，
+    // 判不出写形态 ⇒ 这条越界命令在只读门禁下**从未被拦过**。实测会话
+    // corum-task-ef3f751e 的 worker 正是用 `git -C <主树> merge --no-ff` 把分支并进主树。
+    const withOptions: readonly [string, string][] = [
+      ['git -C <主树> 的 merge（实测那条）', 'git -C /repo merge --no-ff rescue/x -m m'],
+      ['git --git-dir=<主树>/.git 的 commit', 'git --git-dir=/repo/.git commit -m x'],
+      ['git --git-dir <主树>/.git 的 commit（分列）', 'git --git-dir /repo/.git commit -m x'],
+      ['git -c k=v 的 merge', 'git -c core.pager=cat merge other'],
+    ]
+    for (const [label, command] of withOptions) {
+      it(`拦下：${label}`, () => {
+        expect(detectBashWrite(command)).toBeDefined()
+      })
+    }
+
+    it('带选项的**只读** git 命令仍然放行（不误伤）', () => {
+      expect(detectBashWrite('git -C /repo log --oneline -5')).toBeUndefined()
+      expect(detectBashWrite('git --git-dir=/repo/.git status --porcelain')).toBeUndefined()
+    })
+  })
+})
+
+describe('isPathInside / absolutePathsIn — 词法边界判定', () => {
+  it('等于是、其下是、兄弟前缀不是（`/repo-x` 不算在 `/repo` 内）', () => {
+    expect(isPathInside('/repo', '/repo')).toBe(true)
+    expect(isPathInside('/repo/a/b', '/repo')).toBe(true)
+    expect(isPathInside('/repo-x', '/repo')).toBe(false)
+  })
+
+  it('提取独立参数、--opt=/abs、以及 `-C /abs` 形态的绝对路径', () => {
+    expect(absolutePathsIn('git -C /repo merge b')).toContain('/repo')
+    expect(absolutePathsIn('cp x --target=/repo/y')).toContain('/repo/y')
+    expect(absolutePathsIn('echo hi > /tmp/z')).toContain('/tmp/z')
+  })
+
+  it('标记家目录简写（`~` 与 `$HOME`）', () => {
+    expect(absolutePathsIn('cp x ~/f')).toContain('~')
+    expect(absolutePathsIn('cp x $HOME/f')).toContain('~')
+  })
+
+  it('相对路径不参与判定（子会话 cwd 就是 worktree，相对路径天然在界内）', () => {
+    expect(absolutePathsIn('echo hi > out.txt')).toEqual([])
+  })
+})
+
+describe('confinementGuard — 隔离子会话的写边界（修法 2）', () => {
+  const guard = confinementGuard({ worktreeRoot: WORKTREE, parentTreeRoot: MAIN })
+  const bash = (command: string) => ({ name: 'bash', arguments: { command } })
+
+  describe('变异工具：路径参数越界即拒', () => {
+    it('★ 写主树被拒（这就是实测里 worker 干成的那件事）', () => {
+      expect(guard({ name: 'write', arguments: { file_path: `${MAIN}/packages/x.ts`, content: 'x' } })).toBeDefined()
+    })
+
+    it('★ edit / str_replace_editor 同样受约束（两个工具的参数名不同，都要覆盖）', () => {
+      expect(guard({ name: 'edit', arguments: { file_path: `${MAIN}/a.ts`, old_string: 'a', new_string: 'b' } })).toBeDefined()
+      expect(guard({ name: 'str_replace_editor', arguments: { command: 'str_replace', path: `${MAIN}/a.ts`, old_str: 'a', new_str: 'b' } })).toBeDefined()
+    })
+
+    it('worktree 内的相对路径与绝对路径都放行', () => {
+      expect(guard({ name: 'write', arguments: { file_path: 'src/a.ts', content: 'x' } })).toBeUndefined()
+      expect(guard({ name: 'write', arguments: { file_path: `${WORKTREE}/src/a.ts`, content: 'x' } })).toBeUndefined()
+    })
+
+    it('★ 兄弟 worktree 也算越界（隔离是「自己的壳」，不是「所有壳」）', () => {
+      expect(guard({ name: 'write', arguments: { file_path: `${MAIN}/.corum-worktrees/wt-other/f.ts`, content: 'x' } })).toBeDefined()
+    })
+  })
+
+  describe('shell：只读一律放行，写形态才审越界', () => {
+    it('★ `git -C <主树> merge` 被拒（实测里 worker 干成的第二件事）', () => {
+      expect(guard(bash(`git -C ${MAIN} merge --no-ff rescue/x -m m`))).toBeDefined()
+    })
+
+    it('★ `rm -rf <主树>/.corum-worktrees/wt-*` 被拒（实测里 worker 删掉 19 个 worktree 的命令）', () => {
+      expect(guard(bash(`rm -rf ${MAIN}/.corum-worktrees/wt-16fd74`))).toBeDefined()
+    })
+
+    it('★ worktree 外的重定向被拒', () => {
+      expect(guard(bash(`echo hi > ${MAIN}/f.txt`))).toBeDefined()
+    })
+
+    it('★ 越界的家目录简写被拒', () => {
+      expect(guard(bash('cp a ~/.corum/settings.yaml'))).toBeDefined()
+    })
+
+    it('只读命令放行——隔离**不**限制读（通知里明说 reads are still allowed）', () => {
+      expect(guard(bash('git log --oneline -5'))).toBeUndefined()
+      expect(guard(bash(`git -C ${MAIN} log --oneline -3`))).toBeUndefined()
+      expect(guard(bash(`grep -rn foo ${MAIN}/packages | head`))).toBeUndefined()
+    })
+
+    it('worktree 内的写与提交放行（子 Agent 必须能在自己分支提交）', () => {
+      expect(guard(bash('echo hi > out.txt'))).toBeUndefined()
+      expect(guard(bash('git add -A && git commit -m x'))).toBeUndefined()
+      expect(guard(bash(`echo hi > ${WORKTREE}/out.txt`))).toBeUndefined()
+    })
+
+    it('★ 临时区放行（/tmp 造 fixture 是 build/test 的常见需要，与官方可写根口径一致）', () => {
+      expect(guard(bash('echo hi > /tmp/fixture.txt'))).toBeUndefined()
+    })
+  })
+
+  describe('其它工具：不表态（abstain），不干扰机制自身的收尾', () => {
+    it('read / grep / glob / send_message 一律放行', () => {
+      for (const name of ['read', 'grep', 'glob', 'send_message', 'todo_write']) {
+        expect(guard({ name, arguments: { path: `${MAIN}/x` } })).toBeUndefined()
+      }
+    })
+
+    it('参数缺失或形态不符时不误判（宁可漏判也不误伤）', () => {
+      expect(guard({ name: 'bash', arguments: {} })).toBeUndefined()
+      expect(guard({ name: 'write', arguments: {} })).toBeUndefined()
+      expect(guard({ name: 'bash', arguments: { command: 42 } })).toBeUndefined()
+    })
+  })
+
+  describe('临时区允许集', () => {
+    it('至少含 /tmp，且已 resolve 去重', () => {
+      const roots = confinementTempRoots()
+      expect(roots.length).toBeGreaterThan(0)
+      expect(roots).toContain('/tmp')
+      expect(new Set(roots).size).toBe(roots.length)
+    })
+  })
+
+  describe('★ 工作区落在临时区之内时仍须保护（本轮自查发现的弱点）', () => {
+    // 由来：允许集含 /tmp 与 tmpdir()（造 fixture 的合法需要），但**工作区本身**可能就建在
+    // 临时区里（本仓测试环境、以及用户把 workspace 放在 /tmp 的场景）。彼时若只按
+    // 「worktree 之外都拦」，主树会因落在临时区允许集里而被放行 ⇒ 门禁等于没装。
+    // 修法：`parentTreeRoot` **拒绝优先于允许**。
+    const tempBase = '/tmp/corum-ws'                      // 落在临时区内的主树
+    const wt = `${tempBase}/.corum-worktrees/wt-x`
+    const guard = confinementGuard({ worktreeRoot: wt, parentTreeRoot: tempBase })
+
+    it('★ 主树在 /tmp 下也照样被拒（不被临时区允许集吞掉）', () => {
+      expect(guard({ name: 'write', arguments: { file_path: `${tempBase}/main.ts`, content: 'x' } })).toBeDefined()
+      expect(guard({ name: 'bash', arguments: { command: `rm -rf ${tempBase}/.corum-worktrees/wt-16fd74` } })).toBeDefined()
+      expect(guard({ name: 'bash', arguments: { command: `git -C ${tempBase} merge x` } })).toBeDefined()
+    })
+
+    it('worktree 自身与 /tmp 其它位置仍放行（不因新规则误伤）', () => {
+      expect(guard({ name: 'write', arguments: { file_path: `${wt}/f.ts`, content: 'x' } })).toBeUndefined()
+      expect(guard({ name: 'bash', arguments: { command: 'echo hi > /tmp/other-fixture.txt' } })).toBeUndefined()
+    })
+  })
+
+  describe('真目录端到端（不是纯字符串）', () => {
+    it('★ 真建 worktree 与主树两个目录：主树文件被拒、worktree 文件放行', () => {
+      // ⚠️ 必须建在**临时区之外**：`/tmp` 与 `tmpdir()` 属于允许集（造 fixture 的合法
+      // 需要），用 mkdtempSync 建的「主树」会落在允许集里 ⇒ 这条断言测不出东西
+      // （首版就是这么写的，被自己抓到）。这里用仓库内的相对落点并只做纯词法判定，
+      // 不依赖真实仓库结构。
+      const base = join(process.cwd(), '.corum-confinement-spec-main')
+      const wt = join(base, '.corum-worktrees', 'wt-real')
+      const realGuard = confinementGuard({ worktreeRoot: wt, parentTreeRoot: base })
+      // 主树路径（base，不是 wt）应被拒——注意 tmpdir 在允许集内，故这个 base 必须不在其中
+      expect(realGuard({ name: 'write', arguments: { file_path: join(base, 'main-tree.ts'), content: 'x' } })).toBeDefined()
+      // worktree 内应放行
+      expect(realGuard({ name: 'write', arguments: { file_path: join(wt, 'f.ts'), content: 'x' } })).toBeUndefined()
+      // git -C 指向主树同样被拒（端到端复刻实测里那条 merge 命令）
+      expect(realGuard({ name: 'bash', arguments: { command: `git -C ${base} merge x` } })).toBeDefined()
+    })
+  })
+})

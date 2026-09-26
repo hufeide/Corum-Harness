@@ -108,6 +108,18 @@ export interface SubagentStartRequest {
    * `undefined` = 沿用父会话的沙箱覆盖（既有行为不变）。
    */
   readonly readonlySandbox?: boolean
+  /**
+   * fork（corum）2026-09-22：把隔离子会话的沙箱钉成 `workspace-write`（**不继承父档位**）。
+   *
+   * 隔离的第 2 层（fs 写沙箱）依赖沙箱档位，而档位是用户可覆盖的状态 ⇒ 用户切
+   * 「完全权限」会让隔离整档失效（实测：worker 在 `danger-full-access` 下删掉 19 个
+   * worktree 并对主树执行 `git merge`）。本字段把那层边界钉在**正交轴**上，与 research
+   * 的 {@link readonlySandbox} 同一手法；边界 = 子会话 `header.cwd`（= worktree）。
+   *
+   * 与 `readonlySandbox` 同时为真时**只读赢**（更窄，且 research 恒不隔离）。
+   * 缺省 `undefined` = 沿用父会话的沙箱覆盖（既有行为不变）。
+   */
+  readonly confinedSandbox?: boolean
   /** Optional short display label persisted with a session-backed child. */
   readonly label?: string
   /** Content delivered as the child's user message. */

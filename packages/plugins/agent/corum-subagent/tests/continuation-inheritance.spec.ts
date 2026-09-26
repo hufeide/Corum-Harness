@@ -247,3 +247,91 @@ describe('continuable policy inheritance', () => {
     expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBe('read-only')
   })
 })
+
+/**
+ * fork（corum）2026-09-22：**隔离的正交轴**（用户拍板的修法 1）。
+ *
+ * ## 为什么补这一组（实测漏洞）
+ *
+ * 用户核对指挥模式 kimi 会话（`corum-task-ef3f751e`）时问：worker 每次都在单独 worktree，
+ * 为什么还能改 main？核实结论：隔离的第 2 层（fs 写沙箱）**按档位开关**，而子会话此前
+ * **整体继承父档位** ⇒ 用户切「完全权限」（`danger-full-access`）后隔离的物理基础整档
+ * 消失。同一 brief 结构下：`workspace-write` 的 worker 写主树 EPERM（硬隔离生效），
+ * `danger-full-access` 的 worker 删掉 19 个 worktree + 对主树 `git -C <主树> merge`。
+ *
+ * ## 本组断言的形状（三档矩阵）
+ *
+ * 「隔离**要求的是写不出 worktree**，不是只读」——故不能断言「越严越好」，而要断言：
+ *   · `confineToWorktree` ⇒ 无论父档位是什么，子会话沙箱**恒为 workspace-write**；
+ *   · 父档位为 `read-only` 时**不**被放宽（只读是更窄的、不该被隔离改成可写）。
+ */
+describe('隔离的正交轴：confineToWorktree 不继承父档位', () => {
+  /** 三档父档位 × 期望的子会话沙箱档位。 */
+  const tiers: readonly [string, 'read-only' | 'workspace-write' | 'danger-full-access', string][] = [
+    ['父 danger-full-access（实测漏洞场景）', 'danger-full-access', 'workspace-write'],
+    ['父 workspace-write（原本就正常）', 'workspace-write', 'workspace-write'],
+    ['父 read-only（更窄，不得被放宽）', 'read-only', 'read-only'],
+  ]
+  for (const [label, parentMode, expected] of tiers) {
+    it(`★ ${label} ⇒ 子会话沙箱 = ${expected}`, { timeout: 20_000 }, async () => {
+      const { ctx, parent } = await setup([textResponse('child done')])
+      setSandboxMode(parent.session, parentMode)
+
+      const spec = startSpec(parent, 'spawn')
+      const started = await ctx.subagents.startContinuable({
+        ...spec,
+        request: { ...spec.request, confinedSandbox: true },
+      })
+      await waitNoActivation(ctx, started.childId)
+
+      const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+      expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBe(expected)
+      // 落盘形态也要对：`source: 'delegation'` 便于事后从日志还原这次隔离的边界。
+      expect(loaded.events.filter(event => event.type === 'sandbox/mode')).toMatchObject([
+        { data: { mode: expected, source: 'delegation' } },
+      ])
+    })
+  }
+
+  it('★ 不传 confineToWorktree 时维持既有语义（继承父档位，不误伤集成者/track/非隔离路径）', { timeout: 20_000 }, async () => {
+    const { ctx, parent } = await setup([textResponse('child done')])
+    setSandboxMode(parent.session, 'danger-full-access')
+
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBe('danger-full-access')
+  })
+
+  it('★ readonlySandbox 赢过 confinedSandbox（只读更窄；research 恒不隔离）', { timeout: 20_000 }, async () => {
+    const { ctx, parent } = await setup([textResponse('child done')])
+    setSandboxMode(parent.session, 'danger-full-access')
+
+    const spec = startSpec(parent, 'spawn')
+    const started = await ctx.subagents.startContinuable({
+      ...spec,
+      request: { ...spec.request, readonlySandbox: true, confinedSandbox: true },
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBe('read-only')
+  })
+
+  it('★ 隔离标记 durable：描述符落盘 confined，冷恢复可据此重装门禁', { timeout: 20_000 }, async () => {
+    const { ctx, parent } = await setup([textResponse('child done')])
+    setSandboxMode(parent.session, 'danger-full-access')
+
+    const spec = startSpec(parent, 'spawn')
+    const started = await ctx.subagents.startContinuable({
+      ...spec,
+      request: { ...spec.request, confinedSandbox: true },
+    })
+    await waitNoActivation(ctx, started.childId)
+
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    const descriptor = loaded.events.find(event => event.type === 'subagent/descriptor')
+    expect(descriptor?.data).toMatchObject({ mode: 'continuable', confined: true })
+  })
+})

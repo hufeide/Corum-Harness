@@ -544,6 +544,14 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 | `types.ts` | **+18（2026-09-20 增量）** | `SubagentStartRequest` 增 `kind?: ChildKind` / `personaHint?: string` | 低（纯增量字段） |
 | `continuation.ts` | **+16（2026-09-20 增量）** | activation composition 形参增 `kind`/`personaHint`；创建路径、冷恢复路径（`descriptor.*`）、descriptor 快照三处透传 | 低（纯增量字段透传） |
 | `driver/index.ts` | **+3（2026-09-20 增量）** | `applyChildComposition` 调用点透传 `kind`/`personaHint` | 低 |
+| `child-agent.ts` | **+45（2026-09-26 增量，隔离第 2 层修复）** | ① `captureDelegatedPolicyOverrides` 增 `confineToWorktree`：隔离期子会话沙箱**钳到 `workspace-write`**（**只收窄不放宽**：`narrowerMode(父档位 ?? 'workspace-write', 'workspace-write')`；父 `read-only` 时维持只读）；② `ChildComposition` 增 `confined?: boolean`，`applyChildComposition` 据此装 agent-scoped `tools.guard`（`confinementGuard`，边界取子会话 `header.cwd`，主树根取 `parent.session.header.cwd`） | **低**（纯增量分支；官方若改 `applyChildComposition` 注册顺序需三方合并） |
+| `types.ts` | **+13（2026-09-26 增量）** | `SubagentStartRequest` 增 `confinedSandbox?: boolean`（隔离期钉沙箱档位） | 低（纯增量字段） |
+| `descriptor.ts` | **+30（2026-09-26 增量）** | ① `ContinuableSubagentDescriptorData`/`Input` 增 `confined?: boolean`；② `CONTINUABLE_DESCRIPTOR_KEYS` 加 `confined`；③ 新增 `optionalBoolean` 读取器；④ parse/snapshot 两处拷贝。**理由**：门禁随 Activation 消失，冷恢复用描述符重建 composition ⇒ 不落盘则 resume 后丢纵深防御层（与 `kind`/`personaHint` 同一条纪律） | 低（纯增量字段；官方若改 descriptor 版本需同步 `SUBAGENT_DESCRIPTOR_VERSION`） |
+| `driver/index.ts` | **+8（2026-09-26 增量）** | 策略捕获传 `confineToWorktree`；`applyChildComposition` 传 `confined` | 低 |
+| `continuation.ts` | **+12（2026-09-26 增量）** | 三条路径同步：① `startContinuable` 的策略捕获传 `confineToWorktree`；② 新建 composition 传 `confined`；③ `coldResume` 从 `descriptor.confined` 重建 `confined`。**⚠️ 漏任一条 = 默认后台委派（continuable）或冷恢复丢隔离边界** | 低（纯增量字段透传） |
+| `isolated/index.ts` | **+2（2026-09-26 增量）** | `prepareIsolatedChild` 在 `cwd: child.path` 旁置 `confinedSandbox: true` | 低 |
+| `corum-orchestration/src/confinement.ts` | **+370（新增文件，2026-09-26）** | 隔离写边界单一事实源：`detectBashWrite`（从 corum-agent 下沉，**顺带修两处既有缺陷**：引号内 `->` 误判为重定向、`git -C <dir> <sub>` 取不到子命令）、`stripQuoted`、`absolutePathsIn`、`isPathInside`、`confinementGuard`（变异工具路径参数 + shell 写形态的越界判定；`parentTreeRoot` **拒绝优先于允许**，防工作区建在临时区时被允许集吞掉）、`MUTATION_TOOL_PATH_ARGS`、`confinementTempRoots` | 低（corum 独有新文件，官方无对应物） |
+| `corum-agent/permission-policy.ts` | **−140（2026-09-26 增量）** | 写形态判定整体下沉到 `@corum/corum-orchestration`（两消费方都依赖它 ⇒ 唯一无循环依赖且不产生两份实现的落点），改为 `import` + `export`（本地绑定 + 对外 re-export，既有单测 import 路径不变） | 低（依赖方向不变） |
 
 ### 10.3 设计要点（升级 runbook 必读）
 
@@ -551,6 +559,7 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 2. **校验时机**：`assertChildCwd` 在 `SubagentRuntime.start` / `ContinuationManager.startContinuable` 入口（fail fast），provider 侧不重复校验。
 3. **官方测试资产**：官方 `tests/`（13 个 spec）未随 fork 拷贝——corum 侧以 `tests/cwd.spec.ts`（7 例：cwd 透传 3 + assertChildCwd 4）覆盖 fork diff；官方行为回归依赖基座自身测试。升级 rebase 后应跑一次官方 tests 目录对 fork src 的适配验证（手动）。
 4. **依赖锁**：全部 `^0.1.3-alpha.1`（与基座同代，无双向差）。
+5. **⭐ 隔离的沙箱档位是正交轴（2026-09-26 修，勿回退）**：隔离的第 2 层（fs 写沙箱）**不是**「继承父档位 + cwd 指到 worktree」就成立的——`danger-full-access` 在官方 `fs-sandbox` / `bash-sandbox` / `terminal-bash` 三处都是**直通不 confine**，父档位一放宽，隔离的物理基础整档消失（实测：worker 删掉 19 个 worktree 并对主树 `git -C <主树> merge`）。因此 `confinedSandbox` 必须**钉在不可被用户档位覆盖的轴上**（与 research 的 `readonlySandbox` 同一手法），且**只收窄不放宽**。rebase 时若这三条接线（工具层 / isolated provider / continuable+冷恢复）任一被官方改动或本表合并丢失，隔离会**静默退化**——`packages/plugins/agent/corum-subagent/tests/continuation-inheritance.spec.ts` 的三档矩阵与 `isolation-confinement.spec.ts` 是本条的回归门禁，**rebase 后必须绿**。
 
 ### 10.4 验证记录
 

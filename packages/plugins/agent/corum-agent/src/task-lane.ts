@@ -51,6 +51,8 @@ import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { installTaskModelSelection } from './task-model-selection.ts'
 import { readTaskSessionIndex } from './lane-registry.ts'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+// fork（corum）2026-09-26：冷恢复同样要处理「预设模型已被删除」（确定性配置缺失）。
+import { resolveUsableModel } from './model-availability.ts'
 
 /** 一条已解析的 task 泳道会话。 */
 export interface ResolvedTaskSession {
@@ -130,11 +132,20 @@ export async function resolveTaskSession(
   const resumeModel = profile !== undefined && profile !== null
     ? profile.model
     : (() => { const dm = ctx.agentDefaultModel.currentSelection(); return { provider: dm.provider, model: dm.model, ...(dm.reasoningEffort === undefined ? {} : { reasoningEffort: dm.reasoningEffort }) } })()
+  // fork（corum）2026-09-26：冷恢复同样可能撞上「预设里的模型已被删除」——这是**确定性
+  // 配置缺失**，必须在 resume 之前回落，否则恢复出来的会话每句请求都失败
+  // （与创建路径同一条处置；见 model-availability.ts 的概念分界表）。
+  const resumeResolved = await resolveUsableModel(ctx, {
+    provider: resumeModel.provider,
+    model: resumeModel.model,
+    ...(resumeModel.reasoningEffort === undefined ? {} : { reasoningEffort: resumeModel.reasoningEffort }),
+  })
+  const resumeEffective = resumeResolved.model
   const selection: ModelSelectionRef = {
     current: {
-      provider: resumeModel.provider,
-      model: resumeModel.model,
-      ...(resumeModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(resumeModel.reasoningEffort) }),
+      provider: resumeEffective.provider,
+      model: resumeEffective.model,
+      ...(resumeEffective.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(resumeEffective.reasoningEffort) }),
     },
     assembled: undefined,
   }
@@ -144,13 +155,20 @@ export async function resolveTaskSession(
     // ⚠️ 必须在 setup 内注册（组装期），不能事后补 —— 见模块头注「为什么必须在 setup 里调」。
     host.applyConductor(sessionId, agentCtx, conductor)
   }
-  const agentOptions = { provider: resumeModel.provider, model: resumeModel.model }
+  const agentOptions = { provider: resumeEffective.provider, model: resumeEffective.model }
   const sid = SessionId(sessionId)
   const handle = await ctx.agents.resume({ resumeSessionId: sid, agentOptions, setup })
   ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
   const entry = { agent: handle.agent, sessionId: sid, cwd: meta.cwd, profileId: meta.profileId }
   registry.registerTask(entry)
   registry.setTaskSelection(sessionId, selection)
+  if (resumeResolved.fallback !== undefined) {
+    ctx.logger.warn(
+      `corum-agent(task): resumed lane "${sessionId}" had unavailable model `
+      + `${resumeResolved.fallback.configured.provider}/${resumeResolved.fallback.configured.model} `
+      + `(${resumeResolved.fallback.reason}); fell back to ${resumeEffective.provider}/${resumeEffective.model}`,
+    )
+  }
   return { ...entry, conductor }
 }
 

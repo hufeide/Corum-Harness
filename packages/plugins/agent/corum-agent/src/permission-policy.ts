@@ -124,126 +124,22 @@ export function subjectConstraintOf(
  * 放开只读 bash 之后，**bash 是唯一的写通路**，故门禁只需覆盖它。
  */
 
-/** 直接改文件的命令（命令名精确匹配）。 */
-const WRITE_COMMANDS = new Set([
-  'touch', 'mkdir', 'rmdir', 'rm', 'mv', 'cp', 'ln', 'truncate', 'dd', 'tee',
-  'chmod', 'chown', 'chgrp', 'install', 'mktemp', 'mkfifo', 'unlink', 'shred',
-  'rsync', 'tar', 'unzip', 'gunzip', 'sed', 'perl', 'patch',
-])
-
-/** 只在这些子命令下才构成「改仓库」的 `git` 子命令。 */
-const GIT_WRITE_SUBCOMMANDS = new Set([
-  'add', 'commit', 'checkout', 'switch', 'restore', 'reset', 'revert', 'merge',
-  'rebase', 'cherry-pick', 'apply', 'am', 'clean', 'stash', 'rm', 'mv', 'push',
-  'fetch', 'pull', 'init', 'clone', 'tag', 'update-ref', 'gc', 'prune',
-])
-
-/** 会写盘的包管理器。 */
-const PACKAGE_COMMANDS = new Set(['pnpm', 'npm', 'yarn', 'bun'])
-
-/** 包管理器里才构成写入的子命令。 */
-const PACKAGE_WRITE_SUBCOMMANDS = new Set([
-  'install', 'i', 'add', 'remove', 'rm', 'uninstall', 'update', 'upgrade', 'link', 'publish', 'deploy',
-])
-
-/** 会把内联代码写进文件的解释器（按内容特征判定，避免误伤纯计算）。 */
-const INLINE_WRITE_PATTERNS: readonly RegExp[] = [
-  /open\s*\([^)]*['"][wa]/,              // python: open('f','w')
-  /writeFileSync|appendFileSync|createWriteStream/,  // node
-  /Path\([^)]*\)\.write_text|\.write_bytes/,         // python pathlib
-  />\s*['"]?[\w./-]+/,                   // shell 重定向写在 -c 字符串里
-]
-
-/** 拆一条 shell 命令为「按运算符切开的段」（不求完备，只为定位真正的命令名）。 */
-function shellSegments(command: string): string[] {
-  return command
-    .split(/\|\||&&|;|\||\n/)
-    .map(segment => segment.trim())
-    .filter(segment => segment !== '')
-}
-
-/** 去掉 `sudo` / `env` / `nohup` / `time` / 环境变量赋值前缀，露出真正的命令名。 */
-function commandWordOf(segment: string): string {
-  const tokens = segment.split(/\s+/).filter(Boolean)
-  let index = 0
-  while (index < tokens.length) {
-    const token = tokens[index]!
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) { index += 1; continue }        // VAR=value
-    if (['sudo', 'env', 'nohup', 'time', 'command', 'builtin', 'exec'].includes(token)) { index += 1; continue }
-    break
-  }
-  const raw = tokens[index] ?? ''
-  // 去掉路径前缀（/bin/rm → rm）
-  return raw.split('/').pop() ?? raw
-}
-
-/** 段内第二个词（子命令位置），跳过 `-x` 选项前的命令名。 */
-function subcommandOf(segment: string): string | undefined {
-  const tokens = segment.split(/\s+/).filter(Boolean)
-  let index = 0
-  while (index < tokens.length) {
-    const token = tokens[index]!
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) { index += 1; continue }
-    if (['sudo', 'env', 'nohup', 'time', 'command', 'builtin', 'exec'].includes(token)) { index += 1; continue }
-    break
-  }
-  return tokens[index + 1]
-}
+/* 直接改文件的命令（命令名精确匹配）。 */
 
 /**
- * 判定一条 bash 命令**是否试图写盘**——只读门禁的判据。
+ * fork（corum）2026-09-22：写形态判定与越界判定**已下沉到 `@corum/corum-orchestration`**
+ * （`confinement.ts`），此处只 re-export 保持既有 import 路径与单测不变。
  *
- * ⚠️ **这是启发式，不是完备的 shell 语义分析**（如实标注）。设计取舍：
- * - 按**命令名**判定而不是全文匹配，避免把 `grep "rm " f` 误判成删除；
- * - 覆盖高频写形态（重定向 / in-place 编辑 / 文件与 git 与包管理器变更 / 内联解释器写盘）；
- * - 宁可**漏判也不误伤**只读工作（误伤会让指挥者反复撞墙、白烧往返）。
- *
- * 因此它定位是**纵深防御的一层**而非唯一屏障：`write`/`edit` 已由 `tools.restrict`
- * 从工具面摘除；若将来能用「会话级不可覆盖的沙箱」表达只读，门禁可退为兜底。
- *
- * @param command - bash 工具的 `command` 参数原文。
- * @returns 命中的写形态描述（用于拒绝文案）；只读时 `undefined`。
+ * 为什么下沉：`corum-agent`（主 Agent 只读门禁）与 `corum-subagent`（隔离子会话写边界
+ * 门禁）都需要同一份判定，而两者**都**依赖 `corum-orchestration`（反向不成立）⇒ 那里
+ * 是唯一不产生循环依赖、也不产生两份实现的落点。同时修掉原实现的一个实测误报：
+ * 重定向正则直接匹配原文，`echo '===a->b==='` 里的 `->` 被当成重定向，导致**纯只读命令
+ * 被拒**（会话 `corum-task-ef3f751e` turn 4 step 5）。现在先剥引号字面量再判定。
  */
-export function detectBashWrite(command: string): string | undefined {
-  // 1) 重定向。排除两类**无害形态**（否则会误伤常见只读写法）：
-  //    · fd 复制：`2>&1` / `>&2`
-  //    · 写入 `/dev/null`：丢弃输出是惯用只读手法，不产生任何文件
-  const withoutFd = command.replace(/\d?>>?\s*&\s*\d/g, '')
-  const withoutDevNull = withoutFd.replace(/>>?\s*\/dev\/null\b/g, '')
-  if (/(^|[^>])>>?\s*(?!&\s*\d)(?=\S)/.test(withoutDevNull)) {
-    return 'shell redirection writes to a file'
-  }
-
-  for (const segment of shellSegments(command)) {
-    const word = commandWordOf(segment)
-    const sub = subcommandOf(segment)
-
-    if (WRITE_COMMANDS.has(word)) {
-      // `sed` / `perl` / `patch` / `tar` 只有带写选项才算写；其余默认算写。
-      if (word === 'sed') { if (/(^|\s)-i/.test(segment)) return '`sed -i` edits a file in place' ; continue }
-      if (word === 'perl') { if (/(^|\s)-[a-zA-Z]*i/.test(segment)) return '`perl -i` edits a file in place'; continue }
-      if (word === 'patch') return '`patch` modifies files'
-      if (word === 'tar') { if (/(^|\s)-[a-zA-Z]*[xc]/.test(segment)) return '`tar` extracts or creates files'; continue }
-      if (word === 'unzip' || word === 'gunzip') return `\`${word}\` writes files`
-      if (word === 'rsync') return '`rsync` writes files'
-      return `\`${word}\` writes to the filesystem`
-    }
-
-    if (word === 'git' && sub !== undefined && GIT_WRITE_SUBCOMMANDS.has(sub)) {
-      return `\`git ${sub}\` changes the repository`
-    }
-    if (PACKAGE_COMMANDS.has(word) && sub !== undefined && PACKAGE_WRITE_SUBCOMMANDS.has(sub)) {
-      return `\`${word} ${sub}\` installs or modifies dependencies`
-    }
-    // 内联解释器里写盘
-    if (['python', 'python3', 'node', 'ruby', 'perl'].includes(word)) {
-      for (const pattern of INLINE_WRITE_PATTERNS) {
-        if (pattern.test(segment)) return 'inline script writes to a file'
-      }
-    }
-  }
-  return undefined
-}
+import { detectBashWrite } from '@corum/corum-orchestration'
+// 本地绑定（guard 要用）+ 对外 re-export（既有单测 import 路径不变）。`export … from`
+// 不创建本地绑定，故必须分成 import + export 两步。
+export { detectBashWrite }
 
 /**
  * 构造指挥模式下**主 Agent 的只读门禁**（传给 `agentCtx.tools.guard`）。

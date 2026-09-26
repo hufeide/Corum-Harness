@@ -501,11 +501,20 @@ export class SubagentContinuationManager {
       // fork（corum）2026-09-20：种类与注入层落盘（resume 时据此重放同一套角色契约）。
       ...request.kind !== undefined ? { kind: request.kind } : {},
       ...request.personaHint !== undefined ? { personaHint: request.personaHint } : {},
+      // fork（corum）2026-09-22：隔离写边界标记落盘（resume 时据此重装门禁）。
+      ...request.confinedSandbox === true ? { confined: true } : {},
       ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
     })
     // Capture before the first await: a later parent switch belongs to the
     // parent's future, not to this child.
-    const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
+    //
+    // fork（corum）2026-09-22：隔离后台子会话同样钉沙箱（正交轴，修法 1）——`confinedSandbox`
+    // 由工具层/isolated provider 在**隔离建成后**置位；这里与 one-shot 路径共享同一判定，
+    // 否则「默认后台」的 continuable 委派会漏掉隔离边界（正是本次要修的一类漏项）。
+    const delegatedPolicies = captureDelegatedPolicyOverrides(parent, {
+      pinReadOnly: request.readonlySandbox === true,
+      confineToWorktree: request.confinedSandbox === true,
+    })
 
     // Hold the parent's own Activation open across the establishment awaits:
     // an idle continuation-managed parent must not settle while a caller is
@@ -554,6 +563,8 @@ export class SubagentContinuationManager {
             ...request.personaHint === undefined ? {} : { personaHint: request.personaHint },
             persona: request.persona,
             toolFilter: request.toolFilter,
+            // fork（corum）2026-09-22：隔离写边界门禁（纵深防御；边界取子会话 cwd）。
+            ...request.confinedSandbox === true ? { confined: true } : {},
           },
           signal: spec.signal,
         })
@@ -1266,6 +1277,8 @@ export class SubagentContinuationManager {
           ...descriptor.personaHint === undefined ? {} : { personaHint: descriptor.personaHint },
           persona: descriptor.persona,
           toolFilter: descriptor.toolFilter,
+          // fork（corum）2026-09-22：冷恢复重装隔离写边界门禁（不落盘则会丢这一层）。
+          ...descriptor.confined === true ? { confined: true } : {},
         },
         signal: options.signal,
       })

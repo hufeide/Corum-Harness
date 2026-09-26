@@ -98,6 +98,18 @@ export {
   corumWriteToolsForPlatform,
   corumOrchestrationDomainSpec,
 } from './orchestration.ts'
+// fork（corum）2026-09-22：隔离写边界（正交轴 + 纵深防御门禁）——`corum-agent` 与
+// `corum-subagent` 都依赖本包，写形态判定与越界判定因此只能是这一份实现
+// （docs/dev-conventions §4a 的「两处对账」纪律：单一事实源在本层）。
+export {
+  MUTATION_TOOL_PATH_ARGS,
+  absolutePathsIn,
+  confinementGuard,
+  confinementTempRoots,
+  detectBashWrite,
+  isPathInside,
+  stripQuoted,
+} from './confinement.ts'
 export type {
   CorumWorktreeChild,
   CorumChildSpawnFacts,

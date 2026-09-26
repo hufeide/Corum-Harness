@@ -116,7 +116,10 @@ export async function startInProcessRun(
 
   // Capture before the first await: a later parent switch belongs to the
   // parent's future.
-  const inherited = captureDelegatedPolicyOverrides(parent, { pinReadOnly: request.readonlySandbox === true })
+  const inherited = captureDelegatedPolicyOverrides(parent, {
+    pinReadOnly: request.readonlySandbox === true,
+    confineToWorktree: request.confinedSandbox === true,
+  })
 
   let structured: StructuredAttachment | undefined
   const setup = (childCtx: Context): void => {
@@ -127,6 +130,8 @@ export async function startInProcessRun(
       ...request.personaHint === undefined ? {} : { personaHint: request.personaHint },
       persona: request.persona,
       toolFilter: request.toolFilter,
+      // fork（corum）2026-09-22：隔离子会话装写边界门禁（纵深防御，边界就地取子会话 cwd）。
+      ...request.confinedSandbox === true ? { confined: true } : {},
     })
     if (request.outputSchema !== undefined) {
       structured = attachStructuredRuntime(childCtx, request.outputSchema)

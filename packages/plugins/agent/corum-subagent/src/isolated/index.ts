@@ -146,6 +146,10 @@ export function prepareIsolatedChild(
     request: {
       ...request,
       cwd: child.path,
+      // fork（corum）2026-09-22：隔离建成 ⇒ 钉沙箱（workspace-write，不继承父档位）+ 装
+      // 写边界门禁。与工具层同一条修法，见 tool-subagent 的 `confinedSandbox` 赋值点与
+      // `@corum/corum-orchestration/confinement.ts` 的头注（实测漏洞与 1+2 修法）。
+      confinedSandbox: true,
       prompt: [{ type: 'text', text: corumIsolationNotice(child) + promptText(request.prompt) }],
     },
     bind: (runId: string) => { orchestration.bindRunId(sessionId, child.slug, runId) },

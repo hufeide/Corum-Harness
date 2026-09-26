@@ -1801,6 +1801,50 @@ export function apply(ctx: Context, config: Config): void {
               : {},
           }
       const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
+      /**
+       * fork（corum）2026-09-26：**被删除的锁定模型要在委派前就被识别**（用户拍板口径 3）。
+       *
+       * ## 补的是什么缺口
+       *
+       * 刻意在此处（锁定路由解析完、`request` 构造之前）做一次真路由预检：
+       * - **前台**路径原本就预检（`corumLockedOptions === undefined` 分支里的
+       *   `preflightChildLlmRoute`）——但**只在非锁定路径**生效，锁定路径（本 preset 按角色
+       *   配了模型）**跳过了它**；
+       * - **后台 / continuable** 路径**完全不预检**（工具已返回 jobId/子会话 id，失败只能靠
+       *   `subagent/end` 事后问）。
+       *
+       * 后果（用户 2026-09-26 报障的同一根因）：预设里锁着一个**已被用户删除**的模型时，
+       * 委派会先起一个注定失败的子会话、跑一轮、再弹「模型不可用」问用户——白烧一轮，
+       * 且用户面对的是「任务失败」而不是「这个模型已经没了」。
+       *
+       * ## 与用户 2026-09-18 裁定的关系（**语义不变**）
+       *
+       * 那次拍板的是「**运行过程中发生的**模型失败 ⇒ 机制问用户（临时换/永久换/停止）」。
+       * 本预检不改变那条语义：它只是把**同一个判定提前**——预检失败仍然走
+       * `corumAskAboutModel`（同一入口、同一三个选项），只是不再先启动一个死会话。
+       * 用户在配置文件里删掉模型是**确定性的配置缺失**，与「调用时失败」是两个概念
+       * （用户原话：「我 9 月 18 日的功能主要是在运行过程中发生的非用户删除因素，是两个
+       * 不同的概念」）。
+       *
+       * 失败处理：只记录 `corumLockedRouteFailure`，由下方**现有**的两条失败通路消费
+       * （前台 attempt 0 / `subagent/end` 的事后问询），因此不新增第二套提问逻辑。
+       */
+      let corumLockedRouteFailure: string | undefined
+      if (corumLockedOptions !== undefined) {
+        const llm = runtimeCtx.get('llm')
+        if (llm !== undefined) {
+          try {
+            await preflightChildLlmRoute(llm, parentOptions, corumLockedOptions, exec.signal, false)
+          } catch (error: unknown) {
+            corumLockedRouteFailure = error instanceof Error ? error.message : String(error)
+            runtimeCtx.logger.warn(
+              `subagent (${args.label}): configured ${corumChildRole ?? 'worker'} model `
+              + `${corumEffectiveModel?.provider}/${corumEffectiveModel?.model} is unavailable `
+              + `(${corumLockedRouteFailure}) — the delegation is not started; the user is asked instead`,
+            )
+          }
+        }
+      }
       // fork（corum）：研究标志提前解析（任务级覆盖优先）——request 构造要用它把子会话
       // 沙箱钉成 read-only（2026-09-12 用户定调：research 开放 shell 以后，只读性由
       // 沙箱层保证，而不是靠 deny 掉 bash）。
@@ -1827,6 +1871,7 @@ export function apply(ctx: Context, config: Config): void {
         cwd?: string
         outputSchema?: ObjectJsonSchema
         readonlySandbox?: boolean
+        confinedSandbox?: boolean
       } = {
         label: args.label,
         prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
@@ -1844,6 +1889,10 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：只读研究子 Agent 的沙箱钉成 read-only（工具面禁变异工具 + 沙箱层
         // 禁文件写入，两层分工保证「调研能跑命令，但改不了仓库」）。
         ...effReadonlyResearch ? { readonlySandbox: true } : {},
+        // fork（corum）2026-09-22：**隔离子会话的沙箱钉成 workspace-write**（正交轴，修法 1）。
+        // 见下方 `corumIsolate` 解析：隔离真的生效时（`corumIsolate && !effReadonlyResearch`）
+        // 才钉——否则会把「非 git 工作区降级/集成者/track」这些**必须写主树**的路径一起钉死。
+        // 值在下方隔离判定后覆盖（此处只声明键，保持对象字面量的条件展开风格）。
       }
       if (corumLockedOptions === undefined) {
         const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
@@ -2205,6 +2254,17 @@ export function apply(ctx: Context, config: Config): void {
         corumEntry = { sessionId, slug: child.slug }
         corumEntryInfo = { slug: child.slug, branch: child.branch, path: child.path }
         request.cwd = child.path
+        // fork（corum）2026-09-22：隔离**真的建成了** ⇒ 钉沙箱 + 装写边界门禁（修法 1+2）。
+        // ⚠️ 必须在 `createWorktreeChild` 成功之后设置：放在这里而不是函数开头，正是为了让
+        // 「非 git 工作区降级」「集成者（走 parentCwd，不建 worktree）」「track(ralph)」这些
+        // **必须写主树**的路径自动落在 `corumIsolate === false`，不被误钉。
+        //
+        // 为什么需要（实测，会话 `corum-task-ef3f751e`）：隔离的第 2 层是 fs 写沙箱，而沙箱
+        // 按**档位**开关；子会话此前整体继承父档位 ⇒ 用户切「完全权限」后隔离当场失效
+        // （worker 删掉 19 个 worktree 并对主树 `git -C <主树> merge --no-ff`）。
+        // `confinedSandbox` 把它钉在**不可被用户档位覆盖**的轴上（与 research 的
+        // `readonlySandbox` 同一手法），边界 = 子会话 cwd = 这个 worktree。
+        request.confinedSandbox = true
         corumSetMechanismFilter(corumEffectiveToolFilter(config.toolFilter, true))
         request.prompt = [{ type: 'text', text: corumIsolationNotice(child) + args.prompt }] as ContentBlock[]
       } else if (corumIsWrite && !effReadonlyResearch) {
@@ -2266,6 +2326,49 @@ export function apply(ctx: Context, config: Config): void {
         : undefined
 
       if (corumRunSpec.runInBackground) {
+        /**
+         * fork（corum）2026-09-26：**锁定模型已不可用 ⇒ 后台路径也要先问，不起死会话**。
+         *
+         * 后台/continuable 的子会话失败**不在工具调用栈上**（工具早已带 jobId/子会话 id
+         * 返回），原本只能等 `subagent/end` 事后问用户——那意味着先白跑一轮。预检失败在
+         * 委派前就已知，故这里**在前台式地问一次**：走同一个 `corumAskAboutModel`
+         * （同一入口、同一三个选项、同一「至多问一次」去重），语义与用户 2026-09-18 的
+         * 裁定一致，只是把时机提前。
+         *
+         * 用户选「临时/永久换模型」⇒ 用主 Agent 路由重跑（清掉角色锁，与前台 attempt 1 同款）；
+         * 选「否」或问不到 ⇒ 如实把「模型不可用」抛回主 Agent（规则 2 的下半句）。
+         */
+        if (corumLockedRouteFailure !== undefined) {
+          const configuredRoute = corumEffectiveModel !== undefined
+            && parentOptions.provider !== undefined && parentOptions.model !== undefined
+            ? { configured: { provider: corumEffectiveModel.provider, model: corumEffectiveModel.model } }
+            : undefined
+          if (configuredRoute === undefined) {
+            throw new Error(
+              `subagent (${args.label}): the configured child model `
+              + `${corumEffectiveModel?.provider}/${corumEffectiveModel?.model} is unavailable `
+              + `(${corumLockedRouteFailure}) and the parent route is unresolvable, so no fallback can be offered`,
+            )
+          }
+          const asked = await corumAskAboutModel(
+            parent,
+            args.label,
+            effReadonlyResearch ? 'research' : 'worker',
+            configuredRoute.configured,
+            corumLockedRouteFailure,
+            exec.signal,
+            args.notifyParent !== false,
+          )
+          if (asked.route === undefined) {
+            throw new Error(
+              `subagent (${args.label}): the configured child model `
+              + `${corumEffectiveModel?.provider}/${corumEffectiveModel?.model} is unavailable `
+              + `(${corumLockedRouteFailure}) and no fallback was authorized`,
+            )
+          }
+          // 用户授权 → 改走主 Agent 路由（与前台重跑同款：清掉角色锁）。
+          delete request.agentOptions
+        }
         if (continuable) {
           const started = await corumStart(() => runtimeCtx.subagents.startContinuable({
             provider: config.provider,
@@ -2361,6 +2464,12 @@ export function apply(ctx: Context, config: Config): void {
         let failedChildContext: CorumFailedChildContext | undefined
         for (let attempt = 0; attempt < 2; attempt++) {
           if (attempt === 0) {
+            // fork（corum）2026-09-26：锁定路由的预检失败在委派前已知（见上方
+            // `corumLockedRouteFailure` 的说明）——直接进「问用户」，不启死会话。
+            if (corumLockedRouteFailure !== undefined) {
+              configuredFailure = corumLockedRouteFailure
+              break
+            }
             const llm = runtimeCtx.get('llm')
             if (llm !== undefined) {
               try {

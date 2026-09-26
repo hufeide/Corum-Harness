@@ -364,6 +364,45 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     const prompt = between('Child model routing is NOT yours to choose', '\n')
     expect(prompt).not.toContain('automatically retries')
   })
+
+  /**
+   * fork（corum）2026-09-26：**被删除的锁定模型要在委派前被识别**（用户拍板口径 3）。
+   *
+   * 背景：用户手动删掉 `kimi-k3-1` 后，预设里仍锁着它 ⇒ 委派会先起一个注定失败的子会话、
+   * 白跑一轮，再弹「模型不可用」。用户定调：那属**确定性配置缺失**，与「运行期失败」是
+   * 两个概念，不该靠跑一次失败去发现。
+   *
+   * ⚠️ 本组只钉「**时机提前**」；「失败后问用户」的语义（2026-09-18 拍板）由上一条 describe
+   * 的断言继续守着，两者不得互相覆盖。
+   */
+  it('★ 锁定路由在委派前做真路由预检（记录 corumLockedRouteFailure）', () => {
+    // 该块紧跟在 `maxDepth` 解析之后、`request` 构造之前（见源码注释）。
+    const block = between('let corumLockedRouteFailure', 'const childKind')
+    expect(block).toContain('preflightChildLlmRoute')
+    expect(block).toContain('corumLockedRouteFailure =')
+    // 只在锁定路由（preset 按角色配了模型）时预检——跟随父的委派没有「配置模型」可言。
+    expect(block).toContain('corumLockedOptions !== undefined')
+  })
+
+  it('★ 预检失败走**既有**问询入口，不新增第二套提问逻辑（同一入口/同一三选项）', () => {
+    // 前台：预检失败 ⇒ configuredFailure ⇒ 复用下方 corumAskAboutModel 分支。
+    const fg = between('if (attempt === 0) {', 'const run = await startRun()')
+    expect(fg).toContain('corumLockedRouteFailure')
+    expect(fg).toContain('configuredFailure = corumLockedRouteFailure')
+    // 后台：同样先问（不起死会话），且用的是同一个 corumAskAboutModel。
+    const bg = between('if (corumRunSpec.runInBackground) {', "const jobs = runtimeCtx.get('jobs')")
+    expect(bg).toContain('corumLockedRouteFailure')
+    expect(bg).toContain('corumAskAboutModel')
+    expect(bg).toContain('asked.route === undefined')
+  })
+
+  it('★ 「配置缺失」与「运行期失败」两个概念不混淆：预检是补充、不替换', () => {
+    // 用户在配置文件里删模型 ⇒ 事前可知；调用时失败（限流/超时/额度）⇒ 只能跑了才知道。
+    // 后者仍必须经 stopReason === 'error' 判定（本 describe 前段已钉），此处确认两者并存。
+    expect(SRC).toContain('corumLockedRouteFailure')
+    expect(SRC).toContain("stopReason === 'error'")
+    expect(SRC).toContain('corumAskAboutModel(')
+  })
 })
 
 describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {

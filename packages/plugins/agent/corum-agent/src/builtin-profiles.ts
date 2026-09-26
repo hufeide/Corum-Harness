@@ -444,6 +444,15 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     // 恒按 orchestrator 处理），人格为指挥者（compile.ts 的 MODE_CORE_IDENTITY.conductor）。
     // 子 Agent 模型锁到本地网关（省费用）；隔离策略沿用并发感知默认。
     // 2026-09-13 用户定调（fork 成效验证轮）：主 Agent = localhost/Kimi-k3。
+    //
+    // ⚠️ 2026-09-26 修正（用户报障）：这里此前写的是 `kimi-k3-1`——该 id 在 `settings.yaml`
+    // 的 localhost provider 里**根本不存在**（只有 `kimi-k3`）。用户手动删掉它之后，每个新
+    // 指挥会话第一句就 `UNKNOWN_MODEL` 硬失败（实测 `corum-task-b36de140`）。按上面
+    // 2026-09-13 的定调原文（「Kimi-k3」）改回 `kimi-k3`。
+    //
+    // 注：**机制侧的兜底不依赖这里改对**——运行期已加「预设模型不可用 ⇒ 回落全局默认 +
+    // 显式告知」（见 `model-availability.ts`）；本处只把产品自带的默认值修正到实际存在的
+    // 模型，避免家目录副本被幂等刷新写回一个死 id。
     // 2026-09-14 用户改定（额度轮）：子 Agent（写 / 只读研究）**统一**
     // localhost/glm-5.3-flash，思考等级 High —— 原话「使用 glm-5.3-flash 或者 localhost
     // 的 GLM-5.2 作为子 Agent，思考都是 high，这些模型的额度足以支撑长期任务」；
@@ -457,7 +466,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     title: '编排指挥',
     dimension: '研发',
     baseMode: 'conductor',
-    model: { provider: 'localhost', model: 'kimi-k3-1', reasoningEffort: 'high' },
+    model: { provider: 'localhost', model: 'kimi-k3', reasoningEffort: 'high' },
     subagentModel: { provider: 'localhost', model: 'deepseek-v4.1-flash', reasoningEffort: 'high' },
     researchModel: { provider: 'localhost', model: 'glm-5.3-flash', reasoningEffort: 'high' },
     // 2026-09-21 裁定：`parallelWork.isolation` 已随隔离机制恒定生效剔除（死键清除），

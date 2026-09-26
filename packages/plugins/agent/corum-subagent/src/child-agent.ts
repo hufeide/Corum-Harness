@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // keeps its model-facing rows on the host plane, where the child already sees
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
+import { corumNarrowDenyFilter, corumVisibleToolNames, confinementGuard } from '@corum/corum-orchestration'
 import { CHILD_WORKER_ROLE, CHILD_WORK_STYLE, RESEARCHER_ROLE } from './child-roles.ts'
 import { delegationDepthOf } from './depth.ts'
 
@@ -195,6 +195,24 @@ export interface ChildComposition {
   readonly persona?: string | undefined
   /** Per-child tool scoping. */
   readonly toolFilter?: ToolRestriction | undefined
+  /**
+   * fork（corum）2026-09-22：**隔离写边界**（纵深防御，用户拍板的修法 2）。
+   *
+   * `true` = 这是一个隔离子会话：`applyChildComposition` 会在子 scope 装一个 agent-scoped
+   * `tools.guard`（`confinementGuard`），拒绝对该 worktree 之外路径的**写形态**调用
+   * （变异工具的路径参数 / shell 写命令里的越界绝对路径）。
+   *
+   * 边界根**不在此传**，而是就地取子 Agent 自己的 `session.header.cwd`——那是隔离建立时
+   * 写死的（`request.cwd = child.path`），且**持久化**，因此冷恢复（`coldResume`）重放
+   * 同一份 composition 时边界自动正确，无需把路径再存一份到描述符里。
+   *
+   * 与修法 1（把子会话沙箱钉成 `workspace-write`）**同源但独立**：沙箱是强边界，本门禁
+   * 在它被旁路时兜底（未装配 / 平台差异 / 未来改动）。
+   *
+   * 只对**隔离**子会话为真：集成者、`track`（ralph）与只读研究子会话都不传——它们要么
+   * 必须写主树，要么本就只读（已由 `readonlySandbox` 钉死）。
+   */
+  readonly confined?: boolean | undefined
 }
 
 /**
@@ -314,6 +332,36 @@ export function applyChildComposition(
     : composition.toolFilter
   const toolFilter = raw === undefined ? undefined : narrowChildToolFilter(childCtx, raw)
   if (toolFilter !== undefined) childCtx.tools.restrict(toolFilter)
+
+  /**
+   * fork（corum）2026-09-22：**隔离写边界的纵深防御门禁**（用户拍板的修法 2）。
+   *
+   * 为什么还要一层（沙箱已经是强边界）：隔离的第 2 层（fs 写沙箱）是**按档位**开关的，
+   * 而档位是用户可改的状态——2026-09-22 实测「用户在指挥模式切完全权限后，隔离的物理
+   * 基础整档消失」（worker 成功删掉 19 个 worktree 并对主树执行 merge）。修法 1 已把
+   * 隔离期子会话的沙箱钉成 `workspace-write`，本门禁是**与沙箱正交**的第二道：
+   * 即便沙箱被旁路（未装配 / 平台差异 / 未来有人改动档位语义），越界写仍被拒绝。
+   *
+   * 单调性：guard 是「deny or abstain, never allow」，后注册者无法复活被拒的调用
+   * （与主 Agent 只读门禁同一机制，见 `@corum/corum-agent` 的 `permission-policy.ts`）。
+   * 注册在 `childCtx`（子 Agent 自己的 scope）上 ⇒ **只作用于这个子会话**，不泄漏给它的
+   * 父或兄弟；`track`/集成者/只读研究都不置 `confined`，因此不受影响。
+   */
+  if (composition.confined === true) {
+    // 边界就地取子会话自己的 header.cwd（隔离建立时写死的 worktree 路径，且持久化）——
+    // 因此冷恢复重放同一份 composition 时边界自动正确，不必把路径再存进描述符。
+    const root = childCtx.agent?.session.header.cwd
+    if (root !== undefined && root !== '') {
+      // 主工作树根 = 委派方的 cwd（隔离要保护的对象）。**必须显式传**：工作区可能就建在
+      // 临时区之内（本仓测试与部分用户环境如此），只靠「worktree 之外都拦」会被临时区
+      // 允许集放行，门禁等于没装。
+      const parentTree = parent.session.header.cwd
+      childCtx.tools.guard(confinementGuard({
+        worktreeRoot: root,
+        ...parentTree !== undefined && parentTree !== '' ? { parentTreeRoot: parentTree } : {},
+      }))
+    }
+  }
 }
 
 /**
@@ -480,23 +528,64 @@ export interface DelegatedPolicyOverrides {
 }
 
 /**
+ * fork（corum）：沙箱档位的序（`read-only` < `workspace-write` < `danger-full-access`）。
+ *
+ * 用于「隔离只收窄、绝不放宽」的钳制（见 {@link captureDelegatedPolicyOverrides}）。
+ */
+const SANDBOX_MODE_ORDER: readonly SandboxMode[] = ['read-only', 'workspace-write', 'danger-full-access']
+
+/** 取两个档位里更窄的那个（索引小 = 更窄）。 */
+function narrowerMode(a: SandboxMode, b: SandboxMode): SandboxMode {
+  return SANDBOX_MODE_ORDER.indexOf(a) <= SANDBOX_MODE_ORDER.indexOf(b) ? a : b
+}
+
+/**
  * Capture the policy to seed into one delegation. Call synchronously before
  * the child start's first await: a later parent switch belongs to the
  * parent's future, not to this child. Only the parent session's explicit
  * sandbox override is captured — never deployment defaults or one-shot
  * grants — and the approval policy is pinned to `'never'` regardless of the
  * parent's own policy.
+ *
+ * ## fork（corum）2026-09-22：`confineToWorktree` —— 隔离的**正交轴**（实测漏洞修复）
+ *
+ * 隔离的第 2 层（fs 写沙箱）此前**整体继承父档位**：用户在指挥模式切「完全权限」
+ * （`danger-full-access`）后，子会话也拿到 `danger-full-access`，而该档位在
+ * `fs-sandbox` / `bash-sandbox` / `terminal-bash` 三处都**直通不 confine** ⇒ 隔离的
+ * 物理基础当场消失。实测（会话 `corum-task-ef3f751e`）：同一 brief 结构，
+ * `workspace-write` 下 worker 写主树 EPERM（硬隔离生效），`danger-full-access` 下
+ * worker 成功删掉 19 个 worktree 并对主树 `git -C <主树> merge --no-ff`。
+ *
+ * 修法与 research 的 {@link pinReadOnly} 同一手法：**把约束钉在不可被用户档位覆盖的
+ * 轴上**——隔离期的子会话沙箱**至多** `workspace-write`，边界 = 它自己的
+ * `header.cwd`（= worktree）。
+ *
+ * ⚠️ **只收窄，绝不放宽**（写成取更窄者，而不是无条件写 `workspace-write`）：
+ * 父档位是 `read-only` 时子会话必须**维持只读**——隔离要求的是「写不出 worktree」，
+ * 而只读是比它更强的保证；父档位 `danger-full-access` 时收到 `workspace-write`。
+ * 首版无条件钉 `workspace-write`，会把只读父会话的子 Agent **放宽**成可写，
+ * 被本文件的三档矩阵单测当场抓到。
+ *
  * @param parent - the delegating parent agent.
+ * @param options.pinReadOnly - pin the child to `read-only` (read-only research child).
+ * @param options.confineToWorktree - cap the child at `workspace-write` (isolated child);
+ *   ignored when `pinReadOnly` is set (read-only is strictly narrower and wins).
  * @returns the sandbox override (or `undefined` without one) and the approval pin.
  */
 export function captureDelegatedPolicyOverrides(
   parent: Agent,
-  options: { readonly pinReadOnly?: boolean } = {},
+  options: { readonly pinReadOnly?: boolean; readonly confineToWorktree?: boolean } = {},
 ): DelegatedPolicyOverrides {
+  const inherited = parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session)
+  const sandboxMode: SandboxMode | undefined = options.pinReadOnly === true
+    ? 'read-only'
+    : options.confineToWorktree === true
+      // 隔离只收窄：父档位缺省（未显式切换）时按 workspace-write 处理（比部署默认更严，
+      // 且隔离本就要求「能写自己的 worktree、写不出别的」这一档）。
+      ? narrowerMode(inherited ?? 'workspace-write', 'workspace-write')
+      : inherited
   return {
-    sandboxMode: options.pinReadOnly === true
-      ? 'read-only'
-      : parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session),
+    sandboxMode,
     approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never',
   }
 }

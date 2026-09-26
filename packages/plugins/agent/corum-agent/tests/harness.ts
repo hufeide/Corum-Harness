@@ -423,6 +423,9 @@ function installState(service: CorumAgentService, ctx: Context, events: Recorded
   // `Cannot read properties of undefined`。这个坑极具误导性：报错指向实现的某一行，
   // 而真因是「测试台没造出那张表」——本轮实测就把它误读成「实现有 bug」。
   Object.defineProperty(container, 'pendingPermissions', { value: new Map<string, unknown>(), writable: true, configurable: true })
+  // fork（corum）2026-09-26：模型回落告知的去重集（`Set<string>`）同属构造器初始化 ——
+  // 缺了它，`notifyModelFallbackOnce` 第一行 `.has(...)` 就抛（正是上面那条坑）。
+  Object.defineProperty(container, 'notifiedModelFallbacks', { value: new Set<string>(), writable: true, configurable: true })
   // `laneSetupHooks` 是数组、不是「状态表」，但同属构造器初始化 ⇒ 一并补上
   // （`registerLaneSetupHook` 会 push，缺了它会抛）。
   Object.defineProperty(container, 'laneSetupHooks', { value: [], writable: true, configurable: true })
