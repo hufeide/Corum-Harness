@@ -5,6 +5,16 @@
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
+// 空类型 import：让 `ctx.tools` 的 Context 合并生效（`ToolRuntime` 由
+// @deepseek-ai/dsh-tools 声明为 cordis 的 ambient augmentation）。
+// ⚠️ 这条 import **不是装饰性的**：本文件用了 `ctx.tools.schemas(agent)`，但「谁把
+// dsh-tools 拉进 program」原本由**同包的邻居文件**承担 —— list-models.ts / index.ts
+// 各有一行值导入 `import { defineTool } from '@deepseek-ai/dsh-tools'`，靠 tsconfig 的
+// `include: ["src"]` 把增强带进来。那是**偶然**的依赖：邻居一旦不再引用（正是
+// corum-agent 的 conductor-runtime.ts 在项目模式剥离后踩到的形态），本文件就会报
+// `TS2339: Property 'tools' does not exist on type 'Context'`。
+// 故改为**本文件自证**依赖，与仓库既有惯例一致（如 corum-api-remotes/src/corum-events.ts）。
+import type {} from '@deepseek-ai/dsh-tools'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import { subagentModelSelectionPolicy } from './model-selection-state.ts'
 
