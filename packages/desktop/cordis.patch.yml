@@ -54,8 +54,11 @@
 #   · Per-project tables (`corum_project_<id>` under `<cwd>/.corum/project/`)
 #     are NOT affected: they never route through this domain default — corum
 #     registers a per-project JsonStorageBackend instance (`corum-project:<cwd>`,
-#     see corum-agent/project-data-backend.ts). That keeps the §2 "project data
-#     travels with the project, readable and git-diffable" model intact.
+#     see **closed-source** Corum-Harness-Project
+#     `packages/corum-project/src/project-data-backend.ts`; the file lived at
+#     corum-agent/project-data-backend.ts before the 2026-09-26 project-mode
+#     split-out). That keeps the §2 "project data travels with the project,
+#     readable and git-diffable" model intact.
 #
 # Why ADD a row instead of replacing storage-json: the two backends register
 # under different hub names (`json` / `sqlite`). Replacing the row would remove
@@ -240,6 +243,9 @@
     # 直调，失败 fail-loud 阻断创建，不再依赖 UI 层自觉）；后续承接 worktree/settle
     # 强制提交 / 集成真值 / 隔离判定 / 合并链（四条不变式统一由本插件能力完成）。
     # **行序必须在 corum-agent / corumProject 装配之前**（它们 inject ctx.gitCore）。
+    # 2026-09-26 项目模式剥离：`corumProject` 插件已迁到闭源仓 Corum-Harness-Project
+    # （`@corum/corum-project`），**本行序约束对它同样成立**——闭源组合把它插在
+    # corum-agent 之前，自然也在本行之后。
     # ⚠️ 本插件不可卸载：插件管理器按包名 @corum/corum-git-core 过滤启停/卸载入口。
     - id: corum-git-core
       name: '@corum/corum-git-core'
