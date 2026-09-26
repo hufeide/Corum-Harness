@@ -8,6 +8,9 @@ import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-ses
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { ApprovalPanel } from './ApprovalPanel.tsx'
+// fork（corum）2026-09-26：拉入 corum 领域事件的 client 类型面（含 `corum/escalation/ask`），
+// 与 corum-ui-model-ask 同款（`import type {}` 只取声明副作用）。
+import type {} from '@corum/corum-api-remotes/client'
 import { PendingApproval } from './contract/slots.ts'
 import { en, zh } from './locales.ts'
 
@@ -26,6 +29,9 @@ export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale']
 const NS = 'approval'
 
 type ApprovalListener = TypertClientEventListener<'approval/request'>
+// fork（corum）2026-09-26：三档提权询问（host → client waterfall）。与官方 approval/request
+// 的关键差别：这条的返回值**不**经过官方归一化，所以它能带回 `always-allow`（三档第 2 档）。
+type EscalationListener = TypertClientEventListener<'corum/escalation/ask'>
 type ClientApprovalRequest = Parameters<ApprovalListener>[0]
 type ClientApprovalNext = Parameters<ApprovalListener>[1]
 type ClientApprovalOutcome = Awaited<ReturnType<ApprovalListener>>
@@ -56,7 +62,12 @@ async function answerApproval(
   })
   try {
     try {
-      return await pending.result
+      const decision = await pending.result
+      // fork（corum）2026-09-26：官方卡**不**提供第 2 档（构造时不设 `allowsAlwaysAllow`），
+      // 故 `always-allow` 在这里不可能出现；真出现就交回下游（绝不把第五个词喂给官方通路 ——
+      // 官方会把它归一成 `unavailable`，看着像批准、实际是拒绝）。
+      if (decision === 'always-allow') return await next()
+      return decision
     } catch (error) {
       if (pending.isDelegation(error)) return await next()
       throw error
@@ -89,5 +100,42 @@ export function apply(ctx: ClientContext): void {
   }, ApprovalPanel))
   ctx.remote.$on('approval/request', function (request, next) {
     return answerApproval(ctx, this, request, next, registerPendingInteraction)
+  })
+
+  /**
+   * fork（corum）2026-09-26：**三档提权询问**（子 Agent 请求更宽沙箱档位）。
+   *
+   * 与官方审批共用一个面板（`PendingApproval`），但构造时**打开**第 2 档
+   * （`allowsAlwaysAllow: true`）⇒ 卡片多出「总是允许」。本监听器的返回值走 **corum 自有
+   * waterfall**，不经官方归一化，所以 `always-allow` 能完整传回宿主（宿主据此记一条会话级授权）。
+   *
+   * 拿不到会话身份时不 `next()` 会静默丢掉请求，故与官方监听器同款：解析不到就交回下游
+   * （下游 = 宿主的兜底 = 官方审批卡，见 `escalation-answerer.ts` 的两级通路）。
+   */
+  ctx.remote.$on('corum/escalation/ask', async function (request, next) {
+    const sessionId = ctx.sessions.scopeOf(this)
+    if (sessionId === undefined) return await next()
+    const pending = new PendingApproval(sessionId, {
+      toolName: 'bash',
+      reason: request.justification === undefined || request.justification === ''
+        ? `子 Agent 请求提权到 ${request.mode}`
+        : `子 Agent 请求提权到 ${request.mode}：${request.justification}`,
+    }, { allowsAlwaysAllow: true })
+    const completed = Promise.withResolvers<void>()
+    const remove = registerPendingInteraction(pending, async () => {
+      pending.delegate()
+      await completed.promise
+    })
+    try {
+      try {
+        return { kind: await pending.result }
+      } catch (error) {
+        if (pending.isDelegation(error)) return await next()
+        throw error
+      }
+    } finally {
+      remove()
+      completed.resolve()
+    }
   })
 }

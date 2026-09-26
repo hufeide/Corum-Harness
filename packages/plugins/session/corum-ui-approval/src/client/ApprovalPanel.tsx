@@ -26,10 +26,15 @@ function ApprovalFlow({ pending, detail, t }: {
   const [menuOpen, setMenuOpen] = useState(false)
   /** 审批卡容器（click-outside 判定边界：含拆分按钮与浮层 allowMenu）。 */
   const cardRef = useRef<HTMLDivElement | null>(null)
-  const answer = (outcome: 'allowed-once' | 'rejected'): void => {
+  /**
+   * fork（corum）2026-09-26：`always-allow` 是第 2 档 —— 走 `answerAlwaysAllow()`（它会请宿主
+   * 记一条会话级授权）。官方卡不提供该档，按钮在那种卡上是禁用的。
+   */
+  const answer = (outcome: 'allowed-once' | 'always-allow' | 'rejected'): void => {
     setAnswered(true)
     setMenuOpen(false)
-    void pending.answer(outcome).catch(() => { setAnswered(false) })
+    const settled = outcome === 'always-allow' ? pending.answerAlwaysAllow() : pending.answer(outcome)
+    void settled.catch(() => { setAnswered(false) })
   }
 
   // 浮层收起（todo.approval-card.menu-dismiss）：打开期间，click-outside（落在审批卡
@@ -97,8 +102,23 @@ function ApprovalFlow({ pending, detail, t }: {
             <button type="button" className={`${css.allowMenuItem} ${css.allowMenuItemActive}`} onClick={() => { answer('allowed-once') }}>
               {t('allowOnce')}
             </button>
-            <button type="button" className={css.allowMenuItem} disabled title="会话级始终允许暂未接入（需写回 approval/policy）">
-              始终允许
+            {/* fork（corum）2026-09-26：三档第 2 档「总是允许」——只在 corum 自有提权询问上启用
+                （`allowsAlwaysAllow`）；官方审批卡的 outcome 词汇表封闭，回传第五个词会被归一成
+                `unavailable`，故那里保持禁用。 */}
+            <button
+              type="button"
+              className={css.allowMenuItem}
+              disabled={!pending.allowsAlwaysAllow}
+              title={pending.allowsAlwaysAllow
+                ? '本会话内后续同类提权免问'
+                : '会话级始终允许仅用于子 Agent 提权询问（官方审批结果词汇表封闭）'}
+              onClick={() => { answer('always-allow') }}
+            >
+              总是允许
+            </button>
+            {/* 第 3 档「自动」按用户裁定预留（记录允许情况 + 后台 AI 生成批准策略 + 落盘跨会话）。 */}
+            <button type="button" className={css.allowMenuItem} disabled title="第 3 档「自动」按用户裁定预留，暂未接入">
+              自动
             </button>
           </div>
         )}
