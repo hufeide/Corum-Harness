@@ -248,14 +248,21 @@ async function askCorumEscalation(
 ): Promise<CorumEscalationAnswer> {
   const timeout = AbortSignal.timeout(ESCALATION_ASK_TIMEOUT_MS)
   const signal = request.signal === undefined ? timeout : AbortSignal.any([request.signal, timeout])
-  const face = (deps.parent.ctx as unknown as { waterfall?: CorumAskFace['waterfall'] }).waterfall
+  // ⚠️ 必须在**根（未 scoped）**上下文上派发：scoped 派发会把**发起者自己的 scope 过滤器**
+  // 一并合成进载体（见 `corum-subagent/src/index.ts` 里 `createLifecycleEmitter` 的注释
+  // 「whose own context filter composes into the carrier」）。若用 `parent.ctx` 派发，过滤器
+  // 会窄于转发器所监听的 scope ⇒ 事件**不会**被转发到 renderer ⇒ 客户端永远收不到、
+  // 静默走 `next` 退回官方两档卡（2026-09-26 实机就是这样：卡出现了，但只有「允许一次/拒绝」）。
+  // 载体仍用 `scopeTarget(parent, parent)` 指定，与 `corum/model-ask` 同款（它用的也是 runtime 根 ctx）。
+  const root = (deps.parent.ctx as unknown as { root?: unknown }).root ?? deps.parent.ctx
+  const face = (root as { waterfall?: CorumAskFace['waterfall'] }).waterfall
   if (typeof face !== 'function') {
     // 事件总线永远可用，理论上到这里不可达；真到了就退回官方通路（保守，而不是静默拒绝）。
-    deps.logger.warn('subagent escalation: no waterfall on the parent context; falling back to the approval card')
+    deps.logger.warn('subagent escalation: no waterfall on the root context; falling back to the approval card')
     return await fallback(signal)
   }
   const ask = face.call(
-    deps.parent.ctx,
+    root,
     scopeTarget(deps.parent, deps.parent),
     'corum/escalation/ask',
     {
