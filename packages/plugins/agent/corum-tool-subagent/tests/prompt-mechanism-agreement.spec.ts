@@ -28,6 +28,11 @@ const CHILD_AGENT_SRC = readFileSync(
   join(import.meta.dirname, '../../corum-subagent/src/child-agent.ts'),
   'utf8',
 )
+// fork（corum）2026-09-26：提权应答器——「重试会被裁决」那句提示词的机制锚点。
+const ESCALATION_ANSWERER_SRC = readFileSync(
+  join(import.meta.dirname, '../../corum-subagent/src/escalation-answerer.ts'),
+  'utf8',
+)
 const COMPILE_SRC = readFileSync(
   join(import.meta.dirname, '../../corum-agent/src/compile.ts'),
   'utf8',
@@ -36,11 +41,17 @@ const COMPILE_SRC = readFileSync(
 describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () => {
   const text = corumSandboxEscalationLines().join('\n')
 
-  it('子会话分岔条目存在：DELEGATED CHILD + pinned to never + 无弹窗 + report as conclusion', () => {
+  it('子会话分岔条目存在：DELEGATED CHILD + 重试会被裁决 + 硬上限不可加宽 + report as conclusion', () => {
+    // 2026-09-26：本条由「子会话提权必被拒」改aim为「子会话提权会被裁决」。
+    // 改动的**判据**是机制真的变了（child-agent.ts 的 approvalPolicy 由 never 改成 ask
+    // + 装了 escalation-answerer），不是为了让测试变绿 —— 见下方「机制锚点」。
     expect(text).toContain('DELEGATED CHILD session')
-    expect(text).toContain('pinned to `never`')
-    expect(text).toContain('no approval prompt is reachable')
+    expect(text).toContain('the retry IS adjudicated')
+    expect(text).toContain('hard limit it can never widen')
     expect(text).toContain('report it as a conclusion')
+    // 旧的（现已为假的）承诺必须消失。
+    expect(text).not.toContain('pinned to `never`')
+    expect(text).not.toContain('no approval prompt is reachable')
   })
 
   it('主会话那句带条件：approval policy is ask（不再是无条件承诺）', () => {
@@ -64,10 +75,19 @@ describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () 
     }
   })
 
-  // Mechanism anchor: if this anchor breaks (child gets an approval path),
-  // the prompt-side assertions above must be re-reviewed — the test goes red first.
-  it('机制锚点：child-agent.ts 仍含 approvalPolicy 钉死为 never', () => {
-    expect(CHILD_AGENT_SRC).toContain("approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never'")
+  // Mechanism anchor: this is the tripwire that fired on 2026-09-26 when the child
+  // gained an approval path. It now pins the NEW truth pair: the child policy is
+  // seeded `ask` AND the mechanism-side answerer exists to adjudicate it.
+  it('机制锚点：child-agent.ts 把子会话 approvalPolicy 播种为 ask（而非 never）', () => {
+    expect(CHILD_AGENT_SRC).toContain("approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'ask'")
+    expect(CHILD_AGENT_SRC).not.toContain("undefined : 'never'")
+  })
+
+  it('机制锚点：提权应答器存在（ask 必须有应答者，否则等于把旧承诺换成新幻象）', () => {
+    // 提示词说「重试会被裁决」⇒ 机制里必须真有裁决者。缺了它，ask 策略下子会话的
+    // 请求会落到 fail-closed 的 unavailable，那句话就又变成假的。
+    expect(CHILD_AGENT_SRC).toContain('installEscalationAnswerer(childCtx, {')
+    expect(ESCALATION_ANSWERER_SRC).toContain('decideEscalation({ requested: request.mode')
   })
 
   it('保留性断言：原有三条仍在线', () => {
@@ -183,14 +203,15 @@ const CLAIMS: ReadonlyArray<{
   readonly mechanismName: string
   readonly mechanismAnchor: string
 }> = [
-  // ① 沙箱升级：子会话无弹窗（描述说「pinned to never」，机制锚点是 child-agent.ts 的 approvalPolicy 钉死）
+  // ① 沙箱升级：子会话的重试会被**裁决**（2026-09-26 改aim；机制锚点 = 子会话策略 seed 为
+  //    ask + 提权应答器确实存在）
   {
-    claim: 'pinned to `never`',
+    claim: 'the retry IS adjudicated',
     source: corumSandboxEscalationLines().join('\n'),
     sourceName: 'corumSandboxEscalationLines()',
     mechanism: CHILD_AGENT_SRC,
     mechanismName: 'corum-subagent/src/child-agent.ts',
-    mechanismAnchor: "approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never'",
+    mechanismAnchor: 'installEscalationAnswerer(childCtx, {',
   },
   // ② research 恒前台 / 拒绝后台（描述说「it is rejected」，机制锚点是 index.ts 的 throw）
   {

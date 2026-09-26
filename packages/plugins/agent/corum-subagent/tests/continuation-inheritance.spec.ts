@@ -1,6 +1,6 @@
 /**
  * Continuable-child delegation policy: a fresh continuable start seeds the
- * parent's explicit sandbox override and the pinned `approval/policy: never`
+ * parent's explicit sandbox override and the seeded `approval/policy` (2026-09-26: `ask`, see below)
  * onto the child's own log as `source: 'delegation'` events, and a cold
  * resume replays that persisted snapshot instead of re-capturing the parent
  * (the one-shot `subagent-inprocess/tests/inheritance.spec.ts` counterpart).
@@ -88,7 +88,7 @@ function foldedApprovalPolicy(ctx: Context, id: SessionId, events: readonly Sess
 }
 
 describe('continuable policy inheritance', () => {
-  it('seeds the parent sandbox override and pins approval to never', { timeout: 20_000 }, async () => {
+  it('seeds the parent sandbox override and routes child asks through the escalation answerer', { timeout: 20_000 }, async () => {
     const { ctx, parent } = await setup([textResponse('child done')])
     setSandboxMode(parent.session, 'danger-full-access')
     // No parent approval override: the child pin must not depend on one.
@@ -103,17 +103,19 @@ describe('continuable policy inheritance', () => {
     // already the child's effective policy at inbox acceptance.
     if (child === undefined) throw new Error('expected the continuable child to be created')
     expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('danger-full-access')
-    expect(ctx.approval.overrideOf(child.session)).toBe('never')
+    // 2026-09-26：由 'never' 改为 'ask' 以放行子 Agent 提权通路（见 child-agent.ts 的
+    // 「成对不变式」头注：'ask' 必须与 installEscalationAnswerer 同装）。
+    expect(ctx.approval.overrideOf(child.session)).toBe('ask')
 
     await waitNoActivation(ctx, started.childId)
     const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
     expect(policyEvents(loaded.events)).toMatchObject([
       { type: 'sandbox/mode', data: { mode: 'danger-full-access', source: 'delegation' } },
-      { type: 'approval/policy', data: { policy: 'never', source: 'delegation' } },
+      { type: 'approval/policy', data: { policy: 'ask', source: 'delegation' } },
     ])
     // Durable: a reload folds the same effective policy.
     expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBe('danger-full-access')
-    expect(foldedApprovalPolicy(ctx, started.childId, loaded.events)).toBe('never')
+    expect(foldedApprovalPolicy(ctx, started.childId, loaded.events)).toBe('ask')
     expect(ctx.approval.overrideOf(parent.session)).toBeUndefined()
     const runtimeContext = loaded.events.find(
       (event): event is SessionEvent<'user/message'> => event.type === 'user/message'
@@ -142,7 +144,7 @@ describe('continuable policy inheritance', () => {
     expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBe('read-only')
   })
 
-  it('leaves an unswitched sandbox on the deployment default while still pinning approval', { timeout: 20_000 }, async () => {
+  it('leaves an unswitched sandbox on the deployment default while still seeding an approval policy', { timeout: 20_000 }, async () => {
     const { ctx, parent } = await setup([textResponse('child done')])
 
     const started = await ctx.subagents.startContinuable(startSpec(parent))
@@ -150,7 +152,7 @@ describe('continuable policy inheritance', () => {
 
     const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
     expect(policyEvents(loaded.events)).toMatchObject([
-      { type: 'approval/policy', data: { policy: 'never', source: 'delegation' } },
+      { type: 'approval/policy', data: { policy: 'ask', source: 'delegation' } },
     ])
     expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBeNull()
   })
@@ -169,7 +171,7 @@ describe('continuable policy inheritance', () => {
     const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
     expect(loaded.inheritedEventCount).toBeGreaterThan(0)
     expect(policyEvents(loaded.events)).toMatchObject([
-      { type: 'approval/policy', data: { policy: 'never', source: 'delegation' } },
+      { type: 'approval/policy', data: { policy: 'ask', source: 'delegation' } },
     ])
     expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBeNull()
   })
@@ -220,7 +222,7 @@ describe('continuable policy inheritance', () => {
     expect(foldedSandboxMode(ctx, started.childId, loaded.events)).toBe('read-only')
     // The approval pin is seeded once at creation, never re-appended on resume.
     expect(loaded.events.filter(event => event.type === 'approval/policy')).toMatchObject([
-      { data: { policy: 'never', source: 'delegation' } },
+      { data: { policy: 'ask', source: 'delegation' } },
     ])
   })
 

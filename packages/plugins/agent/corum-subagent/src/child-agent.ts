@@ -27,6 +27,10 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { corumNarrowDenyFilter, corumVisibleToolNames, confinementGuard } from '@corum/corum-orchestration'
+// fork（corum）2026-09-26：子 Agent 提权（用户 9-14 需求）——判定纯函数在 escalation-policy.ts，
+// 应答器在 escalation-answerer.ts。两者与 `approvalPolicy: 'ask'` 成对（见 capture 的头注）。
+import { installEscalationAnswerer } from './escalation-answerer.ts'
+import { hardCeilingFor } from './escalation-policy.ts'
 import { CHILD_WORKER_ROLE, CHILD_WORK_STYLE, RESEARCHER_ROLE } from './child-roles.ts'
 import { delegationDepthOf } from './depth.ts'
 
@@ -221,10 +225,12 @@ export interface ChildComposition {
  * deployment's system prompt stays uniform across parents and children.
  */
 export const SUBAGENT_DELEGATION_CONTEXT
-  = 'You are a delegated subagent: your permission scope was fixed when you were started and cannot be '
-    + 'widened from inside this session — operations that require approval are rejected automatically. '
-    + 'When the task needs access beyond that scope, do not retry the denied operation; state the '
-    + 'limitation in your reply so the delegating agent can handle it.'
+  = 'You are a delegated subagent: your permission scope was fixed when you were started. If a command is '
+    + 'blocked by the sandbox, you MAY retry that exact command once with `sandbox_permissions` plus a '
+    + 'one-sentence `justification` — the mechanism grants it when it stays within what the delegating agent '
+    + 'itself holds, and otherwise asks the user. That request never widens a hard limit (a read-only or '
+    + 'isolated scope stays as-is), so if it is refused the refusal is final: state the limitation in your '
+    + 'reply so the delegating agent can handle it instead of working around it.'
 
 /**
  * Compose one child inside its creation window: join its parent's preset,
@@ -362,6 +368,29 @@ export function applyChildComposition(
       }))
     }
   }
+
+  /**
+   * fork（corum）2026-09-26：**子 Agent 提权应答器**（用户 9-14 需求，9-26 拍板口径）。
+   *
+   * 与 `captureDelegatedPolicyOverrides` 的 `approvalPolicy: 'ask'` **成对**（见那里的头注）：
+   * 那条把子会话的 ask 放进 waterfall，本条**抢在转发器之前**认领并判定
+   * （`X ≤ P` 机制自批 / 越硬天花板直接拒 / 否则以父 Agent 为载体上呈用户）。
+   *
+   * 硬天花板由**本组合已有的两个事实**推出，不新增透传字段：
+   * `researcher`（只读研究）⇒ `read-only`；`confined`（隔离）⇒ `workspace-write`；否则不设界。
+   * 这与 `captureDelegatedPolicyOverrides` 里 `pinReadOnly` 胜过 `confineToWorktree` 同序
+   * （只读是更强的保证）。新增受限子 Agent 种类时改 `hardCeilingFor` 一处即可。
+   *
+   * 未装成（该部署没有 `approval` 服务）⇒ 不改变任何既有行为（那条策略同时也是 `undefined`）。
+   */
+  installEscalationAnswerer(childCtx, {
+    parent,
+    hardCeiling: hardCeilingFor({
+      ...composition.kind === 'researcher' ? { pinReadOnly: true } : {},
+      ...composition.confined === true ? { confineToWorktree: true } : {},
+    }),
+    logger: parent.ctx.logger,
+  })
 }
 
 /**
@@ -520,11 +549,18 @@ export interface DelegatedPolicyOverrides {
   /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
   readonly sandboxMode: SandboxMode | undefined
   /**
-   * `'never'` whenever the approval capability is composed, `undefined`
-   * otherwise: a delegated child acts only within the sandbox scope fixed at
-   * delegation, so its asks are rejected deterministically.
+   * The child's approval policy, or `undefined` when the approval capability is not composed.
+   *
+   * 2026-09-26（fork corum）：由恒为 `'never'` 放宽为 `'ask'`，以放行**子 Agent 提权通路**。
+   * `'never'` 的官方语义是「在到达任何应答者之前就确定性 rejected」⇒ 子 Agent 撞到沙箱墙时
+   * 既拿不到权限也无人知晓（实测 `bca632cd-…`：4 次拒绝 / 0 次尝试 / 0 条审批事件）。
+   *
+   * ⚠️ 取值恒为 `'ask' | undefined`（此处刻意收窄成两个字面量，而不是宽泛的
+   * `ApprovalPolicy`）：`'ask'` 只有在 `installEscalationAnswerer` 确实装上时才安全，
+   * 而后者同样以「`approval` 服务是否存在」为条件 —— 两个字面量让这条**成对不变式**
+   * 在类型层面就看得见，也防止有人顺手写别的策略。
    */
-  readonly approvalPolicy: 'never' | undefined
+  readonly approvalPolicy: 'ask' | undefined
 }
 
 /**
@@ -544,8 +580,22 @@ function narrowerMode(a: SandboxMode, b: SandboxMode): SandboxMode {
  * the child start's first await: a later parent switch belongs to the
  * parent's future, not to this child. Only the parent session's explicit
  * sandbox override is captured — never deployment defaults or one-shot
- * grants — and the approval policy is pinned to `'never'` regardless of the
- * parent's own policy.
+ * grants.
+ *
+ * ## fork（corum）2026-09-26：审批策略由 `'never'` 改为 `'ask'`（子 Agent 提权通路）
+ *
+ * 此前这里恒钉 `'never'`，官方语义是「在到达任何应答者**之前**就确定性 rejected」⇒ 子 Agent
+ * 撞到沙箱墙时**既拿不到权限、也无人知晓**（实测会话 `bca632cd-…`：4 次沙箱拒绝、
+ * **0 次提权尝试**、**0 条审批事件**，子 Agent 自述「无法从内部申请提权」）。
+ *
+ * 改为 `'ask'` 后，子会话的 ask 会进入审批 waterfall，由本包新装的
+ * {@link installEscalationAnswerer}（`escalation-answerer.ts`）**抢在转发器之前**认领并判定：
+ * - 提权请求按 `X ≤ P` 机制自批 / 越硬天花板直接拒 / 否则**以父 Agent 为载体**上呈用户；
+ * - **非提权**的 ask 一律回 `rejected` —— 原样保住 `'never'` 的既有语义，不顺手开别的口子。
+ *
+ * ⚠️ **成对不变式**：本策略只在 `applyChildComposition` 确实装上应答器时才安全。两者都以
+ * 「`approval` 服务是否存在」为条件，故取值一致（`installEscalationAnswerer` 返回 `false`
+ * 的部署同时也是这里返回 `undefined` 的部署）。改这里时必须同时看那里。
  *
  * ## fork（corum）2026-09-22：`confineToWorktree` —— 隔离的**正交轴**（实测漏洞修复）
  *
@@ -586,7 +636,9 @@ export function captureDelegatedPolicyOverrides(
       : inherited
   return {
     sandboxMode,
-    approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never',
+    // fork（corum）2026-09-26：`'ask'`（而非 `'never'`）以放行提权通路——见本函数头注的
+    // 「成对不变式」：只有 `installEscalationAnswerer` 装上时才安全，两者同条件。
+    approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'ask',
   }
 }
 
