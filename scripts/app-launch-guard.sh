@@ -22,7 +22,7 @@
 # 用法（可被 dev-ide.sh / cdp.sh 直接调用，也可手工跑）：
 #   bash scripts/app-launch-guard.sh [<repo-root>]
 # 退出码：永远 0（本脚本只负责**告知**）。沙箱内想强行启动：
-#   CORUM_ALLOW_SANDBOXED_LAUNCH=1 bash scripts/dev-ide.sh start
+#   CORUM_ALLOW_SANDBOXED_LAUNCH=1 ./scripts/corum-instance.sh start --home=dev --allow-sandboxed
 set -uo pipefail
 
 ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -92,7 +92,7 @@ cat >&2 <<'EOF'
   · 或把 Agent 会话的文件策略放宽到 danger-full-access 后再启动
 
 确知后果、仍要在沙箱内启动：
-  CORUM_ALLOW_SANDBOXED_LAUNCH=1 bash scripts/dev-ide.sh start
+  CORUM_ALLOW_SANDBOXED_LAUNCH=1 ./scripts/corum-instance.sh start --home=dev --allow-sandboxed
 ================================================================================
 
 EOF

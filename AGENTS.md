@@ -224,4 +224,5 @@
   domain-event name alignment, host emit presence). Run it after any fork or
   event change.
 - On-device verification / CDP: see the `corum-cdp-verify` skill
-  (`./scripts/cdp.sh start|status|stop`).
+  (`./scripts/corum-instance.sh start|status|stop --home=dev`；验证实例加 `--home=verify`。
+  2026-09-25 由 cdp.sh / verify-instance.sh / dev-ide.sh / combo.sh / pack-instance.sh 五个脚本合并而来).

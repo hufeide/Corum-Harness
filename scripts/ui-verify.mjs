@@ -47,7 +47,7 @@
  * 报告」的验证装置。**多断言场景一律用本跑器**，不要退回一轮写一个脚本。
  *
  * ## 环境
- *   CDP_PORT     默认 9333（= scripts/verify-instance.sh 的验证实例端口）
+ *   CDP_PORT     默认 9333（= corum-instance.sh --home=verify 的验证实例端口）
  *   CDP_OUT      截图目录，默认 /tmp/corum-cdp/shots
  *   CORUM_DESKTOP_PKG  desktop 包 package.json 路径（解析 `ws` 用）
  *

@@ -1441,7 +1441,11 @@ if select_section 18; then
 section "[18] corum-cdp-verify 技能：打包副本 == 仓库脚本（逐字节）"
 SKILL_DIR="${CORUM_HOME:-$REPO_ROOT/packages/desktop/.corum-dev-home}/skills/corum-cdp-verify"
 if [ -d "$SKILL_DIR/scripts" ]; then
-  SKILL_ASSETS="cdp.mjs cdp.sh rpc-helper.js ui-verify.mjs verify-instance.sh app-launch-guard.sh"
+  # 2026-09-25：5 个启动脚本（cdp.sh / verify-instance.sh / dev-ide.sh / combo.sh /
+  # pack-instance.sh）合并为 **corum-instance.sh**（唯一实现 + 长选项区分实例），
+  # 旧文件名**已删除**（彻底合并，不留分发壳）；SKILL.md 与本文档同步改为新入口。
+  # 故本节逐字节断言的对象从 cdp.sh/verify-instance.sh 换成 corum-instance.sh。
+  SKILL_ASSETS="cdp.mjs rpc-helper.js ui-verify.mjs app-launch-guard.sh corum-instance.sh"
   skill_bad=0
   for asset in $SKILL_ASSETS; do
     if [ ! -f "$REPO_ROOT/scripts/$asset" ]; then
@@ -1459,7 +1463,7 @@ if [ -d "$SKILL_DIR/scripts" ]; then
       skill_bad=1
     fi
   done
-  [ "$skill_bad" = "0" ] && pass "6 个验证脚本：技能副本与仓库逐字节一致（$SKILL_DIR/scripts）"
+  [ "$skill_bad" = "0" ] && pass "验证脚本：技能副本与仓库逐字节一致（$SKILL_DIR/scripts）"
   [ -f "$SKILL_DIR/SKILL.md" ] && pass "技能自带 SKILL.md" || fail "技能缺 SKILL.md"
 else
   skip "未安装 corum-cdp-verify 技能（$SKILL_DIR 不存在）——跳过打包副本对账"
