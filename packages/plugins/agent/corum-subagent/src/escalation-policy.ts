@@ -153,6 +153,28 @@ export function decideEscalation(input: EscalationDecisionInput): EscalationVerd
 export const WIDEST_MODE: SandboxMode = 'danger-full-access'
 
 /**
+ * 把「用户已对本会话说过**总是允许**」（三档第 2 档）叠加到判定结果上。
+ *
+ * ## 唯一允许的升级：`ask-user` → `auto-approve`
+ *
+ * ⚠️ **`refuse` 绝不因授权而改变** —— 这是本函数存在的**全部理由**，也是本模块最要紧的
+ * 一条不变式：授权只豁免「上呈用户」这一步，**不豁免硬天花板**（只读研究）。
+ * 判定顺序恒为「先硬天花板、后授权」；把这条写成一个纯函数，就是为了让「顺序写反」
+ * 这件事**在单测里必然变红**，而不是靠读代码发现。
+ *
+ * 为什么 `auto-approve` 也要原样返回：它本就已经放行，授权不改变结论（幂等）。
+ *
+ * @param verdict - 授权之前的判定（来自 {@link decideEscalation}）。
+ * @param granted - 该父会话是否已被授权。
+ * @returns 叠加授权后的判定。
+ */
+export function applySessionGrant(verdict: EscalationVerdict, granted: boolean): EscalationVerdict {
+  if (!granted) return verdict
+  if (verdict.kind === 'ask-user') return { kind: 'auto-approve' }
+  return verdict
+}
+
+/**
  * 由子 Agent 的**委派形态**推出它的硬天花板（唯一事实源）。
  *
  * ## 用户 2026-09-26 的裁定：隔离**不是**档位天花板（我此前把两个轴混为一谈）

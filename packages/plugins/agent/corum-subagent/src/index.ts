@@ -76,6 +76,9 @@ import type { SubagentDescendantListEntry, SubagentListEntry } from './list-chil
 import { snapshotSubagentDescriptor } from './descriptor.ts'
 import { subagentIdentityProjectionDefinition, subagentTimingProjectionDefinition } from './projection.ts'
 import { deliverSubagentPrompt, type HostPromptDeliveryMode } from './internal.ts'
+// fork（corum）2026-09-26：会话级提权授权（三档里的第 2 档「总是允许」）。纯状态类放这里，
+// 真正的持有者是下面的 `SubagentRuntime`（它是 cordis 服务 ⇒ 跨 bundle 同一份，红线 1）。
+import { EscalationGrants, type EscalationGrantFace } from './escalation-grants.ts'
 
 export * from './out-of-process.ts'
 // fork（corum）2026-09-20：子 Agent 角色契约（两类）+ 注入层上限——工具层构建 request 时
@@ -191,9 +194,20 @@ interface BrowserPromptSource {
 }
 
 /** Named provider registry with one-shot runs, durable discovery, and continuable-child operations. */
-export class SubagentRuntime extends TypertRemoteService {
+export class SubagentRuntime extends TypertRemoteService implements EscalationGrantFace {
   private providers = new Map<string, SubagentProvider>()
   private continuations: SubagentContinuationManager | undefined
+  /**
+   * fork（corum）2026-09-26：**会话级提权授权**（三档里的第 2 档「总是允许」）。
+   *
+   * 挂在这个**已有的 cordis 服务**上、而不是用模块级 Map：红线 1 —— dsh 会把 `@corum/*`
+   * 源码内联进每个 consumer bundle，模块级状态会被切成**每 bundle 一份**且互不同步；而本服务
+   * 实例的唯一性由根 context 的 `reflect.store` 保证（`super(ctx, 'subagents')`）。
+   *
+   * 语义与形状见 `escalation-grants.ts` 头注（关键取舍：官方 outcome 词汇表封闭 ⇒ 第 2 档
+   * **本次仍回 `allowed-once`**，机制侧只是**多记一条**会话授权）。
+   */
+  private readonly escalationGrants = new EscalationGrants()
   /**
    * The contained lifecycle-edge publisher. Built here because scoped dispatch
    * keys its carrier by this exact service instance, whose own context filter
@@ -695,6 +709,31 @@ export class SubagentRuntime extends TypertRemoteService {
         )
       }
     }
+  }
+
+  /**
+   * fork（corum）2026-09-26：记一条**会话级提权授权**（用户在审批卡上点「总是允许」）。
+   *
+   * 由 `EscalationGrantFace` 收窄（红线 3）：调用方只需要「记一条 / 查一条」，不该耦合
+   * `SubagentRuntime` 的其余全部能力。实现细节与三档取舍见 `escalation-grants.ts` 头注。
+   *
+   * @param sessionId - **父会话**（用户所在会话）的 id；空值被忽略，不产生「空键授权」。
+   */
+  grantEscalation(sessionId: string | undefined): void {
+    this.escalationGrants.grant(sessionId)
+  }
+
+  /**
+   * fork（corum）2026-09-26：该父会话是否已被授权「后续同类提权免问」。
+   *
+   * ⚠️ 调用方**必须**只在「已过硬天花板检查」之后用它 —— 授权只豁免「上呈用户」这一步，
+   * **不**豁免只读研究等硬约束（判定顺序见 `escalation-policy.ts` 的 `decideEscalation`）。
+   *
+   * @param sessionId - 父会话 id。
+   * @returns 已授权为 `true`；`undefined`/空串恒为 `false`（fail-closed）。
+   */
+  isEscalationGranted(sessionId: string | undefined): boolean {
+    return this.escalationGrants.isGranted(sessionId)
   }
 }
 

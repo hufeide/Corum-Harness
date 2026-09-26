@@ -46,6 +46,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import {
+  applySessionGrant,
   decideEscalation,
   isEscalationTarget,
   type EscalationVerdict,
@@ -195,6 +196,30 @@ export function adjudicateEscalation(
 }
 
 /**
+ * 该 ask 所属的**父会话**是否已被用户授权「后续同类提权免问」（三档第 2 档「总是允许」）。
+ *
+ * 取用方式是**窄接口**（红线 3）：只声明 `isEscalationGranted` 这一小块，不耦合
+ * `SubagentRuntime` 的其余能力，也不 import 它所在的包（跨 bundle 类型面本就不一致）。
+ *
+ * **fail-closed**：服务缺失（精简装配 / 未来改动）或方法不存在一律返回 `false`
+ * ⇒ 退回「照常问用户」，绝不会因为读不到授权而**擅自放行**。
+ *
+ * @param deps - 应答器依赖面（需要 `parent` 以定位父会话与其 ctx）。
+ * @returns 已授权为 `true`；任何不确定情形均为 `false`。
+ */
+function isSessionGranted(deps: EscalationAnswererDeps): boolean {
+  const face = (deps.parent.ctx as unknown as { get: (name: string) => unknown })
+    .get('subagents') as { isEscalationGranted?: (sessionId: string) => boolean } | undefined
+  if (face === undefined || typeof face.isEscalationGranted !== 'function') return false
+  try {
+    return face.isEscalationGranted(String(deps.parent.session.id)) === true
+  } catch (error: unknown) {
+    deps.logger.warn(`subagent escalation: cannot read the session grant (${String(error)}); asking the user instead`)
+    return false
+  }
+}
+
+/**
  * 在子 scope 上安装提权应答器。
  *
  * 安装前提：官方 `approval` 服务可用（否则子会话的 `ask` 策略没有应答者，会落到
@@ -222,16 +247,23 @@ export function installEscalationAnswerer(childCtx: Context, deps: EscalationAns
     // 不是提权 ⇒ 保住旧语义（子会话的 ask 一律被拒），**不放行**。
     if (adjudicated === undefined) return 'rejected'
     const { request: escalation, verdict } = adjudicated
-    if (verdict.kind === 'auto-approve') {
-      deps.logger.warn(`subagent escalation: auto-approved ${escalation.mode} (within the parent's own mode)`)
+    // 三档第 2 档「总是允许」：只把 `ask-user` 升级为放行，**绝不**改变 `refuse`
+    // （硬天花板不被授权豁免）—— 这条不变式被钉在纯函数 `applySessionGrant` 上并有单测。
+    const effective = applySessionGrant(verdict, isSessionGranted(deps))
+    if (effective.kind === 'auto-approve') {
+      deps.logger.warn(
+        verdict.kind === 'ask-user'
+          ? `subagent escalation: auto-approved ${escalation.mode} (session-wide grant)`
+          : `subagent escalation: auto-approved ${escalation.mode} (within the parent's own mode)`,
+      )
       return 'allowed-once'
     }
-    if (verdict.kind === 'refuse') {
-      // 硬天花板（隔离 / 只读研究）：连问都不问。理由由提示词层解释。
+    if (effective.kind === 'refuse') {
+      // 硬天花板（只读研究）：连问都不问。理由由提示词层解释。
       deps.logger.warn(`subagent escalation: refused ${escalation.mode} (exceeds the hard ceiling ${deps.hardCeiling})`)
       return 'rejected'
     }
-    // `X > P`：**以父 Agent 为载体**上呈用户（见模块头注：子会话载体到不了用户面前）。
+    // `X > P` 且未被授权：**以父 Agent 为载体**上呈用户（见模块头注：子会话载体到不了用户面前）。
     try {
       const copy = escalationAskCopy(escalation.mode, escalation.justification)
       // 有界等待：见 ESCALATION_ASK_TIMEOUT_MS 的说明（没有可应答的 UI 时不得挂死父轮）。
