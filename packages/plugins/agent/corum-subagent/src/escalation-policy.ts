@@ -37,17 +37,20 @@
  * 官方 `resolve()` 的取值序是 **已批准的显式档位 > 会话 `sandbox/mode` 事件 > 部署默认**
  * （`dsh/packages/sandbox/sandbox-policy/src/index.ts`：*"An approved explicit mode
  * **outranks** the session's last `sandbox/mode` event"*）。而隔离子会话的沙箱正是**用
- * `sandbox/mode` 事件（`source:'delegation'`）钉住的** ⇒ 一旦批准其提权到
- * `danger-full-access`，它会**顺手解掉自己的隔离钉**，主树写边界随之消失 ——
- * 正是 2026-09-22 实测过的漏洞形态（`corum-task-ef3f751e`：worker 删 19 个 worktree + merge 主树）。
+ * `sandbox/mode` 事件（`source:'delegation'`）钉住的**。
  *
- * 故对**隔离期**子 Agent（`confined`），本模块把天花板再夹一层：
- * **绝不给它比隔离钉更宽的档位**（隔离钉恒 ≤ `workspace-write`）。理由：隔离是用户裁定的
- * 硬不变式（`docs/plan/PLAN-subagent-isolation.md` §1.3），不得被一次提权绕过。
- * 台账：`risk.sandbox.escalation-outranks-delegation-isolation-pin`。
+ * ## ⚠️ 2026-09-26 用户裁定：这两个轴要分开，我此前混淆了
  *
- * ⚠️ 与 `confinementGuard`（`@corum/corum-orchestration/confinement.ts`）的分工：guard 是
- * **不读档位**的路径判据（纵深防御的第二道）；本模块是**第一道**，让那种档位根本不产生。
+ * 我最初的实现把「批准提权会解掉隔离钉」当成「提权威胁隔离」，于是给隔离子也夹了一层天花板。
+ * 用户纠正：「**隔离只是工作区隔离**……但若子 Agent 需要访问或者执行一些指令，**需要权限还是合理的**。」
+ *
+ * 即：
+ * - **工作区写边界**由 `confinementGuard` 独立守住（**按路径**判定，**不读档位**）⇒ 提权动不了它；
+ * - **沙箱档位**本就是权限面 ⇒ 提权放开它是**本意**，不是漏洞。
+ *
+ * 故隔离**不构成**档位天花板（见 {@link hardCeilingFor}）。唯一保留的硬天花板是
+ * **只读研究**：它本来就不隔离、cwd 就是父工作区，放开写就等于直接写主树。
+ * 台账：`risk.sandbox.escalation-outranks-delegation-isolation-pin`（结论已按其裁定修正）。
  *
  * @module @corum/corum-subagent/escalation-policy
  */
@@ -152,19 +155,33 @@ export const WIDEST_MODE: SandboxMode = 'danger-full-access'
 /**
  * 由子 Agent 的**委派形态**推出它的硬天花板（唯一事实源）。
  *
- * 把「哪类子 Agent 有硬约束」收在这里，而不是散落在调用点：新增一类受限子 Agent 时
- * 只改这一个函数，判定逻辑不必动（也不会漏）。
+ * ## 用户 2026-09-26 的裁定：隔离**不是**档位天花板（我此前把两个轴混为一谈）
  *
- * 优先级：只读研究（`pinReadOnly`）**强于**隔离——只读是比「写不出 worktree」更强的保证
- * （与 `captureDelegatedPolicyOverrides` 里 `pinReadOnly` 胜过 `confineToWorktree` 同序）。
+ * 用户原话：「我理解，**隔离只是工作区隔离**，即当前代码的工作区隔离，但是若子 Agent 需要
+ * 访问或者执行一些指令，**需要权限还是合理的**。」
+ *
+ * 即两个轴要分开看：
+ *
+ * | 轴 | 机制 | 提权能否动它 |
+ * |---|---|---|
+ * | **工作区写边界**（改动只能落在自己的 worktree） | `confinementGuard`（**按路径**判定，不读档位） | **不能**（guard 与档位正交，提权也绕不过） |
+ * | **沙箱档位**（进程能访问什么） | `sandbox/mode` + 本次已批准的显式档位 | **能**（这正是「申请权限」的本意） |
+ *
+ * 故隔离子 Agent **允许**提权到更宽档位：它的写边界仍由 guard 独立守住，
+ * 档位只放开「访问/执行」这一类合理的权限诉求。⚠️ 本判定的安全性因此**依赖 guard 在
+ * `danger-full-access` 下仍然拦住对父树的写** —— 该前提必须实测（见台账
+ * `decision.sandbox.child-escalation-three-tiers` 的验证段；2026-09-26 实机场景①已确认
+ * guard 先于提权生效）。
+ *
+ * **仍然保留的硬天花板**：只读研究（`pinReadOnly`）⇒ `read-only`。
+ * 理由与隔离不同：只读研究**本来就不隔离**（`corumShouldIsolate` 对 `readonlyResearch` 返回 false），
+ * 它的 cwd 就是**父工作区**；一旦放开写就等于直接写主树，「只读研究不落盘」这条不变式会被绕过。
  *
  * @param options.pinReadOnly - 是否只读研究子 Agent。
- * @param options.confineToWorktree - 是否隔离子 Agent。
  * @returns 该子 Agent 不可逾越的档位上界。
  */
-export function hardCeilingFor(options: { readonly pinReadOnly?: boolean; readonly confineToWorktree?: boolean }): SandboxMode {
+export function hardCeilingFor(options: { readonly pinReadOnly?: boolean }): SandboxMode {
   if (options.pinReadOnly === true) return 'read-only'
-  if (options.confineToWorktree === true) return 'workspace-write'
   return WIDEST_MODE
 }
 

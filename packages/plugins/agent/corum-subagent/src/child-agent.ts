@@ -386,8 +386,9 @@ export function applyChildComposition(
   installEscalationAnswerer(childCtx, {
     parent,
     hardCeiling: hardCeilingFor({
+      // 2026-09-26 用户裁定：隔离**不是**档位天花板（两个轴：guard 守写边界、档位是权限面），
+      // 故这里只看只读研究。理由见 hardCeilingFor 的头注。
       ...composition.kind === 'researcher' ? { pinReadOnly: true } : {},
-      ...composition.confined === true ? { confineToWorktree: true } : {},
     }),
     logger: parent.ctx.logger,
   })

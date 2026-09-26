@@ -70,49 +70,36 @@ describe('① 用户 9-14 的三种情形（P/C）—— 逐条对照原话', ()
   })
 })
 
-describe('② 硬天花板：隔离期 / 只读研究（安全关键，交叉审查发现）', () => {
-  it('★★ 即便父档位是 danger-full-access，隔离子请求该档位也**必须被拒**', () => {
-    // 官方 resolve()：已批准的显式档位 **优先于** session 的 sandbox/mode 事件。
-    // 隔离钉正是这样一条事件（source:'delegation'）⇒ 批准即解除隔离。
-    const v = decideEscalation({ requested: 'danger-full-access', parentMode: 'danger-full-access', hardCeiling: 'workspace-write' })
-    expect(v).toEqual({ kind: 'refuse', reason: 'exceeds-hard-ceiling' })
+describe('② 硬天花板：**只读研究**（用户 2026-09-26 裁定：隔离不封档位）', () => {
+  it('★★ 用户裁定：隔离**不是**档位天花板——隔离子允许提权（写边界由 guard 独立守）', () => {
+    // 用户原话：「隔离只是工作区隔离……但若子 Agent 需要访问或者执行一些指令，需要权限还是合理的。」
+    // 即「工作区写边界」（guard，按路径）与「沙箱档位」（权限面）是两个轴，提权只动后者。
+    const v = decideEscalation({ requested: 'danger-full-access', parentMode: 'danger-full-access', hardCeiling: WIDEST_MODE })
+    expect(v).toEqual({ kind: 'auto-approve' })
   })
 
-  it('★ 硬天花板优先于父上限（两条都命中时，必须因为天花板而拦下）', () => {
-    // 父很宽（本可自动批准）但子被隔离 ⇒ 必须因天花板拦下。
-    // 若优先级写反，这里会退化成 auto-approve ⇒ 复现 2026-09-22 的漏洞。
-    const v = decideEscalation({ requested: 'danger-full-access', parentMode: 'danger-full-access', hardCeiling: 'workspace-write' })
-    expect(v.kind).toBe('refuse')
+  it('★ 隔离子 + 父较窄：仍按父上限上呈（不是被隔离拦下）', () => {
+    const v = decideEscalation({ requested: 'danger-full-access', parentMode: 'workspace-write', hardCeiling: WIDEST_MODE })
+    expect(v).toEqual({ kind: 'ask-user', reason: 'exceeds-parent-mode' })
   })
 
-  it('★ 越界是**直接拒绝**，不是「上呈用户」——不该存在的提问不要问', () => {
-    // 理由：隔离/只读都是用户当初就裁定好的硬不变式。
-    // 「问用户要不要解除隔离」本身就不该存在；退化成 ask-user 会浪费一次交互
-    // 并给模型「这条路还通」的错觉。
-    const v = decideEscalation({ requested: 'danger-full-access', parentMode: 'workspace-write', hardCeiling: 'workspace-write' })
-    expect(v.kind).toBe('refuse')
-    expect(v.kind === 'refuse' && v.reason).toBe('exceeds-hard-ceiling')
-  })
-
-  it('★ 只读研究子 Agent：**任何**提权都被拒（只读是比隔离更强的保证）', () => {
-    // 只读研究（pinReadOnly）的硬天花板是 read-only ⇒ 连 workspace-write 都不行。
-    // 否则「只读研究不落盘」这条不变式会被一次提权绕过。
+  it('★ 只读研究子 Agent：**任何**提权都被拒（它不隔离、cwd 就是父工作区）', () => {
+    // 与隔离不同：只读研究本来就不隔离，放开写＝直接写主树 ⇒「只读研究不落盘」会被绕过。
     for (const requested of ['workspace-write', 'danger-full-access'] as const) {
       const v = decideEscalation({ requested, parentMode: 'danger-full-access', hardCeiling: 'read-only' })
       expect(v, `只读研究请求 ${requested} 必须被拒`).toEqual({ kind: 'refuse', reason: 'exceeds-hard-ceiling' })
     }
   })
 
-  it('隔离子请求 workspace-write（= 隔离钉本身）不越过天花板 ⇒ 仍按 P 判', () => {
-    // 隔离钉恒 ≤ workspace-write，故请求 workspace-write 不解除隔离：
-    // 父为 workspace-write（或更宽）时机制可自行批准。
-    const v = decideEscalation({ requested: 'workspace-write', parentMode: 'workspace-write', hardCeiling: 'workspace-write' })
-    expect(v).toEqual({ kind: 'auto-approve' })
+  it('★ 越界是**直接拒绝**，不是「上呈用户」——不该存在的提问不要问', () => {
+    const v = decideEscalation({ requested: 'workspace-write', parentMode: 'danger-full-access', hardCeiling: 'read-only' })
+    expect(v.kind).toBe('refuse')
+    expect(v.kind === 'refuse' && v.reason).toBe('exceeds-hard-ceiling')
   })
 
-  it('隔离子 + 只读父：请求 workspace-write 超过父 ⇒ 上呈（未越天花板，但超父上限）', () => {
-    const v = decideEscalation({ requested: 'workspace-write', parentMode: 'read-only', hardCeiling: 'workspace-write' })
-    expect(v).toEqual({ kind: 'ask-user', reason: 'exceeds-parent-mode' })
+  it('硬天花板优先于父上限（两条都命中时，必须因天花板拦下）', () => {
+    const v = decideEscalation({ requested: 'danger-full-access', parentMode: 'danger-full-access', hardCeiling: 'read-only' })
+    expect(v.kind).toBe('refuse')
   })
 
   it('普通子 Agent 无硬约束（不误伤）', () => {
@@ -121,18 +108,13 @@ describe('② 硬天花板：隔离期 / 只读研究（安全关键，交叉审
   })
 })
 
-describe('②b hardCeilingFor：哪类子 Agent 有硬约束（唯一事实源）', () => {
-  it('普通子 Agent：无硬约束（最宽档位）', () => {
+describe('②b hardCeilingFor：只有只读研究有硬约束（唯一事实源）', () => {
+  it('普通子 Agent：无硬约束', () => {
     expect(hardCeilingFor({})).toBe('danger-full-access')
   })
 
-  it('隔离子 Agent：夹在 workspace-write', () => {
-    expect(hardCeilingFor({ confineToWorktree: true })).toBe('workspace-write')
-  })
-
-  it('只读研究：夹在 read-only，且**优先于**隔离（更强保证胜出）', () => {
+  it('★ 只读研究：夹在 read-only（它不隔离、cwd 是父工作区）', () => {
     expect(hardCeilingFor({ pinReadOnly: true })).toBe('read-only')
-    expect(hardCeilingFor({ pinReadOnly: true, confineToWorktree: true })).toBe('read-only')
   })
 })
 
