@@ -33,10 +33,15 @@ export interface CorumRoute {
 
 /**
  * 会话级状态面（由 `corumOrchestration` 服务提供；窄接口而非 import 实现包，红线 3）。
+ *
+ * fork（corum）2026-09-19：签名加 `role`（可选，缺省 'worker'）——`modelOverrides`
+ * 已升级为「sessionId + 角色」双键（corum preset 双实例各有独立锁面）。
+ * {@link applyCorumModelDecision} 的 temporary/permanent 档把 `facts.role` 透传进去，
+ * 否则 research 角色的临时决定会错误落到 worker 键上（研究实例读不到，改锁面也改错对象）。
  */
 export interface CorumDelegationPolicyState {
-  setModelOverride: (sessionId: string, route: CorumRoute) => void
-  modelOverrideOf: (sessionId: string) => CorumRoute | undefined
+  setModelOverride: (sessionId: string, route: CorumRoute, role?: 'worker' | 'research') => void
+  modelOverrideOf: (sessionId: string, role?: 'worker' | 'research') => CorumRoute | undefined
   clearModelOverride: (sessionId: string) => void
 }
 
@@ -302,7 +307,8 @@ export function applyCorumModelDecision(
   switch (decision.kind) {
     case 'temporary': {
       // 用户原话：临时生效、不覆盖设置 ⇒ 只写会话级内存（不落 settings.yaml / 预设）。
-      deps.state.setModelOverride(sessionId, decision.route)
+      // role 透传（2026-09-19）：research 角色的临时决定必须落 research 键。
+      deps.state.setModelOverride(sessionId, decision.route, facts.role)
       return {
         ...base,
         override: decision.route,
@@ -320,7 +326,7 @@ export function applyCorumModelDecision(
       // 清了 corum-agent 侧的 Agent 缓存并重编译产物，但**早已在跑的插件实例不会重建**，
       // 于是本进程内 `corumEffectiveModel = corumSessionOverride ?? config.model` 仍落回
       // 那个坏模型。会话级覆盖是当前进程里唯一能立即生效的通路；预设负责新会话。
-      if (result.ok) deps.state.setModelOverride(sessionId, { ...facts.fallback })
+      if (result.ok) deps.state.setModelOverride(sessionId, { ...facts.fallback }, facts.role)
       else deps.state.clearModelOverride(sessionId)
       return {
         ...base,
@@ -336,7 +342,7 @@ export function applyCorumModelDecision(
     case 'permanent-route': {
       const result = persistCorumModelChoice(deps.profile, sessionId, facts, decision.route, logger)
       // ★ 同 permanent-follow：写预设只对新会话生效，当前进程必须补会话级覆盖。
-      if (result.ok) deps.state.setModelOverride(sessionId, { ...decision.route })
+      if (result.ok) deps.state.setModelOverride(sessionId, { ...decision.route }, facts.role)
       else deps.state.clearModelOverride(sessionId)
       return {
         ...base,

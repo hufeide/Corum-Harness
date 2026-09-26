@@ -202,3 +202,284 @@ describe('applySubagentModelForSession — 委派机制模型永久切换', () =
       .toThrowError(/ghost-preset/)
   })
 })
+
+/**
+ * compensateLiveSessionsForProfile — 预设保存补偿（2026-09-19 机制缺口修复）的机器验证。
+ *
+ * 缺口：设置里改预设的 subagentModel/researchModel 保存后，`persistProfileAndRecompile`
+ * 重编译落盘 + 清 corum-agent 自有缓存，但官方 registry（ctx.agents）里存活的 IDE 会话
+ * 的 tool-subagent 插件实例不重建，`config.model` 仍是挂载时的静态快照 ⇒ 存量会话
+ * 下一轮委派仍用旧模型。补偿 = 给挂载了该预设的存活会话按角色补会话级覆盖。
+ *
+ * mock 面：官方 registry `ctx.agents.list()` + `sessionProjections.stateOf(…,'agentPreset')`
+ * + `corumOrchestration` 的 set/clear 调用记录——断言「保存后存活会话收到正确的 override」。
+ */
+describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补模型覆盖', () => {
+  interface OverrideCall { sessionId: string; role: 'worker' | 'research'; route?: { provider: string; model: string; reasoningEffort?: string }; clear?: boolean }
+
+  /** 组装带补偿三件套 mock 的服务（registry + 投影 + orchestration 记录器）。 */
+  function makeCompensableService(liveSessions: Array<{ sessionId: string; presetId: string; parentSession?: string }>): {
+    svc: CorumAgentService
+    calls: OverrideCall[]
+  } {
+    const svc = makeService()
+    const calls: OverrideCall[] = []
+    const agents = liveSessions.map(({ sessionId, presetId, parentSession }) => ({
+      // session 形状对齐官方 SessionHeader：parentSession 在 session.header 上。
+      session: {
+        id: sessionId,
+        header: { ...(parentSession !== undefined ? { parentSession } : {}) },
+      },
+      __presetId: presetId,
+    }))
+    const agentsFace = { list: (): unknown[] => agents }
+    const projections = { stateOf: (_s: unknown, key: string): unknown => (key === 'agentPreset' ? undefined : undefined) }
+    // stateOf 需按 session 反查预设：借 agents 表找 id。
+    const projectionsBySession = {
+      stateOf: (session: { id: string }, key: string): string | undefined =>
+        key === 'agentPreset' ? agents.find(a => a.session.id === String(session.id))?.__presetId : undefined,
+    }
+    const orchestration = {
+      setModelOverride: (sessionId: string, role: 'worker' | 'research', route: { provider: string; model: string; reasoningEffort?: string }): void => {
+        calls.push({ sessionId, role, route: { ...route } })
+      },
+      clearModelOverride: (sessionId: string, role: 'worker' | 'research'): void => {
+        calls.push({ sessionId, role, clear: true })
+      },
+    }
+    ;(svc as unknown as { ctx: unknown }).ctx = {
+      agents: agentsFace,
+      get: (name: string): unknown =>
+        name === 'sessionProjections' ? projectionsBySession
+        : name === 'corumOrchestration' ? orchestration
+        : undefined,
+      logger: { warn: (): void => {}, info: (): void => {}, error: (): void => {} },
+    }
+    void projections
+    return { svc, calls }
+  }
+
+  it('(c1) 改 subagentModel 保存后，挂载该预设的存活会话收到 worker 角色覆盖', () => {
+    const p = profile()
+    writeProfile(p)
+    const { svc, calls } = makeCompensableService([{ sessionId: 'live-1', presetId: p.id }])
+
+    svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: p.prompt,
+      model: p.model,
+      subagentModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })
+
+    // 预设原先两个角色都未配置 ⇒ worker 与 research 的生效值都是 undefined；
+    // 保存后 research 生效值回落到新 subagentModel（compile.ts 同口径）⇒ 两键都变、都补。
+    expect(calls).toEqual([
+      { sessionId: 'live-1', role: 'worker', route: { provider: 'pi-ai', model: 'glm-5.3' } },
+      { sessionId: 'live-1', role: 'research', route: { provider: 'pi-ai', model: 'glm-5.3' } },
+    ])
+  })
+
+  it('(c2) research 角色独立补偿：改 researchModel 收到 research 键，worker 不动', () => {
+    const p = profile({ subagentModel: { provider: 'local', model: 'keep-worker' } })
+    writeProfile(p)
+    const { svc, calls } = makeCompensableService([{ sessionId: 'live-2', presetId: p.id }])
+
+    svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: p.prompt,
+      model: p.model,
+      subagentModel: { provider: 'local', model: 'keep-worker' },
+      researchModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })
+
+    expect(calls).toEqual([
+      { sessionId: 'live-2', role: 'research', route: { provider: 'pi-ai', model: 'glm-5.3' } },
+    ])
+  })
+
+  it('(c3) 无关保存（模型没变）零补偿——不覆盖会话里已有的临时决定', () => {
+    const p = profile({ subagentModel: { provider: 'pi-ai', model: 'glm-5.3' } })
+    writeProfile(p)
+    const { svc, calls } = makeCompensableService([{ sessionId: 'live-3', presetId: p.id }])
+
+    svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: '只改了提示词',
+      model: p.model,
+      subagentModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })
+
+    expect(calls).toEqual([])
+  })
+
+  it('(c4) 改回「跟随主 Agent」（键删除）⇒ 补偿清掉该角色的覆盖', () => {
+    const p = profile({ subagentModel: { provider: 'pi-ai', model: 'glm-5.3' } })
+    writeProfile(p)
+    const { svc, calls } = makeCompensableService([{ sessionId: 'live-4', presetId: p.id }])
+
+    svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: p.prompt,
+      model: p.model,
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })
+
+    // 保存后两个角色的生效值都回到「跟随主 Agent」（research 生效值也回落 subagentModel）
+    // ⇒ 两键都清。
+    expect(calls).toEqual([
+      { sessionId: 'live-4', role: 'worker', clear: true },
+      { sessionId: 'live-4', role: 'research', clear: true },
+    ])
+  })
+
+  it('(c5) research 生效值回退口径与编译一致：只改 subagentModel ⇒ research 跟着补', () => {
+    // compile.ts：research 生效值 = researchModel ?? subagentModel。预设原先两者都配，
+    // 保存时只改 subagentModel ⇒ research 生效值也变了 ⇒ research 键同样要补。
+    const p = profile({ subagentModel: { provider: 'old', model: 'm1' }, researchModel: { provider: 'old', model: 'm1' } })
+    writeProfile(p)
+    const { svc, calls } = makeCompensableService([{ sessionId: 'live-5', presetId: p.id }])
+
+    svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: p.prompt,
+      model: p.model,
+      subagentModel: { provider: 'new', model: 'm2' },
+      researchModel: { provider: 'old', model: 'm1' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })
+
+    expect(calls).toEqual([
+      { sessionId: 'live-5', role: 'worker', route: { provider: 'new', model: 'm2' } },
+    ])
+  })
+
+  it('(c6) 只补根会话（跳过带 parentSession 的子会话）+ 只补挂载该预设的会话', () => {
+    const p = profile()
+    const other = profile({ id: 'sam-other-agent' })
+    writeProfile(p)
+    writeProfile(other)
+    const { svc, calls } = makeCompensableService([
+      { sessionId: 'child-of-someone', presetId: p.id, parentSession: 'parent-x' },
+      { sessionId: 'other-preset', presetId: other.id },
+      { sessionId: 'right-one', presetId: p.id },
+    ])
+
+    svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: p.prompt,
+      model: p.model,
+      subagentModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })
+
+    expect(calls).toEqual([
+      { sessionId: 'right-one', role: 'worker', route: { provider: 'pi-ai', model: 'glm-5.3' } },
+      { sessionId: 'right-one', role: 'research', route: { provider: 'pi-ai', model: 'glm-5.3' } },
+    ])
+  })
+
+  it('(c7) 幂等：重复保存同值 ⇒ 第二次零补偿（变化检测拦住）', () => {
+    const p = profile()
+    writeProfile(p)
+    const input = {
+      id: p.id,
+      baseMode: 'standard' as const,
+      prompt: p.prompt,
+      model: p.model,
+      subagentModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user' as const,
+    }
+    const { svc, calls } = makeCompensableService([{ sessionId: 'live-7', presetId: p.id }])
+
+    svc.saveProfileRemote(input)
+    expect(calls).toHaveLength(2)
+    // 第二次保存同值：补偿不再触发（对会话状态零副作用）。
+    svc.saveProfileRemote(input)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('(c8) corumOrchestration 缺席 ⇒ 保存流程不受影响（fail-soft）', () => {
+    const p = profile()
+    writeProfile(p)
+    const svc = makeService()
+    ;(svc as unknown as { ctx: unknown }).ctx = {
+      agents: { list: (): unknown[] => [] },
+      get: (): unknown => undefined,
+      logger: { warn: (): void => {}, info: (): void => {}, error: (): void => {} },
+    }
+
+    expect(() => svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: p.prompt,
+      model: p.model,
+      subagentModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })).not.toThrow()
+    // 预设本身照常落盘。
+    const saved = JSON.parse(readFileSync(join(home, '.agent-presets', p.id, 'agent.json'), 'utf8')) as AgentProfile
+    expect(saved.subagentModel).toEqual({ provider: 'pi-ai', model: 'glm-5.3' })
+  })
+
+  it('(c9) reasoningEffort undefined 与空串等价（编译产物同态 ⇒ 不触发补偿）', () => {
+    const p = profile({ subagentModel: { provider: 'pi-ai', model: 'glm-5.3', reasoningEffort: '' } })
+    writeProfile(p)
+    const { svc, calls } = makeCompensableService([{ sessionId: 'live-9', presetId: p.id }])
+
+    svc.saveProfileRemote({
+      id: p.id,
+      baseMode: 'standard',
+      prompt: p.prompt,
+      model: p.model,
+      subagentModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: 'user',
+    })
+
+    expect(calls).toEqual([])
+  })
+})

@@ -329,6 +329,23 @@ interface ProjectedSelection {
 }
 
 /**
+ * fork（corum）2026-09-19：子 Agent 模型路由的**等值比较**（预设保存补偿的变化检测用）。
+ *
+ * 只比 provider/model/reasoningEffort 三键（compile.ts `corumSubagentConfig` 写进
+ * `config.model` 的恰是这三键）；`reasoningEffort` 按「undefined 与空串等价」处理
+ * （compile.ts 的展开条件 `reasoningEffort !== undefined && !== ''` 两态编译产物相同）。
+ */
+function corumRouteEquals(
+  a: { provider: string; model: string; reasoningEffort?: string } | undefined,
+  b: { provider: string; model: string; reasoningEffort?: string } | undefined,
+): boolean {
+  if (a === undefined || b === undefined) return a === b
+  const effortA = a.reasoningEffort !== undefined && a.reasoningEffort !== '' ? a.reasoningEffort : undefined
+  const effortB = b.reasoningEffort !== undefined && b.reasoningEffort !== '' ? b.reasoningEffort : undefined
+  return a.provider === b.provider && a.model === b.model && effortA === effortB
+}
+
+/**
  * 会话历史里是否出现过图片内容块。
  *
  * 与官方 `session-controller/commands.ts` 的 `imageInEvent` 同判据（content /
@@ -1177,10 +1194,13 @@ export class CorumAgentService extends TypertRemoteService {
       version: 0,
       trust: input.trust,
     }
+    // 补偿基准：第一次写盘**之前**取存量快照（补偿变化检测用；进 persistProfileAndRecompile
+    // 时盘上已是新值，再取就失真了——见该方法的注释）。
+    const previousSnapshot = loadProfile(input.id)
     saveProfile(profile)
 
     // 编译并落盘 agent.cordis.yml + preset.yml
-    this.persistProfileAndRecompile(profile)
+    this.persistProfileAndRecompile(profile, previousSnapshot)
 
     // 清掉旧 Agent 使下次重建
     this.noteAgentTeardown(input.id, 'saveProfile')
@@ -2551,14 +2571,139 @@ export class CorumAgentService extends TypertRemoteService {
    * 注意 saveProfile 侧 version 自增：saveProfileRemote 传入的是 version:0 的新对象，
    * 本方法传入的是 loadProfile 出来的存量对象（version 已是现值）——两处语义各自正确，
    * saveProfile 内部统一按「存量 version + 1」落盘。
+   *
+   * fork（corum）2026-09-19：末尾追加**预设保存补偿**（见
+   * {@link CorumAgentService#compensateLiveSessionsForProfile}）——重编译只对新会话
+   * 生效，本进程内已挂载该预设的存活会话的 tool-subagent 插件实例不会重建，其
+   * `config.model` 仍是旧静态快照；给这些会话补会话级覆盖，下一次委派立即用新模型。
+   *
+   * @param profile - 要保存的完整 profile。
+   * @param previousSnapshot - 保存前的存量快照（补偿变化检测基准；缺省回落 loadProfile，
+   *   适用「盘上还是存量」的调用方——applySubagentModelForSession）。
    */
-  private persistProfileAndRecompile(profile: AgentProfile): void {
+  private persistProfileAndRecompile(profile: AgentProfile, previousSnapshot?: AgentProfile): void {
+    // 补偿基准：本次保存**之前**的存量快照（saveProfileRemote 在进入本方法前已写过
+    // 一遍盘，loadProfile 拿到的是新值——所以快照必须在第一次 saveProfile 前取，
+    // 由调用方显式传入；applySubagentModelForSession 不传参，回落读盘 = 存量）。
+    // 只对比子 Agent 模型键是否真的变化——无关保存（如改 prompt）不得动会话里
+    // 已有的临时覆盖决定。
+    const previous = previousSnapshot ?? loadProfile(profile.id)
     saveProfile(profile)
     // 编译并落盘 agent.cordis.yml + preset.yml
     writeAgentDirOf(loadProfile(profile.id)!, agentDirPath(profile.id))
     // 清掉旧 Agent 使下次重建
     this.noteAgentTeardown(profile.id, 'verify')
     this.registry.forgetProfileAgent(profile.id)
+    this.compensateLiveSessionsForProfile(profile, previous)
+  }
+
+  /**
+   * 预设保存补偿：给本进程内**挂载了该预设的存活会话**补会话级子 Agent 模型覆盖，
+   * 使「设置里改 subagentModel/researchModel 并保存」对存量会话**立即生效**。
+   *
+   * ## 根因（为什么需要补偿）
+   *
+   * `compile.ts` 把 profile.subagentModel/researchModel 编译进 agent.cordis.yml 的
+   * tool-subagent 双实例行 `config.model`；`corum-tool-subagent` 委派时取
+   * `corumEffectiveModel = corumSessionOverride ?? config.model`，而 `config.model`
+   * 是**插件实例创建（预设挂载）时的静态快照**——`persistProfileAndRecompile` 重编译
+   * 落盘 + 清 corum-agent 自有缓存，都够不着官方 registry（`ctx.agents`）里存活的
+   * 会话：它们的 tool-subagent 插件实例不会重建，下一次委派仍拿旧模型。
+   * 与 `corum-tool-subagent/model-ask-run.ts` permanent 档「写预设**同时**补会话级
+   * 覆盖」同一手法（同一缺口的两条入口，机制一致）。
+   *
+   * ## 主模型（profile.model）为什么不补偿
+   *
+   * 主模型**不走** tool-subagent 的静态 `config.model` 通路：它经
+   * `installTaskModelSelection` 的 ModelSelectionRef / 会话模型选择链路在**每次请求
+   * 装配时实时读取**（task-model-selection.ts 文件头：官方 installModelSelection 会被
+   * 安装时的选择覆盖，故 corum 走实时 ref），且 compile.ts 明确「model → 不进 preset
+   * （创建 Agent 时的 agentOptions）」。子 Agent 的「跟随主 Agent」档也是委派时实时读
+   * 父的真实路由（`parentAgentOptionsForDelegation`）——主模型变了，跟随档自然跟着变，
+   * 无需本补偿。补偿只覆盖走静态快照的 subagent/research 两个角色。
+   *
+   * ## 语义细则
+   *
+   * - **变化检测**：与保存前的存量（`previous`）按角色对比**生效值**
+   *   （research 生效值 = `researchModel ?? subagentModel`，与 compile.ts 同口径）；
+   *   没变的角色**不写**——无关保存（改 prompt 等）不得覆盖会话里 model-ask 临时档
+   *   留下的用户决定。变了的角色：新值存在 ⇒ `setModelOverride`（用户的显式保存压过
+   *   旧临时决定，正是本补偿的目的）；新值为 undefined（改回「跟随主 Agent」）⇒
+   *   `clearModelOverride`（清掉旧值/旧临时决定，回落跟随语义）。
+   * - **幂等**：重复保存同值 ⇒ 变化检测不过 ⇒ 零写入；即使写入，Map.set 同键同值
+   *   覆盖后状态不变，无叠加副作用。
+   * - **fail-soft**：本方法绝不让保存流程失败——corumOrchestration / sessionProjections
+   *   缺席、registry 枚举异常、单会话补偿失败，一律跳过 + warn 日志
+   *   （会话已结束/不在 registry = 无需补偿，本来就跳过）。
+   * - 只补偿**根会话**（跳过带 `parentSession` 的子会话）：子会话的委派锁面随其父
+   *   实例组装，生命周期短，补了也随即失效。
+   */
+  private compensateLiveSessionsForProfile(profile: AgentProfile, previous: AgentProfile | undefined): void {
+    // 生效值按角色对比（research 回落 subagentModel，与 compile.ts corumSubagentConfig 同口径）。
+    const workerBefore = previous?.subagentModel
+    const workerAfter = profile.subagentModel
+    const researchBefore = previous?.researchModel ?? previous?.subagentModel
+    const researchAfter = profile.researchModel ?? profile.subagentModel
+    const workerChanged = !corumRouteEquals(workerBefore, workerAfter)
+    const researchChanged = !corumRouteEquals(researchBefore, researchAfter)
+    if (!workerChanged && !researchChanged) return
+
+    // 窄能力接口取 corumOrchestration（红线 3：不 import 实现包的类型面；
+    // 缺席（headless/单测）= 无覆盖通路，跳过不报错）。
+    type OverrideFace = {
+      setModelOverride: (sessionId: string, role: 'worker' | 'research', route: { provider: string; model: string; reasoningEffort?: string }) => void
+      clearModelOverride: (sessionId: string, role: 'worker' | 'research') => void
+    }
+    let orchestration: OverrideFace | undefined
+    try {
+      orchestration = this.ctx.get('corumOrchestration') as OverrideFace | undefined
+    } catch {
+      return
+    }
+    if (orchestration === undefined) return
+    // 预设归属投影（与 applySubagentModelForSession 同口径：必须 ctx.get，属性访问
+    // 在未 inject 时抛 cannot get property … without inject）。
+    let projections: AgentPresetProjections | undefined
+    try {
+      projections = this.ctx.get('sessionProjections' as never) as AgentPresetProjections | undefined
+    } catch {
+      return
+    }
+    if (projections === undefined) return
+
+    let compensated = 0
+    try {
+      // 官方 registry 是「本进程存活」的权威口径（见 applySubagentModelForSession 的
+      // 2026-09-19 注释：IDE 侧会话只在 ctx.agents 里）。list() 注册序全量。
+      for (const agent of this.ctx.agents.list()) {
+        try {
+          // 只补根会话：子会话（corum-spawn 的委派产物）带 parentSession 头。
+          if (agent.session.header?.parentSession !== undefined) continue
+          const presetId = projections.stateOf(agent.session, 'agentPreset')
+          if (presetId !== profile.id) continue
+          const sessionId = String(agent.session.id)
+          if (workerChanged) {
+            if (workerAfter !== undefined) orchestration.setModelOverride(sessionId, 'worker', { ...workerAfter })
+            else orchestration.clearModelOverride(sessionId, 'worker')
+          }
+          if (researchChanged) {
+            if (researchAfter !== undefined) orchestration.setModelOverride(sessionId, 'research', { ...researchAfter })
+            else orchestration.clearModelOverride(sessionId, 'research')
+          }
+          compensated++
+        } catch (error: unknown) {
+          // 单会话失败（已结束/投影异常）⇒ 跳过该会话，不中断其余补偿。
+          this.ctx.logger.warn(`corum-agent: 补偿会话 ${String((agent as { session?: { id?: unknown } }).session?.id ?? '?')} 失败（跳过）: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    } catch (error: unknown) {
+      // registry 枚举本身异常 ⇒ 整体放弃补偿，保存流程不受影响。
+      this.ctx.logger.warn(`corum-agent: 预设 "${profile.id}" 保存补偿枚举存活会话失败（跳过）: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    if (compensated > 0) {
+      this.ctx.logger.info(`corum-agent: 预设 "${profile.id}" 保存补偿完成 — ${compensated} 个存活会话已按新 subagent/research 模型补会话级覆盖`)
+    }
   }
 
   /** 按 sessionId 反查泳道/项目模式的存活会话（taskAgents 之外的存活表）。 */

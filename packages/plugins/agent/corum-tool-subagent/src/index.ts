@@ -1781,8 +1781,15 @@ export function apply(ctx: Context, config: Config): void {
       // 写进 `corumOrchestration` 的内存值（`setModelOverride`）——**只对本会话生效、
       // 不落盘**（用户明确要求「临时生效，不覆盖用户的设置」）。它不构成"第三档配置"：
       // 用户从未配置它，是机制的一次会话内决定，新会话自然回到预设/跟随主 Agent。
+      //
+      // fork（corum）2026-09-19：覆盖按**角色**取（`corumOrchestration` 的
+      // `modelOverrides` 已升级为「sessionId + 角色」双键）。corum preset 里本工具是
+      // 双实例（worker + research，见 compile.ts `corumSubagentRows`），两个实例各有
+      // 自己的 `config.model` 锁面——设置页改预设保存后的补偿也按角色分别补
+      // （corum-agent 的 `compensateLiveSessionsForProfile`），取错角色会把另一实例
+      // 的锁面覆盖掉。
       const corumSessionOverride: CorumRoute | undefined =
-        orchestration.modelOverrideOf(String(parent.session.id))
+        orchestration.modelOverrideOf(String(parent.session.id), corumChildRole === 'research' ? 'research' : 'worker')
       const corumEffectiveModel = corumSessionOverride ?? config.model
       const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
         ? undefined

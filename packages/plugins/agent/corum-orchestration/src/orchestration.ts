@@ -1790,7 +1790,14 @@ export class CorumOrchestration extends Service {
    */
   private readonly commitFailures = new Map<string, CorumSettleCommitFailure[]>()
   /**
-   * 会话级**临时子 Agent 模型覆盖**（key=父 session id）。
+   * 会话级**临时子 Agent 模型覆盖**（key = `<父 session id> <worker|research>`）。
+   *
+   * fork（corum）2026-09-19：key 从裸 sessionId 升级为「sessionId + 角色后缀」——
+   * corum preset 里 tool-subagent 是**双实例**（worker + research，见
+   * corum-agent/compile.ts），两个实例各有自己的 `config.model` 锁面；补偿/临时改
+   * 模型必须能按角色分别落地，否则改 research 锁面会连 worker 一起被覆盖。
+   * key 用 **空格** 做分隔符：sessionId 由官方 agent-loop 生成（`…-session-` +
+   * `randomUUID()`，dsh-agent-loop lib/index.ts:428），恒不含空格 ⇒ 分隔是单射的。
    *
    * 用户选了「临时改用主 Agent 模型」后落在这里：后续本会话的子 Agent 一律用该路由，
    * 但**绝不写入 settings.yaml / 预设**（用户原话「临时生效，不覆盖用户的设置，即用户
@@ -2184,19 +2191,59 @@ export class CorumOrchestration extends Service {
   setModelOverride(
     sessionId: string,
     route: { provider: string; model: string; reasoningEffort?: string },
+  ): void
+  /**
+   * fork（corum）2026-09-19：带角色的重载——补偿「预设保存后存量会话仍用旧模型」。
+   *
+   * 机制（{@link CorumOrchestration#modelOverrides} 两键语义）：worker 键 = 原 2 参调用
+   * 的行为（model-ask-run.ts 的 temporary/permanent 档原样兼容）；research 键 =
+   * compile.ts 那个 research 实例（`tool-subagent-research` 行）的锁面。两个角色互相
+   * 独立，写入互不覆盖。幂等：同键重复写同值，Map.set 覆盖后 snapshot 相同。
+   */
+  setModelOverride(
+    sessionId: string,
+    role: 'worker' | 'research',
+    route: { provider: string; model: string; reasoningEffort?: string },
+  ): void
+  setModelOverride(
+    sessionId: string,
+    roleOrRoute: 'worker' | 'research' | { provider: string; model: string; reasoningEffort?: string },
+    route?: { provider: string; model: string; reasoningEffort?: string },
   ): void {
-    this.modelOverrides.set(sessionId, { ...route })
+    if (route !== undefined) {
+      this.modelOverrides.set(`${sessionId} ${roleOrRoute as 'worker' | 'research'}`, { ...route })
+      return
+    }
+    // 原 2 参形态 = worker 角色（tool-subagent 行的锁面）——历史调用方（model-ask 的
+    // temporary/permanent 档）改的就是委派主实例，语义与旧行为一致。
+    this.modelOverrides.set(`${sessionId} worker`, { ...(roleOrRoute as { provider: string; model: string; reasoningEffort?: string }) })
   }
 
   /** 取该会话的临时子 Agent 模型覆盖（无则 undefined = 按预设/跟随主 Agent 原样解析）。 */
-  modelOverrideOf(sessionId: string): { provider: string; model: string; reasoningEffort?: string } | undefined {
-    const route = this.modelOverrides.get(sessionId)
+  modelOverrideOf(sessionId: string): { provider: string; model: string; reasoningEffort?: string } | undefined
+  /** fork（corum）2026-09-19：带角色取值（见 {@link CorumOrchestration#modelOverrides}）。 */
+  modelOverrideOf(sessionId: string, role: 'worker' | 'research'): { provider: string; model: string; reasoningEffort?: string } | undefined
+  modelOverrideOf(
+    sessionId: string,
+    role: 'worker' | 'research' = 'worker',
+  ): { provider: string; model: string; reasoningEffort?: string } | undefined {
+    const route = this.modelOverrides.get(`${sessionId} ${role}`)
     return route === undefined ? undefined : { ...route }
   }
 
-  /** 清除该会话的临时覆盖（用户改回原配置时用）。 */
-  clearModelOverride(sessionId: string): void {
-    this.modelOverrides.delete(sessionId)
+  /** 清除该会话的临时覆盖（用户改回原配置时用；缺省两角色一起清）。 */
+  clearModelOverride(sessionId: string): void
+  /** fork（corum）2026-09-19：只清指定角色（预设保存补偿用——一次保存只改一个角色的锁面）。 */
+  clearModelOverride(sessionId: string, role: 'worker' | 'research'): void
+  clearModelOverride(sessionId: string, role?: 'worker' | 'research'): void {
+    // 缺省 = 两角色一起清：调用方（model-ask 的 decline 档）语义是「本会话的临时决定
+    // 整体作废」。带角色 = 只清该键（corum-agent 的预设保存补偿按角色清）。
+    if (role === undefined) {
+      this.modelOverrides.delete(`${sessionId} worker`)
+      this.modelOverrides.delete(`${sessionId} research`)
+      return
+    }
+    this.modelOverrides.delete(`${sessionId} ${role}`)
   }
 
   /**

@@ -93,7 +93,9 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     // 2026-09-18：解析式多了一层**会话级临时覆盖**（机制问过用户之后写的内存值），
     // 但它不是"配置档"——用户从未配置它、不落盘、新会话自然消失。
     expect(SRC).toContain('const corumEffectiveModel = corumSessionOverride ?? config.model')
-    expect(SRC).toContain('orchestration.modelOverrideOf(String(parent.session.id))')
+    // 2026-09-19：覆盖读取升级为**按角色**取（corumOrchestration 双键：sessionId+角色）——
+    // corum preset 的 tool-subagent 双实例各有独立锁面，取错角色会覆盖另一实例的锁面。
+    expect(SRC).toContain('orchestration.modelOverrideOf(String(parent.session.id), corumChildRole === \'research\' ? \'research\' : \'worker\')')
     expect(SRC, '运行期又读了全局兜底档（它应只是「新建预设的模板」）')
       .not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)
   })
