@@ -245,12 +245,10 @@ export interface ConversationInjected {
   /** Session-addressed composer block source, or the stable absent source. */
   hooks: { composerBlock: ObservableSnapshot<ComposerBlock | undefined> }
   emptyActions: {
-    /** 最近项目列表（corumProject.listProjects）。 */
-    listProjects: () => Promise<readonly { id: string; name: string; memberCount?: number; updatedAt?: number }[]>
-    /** 进入某个项目（切项目模式 + 打开项目实体，ProjectPane 接管详情）。 */
-    openProject: (projectId: string) => Promise<void>
-    /** 新建项目（切项目模式 + 目录选择器分流，ProjectPane 接管向导）。 */
-    newProject: () => Promise<void>
+    // 项目模式剥离（2026-09-26）：原 `listProjects` / `openProject` / `newProject`
+    // 三个声明已随项目模式迁到闭源仓 Corum-Harness-Project 的
+    // `@corum/corum-ide-project-ui`（那里提供项目模式的空态入口）。开源侧的空态
+    // 只剩任务模式两枚。
     /** 进入某个任务泳道（切任务模式 + sessions.open）。 */
     openTask: (sessionId: string) => Promise<void>
     /** 新建任务（切任务模式 + 起 task 泳道）。不传 cwd 时取当前/最近工作区，

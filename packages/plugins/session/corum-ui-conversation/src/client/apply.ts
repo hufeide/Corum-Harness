@@ -14,11 +14,12 @@ import { UiConversation } from './conversation/assembly.ts'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 // C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only；
 // 服务端改 @Remote 方法名/参数时本文件编译期报错，而非运行时发现）。
+// 项目模式剥离（2026-09-26）：`CORUM_PROJECT_METHODS` 与 project 侧 args/result
+// （ListProjectsResult / OpenProjectArgs / OpenProjectByPathArgs）已随项目模式
+// 迁到闭源仓的契约子路径，本文件不再引入。
 import {
-  CORUM_AGENT_METHODS, CORUM_PROJECT_METHODS,
+  CORUM_AGENT_METHODS,
   type CreateTaskAgentArgs, type CreateTaskAgentResult,
-  type ListProjectsResult,
-  type OpenProjectArgs, type OpenProjectByPathArgs,
   type ListProfilesResult, type ListModelsResult, type ListPermissionPresetsResult,
   type ListTaskAgentsResult,
 } from '@corum/corum-agent/contract'
@@ -26,6 +27,9 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 // C3a：侧栏模式写（openProject/newProject→project、openTask/newTask→task）收敛进
 // IDE 壳 cordis 服务 ctx.layout.setSidebarMode（跨 bundle 单例）——原 ui-base
 // window 全局 __corumSidebarMode 死写已退役（ui-base sidebar-mode.ts 随之删除）。
+// 项目模式剥离（2026-09-26）后本插件只剩 'task' 一侧的写（'project' 由闭源
+// `@corum/corum-ide-project-ui` 写；侧栏模式按钮本体仍由 corum-ide-sidebar-ui
+// 两侧都提供）。
 // 类型说明见下方 SidebarModeCapableLayout：本插件 inject 的 ctx.layout 类型来自
 // 官方基座 dsh-client-ui-layout 的窄 ILayout（3 方法），corum IDE 壳的运行时
 // LayoutController 是其超集（另含侧栏模式面）；用局部能力接口收窄，与 C3b 契约
@@ -399,25 +403,10 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           await applyFormModel(sessionId, model)
         }
         return {
-          listProjects: async () => {
-            const result = await call<ListProjectsResult>('corumProject', CORUM_PROJECT_METHODS.listProjects, {})
-            return result.projects ?? []
-          },
-          openProject: async (projectId) => {
-            sidebarModeLayout(ctx).setSidebarMode('project')
-            // C3b 类型保障实证：wire 参数名是 id（不是 projectId）——原裸传
-            // { projectId } 与 host @Remote('openProject')(id) 签名不符（运行时
-            // 静默错位）；契约类型 OpenProjectArgs 在此编译期拦截并纠正。
-            const args: OpenProjectArgs = { id: projectId }
-            await call('corumProject', CORUM_PROJECT_METHODS.openProject, args)
-          },
-          newProject: async () => {
-            sidebarModeLayout(ctx).setSidebarMode('project')
-            const path = await pickDir()
-            if (path === null || path === '') return
-            const args: OpenProjectByPathArgs = { cwd: path }
-            await call('corumProject', CORUM_PROJECT_METHODS.openProjectByPath, args)
-          },
+          // 项目模式剥离（2026-09-26）：原 `listProjects` / `openProject` /
+          // `newProject` 三个 emptyActions 分支（走 corumProject RPC）已随项目模式
+          // 迁到闭源仓 Corum-Harness-Project 的 `@corum/corum-ide-project-ui`
+          // ——项目模式的空态入口由那个插件自己提供，开源侧只留任务模式。
           openTask: async (sessionId) => {
             sidebarModeLayout(ctx).setSidebarMode('task')
             sessions.open(sessionId as SessionId)

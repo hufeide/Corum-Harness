@@ -1,19 +1,22 @@
 /**
  * EmptyStateHero —— 会话区空态（2026-08-30 重设计定稿，设计稿 DjFev 重排版式）。
  *
- * 版式（更品牌 · 保留大 logo）：大 logo + 「新建项目 / 新建任务」两个**横排
- * 大按钮**（ic 44×44 左 + 标题/副标题右，宽 360、高 97）+ 「最近」合一列
- * （项目+任务混排按时间倒序，icon + 标题 + kind + 时间，宽 420）。每次启动
- * 显示空态，用户再打开想要的项目/任务。
+ * 版式（更品牌 · 保留大 logo）：大 logo + 「新建任务」**大按钮**（ic 44×44 左 +
+ * 标题/副标题右，宽 360、高 97）+ 「最近」列（任务泳道按时间倒序，icon + 标题 +
+ * kind + 时间，宽 420）。每次启动显示空态，用户再打开想要的任务。
  *
  * 数据流：动作经 ConversationInjected.emptyActions（apply.ts 注入，RPC/目录
- * 选择器/sessions.open 通路）。最近项目经 emptyActions.listProjects（corumProject
- * RPC），最近任务泳道经 recentTasks prop（AppFrame/ConversationRoot 投影
- * sessions.list corum-task-*）。大 logo 深/浅主题各一张（big_brand_dark/light，
- * 拷入 desktop assets，corumapp:// 协议可达）。
+ * 选择器/sessions.open 通路）。最近任务泳道经 recentTasks prop（AppFrame/
+ * ConversationRoot 投影 sessions.list corum-task-*）。大 logo 深/浅主题各一张
+ * （big_brand_dark/light，拷入 desktop assets，corumapp:// 协议可达）。
+ *
+ * 项目模式剥离（2026-09-26）：原「新建项目」卡与「最近项目」卡列表（数据源
+ * emptyActions.listProjects → corumProject RPC）已随项目模式迁到闭源仓
+ * Corum-Harness-Project 的 `@corum/corum-ide-project-ui`（那里提供项目模式的
+ * 空态入口）。开源侧空态只留任务模式。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Clock, FolderGit2, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
+import { Check, ChevronDown, Clock, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
 import type { AgentOption, ConversationInjected, ModelProviderGroup, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
 import { AgentTwoLevelSelect } from './AgentTwoLevelSelect.tsx'
 import { ModelSelectWithEffort, type ModelRouteSelection } from './ModelSelectWithEffort.tsx'
@@ -69,9 +72,9 @@ function relTime(ts: number): string {
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
-/** 最近一条（项目/任务混排）。 */
+/** 最近一条（任务泳道；项目模式剥离后只剩 task 一种）。 */
 interface RecentItem {
-  kind: 'project' | 'task'
+  kind: 'task'
   id: string
   title: string
   updatedAt: number
@@ -420,15 +423,7 @@ export function EmptyStateHero({ emptyActions, newTaskForm, recentTasks, dark }:
   recentTasks: readonly { id: string; title: string; updatedAt: number }[]
   dark: boolean
 }) {
-  const [projects, setProjects] = useState<readonly { id: string; name: string; updatedAt?: number }[]>([])
   const [formOpen, setFormOpen] = useState(false)
-  useEffect(() => {
-    let alive = true
-    emptyActions.listProjects()
-      .then((list) => { if (alive) setProjects(list) })
-      .catch(() => { /* 项目列表拉取失败不阻塞空态（最近项目留空） */ })
-    return () => { alive = false }
-  }, [emptyActions])
 
   // 侧栏顶部「新会话」按钮（corum-ide-sidebar-ui openNewTaskForm →
   // ctx.layout.openNewTaskForm）：回空态后打开新建任务表单——与点「新建任务」
@@ -439,17 +434,14 @@ export function EmptyStateHero({ emptyActions, newTaskForm, recentTasks, dark }:
     return newTaskForm.onOpen(() => { setFormOpen(true) })
   }, [newTaskForm])
 
-  // 最近合一列：项目 + 任务泳道混排，按 updatedAt 倒序取前 6。
-  const recents: RecentItem[] = [
-    ...projects.map((p) => ({ kind: 'project' as const, id: p.id, title: p.name, updatedAt: p.updatedAt ?? 0 })),
-    ...recentTasks.map((t) => ({ kind: 'task' as const, id: t.id, title: t.title, updatedAt: t.updatedAt })),
-  ]
+  // 最近一列：只剩任务泳道，按 updatedAt 倒序取前 6。
+  const recents: RecentItem[] = recentTasks
+    .map((t) => ({ kind: 'task' as const, id: t.id, title: t.title, updatedAt: t.updatedAt }))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 6)
 
   const openRecent = (r: RecentItem): void => {
-    const p = r.kind === 'project' ? emptyActions.openProject(r.id) : emptyActions.openTask(r.id)
-    void p.catch((e) => console.error('[empty-hero] openRecent failed', e))
+    void emptyActions.openTask(r.id).catch((e) => console.error('[empty-hero] openRecent failed', e))
   }
 
   // 表单态：点「新建任务」后两卡原位展开表单（设计稿 btAJh，不跳页）。
@@ -471,14 +463,9 @@ export function EmptyStateHero({ emptyActions, newTaskForm, recentTasks, dark }:
         />
       </div>
 
-      {/* 新建双按钮（设计稿：两个横排大按钮，ic 左 + 标题/副标题右）。 */}
+      {/* 新建卡（设计稿：横排大按钮，ic 左 + 标题/副标题右）。
+          项目模式剥离后只剩「新建任务」一枚（项目模式入口在闭源 UI 插件里）。 */}
       <div className={css.actions}>
-        <NewCard
-          icon={<FolderGit2 size={20} />}
-          title="新建项目"
-          desc="多 Agent 团队协作 · 项目制工作区"
-          onClick={() => { emptyActions.newProject().catch((e) => console.error('[empty-hero] newProject failed', e)) }}
-        />
         <NewCard
           icon={<MessageSquarePlus size={20} />}
           title="新建任务"
@@ -487,7 +474,7 @@ export function EmptyStateHero({ emptyActions, newTaskForm, recentTasks, dark }:
         />
       </div>
 
-      {/* 最近合一列（项目+任务混排按时间倒序）：icon + 标题 + kind + 时间。 */}
+      {/* 最近一列（任务泳道按时间倒序）：icon + 标题 + kind + 时间。 */}
       {recents.length > 0 && (
         <div className={css.recents}>
           <div className={css.recentsHead}>
@@ -498,10 +485,10 @@ export function EmptyStateHero({ emptyActions, newTaskForm, recentTasks, dark }:
             {recents.map((r) => (
               <button key={`${r.kind}-${r.id}`} type="button" className={css.recentRow} onClick={() => openRecent(r)}>
                 <span className={css.recentIcon} data-kind={r.kind}>
-                  {r.kind === 'project' ? <FolderGit2 size={18} /> : <Folder size={18} />}
+                  <Folder size={18} />
                 </span>
                 <span className={css.recentTitle}>{r.title}</span>
-                <span className={css.recentKind}>{r.kind === 'project' ? '项目' : '任务'}</span>
+                <span className={css.recentKind}>任务</span>
                 <span className={css.recentTime}>{relTime(r.updatedAt)}</span>
               </button>
             ))}

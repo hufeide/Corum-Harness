@@ -31,7 +31,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeF
 import { join } from 'node:path'
 import { corumHome, readSessionIndex, writeSessionIndex, sessionIndexPath } from './session-index.ts'
 import type { SessionIndexEntry } from './session-index.ts'
-import { canonicalWorkspaceKey } from './project.ts'
+// 工作区身份（L0 助手）：项目模式剥离后由 workspace-identity.ts 承接。
+import { canonicalWorkspaceKey } from './workspace-identity.ts'
 import {
   LEGACY_TASK_PROJECT_ID,
   encodeCwdForSessionsDir,

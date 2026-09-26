@@ -19,17 +19,17 @@ import { tmpdir } from 'node:os'
 import {
   DEFAULT_PROJECT_TYPE,
   canTransitionProjectType,
-  canonicalWorkspaceKey,
   classifyProjectTypeTransition,
   isProjectType,
   projectTypeOf,
-} from '../src/project.ts'
+} from '../src/workspace-type.ts'
 import {
-  findProjectByCwd,
-  listProjects,
-  loadProject,
-  saveProject,
-} from '../src/project-store.ts'
+  canonicalWorkspaceKey,
+  findWorkspaceEntryByCwd,
+  workspaceEntryTypeOf,
+  workspaceIndexRoot,
+  writeJsonAtomic,
+} from '../src/workspace-identity.ts'
 import {
   findSession,
   findSessionByLane,
@@ -58,16 +58,24 @@ afterEach(() => {
   rmSync(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
-/** 造一个项目索引 + 项目侧 ProjectInfo。 */
+/**
+ * 造一个**工作区索引条目**（`$CORUM_HOME/projects/<id>/project.json`）。
+ *
+ * ⚠️ 2026-09-26 项目模式剥离后，写索引的 `saveProject` 已随项目模式迁到闭源仓
+ * Corum-Harness-Project。但**磁盘契约两仓共用**（开源侧 `workspace-identity.ts` 的
+ * `findWorkspaceEntryByCwd` 按同一路径/同一字段形读取），故这里直接落等价文件，
+ * 测的是**开源侧读取面**（这正是 task↔project 互斥门禁依赖的那一面）。
+ */
 function seedProject(id: string, cwd: string, type?: 'project' | 'task'): void {
-  saveProject({
+  const now = Date.now()
+  writeJsonAtomic(join(workspaceIndexRoot(), id, 'project.json'), {
     id,
     name: id,
     ...(type !== undefined ? { type } : {}),
     cwd,
-    createdAt: Date.now(),
-    lastOpenedAt: Date.now(),
-    version: 0,
+    addedAt: now,
+    lastOpenedAt: now,
+    version: 1,
   })
 }
 
@@ -130,19 +138,31 @@ describe('工作区身份由 realpath 归一的 cwd 决定', () => {
     expect(canonicalWorkspaceKey(undefined)).toBeUndefined()
   })
 
-  it('findProjectByCwd 用身份而非字符串比较（尾斜杠能命中同一条目）', () => {
+  it('findWorkspaceEntryByCwd 用身份而非字符串比较（尾斜杠能命中同一条目）', () => {
     seedProject('my-ws', ws)
-    expect(findProjectByCwd(ws)?.project.id).toBe('my-ws')
-    expect(findProjectByCwd(`${ws}/`)?.project.id).toBe('my-ws')
+    expect(findWorkspaceEntryByCwd(ws)?.id).toBe('my-ws')
+    expect(findWorkspaceEntryByCwd(`${ws}/`)?.id).toBe('my-ws')
   })
 
-  it('一工作区一条目：saveProject 落 type', () => {
+  it('一工作区一条目：索引落 type，读取按权威口径解析', () => {
     seedProject('t1', ws, 'task')
-    const loaded = loadProject('t1')
-    expect(loaded?.type).toBe('task')
+    expect(workspaceEntryTypeOf(findWorkspaceEntryByCwd(ws)!)).toBe('task')
     // 索引文件里 type 是显式字段（不靠读时缺省）
     const raw = JSON.parse(readFileSync(join(home, 'projects', 't1', 'project.json'), 'utf8'))
     expect(raw.type).toBe('task')
+  })
+
+  it('缺 type 的存量条目按史实读作 project（不变式 B：不产生隐式降级）', () => {
+    seedProject('legacy', ws)
+    const entry = findWorkspaceEntryByCwd(ws)
+    expect(entry?.type).toBeUndefined()
+    expect(workspaceEntryTypeOf(entry!)).toBe('project')
+  })
+
+  it('cwd 已失联的条目不作为命中目标（不能「恢复」一个够不着的项目）', () => {
+    const gone = join(ws, 'removed-dir')
+    seedProject('gone-ws', gone)
+    expect(findWorkspaceEntryByCwd(gone)).toBeUndefined()
   })
 })
 
@@ -151,18 +171,18 @@ describe('工作区身份由 realpath 归一的 cwd 决定', () => {
 describe('打开/创建判定表门禁', () => {
   it('已有 task 工作区 + project 口径 ⇒ 需用户确认升级（不擅自升级）', () => {
     seedProject('legacy-task', ws, 'task')
-    const project = loadProject('legacy-task')!
-    expect(classifyProjectTypeTransition(projectTypeOf(project), 'project')).toBe('upgrade')
+    const entry = findWorkspaceEntryByCwd(ws)!
+    expect(classifyProjectTypeTransition(workspaceEntryTypeOf(entry), 'project')).toBe('upgrade')
     // 未确认前 type 不动（不变式 A：type 具权威性）
-    expect(loadProject('legacy-task')?.type).toBe('task')
+    expect(workspaceEntryTypeOf(findWorkspaceEntryByCwd(ws)!)).toBe('task')
   })
 
   it('已有 project 工作区 + task 口径 ⇒ 拒绝（不变式 B / C）', () => {
     seedProject('real-proj', ws, 'project')
-    const project = loadProject('real-proj')!
-    expect(classifyProjectTypeTransition(projectTypeOf(project), 'task')).toBe('downgrade')
+    const entry = findWorkspaceEntryByCwd(ws)!
+    expect(classifyProjectTypeTransition(workspaceEntryTypeOf(entry), 'task')).toBe('downgrade')
     expect(canTransitionProjectType('project', 'task')).toBe(false)
-    expect(loadProject('real-proj')?.type).toBe('project') // 未被改写
+    expect(workspaceEntryTypeOf(findWorkspaceEntryByCwd(ws)!)).toBe('project') // 未被改写
   })
 
   it('同口径重开 ⇒ same（恢复原项目，不再新建）', () => {
@@ -180,18 +200,18 @@ describe('打开/创建判定表门禁', () => {
   })
 
   it('task 入口的门禁判据：project 工作区必须被拒（不变式 C）', () => {
-    // createAgentForTask 内的判据 = findProjectByCwd + projectTypeOf。
+    // createAgentForTask 内的判据 = findWorkspaceEntryByCwd + workspaceEntryTypeOf。
     // 这里验判据本身（host 服务需 cordis 装配，故在单测里验判据、真机验端点）。
     seedProject('proj-ws', ws, 'project')
-    const owner = findProjectByCwd(ws)
-    expect(owner?.project.id).toBe('proj-ws')
-    expect(projectTypeOf(owner?.project)).toBe('project') // ⇒ task 入口会抛错
+    const owner = findWorkspaceEntryByCwd(ws)
+    expect(owner?.id).toBe('proj-ws')
+    expect(workspaceEntryTypeOf(owner!)).toBe('project') // ⇒ task 入口会抛错
 
     const ws2 = mkdtempSync(join(tmpdir(), 'corum-uq-ws-task-'))
     try {
       seedProject('task-ws', ws2, 'task')
-      const owner2 = findProjectByCwd(ws2)
-      expect(projectTypeOf(owner2?.project)).toBe('task') // ⇒ task 入口放行
+      const owner2 = findWorkspaceEntryByCwd(ws2)
+      expect(workspaceEntryTypeOf(owner2!)).toBe('task') // ⇒ task 入口放行
     } finally {
       rmSync(ws2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }

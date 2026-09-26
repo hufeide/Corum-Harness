@@ -82,6 +82,9 @@ import {
   registerTaskSession as registerTaskSessionOf,
 } from './lane-registry.ts'
 // fork（corum）2026-09-20：profile 编译与落盘按关注点抽出（用户定调「文件层面切分清晰」）。
+// 2026-09-26 项目模式剥离后 `checkoutPinnedSkills` 仍有两处调用：`createAgentUncached`
+// 与 `createAgentForTask`（task 模式首次创建同样要走 pinned skill checkout + 落盘 preset）；
+// 项目泳道那一路的同款调用已随编排迁到闭源仓（走 `@corum/corum-agent/lane-support`）。
 import { checkoutPinnedSkills as checkoutPinnedSkillsOf, writeAgentDir as writeAgentDirOf } from './profile-compiler.ts'
 // fork（corum）2026-09-20：润色/翻译按关注点抽出的模块（含类型、引擎路由、system 提示词）。
 import {
@@ -101,8 +104,16 @@ import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from '.
 // fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
 // 调用失败」是两个概念）——事前校验 + 回落全局默认 + 显式告知。见该模块头注的分界表。
 import { deliverModelFallbackNotice, resolveUsableModel, type ModelFallback } from './model-availability.ts'
-import { GENERAL_WORK_TYPE, canonicalWorkspaceKey, isValidProjectId, isValidWorkTypeSlug, isGroupMember, projectTypeOf } from './project.ts'
-import { loadProject, findProjectByCwd } from './project-store.ts'
+// 项目模式剥离（2026-09-26）：原 `./project.ts` 的符号已分流——
+// 工作区身份（canonicalWorkspaceKey / findWorkspaceEntryByCwd / workspaceEntryTypeOf）
+// 落 L0 `workspace-identity.ts`，工程类型与工作类型（GENERAL_WORK_TYPE /
+// DEFAULT_PROJECT_TYPE / ProjectType）落 L1 `workspace-type.ts`；
+// 其余（CorumProject 实体、项目组、项目存储）已迁至闭源仓 Corum-Harness-Project。
+// 顺带：`isValidProjectId` / `isGroupMember` / `loadProject` / `projectTypeOf` /
+// `isValidWorkTypeSlug` 只被已迁出的 project-lane 用到（前者校验 projectId、
+// 后者校验泳道 slug），本文件不再引入。
+import { canonicalWorkspaceKey, findWorkspaceEntryByCwd, workspaceEntryTypeOf } from './workspace-identity.ts'
+import { DEFAULT_PROJECT_TYPE, GENERAL_WORK_TYPE, type ProjectType } from './workspace-type.ts'
 // 统一会话索引（两模式共用；键 = sessionId，按 cwd 分组）——
 // 见 session-index.ts 的文件头（两套旧索引键空间不同构，不可机械合并）。
 import { findSessionByLane, registerSession } from './session-index.ts'
@@ -181,8 +192,9 @@ import type {} from '@deepseek-ai/dsh-tool-todo'
 // this.ctx.gitCore.assertGitWorkspace；显式 import 只触发 declare module 合并）。
 import type {} from '@corum/corum-git-core'
 
-// 再导出：保持既有消费方（index.ts / project-service.ts / runtime.ts /
-// contract/agent.ts）的 import 面不变——包内拆分对外的稳定锚。
+// 再导出：保持既有消费方（index.ts / contract/agent.ts，以及闭源仓的
+// `@corum/corum-project`）的 import 面不变——包内拆分对外的稳定锚。
+// 2026-09-26 项目模式剥离：`project-service.ts` / `runtime.ts` 两个消费方已迁出闭源仓。
 export { ensurePmProfile, ensureTaskProfile, PM_PROFILE_ID } from './builtin-profiles.ts'
 export { simplifyEventData } from './event-projection.ts'
 export type { SkillEntry } from './skill-entry.ts'
@@ -522,19 +534,6 @@ export class CorumAgentService extends TypertRemoteService {
   /** 该会话此刻是否处于指挥模式（供 `corumConductor` 服务消费）。 */
   private isConductorSession(sessionId: string): boolean {
     return this.conductor.isConductor(sessionId)
-  }
-
-  /**
-   * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
-   * 调度派活的执行会话）在 create/resume 的 setup 里统一经过这些钩子装配。
-   * AgentRuntime 借此给每个会话装调度工具（assign_task/list_team_tasks/
-   * complete_task）——PM 统筹会话与被调度会话能力一致是「PM 派活」闭环的前提。
-   */
-  private readonly laneSetupHooks: Array<(agentCtx: Context, projectId: string, profileId: string) => void> = []
-
-  /** 注册泳道会话能力钩子（在 create/resume 的 setup 阶段同步调用；插件 apply 期注册）。 */
-  registerLaneSetupHook(hook: (agentCtx: Context, projectId: string, profileId: string) => void): void {
-    this.laneSetupHooks.push(hook)
   }
 
   constructor(ctx: Context) {
@@ -894,113 +893,11 @@ export class CorumAgentService extends TypertRemoteService {
     return { agent: handle.agent, presetId: profile.id }
   }
 
-  /** 兼容入口：按工作类型建/恢复泳道（label 退化为 type）。 */
-  async createAgentForType(
-    projectId: string,
-    profileId: string,
-    type: string = GENERAL_WORK_TYPE,
-    extraSetup?: (agentCtx: Context) => void,
-  ): Promise<CreateAgentResult & { sessionId: SessionId }> {
-    return this.createAgentForLane(projectId, profileId, { key: type, type }, extraSetup)
-  }
-
-  /**
-   * 按「项目 × 角色 × 泳道标签」创建或恢复一个 root Agent（= 一个泳道会话）。
-   *
-   * 这是团队成员多会话模型的落地（见 project.md「单 Agent 多会话」已知待解
-   * 问题 + docs/agent-foundation/TEAM-SCHEDULER-EVENT-LOG.md §6.1）：
-   * 同一 profile 按 (projectId, laneKey) 各持一个独立 root Agent（官方 Agent:Session
-   * =1:1 硬绑定，N 个 type 会话即 N 个实例，各挂同一份 preset、会话各自独立）。
-   *
-   * sessionId 稳定可路由：corum-proj<p>-agent<a>-lane<label>-<rand>。进程内已存活
-   * 直接复用；否则查 sessionPersistence——已持久化则 resume（冷恢复历史），
-   * 未持久化则 create（并登记 sessionId 进项目目录，供下次 resume 找回）。
-   *
-   * @param projectId - 项目 id（团队属项目，会话隔离边界）。
-   * @param profileId - 角色 profile id。
-   * @param lane - 泳道描述（key=路由标签，type=工作类型语义，requirementId 可选）。
-   * @param extraSetup - 可选额外能力注入（如 complete_task 工具）。
-   * @returns 创建/恢复结果 + 该会话的 sessionId。
-   */
-  async createAgentForLane(
-    projectId: string,
-    profileId: string,
-    lane: AgentLaneDescriptor,
-    extraSetup?: (agentCtx: Context) => void,
-  ): Promise<CreateAgentResult & { sessionId: SessionId }> {
-    if (!isValidProjectId(projectId)) throw new Error(`dev-agent: invalid project id "${projectId}"`)
-    if (!isValidWorkTypeSlug(lane.type)) throw new Error(`dev-agent: invalid work type slug "${lane.type}"`)
-    const existing = this.registry.laneAgent(projectId, profileId, lane.key)
-    if (existing !== undefined) {
-      const entry = this.registry.findLaneBySession(String(existing.session.id))
-      return { agent: existing, presetId: profileId, sessionId: entry?.sessionId ?? SessionId(String(existing.session.id)) }
-    }
-
-    const profile = loadProfile(profileId)
-    if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
-    if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
-
-    // 项目工作目录：Agent 的工作现场（session cwd 创建后不可改）。
-    // 必须用项目自己的 cwd（干净目录），而非 process.cwd()——否则 Agent 会在
-    // corum 源码仓里跑，测试时污染源码。项目未设 cwd 时退回 process.cwd()。
-    const project = loadProject(projectId)
-    if (project === undefined) throw new Error(`dev-agent: project "${projectId}" not found`)
-
-    // 成员边界：只有项目组成员才能在该项目里建会话/被调度（非成员不参与工作）。
-    if (!isGroupMember(project, profileId)) {
-      throw new Error(`dev-agent: profile "${profileId}" 不是项目 "${projectId}" 的项目组成员，不参与该项目工作`)
-    }
-    const workCwd = project.cwd !== undefined && project.cwd !== '' ? project.cwd : process.cwd()
-
-    // 查本项目该 type 会话是否已持久化（登记在项目目录的 session 索引里）。
-    const persisted = this.lookupPersistedSessionId(projectId, profileId, lane.key)
-    const sessionId = persisted ?? SessionId(`corum-proj${projectId}-agent${profileId}-lane${slugLaneKey(lane.key)}-${randomBytes(4).toString('hex')}`)
-
-    // resume 与 create 共用同一份 setup（preset 挂载 + 能力注入 + 模型选择）。
-    // resume 时 session 历史由 persistence 加载，能力仍经 setup 重新组装。
-    // fork（corum）2026-09-26：项目泳道同样事前校验预设模型是否还存在（确定性配置缺失
-    // ⇒ 回落全局默认）。见 `model-availability.ts`。
-    const laneModel = (await resolveUsableModel(this.ctx, profile.model)).model
-    const selection: ModelSelectionRef = {
-      current: {
-        provider: laneModel.provider,
-        model: laneModel.model,
-        ...(laneModel.reasoningEffort === undefined
-          ? {}
-          : { reasoningEffort: ReasoningEffortId(laneModel.reasoningEffort) }),
-      },
-      assembled: undefined,
-    }
-    const setup = async (agentCtx: Context): Promise<void> => {
-      await this.ctx.agentPresets.mount(agentCtx, profile.id)
-      for (const hook of this.laneSetupHooks) hook(agentCtx, projectId, profileId)
-      extraSetup?.(agentCtx)
-      installTaskModelSelection(agentCtx, selection)
-    }
-    const agentOptions = { provider: laneModel.provider, model: laneModel.model }
-
-    let handle: { agent: Agent }
-    if (persisted !== undefined) {
-      // 已持久化：冷恢复（preset 在 create 时已落盘，无需重复 checkout/write）。
-      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
-      this.ctx.logger.info(`corum-agent: resumed agent — ${sessionId}`)
-    } else {
-      // 首次：checkout skill + 编译落盘 preset，再 create。
-      checkoutPinnedSkillsOf(this.ctx.logger, profile)
-      writeAgentDirOf(profile, agentDirPath(profile.id))
-      handle = await this.ctx.agents.create({
-        sessionId,
-        meta: { cwd: workCwd, agentPreset: profile.id },
-        agentOptions,
-        setup,
-      })
-      this.registerSessionId(projectId, profileId, lane.key, sessionId)
-      this.ctx.logger.info(`corum-agent: created agent — ${sessionId}`)
-    }
-
-    this.registry.registerLane(projectId, profileId, lane, handle.agent, sessionId)
-    return { agent: handle.agent, presetId: profileId, sessionId }
-  }
+  // 项目模式剥离（2026-09-26）：`createAgentForType` / `createAgentForLane`、
+  // `laneSetupHooks` / `registerLaneSetupHook`、以及三个 project-lane @Remote 端点
+  // （createAgentForType / runPromptForType / getSessionEventsForType）**整体迁出**
+  // 到闭源仓 Corum-Harness-Project 的 `@corum/corum-project`（它们只服务项目团队会话）。
+  // 本类的 task 模式面（createAgentForTask 及以下）不自洽于泳道机制，保持不变。
 
   /**
    * 按 sessionId 反查泳道归属（权限网关的可信身份来源）。
@@ -1021,36 +918,73 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * 登记一条泳道会话（同时写「泳道表」与「泳道归属索引」）。
+   *
+   * **可见性（2026-09-26 项目模式剥离）**：泳道会话的**创建**编排已随项目模式
+   * 迁到闭源仓 `@corum/corum-project`，但泳道表仍由本服务（`AgentRegistry`）持有
+   * ——登记册必须唯一（`applySubagentModelForSession` 与权限网关都经它取可信身份）。
+   * 故在这里开一个公共登记口，闭源侧装配完会话后回填；**只开可见性，不搬表**。
+   *
+   * @param projectId - 项目 id（团队属项目，会话隔离边界）。
+   * @param profileId - 角色 profile id。
+   * @param lane - 泳道描述（key=路由标签，type=工作类型语义）。
+   * @param agent - 已创建的 root Agent。
+   * @param sessionId - 该泳道会话 id。
+   */
+  registerLaneAgent(projectId: string, profileId: string, lane: AgentLaneDescriptor, agent: Agent, sessionId: SessionId): void {
+    this.registry.registerLane(projectId, profileId, lane, agent, sessionId)
+  }
+
+  /**
    * 查统一会话索引：某 (工作区, profile, 泳道) 会话是否已持久化。
    * 返回其 sessionId（供 resume），未登记返回 undefined。
+   *
+   * **可见性（2026-09-26 项目模式剥离）**：原为 `private`，项目模式迁到闭源仓后
+   * 由 `@corum/corum-project` 的泳道装配调用——闭源仓不得绕过本服务的公共面直读
+   * 索引，故提为 public（**只改可见性，逻辑逐字未动**）。
    *
    * 「按工作区判」是修 `bug.task-lane-reuse-misses-project-sessions` 的关键：
    * 旧实现 `lookupPersistedSessionId(projectId, …)` 用 **projectId** 作账本边界，
    * 而 task 模式用的是伪 projectId——同一工作区在两种模式下各有一本账，互不可见。
    * 改为按 **cwd** 查统一索引后，两模式共享同一本账。
+   *
+   * @param cwd - 工作区目录（闭源仓由项目索引条目解析后传入）。
    */
-  private lookupPersistedSessionId(projectId: string, profileId: string, type: string): SessionId | undefined {
-    // projectId → cwd：索引与工作区同一套账本（会话索引按 cwd 分组）。
-    const project = loadProject(projectId)
-    const cwd = project?.cwd
+  lookupPersistedSessionId(cwd: string | undefined, profileId: string, type: string): SessionId | undefined {
     if (cwd === undefined || cwd === '') return undefined
     const found = findSessionByLane(profileId, type, cwd)
     return found === undefined ? undefined : SessionId(found)
   }
 
-  /** 把一个 (工作区, profile, 泳道) → sessionId 登记进统一会话索引。 */
-  private registerSessionId(projectId: string, profileId: string, type: string, sessionId: SessionId): void {
-    const project = loadProject(projectId)
-    const cwd = project?.cwd
+  /**
+   * 把一个 (工作区, profile, 泳道) → sessionId 登记进统一会话索引。
+   *
+   * **可见性（2026-09-26 项目模式剥离）**：同 {@link lookupPersistedSessionId}，
+   * 提为 public 供闭源 `@corum/corum-project` 的泳道装配登记（只改可见性，逻辑未动）。
+   *
+   * @param sessionId - 泳道会话 id。
+   * @param cwd - 工作区目录（缺省则无法按工作区建账——统一模型的身份由 cwd 决定）。
+   * @param profileId - 角色 profile id。
+   * @param type - 泳道路由标签（进索引的 `laneKey` 段）。
+   * @param projectType - 工作区**工程类型**（`project` | `task`）；缺省 `project`
+   *   （闭源仓的项目泳道恒为 project 模式）。
+   */
+  registerLaneSessionId(
+    sessionId: SessionId,
+    cwd: string | undefined,
+    profileId: string,
+    type: string,
+    projectType: ProjectType = DEFAULT_PROJECT_TYPE,
+  ): void {
     if (cwd === undefined || cwd === '') {
       // 无工作区的项目（cwd 缺省）无法按工作区建账——统一模型的身份由 cwd 决定。
-      this.ctx.logger.warn(`corum-agent: project "${projectId}" 无 cwd，跳过会话索引登记（${String(sessionId)}）`)
+      this.ctx.logger.warn(`corum-agent: 无 cwd 的泳道会话，跳过会话索引登记（${String(sessionId)}）`)
       return
     }
     registerSession(String(sessionId), {
       cwd,
       profileId,
-      type: projectTypeOf(project),
+      type: projectType,
       laneKey: type,
     })
   }
@@ -1368,64 +1302,10 @@ export class CorumAgentService extends TypertRemoteService {
     return { events }
   }
 
-  /** 按「项目×角色×类型」创建（或 resume）一个会话 Agent。 */
-  @Remote('createAgentForType')
-  async createAgentForTypeRemote(
-    projectId: string,
-    profileId: string,
-    type?: string,
-  ): Promise<{ sessionId: string; created: boolean }> {
-    const result = await this.createAgentForType(projectId, profileId, type)
-    return { sessionId: String(result.sessionId), created: true }
-  }
-
-  /** 在「项目×角色×类型」会话里发一个 prompt，等回复。 */
-  @Remote('runPromptForType')
-  async runPromptForTypeRemote(
-    projectId: string,
-    profileId: string,
-    type: string,
-    prompt: string,
-  ): Promise<RunPromptResult> {
-    const { agent } = await this.createAgentForType(projectId, profileId, type)
-    await agent.whenIdle()
-    const firstSeq = agent.session.seq
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: prompt }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-    await this.ctx.sessions.flush(agent.session)
-    const reply = summarizeText(agent.session.snapshotEvents(), firstSeq)
-    const events: SessionEventDto[] = []
-    for (const event of agent.session.snapshotEvents()) {
-      if (event.seq < firstSeq) continue
-      events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
-    }
-    const { systemPrompt, tools } = extractHeader(agent.session.snapshotEvents(), firstSeq)
-    return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
-  }
-
-  /**
-   * 读「项目×角色×类型」会话的历史事件（从 fromSeq 开始，只读不发消息）。
-   * 用于切换泳道时回填该会话的对话历史。会话未存活返回空。
-   */
-  @Remote('getSessionEventsForType')
-  async getSessionEventsForTypeRemote(
-    projectId: string,
-    profileId: string,
-    type: string,
-    fromSeq: number,
-  ): Promise<{ events: SessionEventDto[] }> {
-    const agent = this.getAgentForType(projectId, profileId, type)
-    if (agent === undefined) return { events: [] }
-    const events: SessionEventDto[] = []
-    for (const event of agent.session.snapshotEvents()) {
-      if (event.seq < fromSeq) continue
-      events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
-    }
-    return { events }
-  }
+  // 项目模式剥离（2026-09-26）：project-lane 三个 @Remote 端点
+  // （`createAgentForType` / `runPromptForType` / `getSessionEventsForType`）
+  // 已随项目模式迁到闭源仓 `@corum/corum-project`。RPC **面**随之移动而非删除
+  // ——闭源插件在 `/api/corumProject/*` 上重新暴露同名端点。
 
   // ── task 模式泳道（单任务会话，corum-task-* session id，与 project 泳道隔离） ──
 
@@ -1520,13 +1400,17 @@ export class CorumAgentService extends TypertRemoteService {
     // 用户 2026-09-14 裁定：「如果是 task 模式打开一个 project 项目，则提示用户是项目
     // 模式，是否按照项目模式开启。**拒绝按照 task 模式开启**。」
     // 缺此校验时本入口会绕开门禁直接在 project 工作区里建 task 会话，破坏不变式 C。
-    // ⚠️ 用 realpath 归一查（同 openProjectByPath 的一工作区一条目口径）。
-    const owner = findProjectByCwd(cwd)
+    // ⚠️ 用 realpath 归一查（同「一工作区一条目」身份口径）。
+    // 项目模式剥离（2026-09-26）：原走 `findProjectByCwd`（闭源 project-store），
+    // 现走 workspace-identity 的**最小只读索引读取器**——只读索引轻字段
+    // （id/name/cwd/type），不依赖任何项目侧数据，两仓共用同一份磁盘契约
+    // （`$CORUM_HOME/projects/<id>/project.json`）。
+    const owner = findWorkspaceEntryByCwd(cwd)
     if (owner !== undefined) {
-      const stored = projectTypeOf(owner.project)
+      const stored = workspaceEntryTypeOf(owner)
       if (stored === 'project') {
         throw new Error(
-          `dev-agent: 工作区 "${cwd}" 已是项目模式（project ${owner.project.id}）——无法以任务模式开启。`
+          `dev-agent: 工作区 "${cwd}" 已是项目模式（project ${owner.id}）——无法以任务模式开启。`
           + '请按项目模式打开该工作区（同一工作区只能有一个类型）。',
         )
       }
@@ -2795,17 +2679,18 @@ export class CorumAgentService extends TypertRemoteService {
     }
   }
 
-  /** 按 sessionId 反查泳道/项目模式的存活会话（taskAgents 之外的存活表）。 */
-  private findLaneAgent(sessionId: string): { agent: Agent; sessionId: SessionId } | undefined {
+  /**
+   * 按 sessionId 反查泳道/项目模式的存活会话（taskAgents 之外的存活表）。
+   *
+   * **可见性（2026-09-26 项目模式剥离）**：原为 `private`，闭源仓
+   * `@corum/corum-project` 的泳道创建要在「已存活」分支取回该会话的登记项
+   * （拿权威 sessionId，而不是拿 `agent.session.id` 猜）——故提为 public。
+   * 只改可见性，逻辑逐字未动。
+   */
+  findLaneAgent(sessionId: string): { agent: Agent; sessionId: SessionId } | undefined {
     return this.registry.findLaneBySession(sessionId)
   }
 
-}
-
-/** 泳道标签转 sessionId 安全段（标签可含 `:`，sessionId/路径只用 lower-kebab）。 */
-function slugLaneKey(label: string): string {
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  return slug === '' ? GENERAL_WORK_TYPE : slug
 }
 
 export default CorumAgentService

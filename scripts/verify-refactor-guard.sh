@@ -61,9 +61,18 @@ if [ ! -f "$SERVICE" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 权威基线：28 个 RPC 名字（冻结，来自 2026-09-20 拆分开始前的 HEAD）
+# 权威基线：25 个 RPC 名字（冻结，来自 2026-09-20 拆分开始前的 HEAD **减去**
+# 已迁出的 project-lane 三个端点）
 # ─────────────────────────────────────────────────────────────────────────────
-RPC_NAMES_FROZEN="createAgent createAgentForType createTaskAgent deleteProfile getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSessionEventsForType getSubagentSessionMeta getTaskSessionEvents getWorktreeLedger listAgents listModels listPermissionPresets listProfiles listSkills listTaskAgents polishConversation polishPrompt runPrompt runPromptForTask runPromptForType saveProfile selectTaskAgentProfile setPolishConfig translatePrompt verify"
+# 2026-09-26 项目模式剥离：`createAgentForType` / `runPromptForType` /
+# `getSessionEventsForType` 三个 @Remote **随项目模式迁到闭源仓**
+# Corum-Harness-Project 的 `@corum/corum-project` 插件（在 `/api/corumProject/*`
+# 面重新暴露同名端点）——**RPC 面移动，不是删除**。故它们从冻结集合移入下面的
+# RPC_NAMES_MOVED_TO_CLOSED：本仓不得再出现（出现即代表剥离回退），而 HEAD 对照
+# 仍按「冻结 ∪ 已迁出」比对，这样第 ① 组继续保持它原本的语义——**除这次有意的
+# 移仓之外，@Remote 名字集合不得有任何变化**。
+RPC_NAMES_FROZEN="createAgent createTaskAgent deleteProfile getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSubagentSessionMeta getTaskSessionEvents getWorktreeLedger listAgents listModels listPermissionPresets listProfiles listSkills listTaskAgents polishConversation polishPrompt runPrompt runPromptForTask saveProfile selectTaskAgentProfile setPolishConfig translatePrompt verify"
+RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsForType"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 状态表直访预算（第 ③ 组）
@@ -79,8 +88,7 @@ RPC_NAMES_FROZEN="createAgent createAgentForType createTaskAgent deleteProfile g
 # **不支持 `declare -A`**，本仓脚本一律要能在系统 bash 下跑）。
 STATE_BUDGET="\
 pendingPermissions 3 待兑现权限档位
-conductor 6 指挥模式运行时
-laneSetupHooks 2 泳道装配钩子"
+conductor 6 指挥模式运行时"
 
 # 已经收走的表：必须出现 **0** 次（格式同上，预算恒为 0）。
 EXPECTED_ABSENT="\
@@ -97,11 +105,12 @@ subagentParents 子会话父会话（P1-b 收进 SubagentProgressTracker）
 notifiedInterrupted 中断广播去重（P1-b 收进 SubagentProgressTracker）"
 
 # 允许 import agent-service.ts 的**包内其他模块**。格式：`文件名|理由`。
+# 2026-09-26 项目模式剥离：`runtime.ts` / `project-service.ts` /
+# `project-data-service.ts` 三个条目随源文件迁到闭源仓 Corum-Harness-Project
+# 而删除（闭源仓 `@corum/corum-project` 里仍合法地引用本服务——那是**跨包依赖**、
+# 不是包内反向依赖，本组判据不覆盖也不该覆盖）。
 BACKREF_ALLOW="\
-index.ts|插件入口：导出 CorumAgentService（这是它的公开面，不是反向依赖）
-runtime.ts|AgentRuntime 注入服务类型 + 复用 simplifyEventData（跨关注点共享纯函数）
-project-service.ts|复用 ensurePmProfile / PM_PROFILE_ID（builtin profile 播种）
-project-data-service.ts|type-only 引用服务类型（能力接口，红线 3 的合法形态）"
+index.ts|插件入口：导出 CorumAgentService（这是它的公开面，不是反向依赖）"
 
 # ─────────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "baseline" ]; then
@@ -143,10 +152,10 @@ fi
 printf '\033[1mcorum-agent 拆分守卫\033[0m  (%s)\n' "$(basename "$SERVICE")"
 
 # ── ① RPC 面冻结 ────────────────────────────────────────────────────────────
-group "① RPC 面冻结（28 个 @Remote 名字集合）"
+RPC_COUNT="$(printf '%s\n' $RPC_NAMES_FROZEN | wc -w | tr -d ' ')"
+group "① RPC 面冻结（${RPC_COUNT} 个 @Remote 名字集合）"
 ACTUAL_RPC="$(grep -o "@Remote('[a-zA-Z]*')" "$SERVICE" | sed "s/@Remote('//;s/')//" | sort | tr '\n' ' ' | sed 's/ $//')"
 FROZEN_SORTED="$(printf '%s\n' $RPC_NAMES_FROZEN | sort | tr '\n' ' ' | sed 's/ $//')"
-RPC_COUNT="$(printf '%s\n' $RPC_NAMES_FROZEN | wc -w | tr -d ' ')"
 if [ "$ACTUAL_RPC" = "$FROZEN_SORTED" ]; then
   pass "@Remote 名字集合与冻结基线一致（${RPC_COUNT} 个）"
 else
@@ -157,16 +166,34 @@ else
   diff <(printf '%s\n' $FROZEN_SORTED | tr ' ' '\n') <(printf '%s\n' $ACTUAL_RPC | tr ' ' '\n') | sed 's/^/      /'
 fi
 
-# 若在 git 仓库内，再与 HEAD 对照（防「只改了基线忘了实现」）
+# ① -b 已迁到闭源仓的端点：本仓**不得**再出现（出现即代表剥离回退）。
+# 判据与上面同源但方向相反——上面拦「多/少」，这里拦「搬走又搬回来」。
+MOVED_BAD=0
+for rpc in $RPC_NAMES_MOVED_TO_CLOSED; do
+  if printf '%s\n' $ACTUAL_RPC | tr ' ' '\n' | grep -qx "$rpc"; then
+    fail "@Remote('${rpc}') 又出现在本仓——它已随项目模式迁到闭源仓 @corum/corum-project"
+    MOVED_BAD=$((MOVED_BAD + 1))
+  fi
+done
+if [ "$MOVED_BAD" -eq 0 ]; then
+  pass "project-lane 三个端点未回流（${RPC_NAMES_MOVED_TO_CLOSED}）"
+fi
+
+# 若在 git 仓库内，再与 HEAD 对照（防「只改了基线忘了实现」）。
+# ⚠️ HEAD 对照的口径 = **HEAD 的 RPC 集合减去已迁出的三端点**：本场唯一有意的
+# RPC 面变化就是那次移仓，除此之外一个名字都不许动；否则这条判据会被「顺手改
+# 基线」绕过去（只比冻结集合的话，把某个端点从两边一起删掉也会绿）。
 if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   HEAD_RPC="$(git -C "$REPO_ROOT" show HEAD:packages/plugins/agent/corum-agent/src/agent-service.ts 2>/dev/null \
     | grep -o "@Remote('[a-zA-Z]*')" | sed "s/@Remote('//;s/')//" | sort | tr '\n' ' ' | sed 's/ $//')"
+  HEAD_EXPECTED="$(printf '%s\n' $HEAD_RPC | tr ' ' '\n' | grep -vxF -e createAgentForType -e runPromptForType -e getSessionEventsForType \
+    | tr '\n' ' ' | sed 's/ $//')"
   if [ -n "$HEAD_RPC" ]; then
-    if [ "$ACTUAL_RPC" = "$HEAD_RPC" ]; then
-      pass "与 HEAD 的 @Remote 集合一致（本场未动 RPC 面）"
+    if [ "$ACTUAL_RPC" = "$HEAD_EXPECTED" ]; then
+      pass "与 HEAD 的 @Remote 集合一致（差别仅为有意迁出的 project-lane 三端点）"
     else
-      fail "与 HEAD 的 @Remote 集合不同（RPC 面被改动）"
-      diff <(printf '%s\n' $HEAD_RPC | tr ' ' '\n') <(printf '%s\n' $ACTUAL_RPC | tr ' ' '\n') | sed 's/^/      /'
+      fail "与 HEAD 的 @Remote 集合不同（除 project-lane 三端点外还动了 RPC 面）"
+      diff <(printf '%s\n' $HEAD_EXPECTED | tr ' ' '\n') <(printf '%s\n' $ACTUAL_RPC | tr ' ' '\n') | sed 's/^/      /'
     fi
   else
     info "跳过 HEAD 对照（读不到 HEAD 版本的文件）"

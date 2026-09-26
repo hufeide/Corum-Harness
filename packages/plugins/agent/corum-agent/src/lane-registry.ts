@@ -24,7 +24,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { canonicalWorkspaceKey } from './project.ts'
+// 工作区身份（L0 助手）：项目模式剥离后由 workspace-identity.ts 承接。
+import { canonicalWorkspaceKey } from './workspace-identity.ts'
 import { readSessionIndex, registerSession } from './session-index.ts'
 
 /**

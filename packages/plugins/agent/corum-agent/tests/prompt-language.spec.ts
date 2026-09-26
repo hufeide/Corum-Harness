@@ -19,14 +19,9 @@ function source(name: string): string {
   return readFileSync(join(SRC, name), 'utf8')
 }
 
-/** 抽出所有 `description: '…'` / `description: "…"` 单行字面量（工具与参数描述）。 */
-function descriptionLiterals(src: string): string[] {
-  const out: string[] = []
-  for (const m of src.matchAll(/description:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g)) {
-    out.push(m[1])
-  }
-  return out
-}
+// 项目模式剥离（2026-09-26）：原 `descriptionLiterals()` 抽取器（工具/参数
+// `description:` 字面量的 CJK 扫描）只被已移仓的两条断言使用，随之删除；
+// 闭源仓 Corum-Harness-Project 若要那两条纪律，需在那里自建等价扫描。
 
 describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', () => {
   it('指挥者人格段（CONDUCTOR_PERSONA）无 CJK', () => {
@@ -50,26 +45,10 @@ describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', (
     expect(task?.[1]).not.toMatch(CJK)
   })
 
-  it('团队调度器工具与参数描述无 CJK', () => {
-    for (const literal of descriptionLiterals(source('runtime.ts'))) {
-      expect(literal, literal).not.toMatch(CJK)
-    }
-  })
-
-  it('项目数据工具与参数描述无 CJK', () => {
-    for (const literal of descriptionLiterals(source('project-data-service.ts'))) {
-      expect(literal, literal).not.toMatch(CJK)
-    }
-  })
-
-  it('注入给执行者的任务消息模板无 CJK（结构标记保持英文大写）', () => {
-    const src = source('runtime-task.ts')
-    expect(src).toContain('[TASK]')
-    expect(src).toContain('[ROUTE]')
-    expect(src).toContain('[CONTEXT]')
-    const injection = src.slice(src.indexOf('export function renderTaskMessage'))
-    expect(injection).not.toMatch(CJK)
-  })
+  // 项目模式剥离（2026-09-26）：以下三条断言随源文件**移仓**到闭源仓
+  // Corum-Harness-Project（`runtime.ts` 的调度器工具描述、`project-data-service.ts`
+  // 的数据工具描述、`runtime-task.ts` 的任务消息模板），本仓不再扫描。
+  // 那三条纪律在那里仍应生效——闭源仓需自建等价扫描（不在本仓假装还在测）。
 
   it('工作区 AGENTS.md 模板无 CJK（会被 dsh-agent-instructions 注入每个会话）', () => {
     const src = source('workspace-agents.ts')

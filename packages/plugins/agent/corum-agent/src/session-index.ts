@@ -41,8 +41,9 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { canonicalWorkspaceKey, isProjectType } from './project.ts'
-import type { ProjectType } from './project.ts'
+// 工作区身份（L0）+ 工程类型（L1）：项目模式剥离后由两个助手模块承接。
+import { canonicalWorkspaceKey } from './workspace-identity.ts'
+import { isProjectType, type ProjectType } from './workspace-type.ts'
 
 /**
  * 一条会话索引记录。

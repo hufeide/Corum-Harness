@@ -501,7 +501,12 @@ describe('特征化 · buildChangeSummary / emitChangeSummary（簇 8 / P2）', 
   })
 })
 
-/* ──────────────────── 簇 6：泳道解析/登记（P3，只做可直测的部分） ──────────────────── */
+/* ──────────────────── 簇 6：泳道存活表读取（P3） ──────────────────── */
+/* 项目模式剥离（2026-09-26）：泳道会话的**创建**编排（createAgentForType /
+ * createAgentForLane / laneSetupHooks）已迁到闭源仓 Corum-Harness-Project 的
+ * `@corum/corum-project`。存活表仍由本服务的 AgentRegistry 持有，故这里保留
+ * **读取面**的特征化断言（getAgentForType / getAgentForLane / resolveLaneBySessionId
+ * / findLaneAgent）——它们是权限网关与 applySubagentModelForSession 的可信身份来源。 */
 
 describe('特征化 · 泳道存活表查找（簇 6 / P3）', () => {
   it('getAgentForType / getAgentForLane 走同一条 instanceKey 拼接（含缺省 type）', () => {

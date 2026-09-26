@@ -153,14 +153,14 @@
     # ── 真实功能插件（design.pen 区域实现）──
     # 左列骨架 + 任务模式（开源版核心）：占 corum.sidebar 并声明
     # corum.sidebar.sessions / corum.sidebar.project 两个子槽，自填 sessions
-    # （design.pen ①）。project 子槽由下一行（付费版组合）填充；移除下一行
-    # 即开源形态——project 槽空 → 骨架不显示「项目」tab。
+    # （design.pen ①）。project 子槽**在开源仓恒为空** → 骨架不显示「项目」tab。
     - id: ide-sidebar
       name: '@corum/corum-ide-sidebar-ui'
-    # 项目模式内容（付费版组合，design.pen L2 侧栏 ③/③b/④）：打开项目分流 +
-    # 创建向导 + 项目详情（管理段/团队段），数据 corumProject/* RPC + ctx.sessions。
-    - id: ide-project
-      name: '@corum/corum-ide-project-ui'
+    # ⚠️ 项目模式内容（`@corum/corum-ide-project-ui`，付费版组合）**已迁出本仓**
+    # （2026-09-26 开源/闭源剥离）：原 `- id: ide-project` 挂载行现属闭源仓
+    # **Corum-Harness-Project**（该仓的部署组合/补丁在此处插入同一行）。
+    # 闭源仓未安装时 corum.sidebar.project 槽为空 —— 正是上面那条注释描述的开源形态
+    # （骨架隐藏「项目」tab），故本仓不保留占位行也不留悬空引用。
     # 资源管理器：2026-09-03 设计改版并入编辑器合并卡（corum.editor 槽内嵌
     # ExplorerPane 子面板，corum-desktop client 直通 listDir/generation）——
     # 原独立插件 @corum/corum-ide-explorer-ui 已解挂，代码保留备查，如需回退

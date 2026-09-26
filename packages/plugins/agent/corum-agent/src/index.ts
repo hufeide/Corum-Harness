@@ -14,12 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { setStallAutoRecoverMinutes } from './runtime-state.ts'
 import { CorumAgentService } from './agent-service.ts'
-import { AgentRuntime } from './runtime.ts'
-import { CorumProjectService } from './project-service.ts'
 import { CorumTeamService } from './team-service.ts'
-import { CorumProjectDataService } from './project-data-service.ts'
-import { migrateProjectStore } from './project-migration.ts'
-import { migrateProjectData } from './project-data-migration.ts'
 import { migrateSessionIndex } from './session-index-migration.ts'
 
 export type * from './profile.ts'
@@ -28,39 +23,21 @@ export { isValidProfileId } from './profile.ts'
 export { compilePreset } from './compile.ts'
 export type { CompiledPreset } from './compile.ts'
 export { CorumAgentService } from './agent-service.ts'
-export { publishDomainEvent } from './events.ts'
-export { appendSchedulerEvent, foldSchedulerEvents, readSchedulerEvents, readSchedulerEventsFrom, schedulerEventLogPath } from './event-log.ts'
-export type { SchedulerEvent, FoldedSchedulerState, FoldedProfileState } from './event-log.ts'
-export type {
-  CorumDomainEventMap,
-  CorumDomainEventType,
-  DomainEventRecord,
-  TaskRef,
-  TaskEntityType,
-  TaskSource,
-  TaskVia,
-  TaskAssignedEvent,
-  TaskStartedEvent,
-  TaskCompletedEvent,
-  TaskDeferredEvent,
-  TaskEvictedEvent,
-  GroupMemberAddedEvent,
-  GroupMemberRemovedEvent,
-} from './events.ts'
 export type { AgentLaneDescriptor, CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, ProviderCatalog, SessionEventDto, RunPromptResult, SaveProfileInput, TaskAgentSummary } from './agent-service.ts'
-export { ensureTaskProfile } from './agent-service.ts'
-export { AgentRuntime } from './runtime.ts'
-export type { EnqueueOptions, Task, TaskStatus } from './runtime.ts'
-export type { TaskStatus as ProjectTaskStatus } from './project-entities.ts'
+export { ensureTaskProfile, ensurePmProfile, PM_PROFILE_ID, simplifyEventData } from './agent-service.ts'
+// 项目模式剥离（2026-09-26）：上面这一行补出的 `ensurePmProfile` / `PM_PROFILE_ID` /
+// `simplifyEventData` 供闭源仓 `@corum/corum-project` 消费（项目组的默认 PM 播种 +
+// 事件投影）。它们本来就是 agent-service 的再导出面（`export { … } from`），
+// 这里只是把它接到包根——不再由 project-service / runtime 这两个已迁出的消费方间接转发。
 export { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
-export type { CorumProject, WorkType, ProjectGroup, ProjectGroupMember } from './project.ts'
-export { isValidProjectId, slugifyProjectId, BUILTIN_WORK_TYPES, GENERAL_WORK_TYPE, isValidWorkTypeSlug, resolveWorkTypes, groupMemberIds, isGroupMember, groupPm } from './project.ts'
-export { CorumProjectService } from './project-service.ts'
-export type { CreateProjectInput, OpenProjectByPathResult, CompleteSetupInput } from './project-service.ts'
-export { loadProject, listProjects, saveProject, deleteProject, projectsRoot, projectDir, loadProjectIndex, projectCwdExists } from './project-store.ts'
-export type { ProjectListEntry, ProjectInfo } from './project-store.ts'
-export { migrateProjectStore } from './project-migration.ts'
-export { migrateProjectData } from './project-data-migration.ts'
+// 团队（CorumTeam 实体 + 团队服务）——项目模式用它组项目组，故必须暴露给闭源仓。
+export type { CorumTeam } from './team.ts'
+export { isValidTeamId, slugifyTeamId } from './team.ts'
+export { loadTeam, listTeams, saveTeam, deleteTeam, teamsRoot, teamDir } from './team-store.ts'
+export { CorumTeamService } from './team-service.ts'
+// 工作区 AGENTS.md 的幂等创建（项目打开时用；项目模式剥离后由闭源仓消费，
+// 故必须在包根导出面上）。
+export { ensureWorkspaceAgentsMd } from './workspace-agents.ts'
 export { migrateSessionIndex } from './session-index-migration.ts'
 export type { SessionIndexMigrationResult } from './session-index-migration.ts'
 // 全局 KV 的 JSON → SQLite 存量迁移（用户 2026-09-15 决定；桌面壳在 boot() 之前调用）。
@@ -75,28 +52,21 @@ export {
 export type { SessionIndexEntry } from './session-index.ts'
 export { readLegacyIndexes, parseProjectSessionId } from './legacy-index.ts'
 export type { LegacySession } from './legacy-index.ts'
-export { canonicalWorkspaceKey, classifyProjectTypeTransition, projectTypeOf } from './project.ts'
-export type { ProjectType } from './project.ts'
-export type { ProjectDataMigrationResult } from './project-data-migration.ts'
-export type { CorumTeam } from './team.ts'
-export { isValidTeamId, slugifyTeamId } from './team.ts'
-export { CorumTeamService } from './team-service.ts'
-export { loadTeam, listTeams, saveTeam, deleteTeam, teamsRoot, teamDir } from './team-store.ts'
-export { CorumProjectDataService } from './project-data-service.ts'
-export type { ProjectCaller } from './project-data-service.ts'
-export { projectDataDomainSpecFor, projectDataDomainName, projectDataUnitName, projectDataTables, computeRequirementReadiness, deriveRequirementStatus } from './project-entities.ts'
-export type {
-  BugEntity,
-  BugSeverity,
-  BugStatus,
-  ProjectAudit,
-  ProjectRole,
-  RequirementEntity,
-  RequirementReadiness,
-  RequirementStatus,
-  StatusTransition,
-  TaskEntity,
-} from './project-entities.ts'
+// ── 工作区身份 / 类型（L0·L1 助手）────────────────────────────────────
+// 2026-09-26 项目模式剥离：这两组符号原在 `project.ts`（已移出闭源仓），
+// 但**任务模式也在用**（统一索引分区、task↔project 互斥门禁、泳道 slug），
+// 故沉淀为开源侧助手模块；闭源仓在 `src/shared/` 持同名副本。
+export {
+  canonicalWorkspaceKey, isValidProjectId, slugifyProjectId, writeJsonAtomic,
+  workspaceIndexRoot, findWorkspaceEntryByCwd, workspaceEntryTypeOf,
+} from './workspace-identity.ts'
+export type { WorkspaceIndexEntry } from './workspace-identity.ts'
+export {
+  PROJECT_TYPES, DEFAULT_PROJECT_TYPE, BUILTIN_WORK_TYPES, GENERAL_WORK_TYPE,
+  isProjectType, projectTypeOf, classifyProjectTypeTransition, canTransitionProjectType,
+  isValidWorkTypeSlug, resolveWorkTypes,
+} from './workspace-type.ts'
+export type { ProjectType, WorkType } from './workspace-type.ts'
 
 /** Cordis 插件名。 */
 import { existsSync, readFileSync } from 'node:fs'
@@ -130,7 +100,14 @@ const CORUM_AGENT_SETTINGS_SCHEMA = z.object({
   stallRecoverMinutes: z.number().default(STALL_RECOVER_MINUTES_DEFAULT),
 })
 
-/** 挂载 CorumAgentService + AgentRuntime + CorumProjectService + CorumTeamService 单例服务。 */
+/**
+ * 挂载 CorumAgentService + CorumTeamService 单例服务。
+ *
+ * 项目模式剥离（2026-09-26）：`CorumProjectService` / `CorumProjectDataService` /
+ * `AgentRuntime`（团队调度）已随项目模式迁到闭源仓 Corum-Harness-Project 的
+ * `@corum/corum-project`，由那个插件在自己的 `apply()` 里挂载（mount 点在
+ * `packages/desktop/cordis.ide.patch.yml` 的 project 段）。本插件只留任务模式面。
+ */
 export function apply(ctx: Context): void {
   runSettingsYamlGuard(ctx)
   // settings namespace 注册 + 订阅：settings 服务在 boot 早期可能尚未挂载（与
@@ -160,32 +137,15 @@ export function apply(ctx: Context): void {
   }
 
   const service = new CorumAgentService(ctx)
-  // 「项目数据跟随项目走」启动迁移（幂等可重跑；详见 project-migration.ts）。
-  // 首跑把旧形态详字段/事件日志搬进各项目 cwd，之后每次启动近零开销（无待迁即跳过）。
-  try {
-    const m = migrateProjectStore(msg => ctx.logger.info(msg))
-    ctx.logger.info(
-      `corum-agent: project-store migration done — detail=[${m.detailMigrated.join(',')}] `
-      + `events=[${m.eventsMigrated.join(',')}] unavailable=[${m.skippedUnavailable.join(',')}] `
-      + `backup=${m.backupDir ?? 'none'}`,
-    )
-  } catch (error) {
-    // 迁移失败不阻断启动：读取路径对旧形态向后兼容（详字段回退索引残留/旧日志路径）。
-    ctx.logger.error(`corum-agent: project-store migration failed (非阻断): ${String(error)}`)
-  }
-  // 四表存量迁移（Round 2）：$CORUM_HOME/storages/corum_project.json 按项目
-  // 拆进各 cwd/.corum/project/<projectId>/<table>/<entityId>.json。幂等可重跑；
-  // 备份先行（$CORUM_HOME/backups/project-data-migration-<ts>.json）；归属失败
-  // 的项目数据保留在旧文件，目录恢复后下次启动自动补迁。非阻断。
-  try {
-    const d = migrateProjectData(msg => ctx.logger.info(msg))
-    ctx.logger.info(
-      `corum-agent: project-data migration done — split=[${d.projectsSplit.join(',')}] `
-      + `unknown=[${d.unknownProjects.join(',')}] removed=${d.removed} backup=${d.backupPath ?? 'none'}`,
-    )
-  } catch (error) {
-    ctx.logger.error(`corum-agent: project-data migration failed (非阻断): ${String(error)}`)
-  }
+  // 项目模式剥离（2026-09-26）：`migrateProjectStore`（「项目数据跟随项目走」）与
+  // `migrateProjectData`（四表存量迁移）已随项目模式迁到闭源仓
+  // Corum-Harness-Project 的 `@corum/corum-project`，在它的 `apply()` 里以同一
+  // 非阻断 try/catch 形态执行。
+  //
+  // ⚠️ **顺序要求**（闭源仓 boot 契约）：那两个迁移会收敛项目条目的 cwd 形态，
+  // 而下面的 `migrateSessionIndex` 依赖它读出的 cwd 判定工作区身份。故闭源插件
+  // 必须在本插件**之前**装配（`cordis.ide.patch.yml` 的插入序即够），否则首跑
+  // 那次迁移的会话索引可能读到未收敛的 cwd。
   // 统一会话索引迁移（2026-09-15）：两套异构旧索引 → $CORUM_HOME/sessions.json
   // （键 = sessionId）。幂等可重跑；死条目按用户裁定直接丢弃（计数进日志）。
   // 放在 project-store 迁移之后：后者会收敛项目条目的 cwd 形态，本迁移依赖它
@@ -200,12 +160,6 @@ export function apply(ctx: Context): void {
   } catch (error) {
     ctx.logger.error(`corum-agent: session-index migration failed (非阻断): ${String(error)}`)
   }
-  new AgentRuntime(ctx, service)
-  new CorumProjectService(ctx)
-  const projectData = new CorumProjectDataService(ctx, service)
-  service.registerLaneSetupHook((agentCtx, projectId, profileId) => {
-    projectData.installAgentTools(agentCtx, projectId, profileId)
-  })
   new CorumTeamService(ctx)
   // 日志验证开关：`CORUM_DEV_AGENT_VERIFY` 任意非空值 → 启动即用内置 smoke-test
   // profile 跑一遍「创建 Agent → followup → 汇总回复」闭环，把结果打到日志。

@@ -1,9 +1,9 @@
 /**
  * corumAgent 跨域 RPC 契约（/api/corumAgent/*）。
  *
- * 给 client 半消费方（conversation / ide-sidebar / agent-ui-dev / team-ui-dev /
- * ide-project-ui）type-only 引用：方法名常量替代裸字符串，args/result 类型
- * 与服务实现（agent-service.ts 的 @Remote 端点）同源——服务端改方法名/参数，
+ * 给 client 半消费方（conversation / ide-sidebar / agent-ui-dev / team-ui-dev）
+ * type-only 引用：方法名常量替代裸字符串，args/result 类型与服务实现
+ * （agent-service.ts 的 @Remote 端点）同源——服务端改方法名/参数，
  * 消费方编译期即报错，而非运行时发现。
  *
  * 本文件纯类型 + 字符串常量，无运行时副作用（不 import 服务实现/官方 host 依赖），
@@ -55,12 +55,6 @@ export const CORUM_AGENT_METHODS = {
   saveProfile: 'saveProfile',
   /** 删除一个 AgentProfile。 */
   deleteProfile: 'deleteProfile',
-  /** 创建/恢复指定工作类型泳道的会话。 */
-  createAgentForType: 'createAgentForType',
-  /** 在泳道会话里发一个 prompt，等回复。 */
-  runPromptForType: 'runPromptForType',
-  /** 读泳道会话的历史事件。 */
-  getSessionEventsForType: 'getSessionEventsForType',
   /** 读取润色配置。 */
   getPolishConfig: 'getPolishConfig',
   /** 保存润色配置。 */
@@ -145,37 +139,12 @@ export type DeleteProfileArgs = {
   id: string
 }
 
-/** createAgentForType 入参：按「项目×角色×类型」寻址（type 缺省默认泳道）。 */
-export type CreateAgentForTypeArgs = {
-  projectId: string
-  profileId: string
-  type?: string
-}
-/** createAgentForType 返回：泳道会话 sessionId + 创建标记。 */
-export interface CreateAgentForTypeResult {
-  sessionId: string
-  created: boolean
-}
-
-/** runPromptForType 入参。 */
-export type RunPromptForTypeArgs = {
-  projectId: string
-  profileId: string
-  type: string
-  prompt: string
-}
-
-/** getSessionEventsForType 入参：从 fromSeq 起读。 */
-export type GetSessionEventsForTypeArgs = {
-  projectId: string
-  profileId: string
-  type: string
-  fromSeq: number
-}
-/** getSessionEventsForType 返回：事件投影表。 */
-export interface GetSessionEventsForTypeResult {
-  events: SessionEventDto[]
-}
+// 项目模式剥离（2026-09-26）：project-lane 端点的 args/result
+// （CreateAgentForTypeArgs / CreateAgentForTypeResult / RunPromptForTypeArgs /
+// GetSessionEventsForTypeArgs / GetSessionEventsForTypeResult）已随
+// createAgentForType / runPromptForType / getSessionEventsForType 三个 @Remote
+// 迁到闭源仓 Corum-Harness-Project 的 `@corum/corum-project/contract`
+// ——它们只被这三个已移动的 RPC 消费，本契约不再声明。
 
 /** verify 返回：冒烟结果（失败不抛错，error 字段带回原因）。 */
 export interface VerifyResult {
@@ -221,9 +190,6 @@ export interface CorumAgentEndpointTable {
   [CORUM_AGENT_METHODS.listAgents]: { args: {}; result: ListAgentsResult }
   [CORUM_AGENT_METHODS.saveProfile]: { args: SaveProfileArgs; result: SaveProfileResult }
   [CORUM_AGENT_METHODS.deleteProfile]: { args: DeleteProfileArgs; result: void }
-  [CORUM_AGENT_METHODS.createAgentForType]: { args: CreateAgentForTypeArgs; result: CreateAgentForTypeResult }
-  [CORUM_AGENT_METHODS.runPromptForType]: { args: RunPromptForTypeArgs; result: RunPromptResult }
-  [CORUM_AGENT_METHODS.getSessionEventsForType]: { args: GetSessionEventsForTypeArgs; result: GetSessionEventsForTypeResult }
   [CORUM_AGENT_METHODS.getPolishConfig]: { args: {}; result: GetPolishConfigResult }
   [CORUM_AGENT_METHODS.setPolishConfig]: { args: SetPolishConfigArgs; result: { ok: boolean } }
   [CORUM_AGENT_METHODS.polishPrompt]: { args: PolishPromptArgs; result: PolishPromptResult }

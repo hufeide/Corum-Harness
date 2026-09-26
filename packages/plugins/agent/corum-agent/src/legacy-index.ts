@@ -31,7 +31,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { corumHome } from './session-index.ts'
 import type { SessionIndexEntry } from './session-index.ts'
-import { canonicalWorkspaceKey, isValidProjectId } from './project.ts'
+// 工作区身份（L0 助手）：项目模式剥离后由 workspace-identity.ts 承接。
+import { canonicalWorkspaceKey, isValidProjectId } from './workspace-identity.ts'
 
 /** 一条从旧索引读出的会话（统一形态 + 来源标记）。 */
 export interface LegacySession {

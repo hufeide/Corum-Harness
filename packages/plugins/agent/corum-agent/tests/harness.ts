@@ -426,9 +426,9 @@ function installState(service: CorumAgentService, ctx: Context, events: Recorded
   // fork（corum）2026-09-26：模型回落告知的去重集（`Set<string>`）同属构造器初始化 ——
   // 缺了它，`notifyModelFallbackOnce` 第一行 `.has(...)` 就抛（正是上面那条坑）。
   Object.defineProperty(container, 'notifiedModelFallbacks', { value: new Set<string>(), writable: true, configurable: true })
-  // `laneSetupHooks` 是数组、不是「状态表」，但同属构造器初始化 ⇒ 一并补上
-  // （`registerLaneSetupHook` 会 push，缺了它会抛）。
-  Object.defineProperty(container, 'laneSetupHooks', { value: [], writable: true, configurable: true })
+  // 项目模式剥离（2026-09-26）：`laneSetupHooks` 字段随泳道创建编排迁到闭源仓
+  // Corum-Harness-Project，故这里**不再**捏造该字段（捏一个不存在的字段只会
+  // 掩盖「搬运后哪里真的断了」——正是本文件要消灭的静默失真形态）。
   const registry = container[STATE_CONTAINER_KEY ?? '']
   void registry
   // `conductor` 与 `progress` 都是**有自己状态的对象**（已分别抽到
