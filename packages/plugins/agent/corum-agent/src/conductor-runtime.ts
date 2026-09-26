@@ -31,6 +31,16 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+// 空类型 import：让 `ctx.tools` 的 Context 合并生效（`ToolRuntime` 由
+// @deepseek-ai/dsh-tools 声明为 cordis 的 ambient augmentation）。
+// ⚠️ 这条 import **不是装饰性的**：本文件用了 `agentCtx.tools.restrict` / `.guard`，
+// 但「谁把 dsh-tools 拉进 program」原本是**邻居文件**在承担 —— 剥离前同包的
+// runtime.ts / project-data-service.ts 各有一行 `import { defineTool } from
+// '@deepseek-ai/dsh-tools'`（值导入），靠 tsconfig 的 `include: ["src"]` 把增强带进来。
+// 这两个文件被删后，program 里再无任何文件引用 dsh-tools ⇒ 增强不生效 ⇒
+// `TS2339: Property 'tools' does not exist on type 'Context'`（实测两处：
+// `restrict` / `guard`）。故改为**本文件自证**依赖，不再依赖邻居的偶然引用。
+import type {} from '@deepseek-ai/dsh-tools'
 import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
 import {
   CONDUCTOR_PERSONA,
