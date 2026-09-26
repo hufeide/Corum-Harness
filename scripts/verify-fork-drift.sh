@@ -465,7 +465,6 @@ if select_section 4; then
 # 这仍然只是必要条件（名字在 host 源码出现），不是充分条件——真正的语义断言在
 # corum-api-remotes 的 host spec 里（多路转发/丢弃/降级）。守卫只挡「注释假命中」。
 section "[4] host emit 面：声明的事件是否真有人 emit"
-emit_scope="$REPO_ROOT/packages"
 for ev in $declared; do
   case "$ev" in
     corum/task/*|corum/group/*)
