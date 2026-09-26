@@ -51,6 +51,40 @@ AGENT_EVENTS="$REPO_ROOT/packages/plugins/agent/corum-agent/src/events.ts"
 AGENT_CONTRACT="$REPO_ROOT/packages/plugins/agent/corum-agent/src/contract/agent.ts"
 AGENT_SERVICE="$REPO_ROOT/packages/plugins/agent/corum-agent/src/agent-service.ts"
 
+# ── 闭源仓（项目模式）——2026-09-26 开源/闭源剥离 ──────────────────────────────
+#
+# `corum/task/*` 与 `corum/group/*` 这些**领域事件**（域调度器的因果记录）随项目模式
+# 迁到了闭源仓 Corum-Harness-Project 的 `@corum/corum-project`；开源仓只保留事件的
+# **声明与转发面**（`corum-api-remotes/src/corum-events.ts` + `remote-events.ts`，
+# 因为开源侧 `packages/desktop/src/client/notification-bridge.ts` 仍在消费它们）。
+#
+# 故本脚本对这两类事件的「声明 ↔ 实现」断言改为**跨仓**：闭源仓检出在场就照旧断言，
+# 不在场就 **skip 并说明为什么**（不是静默放过——静默会正好把「闭源侧没 emit」这种
+# 真故障变成看不见）。路径可经 `CORUM_CLOSED_REPO` 覆盖（CI/别处检出）。
+#
+# ⚠️ 判据**没有降级**：断言本身一字未改，只是取样面从「开源仓取不到就不判」变成
+# 「按仓归属取样」。开源单独检出时本组事件**报 skip**（明确计数），其余 18 组照常。
+#
+# 候选路径（按序取第一个在场的）：显式覆盖（`CORUM_CLOSED_REPO`）→ 工作树内的
+# `Corum-Harness-Project/`（迁移期形态：闭源码树暂存在工作树根、待用户落盘）→
+# 与开源仓**并排的兄弟目录**（落盘后的正式形态）。
+CORUM_CLOSED_REPO="${CORUM_CLOSED_REPO:-}"
+CLOSED_PROJECT_SRC=""
+if [ -z "$CORUM_CLOSED_REPO" ]; then
+  for cand in "$REPO_ROOT/Corum-Harness-Project" "$REPO_ROOT/../Corum-Harness-Project"; do
+    if [ -d "$cand/packages/corum-project/src" ]; then
+      CORUM_CLOSED_REPO="$(cd "$cand" && pwd)"
+      break
+    fi
+  done
+fi
+if [ -n "$CORUM_CLOSED_REPO" ]; then
+  CLOSED_PROJECT_SRC="$CORUM_CLOSED_REPO/packages/corum-project/src"
+else
+  # 两者都不在：留一个**可读**的路径给 skip 文案（说明在找哪儿）。
+  CLOSED_PROJECT_SRC="$REPO_ROOT/../Corum-Harness-Project/packages/corum-project/src"
+fi
+
 failures=0
 skips=0
 
@@ -385,24 +419,36 @@ else
   pass "allowlist 无死事件"
 fi
 
-# ── 3. 领域事件（corum-agent/events.ts）↔ 转发声明名字对齐 ──────────────────
+# ── 3. 领域事件（events.ts）↔ 转发声明名字对齐 ──────────────────────────────
+#
+# 2026-09-26 项目模式剥离：`events.ts`（领域事件声明）已迁到闭源仓
+# `@corum/corum-project`；本节的取样面随之改成 **闭源仓优先、开源仓兜底**
+# ——这样本脚本对「剥离前后」都保持同一判据（不认识事件的仓 → 照旧 skip）。
 fi  # ← select_section 2
 if select_section 3; then
-section "[3] 领域事件（corum-agent/events.ts）↔ corum-events.ts 名字对齐"
-if [ -f "$AGENT_EVENTS" ]; then
-  domain=$(uncomment_all "$AGENT_EVENTS" | grep -oE "'corum/(task|group)/[a-z-]+'" | tr -d "'" | sort -u)
+section "[3] 领域事件（events.ts）↔ corum-events.ts 名字对齐"
+DOMAIN_EVENTS_SRC=""
+if [ -f "$CLOSED_PROJECT_SRC/events.ts" ]; then
+  DOMAIN_EVENTS_SRC="$CLOSED_PROJECT_SRC/events.ts"
+  DOMAIN_EVENTS_OWNER="闭源仓 corum-project"
+elif [ -f "$AGENT_EVENTS" ]; then
+  DOMAIN_EVENTS_SRC="$AGENT_EVENTS"
+  DOMAIN_EVENTS_OWNER="开源仓 corum-agent"
+fi
+if [ -n "$DOMAIN_EVENTS_SRC" ]; then
+  domain=$(uncomment_all "$DOMAIN_EVENTS_SRC" | grep -oE "'corum/(task|group)/[a-z-]+'" | tr -d "'" | sort -u)
   if [ -z "$domain" ]; then
-    fail "corum-agent/events.ts 未解析到 corum/task|group 事件（正则失配？）"
+    fail "$DOMAIN_EVENTS_SRC 未解析到 corum/task|group 事件（正则失配？）"
   else
     domain_missing=$(comm -23 <(printf '%s\n' "$domain") <(printf '%s\n' "$declared"))
     if [ -n "$domain_missing" ]; then
       fail "领域事件未在 corum-events.ts 声明：$(printf '%s ' $domain_missing)"
     else
-      pass "领域事件全部有转发声明（$(printf '%s\n' "$domain" | wc -l | tr -d ' ') 个）"
+      pass "领域事件全部有转发声明（$(printf '%s\n' "$domain" | wc -l | tr -d ' ') 个；事实源=${DOMAIN_EVENTS_OWNER}）"
     fi
   fi
 else
-  skip "找不到 $AGENT_EVENTS"
+  skip "找不到领域事件声明（既无 ${CLOSED_PROJECT_SRC}/events.ts 也无 ${AGENT_EVENTS}）"
 fi
 
 # ── 4. 宿主 emit 面 ↔ 声明（防「声明了但 host 从不 emit」）──────────────────
@@ -424,8 +470,16 @@ for ev in $declared; do
   case "$ev" in
     corum/task/*|corum/group/*)
       # 领域事件由 AgentRuntime.record 统一 emit（事件名以字符串字面量出现）。
-      if ! code_has_r "'$ev'" "$emit_scope/plugins/agent/corum-agent/src"; then
-        fail "${ev}：corum-agent 源码中无 emit 字面量（注释不算）"
+      # 2026-09-26 项目模式剥离：emit 点（events.ts / runtime.ts / project-service.ts）
+      # 随项目模式迁到闭源仓 `@corum/corum-project` ⇒ 取样面改为**闭源仓优先**。
+      # 闭源仓不在场时报 **skip 并说明原因**——不是静默放过：静默会把「闭源侧没
+      # emit」这种真故障变成看不见，而 skip 会计入 skips 计数、在结尾摘要里显式出现。
+      if [ -d "$CLOSED_PROJECT_SRC" ]; then
+        code_has_r "'$ev'" "$CLOSED_PROJECT_SRC" \
+          && pass "${ev}：闭源仓 corum-project 有 emit" \
+          || fail "${ev}：闭源仓 corum-project 源码中无 emit 字面量（注释不算）"
+      else
+        skip "${ev}：需闭源仓检出（未找到 ${CLOSED_PROJECT_SRC}）—— 该事件的 emit 点已随项目模式迁出"
       fi
       ;;
     corum/terminal/output)
