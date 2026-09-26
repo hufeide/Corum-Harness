@@ -267,6 +267,7 @@ async function askCorumEscalation(
     'corum/escalation/ask',
     {
       agent: deps.parent,
+      sessionId: String(deps.parent.session.id),
       mode: escalation.mode,
       ...(escalation.justification === undefined ? {} : { justification: escalation.justification }),
     },

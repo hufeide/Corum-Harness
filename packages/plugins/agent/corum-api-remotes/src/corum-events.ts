@@ -675,6 +675,15 @@ export interface CorumEscalationAskRequestEvent {
    * **硬要求载荷带 `agent`**，否则该事件不进可转发联合 —— 与 `corum/model-ask/request` 同款）。
    */
   readonly agent: Agent
+  /**
+   * **父会话** id（卡片该渲染到哪个会话）。
+   *
+   * 为什么随载荷下发而不是只让 client 自己用 `ctx.sessions.scopeOf(owner)` 推：
+   * 实机（2026-09-26）出现「corum waterfall 被派发、但客户端未认领 ⇒ 静默走兜底」，
+   * 而 `scopeOf` 解析失败是两种嫌疑之一。随载荷带上会话身份可以**绕开**这条依赖
+   * （官方 `approval/request` 那条之所以好，是因为它由官方服务派发、载体形状是被验证过的）。
+   */
+  readonly sessionId?: string
   /** 子 Agent 请求的目标档位（官方封闭的提权目标词汇）。 */
   readonly mode: 'workspace-write' | 'danger-full-access'
   /** 模型给的一句话理由（可缺省；仅用于呈现）。 */

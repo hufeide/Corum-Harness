@@ -113,7 +113,10 @@ export function apply(ctx: ClientContext): void {
    * （下游 = 宿主的兜底 = 官方审批卡，见 `escalation-answerer.ts` 的两级通路）。
    */
   ctx.remote.$on('corum/escalation/ask', async function (request, next) {
-    const sessionId = ctx.sessions.scopeOf(this)
+    // 会话身份：先用与官方 `approval/request` 同款的 scope 解析；解析不出时退回**载荷里的
+    // 会话 id**（`sessionId`）。这条兜底是 2026-09-26 加的：当时 `scopeOf` 在客户端是否可靠
+    // 尚未证实，而载荷这条路不依赖它 —— 宁可多一条确定的路，也不要让请求静默走 `next()`。
+    const sessionId = ctx.sessions.scopeOf(this) ?? (request.sessionId as unknown as ReturnType<typeof ctx.sessions.scopeOf>)
     if (sessionId === undefined) return await next()
     const pending = new PendingApproval(sessionId, {
       toolName: 'bash',
