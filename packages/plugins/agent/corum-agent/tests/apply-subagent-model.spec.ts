@@ -18,7 +18,7 @@
  * 价值全在「完整入参 + 真实写盘」语义对得上）。Agent/会话按 CorumAgentService
  * 内部表的最小形状 stub，不拉官方 host 组装（那是 runtime-task 级联的重装置）。
  */
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { makeHarness, projectionsOf, type Harness } from './harness.ts'
@@ -45,12 +45,6 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     trust: 'user',
     ...overrides,
   }
-}
-
-function writeProfile(p: AgentProfile): void {
-  const dir = join(h.home, '.agent-presets', p.id)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'agent.json'), JSON.stringify(p, null, 2))
 }
 
 /**
@@ -217,12 +211,22 @@ describe('applySubagentModelForSession — 委派机制模型永久切换', () =
 describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补模型覆盖', () => {
   interface OverrideCall { sessionId: string; role: 'worker' | 'research'; route?: { provider: string; model: string; reasoningEffort?: string }; clear?: boolean }
 
-  /** 组装带补偿三件套 mock 的服务（registry + 投影 + orchestration 记录器）。 */
-  function makeCompensableService(liveSessions: Array<{ sessionId: string; presetId: string; parentSession?: string }>): {
+  /**
+   * 组装带补偿三件套 mock 的服务（registry + 投影 + orchestration 记录器）。
+   *
+   * ⚠️ 2026-09-21（P3-a）迁移：底座一律用 `makeHarness()`（`h.service` 已由 harness
+   * 经 `Object.create` + `installState` 装好状态表），本函数只做**能力面挂载**——
+   * 原先自己 `Object.create` 服务再整体替换 `ctx` 的写法，在状态搬进 AgentRegistry
+   * 之后会静默失真（见 harness.ts 头注）。
+   *
+   * @param h - 测试台（同一测试独占的 home 与状态表；预设也写进它）。
+   * @param liveSessions - 存活会话（官方 registry 口径：sessionId + 挂载的预设）。
+   */
+  function makeCompensableService(h: Harness, liveSessions: Array<{ sessionId: string; presetId: string; parentSession?: string }>): {
     svc: CorumAgentService
     calls: OverrideCall[]
   } {
-    const svc = makeService()
+    const svc = h.service
     const calls: OverrideCall[] = []
     const agents = liveSessions.map(({ sessionId, presetId, parentSession }) => ({
       // session 形状对齐官方 SessionHeader：parentSession 在 session.header 上。
@@ -233,7 +237,6 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
       __presetId: presetId,
     }))
     const agentsFace = { list: (): unknown[] => agents }
-    const projections = { stateOf: (_s: unknown, key: string): unknown => (key === 'agentPreset' ? undefined : undefined) }
     // stateOf 需按 session 反查预设：借 agents 表找 id。
     const projectionsBySession = {
       stateOf: (session: { id: string }, key: string): string | undefined =>
@@ -247,22 +250,21 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
         calls.push({ sessionId, role, clear: true })
       },
     }
-    ;(svc as unknown as { ctx: unknown }).ctx = {
-      agents: agentsFace,
-      get: (name: string): unknown =>
-        name === 'sessionProjections' ? projectionsBySession
-        : name === 'corumOrchestration' ? orchestration
-        : undefined,
-      logger: { warn: (): void => {}, info: (): void => {}, error: (): void => {} },
-    }
-    void projections
+    // ⚠️ 挂载一律经 harness（不再整体替换 `svc.ctx`）：`agents` 在 `static inject` 里
+    // ⇒ provide（属性 + get 双向可读）；`sessionProjections` / `corumOrchestration` 是
+    // 「ctx.get 取的可选服务」⇒ **provideGet**（挂成属性会让实现的「问不到」这一态
+    // 消失，见 harness.ts L140 注释）。logger 由 harness 的 mock ctx 静音，无需另挂。
+    h.provide('agents', agentsFace)
+    h.provideGet('sessionProjections', projectionsBySession)
+    h.provideGet('corumOrchestration', orchestration)
     return { svc, calls }
   }
 
   it('(c1) 改 subagentModel 保存后，挂载该预设的存活会话收到 worker 角色覆盖', () => {
     const p = profile()
-    writeProfile(p)
-    const { svc, calls } = makeCompensableService([{ sessionId: 'live-1', presetId: p.id }])
+    const h = setup()
+    h.writeProfile(p)
+    const { svc, calls } = makeCompensableService(h, [{ sessionId: 'live-1', presetId: p.id }])
 
     svc.saveProfileRemote({
       id: p.id,
@@ -287,8 +289,9 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
 
   it('(c2) research 角色独立补偿：改 researchModel 收到 research 键，worker 不动', () => {
     const p = profile({ subagentModel: { provider: 'local', model: 'keep-worker' } })
-    writeProfile(p)
-    const { svc, calls } = makeCompensableService([{ sessionId: 'live-2', presetId: p.id }])
+    const h = setup()
+    h.writeProfile(p)
+    const { svc, calls } = makeCompensableService(h, [{ sessionId: 'live-2', presetId: p.id }])
 
     svc.saveProfileRemote({
       id: p.id,
@@ -311,8 +314,9 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
 
   it('(c3) 无关保存（模型没变）零补偿——不覆盖会话里已有的临时决定', () => {
     const p = profile({ subagentModel: { provider: 'pi-ai', model: 'glm-5.3' } })
-    writeProfile(p)
-    const { svc, calls } = makeCompensableService([{ sessionId: 'live-3', presetId: p.id }])
+    const h = setup()
+    h.writeProfile(p)
+    const { svc, calls } = makeCompensableService(h, [{ sessionId: 'live-3', presetId: p.id }])
 
     svc.saveProfileRemote({
       id: p.id,
@@ -332,8 +336,9 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
 
   it('(c4) 改回「跟随主 Agent」（键删除）⇒ 补偿清掉该角色的覆盖', () => {
     const p = profile({ subagentModel: { provider: 'pi-ai', model: 'glm-5.3' } })
-    writeProfile(p)
-    const { svc, calls } = makeCompensableService([{ sessionId: 'live-4', presetId: p.id }])
+    const h = setup()
+    h.writeProfile(p)
+    const { svc, calls } = makeCompensableService(h, [{ sessionId: 'live-4', presetId: p.id }])
 
     svc.saveProfileRemote({
       id: p.id,
@@ -359,8 +364,9 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
     // compile.ts：research 生效值 = researchModel ?? subagentModel。预设原先两者都配，
     // 保存时只改 subagentModel ⇒ research 生效值也变了 ⇒ research 键同样要补。
     const p = profile({ subagentModel: { provider: 'old', model: 'm1' }, researchModel: { provider: 'old', model: 'm1' } })
-    writeProfile(p)
-    const { svc, calls } = makeCompensableService([{ sessionId: 'live-5', presetId: p.id }])
+    const h = setup()
+    h.writeProfile(p)
+    const { svc, calls } = makeCompensableService(h, [{ sessionId: 'live-5', presetId: p.id }])
 
     svc.saveProfileRemote({
       id: p.id,
@@ -384,9 +390,10 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
   it('(c6) 只补根会话（跳过带 parentSession 的子会话）+ 只补挂载该预设的会话', () => {
     const p = profile()
     const other = profile({ id: 'sam-other-agent' })
-    writeProfile(p)
-    writeProfile(other)
-    const { svc, calls } = makeCompensableService([
+    const h = setup()
+    h.writeProfile(p)
+    h.writeProfile(other)
+    const { svc, calls } = makeCompensableService(h, [
       { sessionId: 'child-of-someone', presetId: p.id, parentSession: 'parent-x' },
       { sessionId: 'other-preset', presetId: other.id },
       { sessionId: 'right-one', presetId: p.id },
@@ -413,7 +420,8 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
 
   it('(c7) 幂等：重复保存同值 ⇒ 第二次零补偿（变化检测拦住）', () => {
     const p = profile()
-    writeProfile(p)
+    const h = setup()
+    h.writeProfile(p)
     const input = {
       id: p.id,
       baseMode: 'standard' as const,
@@ -426,7 +434,7 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
       memoryPolicy: p.memoryPolicy,
       trust: 'user' as const,
     }
-    const { svc, calls } = makeCompensableService([{ sessionId: 'live-7', presetId: p.id }])
+    const { svc, calls } = makeCompensableService(h, [{ sessionId: 'live-7', presetId: p.id }])
 
     svc.saveProfileRemote(input)
     expect(calls).toHaveLength(2)
@@ -437,13 +445,12 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
 
   it('(c8) corumOrchestration 缺席 ⇒ 保存流程不受影响（fail-soft）', () => {
     const p = profile()
-    writeProfile(p)
-    const svc = makeService()
-    ;(svc as unknown as { ctx: unknown }).ctx = {
-      agents: { list: (): unknown[] => [] },
-      get: (): unknown => undefined,
-      logger: { warn: (): void => {}, info: (): void => {}, error: (): void => {} },
-    }
+    const h = setup()
+    h.writeProfile(p)
+    const svc = h.service
+    // corumOrchestration 缺席（`ctx.get` 取不到）＝ headless/单测形态 ⇒ 无覆盖通路，
+    // 保存流程不得因它失败。只需给出 agents 面：`static inject` 的服务用 provide。
+    h.provide('agents', { list: (): unknown[] => [] })
 
     expect(() => svc.saveProfileRemote({
       id: p.id,
@@ -458,14 +465,21 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
       trust: 'user',
     })).not.toThrow()
     // 预设本身照常落盘。
-    const saved = JSON.parse(readFileSync(join(home, '.agent-presets', p.id, 'agent.json'), 'utf8')) as AgentProfile
+    const saved = JSON.parse(readFileSync(join(h.home, '.agent-presets', p.id, 'agent.json'), 'utf8')) as AgentProfile
     expect(saved.subagentModel).toEqual({ provider: 'pi-ai', model: 'glm-5.3' })
   })
 
   it('(c9) reasoningEffort undefined 与空串等价（编译产物同态 ⇒ 不触发补偿）', () => {
+    // ⚠️ input 必须带上**同值**的 `researchModel`：实现按角色比生效值
+    // （research 生效值 = researchModel ?? subagentModel，agent-service.ts L2645-46）。
+    // 原先本 input 漏了它 ⇒ researchBefore（存量回落 subagentModel 的 '' 档）≠
+    // researchAfter（undefined）⇒ 误触发 research 补偿。补上后测的才是本用例的语义：
+    // worker 侧 'undefined' 与存量 `reasoningEffort: ''` 判定等价（corumRouteEquals）
+    // ⇒ 零补偿。（存量预设不配 researchModel，正是为了走 `?? subagentModel` 回落口径。）
     const p = profile({ subagentModel: { provider: 'pi-ai', model: 'glm-5.3', reasoningEffort: '' } })
-    writeProfile(p)
-    const { svc, calls } = makeCompensableService([{ sessionId: 'live-9', presetId: p.id }])
+    const h = setup()
+    h.writeProfile(p)
+    const { svc, calls } = makeCompensableService(h, [{ sessionId: 'live-9', presetId: p.id }])
 
     svc.saveProfileRemote({
       id: p.id,
@@ -473,6 +487,7 @@ describe('compensateLiveSessionsForProfile — 预设保存后给存量会话补
       prompt: p.prompt,
       model: p.model,
       subagentModel: { provider: 'pi-ai', model: 'glm-5.3' },
+      researchModel: { provider: 'pi-ai', model: 'glm-5.3', reasoningEffort: '' },
       skills: p.skills,
       mcpServers: p.mcpServers,
       terminal: p.terminal,
