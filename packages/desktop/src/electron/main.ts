@@ -310,6 +310,28 @@ async function launchCombo(id: string): Promise<{ ok: boolean; error?: string }>
 }
 
 async function main(): Promise<void> {
+  /**
+   * 统一应用身份 —— **必须在任何 safeStorage 调用之前**（2026-09-26 修）。
+   *
+   * 为什么必需：macOS 上 `safeStorage` 用**应用名**选 Keychain 条目
+   * （`<app.getName()> Safe Storage`）。dev 态直接跑 Electron 二进制时身份是
+   * `Electron`，而打包态是 `corum-desktop`（= package.json 的 name）——两者是
+   * **两个不同的 Keychain 条目**，于是同一个 home 里的 `$CORUM_HOME/.master-key`
+   * 谁建的、另一方就解不开：
+   *
+   *   `credentials-local(encrypted): a stored credential is encrypted but the
+   *    master key is unavailable`  ⇒ **整棵插件树加载失败，应用起不来**。
+   *
+   * 实测（4 组对照，2026-09-26）：不 setName 时 dev 解不开打包态建的密钥；
+   * `app.setName('corum-desktop')` 后两边互通。故显式固定这一个名字，使
+   * dev / 打包态 / 各调试端口实例**共用同一 Keychain 条目**。
+   *
+   * 注意：名字来源于 package.json 的 `name`（`corum-desktop`），而 showName 用的
+   * `productName`（`Corum`）只影响 Dock/菜单显示 —— 改名会**换 Keychain 条目**，
+   * 使既有 `.master-key` 解不开，因此这里的字面量必须与 package.json 的 `name` 保持一致。
+   */
+  app.setName('corum-desktop')
+
   // 多实例隔离：默认所有 corum-desktop 实例会挤在同一个 user-data-dir
   // （~/Library/Application Support/Electron），共享 Chromium profile/锁/
   // 网络服务进程——一个实例（如 IDE 测试窗口）的渲染/网络崩溃会传染另一个
