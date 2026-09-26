@@ -51,9 +51,13 @@
 #    双条件；`is_self` 用 `pgrep -f` 集合判定而**不是** `ps -p <pid> -o command=`
 #    ——后者在 Agent 工具沙箱里被禁（Operation not permitted），cmdline 取空会让
 #    is_self 永远 false、cleanup 静默全跳过（2026-08-28 四实例残留事故的根因）。
-# 2. **dev 主实例的清理必须排除验证实例**（连子进程一起）。两者 cmdline 都含
-#    `packages/desktop/lib`，兜底 kill 会顺手带走验证实例（2026-09-12 实测：起主实例后
-#    验证实例静默消失、日志无报错）。
+# 2. **清理必须按实例身份分档**（2026-09-12 与 2026-09-25 两次教训）：
+#    · dev(主) 与 verify 的 cmdline **完全一样**（都是 `packages/desktop/lib/main.js
+#      --combo=coding`）⇒ 靠 cmdline 分不开，只能靠「各自的 PID 文件 + home」。
+#    · dev(主) 兜底清理时**必须排除 verify 的记录树（连子进程）**，否则起主实例会把
+#      verify 静默带走（2026-09-12 实测：验证实例消失、日志无报错，排查了半天）。
+#    · verify **自己绝不做任何宽匹配兜底**（只杀自己 PID 记录的那棵树）——同理，
+#      否则它会杀掉主实例（原 verify-instance.sh 的明文纪律；本场合并时曾丢失）。
 # 3. **spawn 必须切断与脚本的 fd 血缘**（独立子 shell + 三重 fd 重定向 + disown）。
 #    后台进程若继承脚本的 stdout/stderr，脚本退出时 shell 会等该 fd 关闭而 hang，外层
 #    「带超时的 bash 调用」随即 SIGTERM 整个进程组、连坐刚起的 Electron。
@@ -175,25 +179,55 @@ case "$CMD" in
 esac
 parse_args "$@" || exit 2
 
-# 归一 home：dev→.corum-dev-home / verify→.corum-verify-home / 绝对路径原样。
-# 兼容 CORUM_HOME 直接指定（既有调用方与技能都这么用）。
+# ── home 归一的**核心决策**（2026-09-26 用户定调）──────────────────────────
+#
+# 「开发和验证的 CORUM_HOME 都指向**同一个路径**；打包的走**默认路径** `~/.corum`。」
+# ⇒ dev / verify / packaged **三者共用 `~/.corum`**（用户拍板：与打包同一个 home）。
+#
+# 于是「实例身份」不再由 home 路径区分，而是由 **角色(role) + 端口 + PID 文件名** 区分：
+#
+#   role=dev        ~/.corum  :9222  coding.pid          ← 用户日常开发实例
+#   role=verify     ~/.corum  :9333  verify-coding.pid   ← 子 Agent 可随便重启的实例
+#   mode=packaged   ~/.corum  :9222  pack-9222.pid       ← 打包态（吃 .app 闭包）
+#
+# ⚠️ 三个实例共写一份 home ⇒ 清理时**必须**靠 PID 文件分辨归属（见不变式 2）：
+#    dev 与 verify 的 cmdline **完全一样**，任何宽匹配都会互杀。
+#
+# 仍保留两个**显式**选项供需要真隔离时使用（默认不再使用）：
+#   --home=legacy-dev / legacy-verify  → 仓库内的 .corum-dev-home / .corum-verify-home
+#   --home=/abs/path                   → 任意隔离 home
+DEFAULT_HOME="${CORUM_DEFAULT_HOME:-$HOME/.corum}"
+
 resolve_home() {
   local sel="$HOME_SEL"
-  if [[ -z "$sel" && -n "${CORUM_HOME:-}" ]]; then
-    # 显式 CORUM_HOME 优先；但若它恰好等于两个标准 home，仍按标准语义识别
-    if [[ "$CORUM_HOME" == "$DESKTOP/.corum-verify-home" ]]; then sel=verify; else printf '%s' "$CORUM_HOME"; return 0; fi
-  fi
+  # ① 显式绝对路径（真隔离）
+  if [[ "$sel" == /* ]]; then printf '%s' "$sel"; return 0; fi
+  # ② 旧仓库内 home（显式要求时才用）
   case "$sel" in
-    ""|dev)   printf '%s' "$DESKTOP/.corum-dev-home" ;;
-    verify)   printf '%s' "$DESKTOP/.corum-verify-home" ;;
-    /*)       printf '%s' "$sel" ;;
-    *)        printf '%s' "$DESKTOP/$sel" ;;
+    legacy-dev)    printf '%s' "$DESKTOP/.corum-dev-home"; return 0 ;;
+    legacy-verify) printf '%s' "$DESKTOP/.corum-verify-home"; return 0 ;;
   esac
+  # ③ 显式 CORUM_HOME（既有调用方与技能仍这么用）
+  if [[ -n "${CORUM_HOME:-}" ]]; then printf '%s' "$CORUM_HOME"; return 0; fi
+  # ④ 默认：dev / verify / packaged 共用同一个 home
+  printf '%s' "$DEFAULT_HOME"
 }
 
 CORUM_HOME_RESOLVED="$(resolve_home)"
 export CORUM_HOME="$CORUM_HOME_RESOLVED"
-export CORUM_HOME_SEL="${HOME_SEL:-$([[ "$CORUM_HOME_RESOLVED" == *".corum-verify-home" ]] && echo verify || echo dev)}"
+
+# 角色（**不是**路径）：决定端口、PID 文件名与清理策略。
+if [[ "$HOME_SEL" == "verify" || "$HOME_SEL" == "legacy-verify" ]]; then
+  CORUM_HOME_SEL=verify
+elif [[ -n "${CORUM_HOME:-}" && "$CORUM_HOME" == *".corum-verify-home"* ]]; then
+  CORUM_HOME_SEL=verify          # 兼容：显式 CORUM_HOME 指向旧 verify home
+else
+  CORUM_HOME_SEL=dev
+fi
+export CORUM_HOME_SEL
+# 显示用标签（区分「哪个 home 的哪个角色」）
+CORUM_HOME_LABEL="$CORUM_HOME_RESOLVED"
+[[ "$CORUM_HOME_SEL" == "verify" ]] && CORUM_HOME_LABEL="$CORUM_HOME_RESOLVED (role=verify)"
 
 # 端口缺省：verify → 9333；其余 → 9222。CORUM_VERIFY_PORT 兼容旧调用。
 if [[ -z "$PORT" ]]; then
@@ -222,14 +256,26 @@ log() { printf '[instance] %s\n' "$*"; }
 
 # ── 校验/清理（安全不变式 1、2）────────────────────────────────────────────
 
-# 目标 pid 是否确实是**本实例**（cmdline 含本仓库标记）——防 PID 复用误杀、防误伤微信等
-# 无关 Electron。**必须用 pgrep 集合判定**，理由见文件头不变式 1。
+# 目标 pid 是否确实是**本实例**（防 PID 复用误杀、防误伤微信等无关 Electron）。
+# **必须用 pgrep 集合判定**（不用 `ps -p … -o command=`，理由见文件头不变式 1）。
+#
+# ⚠️ 还要认「**记录根 PID 自己不含标记、但子孙含标记**」这一情形 —— 实测踩到：
+# dev/verify 记录的根 PID 是 `node lib/cli.js --combo=coding`（**相对路径**，cwd 才在
+# packages/desktop），cmdline 里没有仓库绝对路径 ⇒ 只比对自己会判 false，stop 于是
+# 静默退化成「不是本实例，仅移除记录」——**实例没停、端口仍占着**，下次 start 撞
+# `bind() failed: Address already in use`。原 dev-ide.sh 靠 `exec` 让记录 PID 直接等于
+# 最终 cli 进程来规避；本脚本是后台 spawn，故必须在判定里下探子孙。
 is_self() {
   local pid="$1" match
   [[ -n "$pid" ]] || return 1
   match="$(pgrep -f "$SELF_MARK" 2>/dev/null || true)"
   [[ -n "$match" ]] || return 1
   while IFS= read -r line; do [[ "$line" == "$pid" ]] && return 0; done <<< "$match"
+  # 下探：任一代子孙命中标记即认作本实例（记录根是启动器时的正常情形）。
+  local d
+  for d in $(descendants_of "$pid"); do
+    while IFS= read -r line; do [[ "$line" == "$d" ]] && return 0; done <<< "$match"
+  done
   return 1
 }
 
@@ -254,14 +300,28 @@ cdp_ok() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; }
 alive()  { local p; p="$(pid_of || true)"; [[ -n "${p:-}" ]] && kill -0 "$p" 2>/dev/null; }
 
 # dev 主实例的兜底清理必须**排除验证实例**（连子孙）：两者 cmdline 都含 packages/desktop/lib。
-verify_exclude_pids() {
-  local vf vpid
-  for vf in "$DESKTOP/.corum-verify-home/run/"*.pid; do
-    [[ -f "$vf" ]] || continue
-    vpid="$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$vf" | head -1)"
-    [[ -n "${vpid:-}" ]] || continue
-    printf '%s\n' "$vpid"
-    descendants_of "$vpid"
+# 其它**同 home** 实例的 PID 树（用于把「不属于本实例」的进程从兜底清理中排除）。
+#
+# 2026-09-26 起 dev / verify / packaged **共用 `~/.corum`**，三者 cmdline 完全一样
+# ⇒ 唯一的分辨依据就是「各自的 PID 文件」。本函数枚举本 home 下**除自己 PID 文件之外**
+# 的所有 *.pid 记录（含子孙），调用方从这里剔除，从而做到「只清自己」。
+#
+# 同时仍枚举**旧 home** 的记录（legacy-dev / legacy-verify）：迁移期可能新旧并存，
+# 漏掉就会重演 2026-09-12「起主实例把验证实例静默带走」的事故。
+other_instance_pids() {
+  local dirs=("$CORUM_HOME/run" "$DESKTOP/.corum-dev-home/run" "$DESKTOP/.corum-verify-home/run")
+  local d vf vpid self_real
+  self_real="$PID_FILE"
+  for d in "${dirs[@]}"; do
+    [[ -d "$d" ]] || continue
+    for vf in "$d"/*.pid; do
+      [[ -f "$vf" ]] || continue
+      [[ "$vf" == "$self_real" ]] && continue          # 自己不算「其它」
+      vpid="$(sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$vf" | head -1)"
+      [[ -n "${vpid:-}" ]] || continue
+      printf '%s\n' "$vpid"
+      descendants_of "$vpid"
+    done
   done
 }
 
@@ -280,25 +340,37 @@ cleanup() {
     fi
     rm -f "$PID_FILE"
   fi
-  # 2) 兜底：严格按本仓库绝对路径匹配（绝不宽匹配 electron/node）
-  local pids
-  if [[ "$MODE" == "packaged" ]]; then
+  # 2) 兜底清理 —— **按实例身份分档，这是隔离纪律的核心**：
+  #
+  #    · verify：**只杀自己 PID 记录的那棵树，绝不做任何按仓库路径的宽匹配**。
+  #      它和主 dev 实例的 cmdline **完全一样**（都是 `<repo>/packages/desktop/lib/main.js
+  #      --combo=coding`），靠 cmdline 根本分不开 ⇒ 任何宽匹配都会把主实例一起杀掉。
+  #      （原 verify-instance.sh 原文：「只杀自己记录的那棵树，不 pgrep 仓库路径，
+  #      绝不碰主实例」。2026-09-25 我合并五脚本时**丢掉过这条**，做了兜底匹配 ⇒
+  #      `stop --home=verify` 会连带杀掉主实例；此注释即该回归的护栏说明。）
+  #    · dev(主) / packaged：可以兜底，但都必须排除其它实例（verify 的记录树；
+  #      以及不同端口的另一棵树）。
+  local pids=""
+  if [[ "$CORUM_HOME_SEL" == "verify" ]]; then
+    :   # verify 不做兜底 —— 见上。仅靠上面 1) 的 PID 记录。
+  elif [[ "$MODE" == "packaged" ]]; then
     pids="$(pgrep -f "$SELF_MARK" 2>/dev/null || true)"
   else
     pids="$( { pgrep -f "$ROOT/packages/desktop/lib" 2>/dev/null || true; pgrep -f "node lib/cli.js --combo=$COMBO" 2>/dev/null || true; } | sort -u )"
-    # 不变式 2：dev 主实例排除验证实例（含子孙）
-    if [[ "$CORUM_HOME_SEL" != "verify" && -n "$pids" ]]; then
+    # 排除验证实例（含子孙）：两者 cmdline 相同，不排除就会误杀（2026-09-12 实测事故）。
+    if [[ -n "$pids" ]]; then
       local ex keep="" filtered="" p
-      ex="$(verify_exclude_pids | sort -u | tr '\n' ' ')"
+      ex="$(other_instance_pids | sort -u | tr '\n' ' ')"
       for p in $pids; do
         if [[ " $ex " == *" $p "* ]]; then keep="$keep $p"; continue; fi
         filtered="$filtered $p"
       done
-      [[ -n "$keep" ]] && log "跳过验证实例进程（不属于本实例）：$keep"
+      [[ -n "$keep" ]] && log "跳过其它实例进程（不属于本实例）：$keep"
       pids="${filtered# }"
     fi
   fi
   if [[ -n "${pids// /}" ]]; then
+    local p
     for p in $pids; do
       if is_self "$p"; then log "兜底清理本仓库残留：$p"; kill "$p" 2>/dev/null || true; killed=1; fi
     done
@@ -535,19 +607,30 @@ do_start() {
         log "⚠️ 自动解主密钥失败：若该 home 存在密文凭据，宿主会 fail-loud"
       fi
     fi
-    log "启动打包实例：CORUM_HOME=$CORUM_HOME CDP=:$PORT APP=$APP_PATH"
+    # 「打包走默认路径 ~/.corum」的忠实实现：当解析结果就是应用默认 home 时**不注入**
+    # CORUM_HOME，交给 bridge.js 自行解析（DEFAULT_DESKTOP_HOME = ~/.corum，含 legacy 迁移）。
+    # 仅当用户显式指定了别的 home 时才注入。
+    # ⚠️ 用 `env -u CORUM_HOME` 只在**子进程**里去掉它，**不能**在脚本里 `unset`
+    # —— 后面 write_pid 还要读 $CORUM_HOME（`set -u` 下 unset 会直接报 unbound）。
+    if [[ "$CORUM_HOME_RESOLVED" == "$HOME/.corum" ]]; then
+      log "启动打包实例：CORUM_HOME=<默认 ~/.corum，不注入> CDP=:$PORT APP=$APP_PATH"
+      APP_LAUNCH=(env -u CORUM_HOME "$APP_BIN" "--combo=$COMBO")
+    else
+      log "启动打包实例：CORUM_HOME=$CORUM_HOME CDP=:$PORT APP=$APP_PATH"
+      APP_LAUNCH=("$APP_BIN" "--combo=$COMBO")
+    fi
     if [[ "$FOREGROUND" == "1" ]]; then
       write_pid foreground "$$"
-      exec "$APP_BIN" "--combo=$COMBO"
+      exec "${APP_LAUNCH[@]}"
     fi
     # 不变式 3：独立子 shell + 三重 fd 重定向 + disown ⇒ 脚本秒回，不受外层超时连坐
     (
-      nohup "$APP_BIN" "--combo=$COMBO" > "$LOG_FILE" 2>&1 < /dev/null &
+      nohup "${APP_LAUNCH[@]}" > "$LOG_FILE" 2>&1 < /dev/null &
       write_pid background "$!"
       disown
     )
   else
-    log "启动 dev 实例：CORUM_HOME=$CORUM_HOME CDP=:$PORT combo=$COMBO"
+    log "启动 dev 实例（role=${CORUM_HOME_SEL}）：CORUM_HOME=$CORUM_HOME CDP=:$PORT combo=$COMBO"
     if [[ "$FOREGROUND" == "1" ]]; then
       write_pid foreground "$$"
       cd "$DESKTOP"
@@ -566,14 +649,17 @@ do_start() {
   return 0
 }
 
+# 当前占着本端口的 PID（可能不在 PID 记录树里）。
+port_holder_pids() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true; }
+
 do_stop() {
   assert_no_active_turns || return 1
   local pid
   pid="$(pid_of || true)"
   if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
     if is_self "$pid"; then
-      log "停止实例：${pid}（${MODE} / ${CORUM_HOME_SEL}）"
-      kill "$pid" 2>/dev/null || true
+      log "停止实例：${pid}（${MODE} / role=${CORUM_HOME_SEL}）"
+      kill_tree "$pid" || true
       local _ ; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || break; sleep 0.3; done
       kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
     else
@@ -582,6 +668,28 @@ do_stop() {
   else
     log "无 PID 记录或进程已退出"
   fi
+  rm -f "$PID_FILE"
+
+  # 2026-09-14 修复（incident.verify-instance.stop-orphan）：**PID 记录树之外**仍可能有
+  # 进程占着 CDP 端口 —— 实测真正监听端口的 PID 不在记录树里，旧实现只 warn 一句就继续
+  # start，于是新实例 `bind() failed: Address already in use` + 单实例锁冲突，Agent 对着
+  # 一个「活着但 CDP 不可达」的实例反复重试（白花约 3 分钟）。
+  # 处置：**属于本实例**的占用者一并停掉；**不属于**的只报告、绝不杀（隔离纪律）。
+  local holder
+  for holder in $(port_holder_pids); do
+    if is_self "$holder"; then
+      log "端口 ${PORT} 仍被本实例的残留进程 ${holder} 占用 → 一并停止"
+      kill_tree "$holder" || true
+      sleep 1
+      kill -0 "$holder" 2>/dev/null && kill -9 "$holder" 2>/dev/null || true
+    else
+      log "⚠️ 端口 ${PORT} 被**非本实例**的进程 ${holder} 占用，拒绝杀它："
+      pgrep -fl "$ROOT/packages/desktop" 2>/dev/null | grep "^${holder} " | sed 's/^/   /' || true
+      log "   处置：确认那是什么（另一个 dev 实例 / 打包实例 / 别的程序）再自行停止。"
+      cleanup || true
+      return 1
+    fi
+  done
   cleanup
   return 0
 }
@@ -589,22 +697,26 @@ do_stop() {
 do_status() {
   # 先按 PID 记录
   if alive; then
-    log "实例存活：PID $(pid_of)（mode=${MODE} home=${CORUM_HOME_SEL}）"
+    log "实例存活：PID $(pid_of)（mode=${MODE} role=${CORUM_HOME_SEL}）"
     if cdp_ok; then log "CDP 可达 → http://127.0.0.1:$PORT"; else log "CDP 不可达（应用可能还在启动）"; fi
     return 0
   fi
   # PID 记录失效但端口有应答 ⇒ 可能是别的实例（或残留）
   if cdp_ok; then
-    log "未运行（无有效 PID 记录），但端口 $PORT 有应答 —— 可能是其它实例/残留进程"
+    log "未运行（无有效 PID 记录，home=${CORUM_HOME_LABEL}），但端口 ${PORT} 有应答 —— 可能是其它实例/残留进程"
     return 1
   fi
-  log "未运行（home=${CORUM_HOME_SEL} mode=${MODE} port=${PORT}）"
+  log "未运行（home=${CORUM_HOME_LABEL} mode=${MODE} port=${PORT}）"
   return 1
 }
 
 # 列出所有已知实例（两个 home × 两种形态），并标注谁在跑、谁占着端口。
 do_list() {
-  local homes=("dev:$DESKTOP/.corum-dev-home" "verify:$DESKTOP/.corum-verify-home")
+  # 2026-09-26 起默认 home 是共享的 ~/.corum（dev/verify/packaged 同一份），
+  # 同时仍列出旧 home（迁移期可能并存）。
+  local homes=("shared:$DEFAULT_HOME")
+  [[ -d "$DESKTOP/.corum-dev-home/run" ]]    && homes+=("legacy-dev:$DESKTOP/.corum-dev-home")
+  [[ -d "$DESKTOP/.corum-verify-home/run" ]] && homes+=("legacy-verify:$DESKTOP/.corum-verify-home")
   local entry sel dir f pid port state line
   printf '[instance] 已知实例：\n'
   for entry in "${homes[@]}"; do
@@ -616,8 +728,15 @@ do_list() {
       port="$(sed -n 's/.*"debugPort":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" | head -1)"
       state="已退出"
       if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then state="运行中"; fi
-      line="$(basename "$f")  pid=${pid:-?}  port=${port:-?}  home=$sel  → $state"
-      printf '  %s\n' "$line"
+      local base role
+      base="$(basename "$f")"
+      case "$base" in
+        verify-*) role=verify ;;
+        pack-*)   role=packaged ;;
+        *)        role=dev ;;
+      esac
+      line="$(printf '%-22s role=%-9s pid=%-7s port=%-6s %s' "$base" "$role" "${pid:-?}" "${port:-?}" "$state")"
+      printf '  %s  [%s]\n' "$line" "$sel"
     done
   done
   printf '[instance] 当前监听中的 CDP 端口：\n'

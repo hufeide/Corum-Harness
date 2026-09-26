@@ -1439,7 +1439,23 @@ fi
 fi  # ← select_section 17
 if select_section 18; then
 section "[18] corum-cdp-verify 技能：打包副本 == 仓库脚本（逐字节）"
-SKILL_DIR="${CORUM_HOME:-$REPO_ROOT/packages/desktop/.corum-dev-home}/skills/corum-cdp-verify"
+# 2026-09-26：默认 home 改为共享的 ~/.corum（dev/verify/packaged 同一份），技能也随之装在
+# 那里。这里**按候选顺序**找技能目录，而不是写死一个路径 —— 写死会让本节在 home 迁移后
+# **静默 skip**（本该变红的一致性断言变成「跳过」，是最危险的一种弱化）。扫描顺序：
+#   ① 显式 CORUM_HOME  ② ~/.corum（当前默认）  ③ ~/.agents 链接  ④ 旧 dev/verify home
+_skill_dir_candidates=(
+  "${CORUM_HOME:-}/skills/corum-cdp-verify"
+  "$HOME/.corum/skills/corum-cdp-verify"
+  "$HOME/.agents/skills/corum-cdp-verify"
+  "$REPO_ROOT/packages/desktop/.corum-dev-home/skills/corum-cdp-verify"
+  "$REPO_ROOT/packages/desktop/.corum-verify-home/skills/corum-cdp-verify"
+)
+SKILL_DIR=""
+for _c in "${_skill_dir_candidates[@]}"; do
+  [[ -n "$_c" && -d "$_c/scripts" ]] && { SKILL_DIR="$_c"; break; }
+done
+# 全都没有 ⇒ 保留原默认值，让下面的 [ -d ] 走 skip 分支（并给出准确路径）
+[[ -z "$SKILL_DIR" ]] && SKILL_DIR="${CORUM_HOME:-$REPO_ROOT/packages/desktop/.corum-dev-home}/skills/corum-cdp-verify"
 if [ -d "$SKILL_DIR/scripts" ]; then
   # 2026-09-25：5 个启动脚本（cdp.sh / verify-instance.sh / dev-ide.sh / combo.sh /
   # pack-instance.sh）合并为 **corum-instance.sh**（唯一实现 + 长选项区分实例），
