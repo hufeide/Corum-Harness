@@ -45,6 +45,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+// fork（corum）2026-09-26：corum 自有 waterfall 询问要**以父 Agent 为载体**（scopeTarget），
+// 与 `corum/model-ask` 同款 —— 子会话载体到不了用户面前。
+import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import {
   applySessionGrant,
   decideEscalation,
@@ -195,9 +198,98 @@ export function adjudicateEscalation(
   }
 }
 
+/** corum 自有询问通路 `corum/escalation/ask` 的回答（三档；第 3 档「自动」按用户裁定预留）。 */
+type CorumEscalationAnswer = { readonly kind: 'allowed-once' | 'always-allow' | 'rejected' }
+
 /**
- * 该 ask 所属的**父会话**是否已被用户授权「后续同类提权免问」（三档第 2 档「总是允许」）。
+ * 跨包调用 **corum 自有 waterfall** 所需的最小能力面（红线 3：不 import 声明方那个包，
+ * 只用窄接口 —— corum-subagent 与 corum-api-remotes 的类型面本就不必互相耦合）。
+ */
+interface CorumAskFace {
+  waterfall: (
+    scope: unknown,
+    event: string,
+    data: unknown,
+    next: () => Promise<CorumEscalationAnswer>,
+  ) => Promise<CorumEscalationAnswer>
+}
+
+/**
+ * 以**父 Agent 为载体**发起 corum 自有 waterfall 询问，并施加**有界等待**。
  *
+ * ## 为什么是 corum 自有通路（而不是直接再发一次官方 `approval/request`）
+ *
+ * 官方审批 outcome 词汇表封闭（`allowed-once | rejected | cancelled | unavailable`），且归一化
+ * 发生在 `ApprovalService.request()` **内部**（`user-approval/src/index.ts:288`）⇒ 三档里的
+ * 「总是允许」**传不过去**（会被归一成 `unavailable`）。corum 自有 waterfall 的返回值**不**经过
+ * 那层归一化，故只有它能携带自己的答案词汇表。先例：`corum/model-ask/request`。
+ *
+ * ## 有界等待
+ *
+ * `Promise.race` 一个超时（见 {@link ESCALATION_ASK_TIMEOUT_MS}）：客户端装了监听器但用户一直
+ * 不答时，不得**永久挂住父轮**；超时按 `rejected` 收口（朝关闭倒）。
+ *
+ * ## 无人应答时**不**在这里兜底
+ *
+ * `next` 由调用方传入（它退回官方审批卡）。老渲染 / 未装 UI 插件时 waterfall 会立刻走 `next`
+ * ⇒ 行为与改动前完全一致，**没有回归窗口**。
+ *
+ * @param deps - 应答器依赖面（`parent` 既是载体也是授权主体）。
+ * @param escalation - 已读回的提权请求。
+ * @param request - 原始审批请求（取 `signal` 与工具名）。
+ * @param fallback - 无人应答时退回的官方通路（带 signal）。
+ * @returns 三档答案。
+ */
+async function askCorumEscalation(
+  deps: EscalationAnswererDeps,
+  escalation: ReadEscalationRequest,
+  request: { readonly toolName?: string, readonly signal?: AbortSignal },
+  fallback: (signal: AbortSignal) => Promise<CorumEscalationAnswer>,
+): Promise<CorumEscalationAnswer> {
+  const timeout = AbortSignal.timeout(ESCALATION_ASK_TIMEOUT_MS)
+  const signal = request.signal === undefined ? timeout : AbortSignal.any([request.signal, timeout])
+  const face = (deps.parent.ctx as unknown as { waterfall?: CorumAskFace['waterfall'] }).waterfall
+  if (typeof face !== 'function') {
+    // 事件总线永远可用，理论上到这里不可达；真到了就退回官方通路（保守，而不是静默拒绝）。
+    deps.logger.warn('subagent escalation: no waterfall on the parent context; falling back to the approval card')
+    return await fallback(signal)
+  }
+  const ask = face.call(
+    deps.parent.ctx,
+    scopeTarget(deps.parent, deps.parent),
+    'corum/escalation/ask',
+    {
+      agent: deps.parent,
+      mode: escalation.mode,
+      ...(escalation.justification === undefined ? {} : { justification: escalation.justification }),
+    },
+    async () => await fallback(signal),
+  )
+  const expired = new Promise<CorumEscalationAnswer>(resolve => {
+    signal.addEventListener('abort', () => resolve({ kind: 'rejected' }), { once: true })
+  })
+  return await Promise.race([ask, expired])
+}
+
+/**
+ * 记一条**会话级**提权授权（三档第 2 档）。经窄接口取用 `subagents` 服务（红线 3/1）。
+ *
+ * 失败只告警：授权没记上**只影响「下次还问不问」**，本次已经放行，不该因此回滚。
+ *
+ * @param deps - 应答器依赖面。
+ */
+function grantEscalationForSession(deps: EscalationAnswererDeps): void {
+  const face = (deps.parent.ctx as unknown as { get: (name: string) => unknown })
+    .get('subagents') as { grantEscalation?: (sessionId: string) => void } | undefined
+  try {
+    face?.grantEscalation?.(String(deps.parent.session.id))
+  } catch (error: unknown) {
+    deps.logger.warn(`subagent escalation: could not record the session grant (${String(error)})`)
+  }
+}
+
+/**
+ * 该 ask 所属的**父会话**是否已被用户授权「后续同类提权免问」（三档第 2 档「总是允许」）。 *
  * 取用方式是**窄接口**（红线 3）：只声明 `isEscalationGranted` 这一小块，不耦合
  * `SubagentRuntime` 的其余能力，也不 import 它所在的包（跨 bundle 类型面本就不一致）。
  *
@@ -264,21 +356,35 @@ export function installEscalationAnswerer(childCtx: Context, deps: EscalationAns
       return 'rejected'
     }
     // `X > P` 且未被授权：**以父 Agent 为载体**上呈用户（见模块头注：子会话载体到不了用户面前）。
+    //
+    // 两级通路（2026-09-26 定案）：
+    //   ① 先走 **corum 自有 waterfall** `corum/escalation/ask` —— 只有它能携带三档词汇表
+    //      （官方 `approval/request` 的 outcome 在 `ApprovalService.request()` **内部**就被
+    //      归一化成 4 个词，见 `user-approval/src/index.ts:288`）；
+    //   ② 该 waterfall 的 `next`（**无人应答**时）退回**现有官方审批卡** —— 于是老渲染 /
+    //      没装 UI 插件的部署行为与本次改动前**完全一致**，不存在「换了通路反而批不了」的窗口。
     try {
-      const copy = escalationAskCopy(escalation.mode, escalation.justification)
-      // 有界等待：见 ESCALATION_ASK_TIMEOUT_MS 的说明（没有可应答的 UI 时不得挂死父轮）。
-      const timeout = AbortSignal.timeout(ESCALATION_ASK_TIMEOUT_MS)
-      const signal = request.signal === undefined ? timeout : AbortSignal.any([request.signal, timeout])
-      const outcome = await approval.request({
-        agent: deps.parent,
-        toolName: request.toolName ?? 'bash',
-        reason: copy.reason,
-        displayReason: copy.displayReason,
-        signal,
+      const asked = await askCorumEscalation(deps, escalation, request, async signal => {
+        const copy = escalationAskCopy(escalation.mode, escalation.justification)
+        const outcome = await approval.request({
+          agent: deps.parent,
+          toolName: request.toolName ?? 'bash',
+          reason: copy.reason,
+          displayReason: copy.displayReason,
+          signal,
+        })
+        return outcome === 'allowed-once' ? { kind: 'allowed-once' as const } : { kind: 'rejected' as const }
       })
-      return outcome === 'allowed-once' ? 'allowed-once' : 'rejected'
+      if (asked.kind === 'always-allow') {
+        // 三档第 2 档：本次**照放行**，并记一条**会话级**授权 ⇒ 该父会话后续同类提权免问。
+        // 授权只豁免「上呈用户」这一步；硬天花板早在上面 `refuse` 分支就拦掉了，永不豁免。
+        grantEscalationForSession(deps)
+        deps.logger.warn(`subagent escalation: allowed-once + session-wide grant recorded for ${escalation.mode}`)
+        return 'allowed-once'
+      }
+      return asked.kind === 'allowed-once' ? 'allowed-once' : 'rejected'
     } catch (error: unknown) {
-      // 父会话没有 open turn（例如后台子 Agent 跑完父轮已结束）⇒ 官方拒绝；如实朝关闭倒。
+      // 父会话没有 open turn（例如后台子 Agent 跑完父轮已结束）⇒ 任何失败都朝关闭倒。
       deps.logger.warn(`subagent escalation: cannot ask the user (${String(error)}); treating as rejected`)
       return 'rejected'
     }

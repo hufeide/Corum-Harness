@@ -66,4 +66,7 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'corum/artgen/job-progress', mode: 'emit' },
   // 子 Agent 模型不可用 ⇒ 机制问用户（独立通路，不经 userQuestions）
   { event: 'corum/model-ask/request', mode: 'waterfall' },
+  // fork（corum）2026-09-26：子 Agent 提权三档询问（第 2 档「总是允许」借 corum 自有
+  // waterfall 携带自己的答案词汇表——官方 approval/request 的 outcome 在服务内部就被归一化了）。
+  { event: 'corum/escalation/ask', mode: 'waterfall' },
 ] as const satisfies readonly TypertForwardableEventEntry[]

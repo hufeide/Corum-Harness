@@ -659,6 +659,44 @@ export interface CorumModelAskOutcomeEvent {
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
+/**
+ * fork（corum）2026-09-26：corum/escalation/ask 的提问载荷（host → client）。
+ *
+ * 子 Agent 撞到沙箱墙、想用更宽的档位重试时，机制**以父 Agent 为载体**问用户。
+ *
+ * 为什么**不**复用官方 `approval/request`：官方 outcome 词汇表封闭，且归一化发生在
+ * `ApprovalService.request()` **内部**（`user-approval/src/index.ts:288`）⇒ 三档里的
+ * 「总是允许」传不过去（会被归一成 `unavailable`）。corum 自有 waterfall 的返回值
+ * **不**经过那层归一化，所以只有它能携带自己的答案词汇表。先例：`corum/model-ask/request`。
+ */
+export interface CorumEscalationAskRequestEvent {
+  /**
+   * 发起询问的父 Agent（waterfall 的 scope 载体；`TypertAgentScopedRequest`
+   * **硬要求载荷带 `agent`**，否则该事件不进可转发联合 —— 与 `corum/model-ask/request` 同款）。
+   */
+  readonly agent: Agent
+  /** 子 Agent 请求的目标档位（官方封闭的提权目标词汇）。 */
+  readonly mode: 'workspace-write' | 'danger-full-access'
+  /** 模型给的一句话理由（可缺省；仅用于呈现）。 */
+  readonly justification?: string
+}
+
+/**
+ * fork（corum）2026-09-26：corum/escalation/ask 的用户决定（client → host）。
+ *
+ * 三档语义（用户 2026-09-26 裁定）：
+ * - `allowed-once`：只批这一次；
+ * - `always-allow`：**本会话内后续同类请求免问**（机制按父会话记一条授权，本次同样放行）；
+ * - `rejected`：拒绝（对这条命令是终局）。
+ *
+ * ⚠️ 第 3 档「自动」（记录允许情况 + 后台 AI 生成批准策略 + 落盘跨会话）按用户裁定**预留**，
+ * 故此处刻意**没有**对应取值 —— UI 上以禁用按钮占位。
+ */
+export type CorumEscalationAskOutcomeEvent =
+  | { readonly kind: 'allowed-once' }
+  | { readonly kind: 'always-allow' }
+  | { readonly kind: 'rejected' }
+
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────
 
 declare module '@deepseek-ai/cordis' {
@@ -715,6 +753,20 @@ declare module '@deepseek-ai/cordis' {
       data: CorumModelAskRequestEvent,
       next: () => Promise<CorumModelAskOutcomeEvent>,
     ): Promise<CorumModelAskOutcomeEvent>
+    /**
+     * corum/escalation/ask：子 Agent 请求更宽沙箱档位 ⇒ 机制以父 Agent 为载体问用户
+     * （三档：允许一次 / 总是允许 / 拒绝；第 3 档「自动」按用户裁定预留）。
+     *
+     * `this` 是**载体 scope**（父 Agent）⇒ 客户端 `scopeOf(owner)` 解析出**父会话**，
+     * 卡就渲染在用户正在看的那个会话里。
+     * @param data - 请求的档位 + 模型给的理由。
+     * @mode waterfall
+     */
+    'corum/escalation/ask'(
+      this: Scoped<Agent>,
+      data: CorumEscalationAskRequestEvent,
+      next: () => Promise<CorumEscalationAskOutcomeEvent>,
+    ): Promise<CorumEscalationAskOutcomeEvent>
   }
 }
 
@@ -758,6 +810,7 @@ export type CorumForwardedEvent =
   | 'corum/ollama/download-progress'
   | 'corum/artgen/job-progress'
   | 'corum/model-ask/request'
+  | 'corum/escalation/ask'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}
