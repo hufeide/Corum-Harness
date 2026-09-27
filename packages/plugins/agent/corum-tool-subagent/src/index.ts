@@ -3568,7 +3568,7 @@ export function apply(ctx: Context, config: Config): void {
           lines.push(
             '',
             'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.',
-            'A BACKGROUND subagent is NOT a job: there is no job id to poll and no `job_output` to read. Track it with `list_agents` (list running/known children), steer or follow up with `send_message`, and wait for its settlement notice — or simply keep working and act when the notice arrives. `send_message` reaches BACKGROUND (continuable) children only: a foreground one-shot child (`run_in_background: false`) is terminal once it settles, and messaging it is rejected.',
+            'A BACKGROUND subagent is NOT a job: there is no job id to poll and no `job_output` to read. Track it with `list_agents` (list running/known children), steer, follow up or stop it with `send_message` / `interrupt_agent`, and wait for its settlement notice — or simply keep working and act when the notice arrives. `send_message` reaches BACKGROUND (continuable) children only: a foreground one-shot child (`run_in_background: false`) is terminal once it settles, and messaging it is rejected.',
           )
           return lines.join('\n')
         },
