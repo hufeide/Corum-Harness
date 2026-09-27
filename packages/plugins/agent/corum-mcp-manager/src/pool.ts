@@ -11,6 +11,16 @@
  * 改造后：**每个服务名一个进程**，由本池持有；多个 Agent/profile 的授权共用同一个连接
  * （`retain`/`release` 引用计数）；**独占**由租约仲裁（忙时 FIFO 排队 + 超时拒绝并告知持有者）。
  *
+ * ## 为什么**只做串行**（2026-09-27 用户决定，别再往回加）
+ *
+ * 曾经实现过「按资源（`filePath`/`pageId`）分桶 + 可配并发上限」，并有实机验证：
+ *   · Pencil MCP：不同 `.pen` 文档确实能真并行（服务端不串行）✓；
+ *   · chrome-devtools-mcp：**服务端自己把工具调用串行化**（一个 30s 脚本把后续请求全挡到它结束）✗。
+ * 用户随后从产品角度判定：真实使用里用户**基本只专注单个业务**，并行开展业务既少又低效；而
+ * 「判断能不能并行 + 施加额外规则」让产品复杂、不可控，还要赌未来各家 MCP 的通用性。
+ * ⇒ **产品层面只保留串行**，那条能力连同推导规则一起移除了（见 `docs/LESSONS.md`）。
+ * 结论：**不要再引入资源分桶 / 并发上限 / skipLease 这类概念**，除非用户重新拍板。
+ *
  * ## 硬约束（都来自实测教训，改动前先读）
  *
  * 1. **按「服务名 → 当前定义」持有，定义指纹变了才换进程**：`args`/`env`/`command` 变了必须换
@@ -74,14 +84,8 @@ export interface McpPoolSnapshot {
   readonly refs: number
   /** 所有资源键下的排队总数。 */
   readonly queueLength: number
-  /** 每个资源键的当前持有者（键 `''` = 整机；不出现 `resource` 字段）；带该桶容量 `limit`。 */
-  readonly holders: readonly (McpLeaseOwner & {
-    readonly sinceMs: number
-    readonly limit: number
-    readonly resource?: string
-  })[]
-  /** 只有一个持有者时的便捷投影（并行/多资源时缺省）。 */
-  readonly holder?: McpLeaseOwner & { readonly sinceMs: number; readonly limit: number; readonly resource?: string }
+  /** 当前持有者（串行：至多一个）。 */
+  readonly holder?: McpLeaseOwner & { readonly sinceMs: number }
 }
 
 /** 忙超时的结构化错误：文本必须能回答「谁占着、我排了多久」。 */
@@ -90,38 +94,22 @@ export class McpLeaseTimeoutError extends Error {
   readonly holder: McpLeaseOwner | undefined
   readonly waitedMs: number
   readonly queueLength: number
-  /** 资源键值（`per-resource` 策略时是具体文档/page；整机独占时缺省）。 */
-  readonly resource: string | undefined
-  /** 该桶的容量（信号量上限；`Infinity` 表示不限——那种情况下不会抛本错误）。 */
-  readonly limit: number
-  /** 当前占用该桶的全部持有者（独占时就是那一个）。 */
-  readonly holders: readonly McpLeaseOwner[]
-
   constructor(input: {
     readonly serverName: string
-    readonly holders: readonly McpLeaseOwner[]
-    readonly limit: number
+    readonly holder: McpLeaseOwner | undefined
     readonly waitedMs: number
     readonly queueLength: number
-    readonly resource?: string | undefined
   }) {
-    const busy = input.limit === Number.POSITIVE_INFINITY ? 'busy' : `busy (${input.holders.length}/${input.limit} slots)`
     super(
-      `MCP server "${input.serverName}"`
-      + (input.resource !== undefined ? ` on resource "${input.resource}"` : '')
-      + ` is ${busy}`
-      + `: held by ${input.holders.length === 0 ? 'nobody' : input.holders.map(describeOwner).join(', ')}`
+      `MCP server "${input.serverName}" is busy: held by ${describeOwner(input.holder)}`
       + ` (waited ${input.waitedMs}ms, ${input.queueLength} still queued).`
-      + ' Retry after a holder finishes, or raise this server\'s concurrency limit.',
+      + ' This MCP server is exclusive — retry after the holder finishes.',
     )
     this.name = 'McpLeaseTimeoutError'
     this.serverName = input.serverName
-    this.holder = input.holders[0]
+    this.holder = input.holder
     this.waitedMs = input.waitedMs
     this.queueLength = input.queueLength
-    this.resource = input.resource
-    this.limit = input.limit
-    this.holders = input.holders
   }
 }
 
@@ -241,23 +229,10 @@ class PooledServer {
   private refs = 0
   /** 待执行的停止定时器（引用计数归零后进入宽限期）。 */
   private stopTimer: NodeJS.Timeout | undefined
-  /**
-   * 租约表：**按资源键**（`''` = 整个 server）。
-   *
-   * 2026-09-27 用户口径「可复用的则不独占」：服务提供者按参数寻址（pencil 的 `filePath`）时，
-   * 不同文档可以并发 ⇒ 租约必须细化到资源；而绑到既有实例的 server（CDP `--browser-url`）
-   * 没有资源键可用 ⇒ 键恒为 `''` ⇒ 整机独占（与改造前语义一致）。
-   */
-  private readonly leases = new Map<string, { owner: McpLeaseOwner; token: symbol; since: number }[]>()
-  /** 每个资源键一条 FIFO 队列。 */
-  private readonly queues = new Map<string, Waiter[]>()
-  /**
-   * 每个资源键的**容量**（信号量上限）。
-   *
-   * 用户 2026-09-27 口径：非独占那侧「大家都可以同时访问，只是可以设置一个访问上限」——
-   * 独占即容量 1，并行即容量 N（缺省不限）。容量由调用方按策略算出后传入，池只做记账。
-   */
-  private readonly limits = new Map<string, number>()
+  /** 当前持有者（串行：同一时刻至多一个）。 */
+  private holder: { owner: McpLeaseOwner; token: symbol; since: number } | undefined
+  /** FIFO 队列（串行租约的等待者）。 */
+  private queue: Waiter[] = []
 
   constructor(
     private readonly definition: McpServerConfig,
@@ -325,16 +300,9 @@ class PooledServer {
     tool: string,
     args: unknown,
     owner: McpLeaseOwner,
-    options: {
-      readonly signal?: AbortSignal
-      readonly resource?: string
-      readonly skipLease?: boolean
-      /** 该桶容量（信号量上限）；缺省 1（= 独占语义）。 */
-      readonly limit?: number
-    } = {},
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<unknown> {
-    // `shared` 策略：完全不仲裁（显式配置才会走到这里）。
-    const release = options.skipLease === true ? () => {} : await this.acquire(owner, options)
+    const release = await this.acquire(owner, options)
     try {
       const client = await this.ensureConnected()
       this.options.log('info', `MCP pool: ${describeOwner(owner)} → ${this.serverName}.${tool}`)
@@ -350,29 +318,25 @@ class PooledServer {
   }
 
   /**
-   * 取独占租约（用户裁定：忙时 **FIFO 排队 + 超时**，超时拒绝并告知持有者）。
+   * 取串行租约（用户裁定：忙时 **FIFO 排队 + 超时**，超时拒绝并告知持有者）。
    * @param owner - 归属。
+   * @param options - 取消信号。
    * @returns 释放函数（幂等；TTL 回收后调用它是空操作）。
    */
   async acquire(
     owner: McpLeaseOwner,
-    options: { readonly signal?: AbortSignal; readonly resource?: string; readonly limit?: number } = {},
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<() => void> {
-    const key = leaseKeyOf(options.resource)
-    const limit = normalizeLimit(options.limit)
-    this.limits.set(key, limit)
-    this.reclaimIfStale(key)
+    this.reclaimIfStale()
     if (options.signal?.aborted === true) throw abortedError(this.serverName, options.signal.reason)
-    const holders = this.leases.get(key) ?? []
-    if (holders.length < limit) return this.grant(key, owner)
+    if (this.holder === undefined) return this.grant(owner)
     const timeoutMs = this.options.leaseTimeoutMs
     return new Promise<() => void>((resolve, reject) => {
       const token = Symbol('mcp-lease')
       /** 出队（授予/超时/中止/关停前先摘监听，幂等）。 */
       const drop = (): void => {
-        const queue = this.queues.get(key)
-        const index = queue?.findIndex(candidate => candidate.token === token) ?? -1
-        if (queue !== undefined && index >= 0) queue.splice(index, 1)
+        const index = this.queue.findIndex(candidate => candidate.token === token)
+        if (index >= 0) this.queue.splice(index, 1)
         clearTimeout(waiter.timer)
         waiter.detach()
       }
@@ -384,35 +348,28 @@ class PooledServer {
         owner,
         token,
         enqueuedAt: Date.now(),
-        grant: () => { resolve(() => { this.releaseToken(key, token) }) },
+        grant: () => { resolve(() => { this.releaseToken(token) }) },
         fail: reject,
         detach: () => { options.signal?.removeEventListener('abort', onAbort) },
         timer: setTimeout(() => {
-          const queue = this.queues.get(key) ?? []
-          if (!queue.some(candidate => candidate.token === token)) return
+          if (!this.queue.some(candidate => candidate.token === token)) return
           drop()
           const error = new McpLeaseTimeoutError({
             serverName: this.serverName,
-            holders: (this.leases.get(key) ?? []).map(entry => entry.owner),
-            limit: this.limits.get(key) ?? limit,
+            holder: this.holder?.owner,
             waitedMs: Date.now() - waiter.enqueuedAt,
-            queueLength: (this.queues.get(key) ?? []).length,
-            ...(options.resource !== undefined ? { resource: options.resource } : {}),
+            queueLength: this.queue.length,
           })
           this.options.log('warn', `MCP pool: ${error.message}`)
           reject(error)
         }, timeoutMs),
       }
       options.signal?.addEventListener('abort', onAbort, { once: true })
-      const queue = this.queues.get(key) ?? []
-      queue.push(waiter)
-      this.queues.set(key, queue)
+      this.queue.push(waiter)
       this.options.log(
         'info',
-        `MCP pool: "${this.serverName}"${options.resource !== undefined ? ` [resource ${options.resource}]` : ''}`
-        + ` at capacity (${holders.length}/${limit === Number.POSITIVE_INFINITY ? '∞' : limit}, `
-        + `held by ${holders.map(entry => describeOwner(entry.owner)).join(', ')})`
-        + ` — ${describeOwner(owner)} queued at #${queue.length}, timeout ${timeoutMs}ms`,
+        `MCP pool: "${this.serverName}" busy (held by ${describeOwner(this.holder?.owner)}) — `
+        + `${describeOwner(owner)} queued at #${this.queue.length}, timeout ${timeoutMs}ms`,
       )
     })
   }
@@ -420,18 +377,7 @@ class PooledServer {
   /** 观测投影。 */
   snapshot(): McpPoolSnapshot {
     const pid = this.transport instanceof StdioClientTransport ? this.transport.pid ?? undefined : undefined
-    // 注意**摊平** owner（能力面类型是 `McpLeaseOwner & {sinceMs, resource?}`，不是嵌套 owner）。
     const now = Date.now()
-    const holders = [...this.leases.entries()].flatMap(([key, entries]) =>
-      entries.map(entry => ({
-        ...entry.owner,
-        sinceMs: now - entry.since,
-        limit: this.limits.get(key) ?? 1,
-        ...(key === '' ? {} : { resource: key }),
-      })),
-    )
-    let queueLength = 0
-    for (const queue of this.queues.values()) queueLength += queue.length
     return {
       serverName: this.serverName,
       fingerprint: this.fingerprint,
@@ -439,9 +385,10 @@ class PooledServer {
       connected: this.client !== undefined,
       toolCount: this.tools.length,
       refs: this.refs,
-      queueLength,
-      holders,
-      ...(holders.length === 1 && holders[0] !== undefined ? { holder: holders[0] } : {}),
+      queueLength: this.queue.length,
+      ...(this.holder !== undefined
+        ? { holder: { ...this.holder.owner, sinceMs: Date.now() - this.holder.since } }
+        : {}),
     }
   }
 
@@ -455,9 +402,9 @@ class PooledServer {
     const transport = this.transport
     this.client = undefined
     this.transport = undefined
-    this.leases.clear()
-    for (const queue of this.queues.values()) {
-      for (const waiter of queue.splice(0)) {
+    this.holder = undefined
+    for (const waiter of this.queue.splice(0)) {
+      {
         clearTimeout(waiter.timer)
         waiter.detach()
         waiter.fail(new Error(`MCP server "${this.serverName}" was stopped before this call could run`))
@@ -467,40 +414,27 @@ class PooledServer {
     if (transport !== undefined) await transport.close().catch(() => {})
   }
 
-  private grant(key: string, owner: McpLeaseOwner): () => void {
+  private grant(owner: McpLeaseOwner): () => void {
     const token = Symbol('mcp-lease')
-    const holders = this.leases.get(key) ?? []
-    holders.push({ owner, token, since: Date.now() })
-    this.leases.set(key, holders)
-    return () => { this.releaseToken(key, token) }
+    this.holder = { owner, token, since: Date.now() }
+    return () => { this.releaseToken(token) }
   }
 
-  /** 释放（幂等）：腾出一个槽位就交给队首。 */
-  private releaseToken(key: string, token: symbol): void {
-    const holders = this.leases.get(key)
-    if (holders === undefined) return
-    const next = holders.filter(entry => entry.token !== token)
-    if (next.length === holders.length) return // 不是本槽（可能已被 TTL 回收）⇒ 空操作
-    if (next.length === 0) this.leases.delete(key)
-    else this.leases.set(key, next)
-    this.handOff(key)
+  /** 释放（幂等）：交给下一个排队者，或清空。 */
+  private releaseToken(token: symbol): void {
+    if (this.holder?.token !== token) return
+    this.holder = undefined
+    this.handOff()
   }
 
-  /** 有空槽就按 FIFO 放行（一次调用可能腾出多个槽，故循环）。 */
-  private handOff(key: string): void {
-    const limit = this.limits.get(key) ?? 1
-    for (;;) {
-      const holders = this.leases.get(key) ?? []
-      if (holders.length >= limit) return
-      const queue = this.queues.get(key)
-      const next = queue?.shift()
-      if (next === undefined) return
-      clearTimeout(next.timer)
-      next.detach()
-      holders.push({ owner: next.owner, token: next.token, since: Date.now() })
-      this.leases.set(key, holders)
-      next.grant()
-    }
+  /** 把租约交给队首（若有）。 */
+  private handOff(): void {
+    const next = this.queue.shift()
+    if (next === undefined) return
+    clearTimeout(next.timer)
+    next.detach()
+    this.holder = { owner: next.owner, token: next.token, since: Date.now() }
+    next.grant()
   }
 
   /**
@@ -509,25 +443,18 @@ class PooledServer {
    * 只在下一次取租约时判——不需要常驻定时器，且语义明确：**没人再要**就不必抢。
    * 回收**不打断**旧持有者的在飞调用（它可能还活着），但租约已经易主并 `warn` 点名。
    */
-  private reclaimIfStale(key: string): void {
-    const holders = this.leases.get(key)
-    if (holders === undefined || holders.length === 0) return
-    const now = Date.now()
-    const fresh = holders.filter(entry => {
-      const age = now - entry.since
-      if (age < this.options.leaseTtlMs) return true
-      this.options.log(
-        'warn',
-        `MCP pool: slot on "${this.serverName}"${key === '' ? '' : ` [resource ${key}]`} held by `
-        + `${describeOwner(entry.owner)} for ${age}ms exceeded TTL `
-        + `${this.options.leaseTtlMs}ms — reclaiming (the previous holder was killed or never released)`,
-      )
-      return false
-    })
-    if (fresh.length === holders.length) return
-    if (fresh.length === 0) this.leases.delete(key)
-    else this.leases.set(key, fresh)
-    this.handOff(key)
+  private reclaimIfStale(): void {
+    if (this.holder === undefined) return
+    const age = Date.now() - this.holder.since
+    if (age < this.options.leaseTtlMs) return
+    const stale = this.holder.owner
+    this.options.log(
+      'warn',
+      `MCP pool: lease on "${this.serverName}" held by ${describeOwner(stale)} for ${age}ms exceeded TTL `
+      + `${this.options.leaseTtlMs}ms — reclaiming (the previous holder was killed or never released)`,
+    )
+    this.holder = undefined
+    this.handOff()
   }
 
   /** 单飞连接（并发调用只连一次）。 */
@@ -589,26 +516,11 @@ class PooledServer {
     this.options.log('warn', `MCP pool: "${this.serverName}" connection died (${reason}) — will reconnect on the next call`)
     this.client = undefined
     this.transport = undefined
-    this.leases.clear()
-    for (const key of [...this.queues.keys()]) this.handOff(key)
+    this.holder = undefined
+    this.handOff()
   }
 }
 
-/** 资源键：无资源 ⇒ 空串（= 整机桶）。 */
-function leaseKeyOf(resource: string | undefined): string {
-  return resource === undefined ? '' : resource
-}
-
-/**
- * 桶容量归一化：缺省 1（独占语义）；`0`/负数/非有限 ⇒ 不限。
- * @param limit - 调用方按策略算出的容量。
- * @returns 归一化容量。
- */
-function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) return 1
-  if (!Number.isFinite(limit) || limit <= 0) return Number.POSITIVE_INFINITY
-  return Math.floor(limit)
-}
 
 /**
  * 宿主级池：`serverName → PooledServer`，按定义指纹判「是否需要换进程」。
@@ -681,12 +593,7 @@ export class McpPool {
     tool: string,
     args: unknown,
     owner: McpLeaseOwner,
-    options: {
-      readonly signal?: AbortSignal
-      readonly resource?: string
-      readonly skipLease?: boolean
-      readonly limit?: number
-    } = {},
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<unknown> {
     return await this.serverFor(serverName).callTool(tool, args, owner, options)
   }
@@ -695,7 +602,7 @@ export class McpPool {
   async acquire(
     serverName: string,
     owner: McpLeaseOwner,
-    options: { readonly signal?: AbortSignal; readonly resource?: string; readonly limit?: number } = {},
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<() => void> {
     return await this.serverFor(serverName).acquire(owner, options)
   }

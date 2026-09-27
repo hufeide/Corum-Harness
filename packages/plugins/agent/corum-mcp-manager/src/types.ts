@@ -38,11 +38,6 @@ export interface McpStdioServer {
    * `read_skill`），在这里点名"先读它"。
    */
   guidance?: string
-  /**
-   * 独占/复用策略；**不写则自动推导**（见 {@link McpConcurrencyPolicy} 与 `concurrency.ts`）。
-   * 想强制现状（整机独占）就写 `{ mode: 'exclusive' }`。
-   */
-  concurrency?: McpConcurrencyPolicy
 }
 
 /** streamable-http 传输的 MCP 服务配置。 */
@@ -62,32 +57,6 @@ export interface McpHttpServer {
   disabled?: boolean
   /** 写给模型的使用指导；语义与 stdio 变体一致（见 {@link McpStdioServer.guidance}）。 */
   guidance?: string
-  /** 独占/复用策略；语义与 stdio 变体一致（见 {@link McpStdioServer.concurrency}）。 */
-  concurrency?: McpConcurrencyPolicy
-}
-
-/**
- * 独占/复用策略（2026-09-27 用户口径：「**可复用的则不独占**」）。
- *
- * 判据不是 server 类型，而是**目标资源是配置时定死、还是调用时传入**：
- *   · 服务提供者按参数寻址（pencil 的 `execute{filePath}`）⇒ `per-resource`：不同文档并发、同一文档串行；
- *   · 绑定到**已存在**的固定实例（CDP `--browser-url=http://127.0.0.1:9333` ⇒ 就那一台）⇒ `exclusive`；
- *   · server **自持**目标（CDP 自己拉起浏览器 / `--isolated`）⇒ 可按 `pageId` 路由 ⇒ `per-resource('pageId')`。
- *
- * 缺省（不写本字段）⇒ **自动推导**，见 `concurrency.ts` 的 {@link deriveConcurrencyPolicy}。
- */
-export interface McpConcurrencyPolicy {
-  /**
-   * · `exclusive` —— 整机一个：同一时刻只允许一个调用（上限恒为 1）。
-   * · `per-resource` —— 按资源参数分桶，**每桶**上限 `maxConcurrent`（缺省 1/桶）：不同文档/page 并行、同一个串行。
-   * · `parallel` —— 不分桶，整机可并发，上限 `maxConcurrent`（缺省不限）：用户口径「大家都可以同时访问，只是可以设置一个访问上限」。
-   * · `shared` —— 与 `parallel` 无上限同义（保留为显式逃生口：完全不仲裁，省掉记账）。
-   */
-  mode: 'exclusive' | 'per-resource' | 'parallel' | 'shared'
-  /** `per-resource` 时，从调用参数里取资源值的键名（如 `filePath` / `pageId`）。 */
-  resourceArg?: string
-  /** 并发上限（信号量容量）。缺省：exclusive=1、per-resource=1/桶、parallel=不限；`0` = 不限。 */
-  maxConcurrent?: number
 }
 
 /** MCP 服务配置（判别联合）。 */
