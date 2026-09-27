@@ -145,9 +145,10 @@ export class AgentRegistry {
    * `preset-reload.ts` 与 `agent-service.ts` 的 `recomposeLiveSessionsOf`）——用户需求是
    * 「会话中改了 MCP 就实时生效，不该重启软件」，而重挂必须点名每一个活 Agent。
    *
-   * 只收**两张带 `profileId` 的表**：root Agent（`byProfile`）与 task 泳道（`tasks`）。
-   * 项目制泳道的键是 `projectId+profileId+laneKey` 拼接串（无分隔符、无法反解），且那些会话
-   * 每次进入泳道都会重新解析 ⇒ 不在此列（如实标注，不假装覆盖）。
+   * 覆盖三张表：root Agent（`byProfile`，直接存 `profileId`）、task 泳道（`tasks`，同样直接存）、
+   * 项目制泳道（`lanes`）。后者的**键**是 `projectId+profileId+laneKey` 无分隔符拼接串、无法反解，
+   * 但 `registerLane` 会**同步**往 `laneIndex`（`sessionId` → 归属，含 `profileId`）写一条，
+   * 故用 `sessionId` 把两张表接起来即可覆盖——不必改键格式（那是既有语义，动它会牵动路由）。
    *
    * @param profileId - profile id。
    * @returns 去重后的活 Agent（同一 Agent 只出现一次；无匹配时空数组）。
@@ -158,6 +159,9 @@ export class AgentRegistry {
     if (root !== undefined) found.add(root)
     for (const entry of this.tasks.values()) {
       if (entry.profileId === profileId) found.add(entry.agent)
+    }
+    for (const entry of this.lanes.values()) {
+      if (this.laneIndex.get(String(entry.sessionId))?.profileId === profileId) found.add(entry.agent)
     }
     return [...found]
   }

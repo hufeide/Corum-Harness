@@ -46,6 +46,18 @@ describe('AgentRegistry.liveAgentsOfProfile — 重挂点名面（2026-09-27）'
     expect(registry.liveAgentsOfProfile('p1')).toHaveLength(1)
   })
 
+  it('★ 项目制泳道也被点名：靠 laneIndex（sessionId → 归属）接起无分隔符的泳道键', () => {
+    const registry = new AgentRegistry()
+    const laneA = fakeAgent('lane-a')
+    const laneB = fakeAgent('lane-b')
+    // 泳道键 `projectId+profileId+laneKey` 无分隔符 ⇒ 只能靠 laneIndex 反查归属。
+    registry.registerLane('proj1', 'p1', { key: 'work', type: 'work' } as never, laneA as never, fakeSessionId('s-lane-a') as never)
+    registry.registerLane('proj1', 'p2', { key: 'work', type: 'work' } as never, laneB as never, fakeSessionId('s-lane-b') as never)
+    expect(registry.liveAgentsOfProfile('p1').map(a => (a as unknown as { id: string }).id)).toEqual(['lane-a'])
+    expect(registry.liveAgentsOfProfile('p2').map(a => (a as unknown as { id: string }).id)).toEqual(['lane-b'])
+    expect(registry.liveAgentsOfProfile('p3')).toEqual([])
+  })
+
   it('没有活会话 ⇒ 空数组（保存 profile 时不产生任何重挂动作）', () => {
     const registry = new AgentRegistry()
     expect(registry.liveAgentsOfProfile('p1')).toEqual([])
