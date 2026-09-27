@@ -24,8 +24,8 @@ interface SessionListState {
   byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
 }
 import type { createLayoutStore } from './stores.ts'
-import type { GridActions } from './service.ts'
-import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal, X } from 'lucide-react'
+import type { GridActions, SidebarMode } from './service.ts'
+import { Blocks, Columns2, FolderKanban, Lock, MessageSquare, Moon, PanelLeftClose, Search, Sun, Terminal, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
@@ -93,7 +93,7 @@ function NavIconButton({ icon, label, onClick, active }: {
  * 资源管理器 / 切换终端 / 插件中心 / 主题（浅↔深）/ 设置。设置触发器渲染
  * sidebar.settings 槽（SettingsShell 触发器+面板一体，面板 portal 到 body）。
  */
-function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onTogglePanels, onToggleTerminal, onOpenPlugins, sidebarCollapsed, settingsSlot }: {
+function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onTogglePanels, onToggleTerminal, onOpenPlugins, sidebarCollapsed }: {
   themePreference: ThemePreference
   onToggleTheme: () => void
   onToggleSidebar: () => void
@@ -101,7 +101,6 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
   onToggleTerminal: () => void
   onOpenPlugins: () => void
   sidebarCollapsed: boolean
-  settingsSlot: ReactNode
 }) {
   const isDark = themePreference === 'dark'
   return (
@@ -127,8 +126,11 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
           onClick={onToggleTheme}
           active={isDark}
         />
-        {/* 设置触发器（sidebar.settings 槽）：覆盖宽按钮样式为小图标按钮。 */}
-        <span className={css.navSettingsSeat}>{settingsSlot}</span>
+        {/* 设置触发器（sidebar.settings 槽）**已迁到活动栏底部组**（PR3）：该槽是
+            single 槽（occupant = SettingsShell，含触发器 + 面板 + onboarding），
+            同一时刻只能挂载一份——旧代码靠「折叠 ⟷ 展开」让标题栏与折叠轨互斥，
+            活动栏常驻后两条挂载点会同时渲染 ⇒ 两个 SettingsShell 实例（两个设置
+            面板、onboarding 弹层渲染两次）。故此处移除，座位归活动栏。 */}
         {/* 插件中心（design.pen action-插件中心 jyVpw）：blocks 18 + 「插件」文字 14px。 */}
         <button type="button" className={css.navPluginBtn} onClick={onOpenPlugins} title="插件中心" aria-label="插件中心">
           <Blocks size={18} />
@@ -140,61 +142,121 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
   )
 }
 
+/** 工作面标识（活动栏主导航组的两项；搜索/插件/设置为非工作面动作）。 */
+type WorkbenchFace = 'task' | 'project'
+
+/** 活动栏 logo 落点（corumapp:// 壳静态资源；与 brand_card / 环境背景同通路）。 */
+const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
+
 /**
- * 侧栏折叠轨（design.pen L1 侧栏折叠态 J0PbdL 的 col-nav，56px 竖排图标栏）：
- * 侧栏被 GridView 收成 collapsedWidth=56 时 leaf 内渲染此轨，替代完整会话
- * 列表。按钮自上而下（design col-nav 9 钮）：
- *   展开侧栏 / 新会话 / 添加工作区 / 搜索 / 编辑器+资源管理器 / 终端 /
- *   插件 / 主题 / 设置。
- * 语义：前三个（新会话/添加工作区/搜索）是侧栏功能——折叠态点击 = 先展开
- * 侧栏（展开后对应功能在会话列表可用）；后五个直通 AppFrame 层动作。
+ * 活动栏（design.pen IrWFV 画板 E 定稿：**活动栏 = 工作面切换器**）——
+ * 56px **常驻**竖排图标列（结构见 design i1ECc）：
+ *   鲸鱼 logo 28 圆形 / 主导航组（任务 · 项目 · 搜索）/ spacer /
+ *   底部组（插件 · 设置）。图标钮 40×40 r10，激活态 $glass-2 底 + 左侧 2px
+ *   $brand-primary 指示条。
+ *
+ * 与旧 SidebarRail 的区别（本 PR = PR3）：旧轨**只在 sidebarCollapsed 时**
+ * 作为 leaf 内替身渲染，且是「侧栏功能快捷键堆」；本组件**常驻**渲染在网格
+ * **外**（AppFrame 的 workbenchRow，GridView 左侧），语义改为工作面切换器。
+ *
+ * 工作面语义（画板 E 的四条 flow）：
+ *   - 任务 → 侧栏任务面板 + 会话主区（= sidebarMode 'task'，开箱默认布局）；
+ *   - 项目 → 侧栏项目面板 + 项目主区（= sidebarMode 'project'）；社区版
+ *     `corum.sidebar.project` 无 occupant ⇒ 图标置灰 + lock 角标，点击只走
+ *     升级引导占位（TODO(project-face)：引导弹层未接入，不假装已切换）；
+ *   - 搜索 → 本 PR 占位（SessionsPane 的搜索框没有跨 bundle 触发通路）；
+ *   - 插件 → 本 PR 占位（集成中心 PR4 才建槽）；
+ *   - 设置 → `sidebar.settings` 槽座位（复用 SettingsShell 触发器，行为不变）；
+ *   - 点**当前激活**的工作面图标 ⇄ 折叠 / 展开侧边栏（design 状态③ 的联动）。
+ *
+ * 刻意**不**走网格内新槽（那是 PR4 集成中心的活，且 grid 数学会把常驻列算进
+ * leafMinSize / collapsedWidth / drop 目标）。
  */
-function SidebarRail({ onExpand, onTogglePanels, onToggleTerminal, onOpenPlugins, themePreference, onToggleTheme, settingsSlot }: {
-  onExpand: () => void
-  onTogglePanels: () => void
-  onToggleTerminal: () => void
-  onOpenPlugins: () => void
-  themePreference: ThemePreference
-  onToggleTheme: () => void
+function ActivityBar({ sidebarMode, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot }: {
+  /** 当前侧栏模式（ctx.layout 的 sidebarMode 快照，经 root inject 面绑为选择器 Hook）。 */
+  sidebarMode: SidebarMode
+  /** 项目工作面可用性（`corum.sidebar.project` 槽占用判定）；社区版恒 false。 */
+  projectAvailable: boolean
+  /** 侧栏是否收起（决定激活项 tooltip 的展开/收起文案）。 */
+  sidebarCollapsed: boolean
+  /** 点「任务 / 项目」：切工作面；已是当前工作面时 = 折叠 / 展开侧栏。 */
+  onSelectFace: (face: WorkbenchFace) => void
+  /** 搜索工作面（本 PR 占位）。 */
+  onSearch: () => void
+  /** 插件工作面（本 PR 占位，待 PR4 集成中心建槽）。 */
+  onPlugins: () => void
+  /** 设置座位：`sidebar.settings` 槽的渲染结果（SettingsShell 触发器 + 面板）。 */
   settingsSlot: ReactNode
 }) {
-  const isDark = themePreference === 'dark'
+  const taskActive = sidebarMode === 'task'
+  const projectActive = sidebarMode === 'project' && projectAvailable
+  /** 工作面 tooltip：激活项额外提示「点此收起/展开侧栏」（状态③ 的可发现性）。 */
+  const faceTitle = (label: string, active: boolean): string =>
+    (active ? `${label} · 点此${sidebarCollapsed ? '展开' : '收起'}侧栏` : label)
   return (
-    <div className={css.sidebarRail} role="toolbar" aria-label="侧栏（已折叠）" aria-orientation="vertical">
-      {/* design y2rO2 btn-toggle：展开侧栏。 */}
-      <button type="button" className={css.railBtn} title="展开侧栏" aria-label="展开侧栏" onClick={onExpand}>
-        <PanelLeftOpen size={18} strokeWidth={2} />
-      </button>
-      {/* design YQ7Gd btn-new-session：新会话（折叠态 = 展开侧栏后新建）。 */}
-      <button type="button" className={css.railBtn} title="新会话" aria-label="新会话" onClick={onExpand}>
-        <MessageCirclePlus size={18} strokeWidth={2} />
-      </button>
-      {/* design DLZas btn-add-workspace：添加工作区（折叠态 = 展开侧栏）。 */}
-      <button type="button" className={css.railBtn} title="添加工作区" aria-label="添加工作区" onClick={onExpand}>
-        <FolderPlus size={18} strokeWidth={2} />
-      </button>
-      {/* design TMy4U btn-search：搜索（折叠态 = 展开侧栏）。 */}
-      <button type="button" className={css.railBtn} title="搜索会话" aria-label="搜索会话" onClick={onExpand}>
-        <Search size={18} strokeWidth={2} />
-      </button>
-      {/* design esTr5 btn-panels：显示/隐藏 编辑器+资源管理器。 */}
-      <button type="button" className={css.railBtn} title="显示/隐藏 编辑器+资源管理器" aria-label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels}>
-        <Columns2 size={18} strokeWidth={2} />
-      </button>
-      {/* design iGETA btn-terminal：显示/隐藏 终端。 */}
-      <button type="button" className={css.railBtn} title="显示/隐藏 终端" aria-label="显示/隐藏 终端" onClick={onToggleTerminal}>
-        <Terminal size={18} strokeWidth={2} />
-      </button>
-      {/* design hNNOS btn-plugin：插件中心。 */}
-      <button type="button" className={css.railBtn} title="插件中心" aria-label="插件中心" onClick={onOpenPlugins}>
-        <Blocks size={18} strokeWidth={2} />
-      </button>
-      {/* design e4enT btn-theme：主题切换。 */}
-      <button type="button" className={css.railBtn} title={isDark ? '切换到浅色主题' : '切换到深色主题'} aria-label="切换主题" aria-pressed={isDark} onClick={onToggleTheme}>
-        {isDark ? <Moon size={18} strokeWidth={2} /> : <Sun size={18} strokeWidth={2} />}
-      </button>
-      {/* design ADqDw btn-settings：设置（sidebar.settings 槽触发器座位）。 */}
-      <span className={css.railSettingsSeat}>{settingsSlot}</span>
+    <div className={css.activityBar} role="toolbar" aria-label="活动栏（工作面切换器）" aria-orientation="vertical">
+      {/* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。 */}
+      <img className={css.railLogo} src={ACTIVITY_BAR_LOGO_SRC} alt="" draggable={false} />
+
+      {/* 主导航组（design dTF8x）：任务 · 项目 · 搜索。 */}
+      <div className={css.railGroup}>
+        <button
+          type="button"
+          className={css.railItem}
+          data-face="task"
+          data-active={taskActive || undefined}
+          aria-pressed={taskActive}
+          title={faceTitle('任务', taskActive)}
+          aria-label="任务工作面"
+          onClick={() => { onSelectFace('task') }}
+        >
+          <MessageSquare size={20} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className={css.railItem}
+          data-face="project"
+          data-active={projectActive || undefined}
+          data-locked={projectAvailable ? undefined : true}
+          aria-pressed={projectActive}
+          title={projectAvailable
+            ? faceTitle('项目', projectActive)
+            : '项目工作面（专业版功能，暂未开放）'}
+          aria-label="项目工作面"
+          onClick={() => { onSelectFace('project') }}
+        >
+          <FolderKanban size={20} strokeWidth={2} />
+          {/* 社区版角标（design a7y2Pc：11px lock，落按钮右下角）。 */}
+          {!projectAvailable && <Lock className={css.railLock} size={11} strokeWidth={2.5} aria-hidden="true" />}
+        </button>
+        <button
+          type="button"
+          className={css.railItem}
+          data-face="search"
+          title="搜索"
+          aria-label="搜索工作面"
+          onClick={onSearch}
+        >
+          <Search size={20} strokeWidth={2} />
+        </button>
+      </div>
+
+      {/* spacer（design KBKWI）：把底部组推到栏底（margin-top auto）。 */}
+      <div className={css.railSpacer} />
+      <div className={css.railGroup}>
+        <button
+          type="button"
+          className={css.railItem}
+          data-face="plugins"
+          title="插件"
+          aria-label="插件工作面"
+          onClick={onPlugins}
+        >
+          <Blocks size={20} strokeWidth={2} />
+        </button>
+        {/* design bg1Ll btn-settings：设置（sidebar.settings 槽触发器座位，行为不变）。 */}
+        <span className={css.railSettingsSeat}>{settingsSlot}</span>
+      </div>
     </div>
   )
 }
@@ -299,6 +361,23 @@ export type AppFrameProps =
     /** 主题偏好选择器 hook（inject hooks.theme 绑定而来，selector 形式）。 */
     useTheme: <S>(sel: (p: ThemePreference) => S, eq?: (a: S, b: S) => boolean) => S
     /**
+     * 侧栏模式选择器 hook（PR3 活动栏：inject hooks.sidebarMode 绑定而来，
+     * 源 = ctx.layout.sidebarModeSnapshot()）。活动栏「任务/项目」的激活态跟它走。
+     */
+    useSidebarMode: <S>(sel: (m: SidebarMode) => S, eq?: (a: S, b: S) => boolean) => S
+    /**
+     * 项目工作面可用性选择器 hook（inject hooks.projectOccupied 绑定而来，
+     * 源 = `corum.sidebar.project` 槽占用判定）。社区版无 occupant ⇒ 恒 false ⇒
+     * 活动栏项目图标置灰 + lock 角标。
+     */
+    useProjectOccupied: <S>(sel: (occupied: boolean) => S, eq?: (a: S, b: S) => boolean) => S
+    /**
+     * 侧栏模式写入（PR2 已建的 `ctx.layout.setSidebarMode` 通路，幂等）——
+     * 活动栏点「任务/项目」时直接写它。AppFrame 是纯组件拿不到 cordis 服务，
+     * 与 setTheme / attachGridActions 同一「inject 面反向注入」模式。
+     */
+    setSidebarMode: (mode: SidebarMode) => void
+    /**
      * 主题偏好写入（直通 theme 服务）。
      *
      * 注：`remote` / `openSession` 两个注入面**已不再由本组件消费**——它们随会话段
@@ -329,7 +408,10 @@ export function IdeAppFrame({
   actions,
   renderSlot,
   useTheme,
+  useSidebarMode,
+  useProjectOccupied,
   setTheme,
+  setSidebarMode,
   openPluginManager: onOpenPluginManager,
   attachGridActions,
 }: AppFrameProps) {
@@ -340,6 +422,11 @@ export function IdeAppFrame({
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
   const themePreference = useTheme((p: ThemePreference) => p)
+  // 活动栏工作面状态（PR3）：当前侧栏模式 + 项目工作面可用性。
+  // 两者都来自 root inject 面的 hooks 室（源 = ctx.layout 的
+  // sidebarModeSnapshot / corum.sidebar.project 槽占用判定），活动栏据此定激活态。
+  const sidebarMode = useSidebarMode(m => m)
+  const projectAvailable = useProjectOccupied(occupied => occupied)
   // 会话标题/空态判定（isHero）已随会话段迁往 session-bar.tsx：那里由槽 occupant
   // 直接读 `useSessions` 投影（槽是会话作用域，自带 sessionId），本组件不再需要。
   const frameRef = useRef<HTMLDivElement | null>(null)
@@ -474,6 +561,39 @@ export function IdeAppFrame({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const onToggleSidebar = useCallback(() => {
     setSidebarCollapsed(c => !c)
+  }, [])
+  // ── 活动栏工作面切换（PR3）──
+  // 点「任务/项目」= 写 ctx.layout 的 sidebarMode（工作面的跨 bundle 单例状态，
+  // 侧栏骨架按它切换任务/项目面板）；点**当前激活**的工作面图标 = 折叠/展开侧栏
+  // （design 画板 E 状态③ 的联动，取代旧 SidebarRail 的展开按钮）。切工作面时
+  // 一并确保侧栏是展开态——否则点了图标侧栏还收着，用户看不到工作面内容。
+  const onSelectFace = useCallback((face: WorkbenchFace) => {
+    if (face === 'project' && !projectAvailable) {
+      // 社区版：corum.sidebar.project 槽无 occupant（项目工作面是闭源内容）。
+      // TODO(project-face): 升级引导弹层未接入（PR 未定）——本 PR 只置灰 + 记日志，
+      // 不写 sidebarMode（写了也没有面板可渲染，且会污染跨 bundle 的服务状态）。
+      console.debug('[activity-bar] 项目工作面不可用（社区版 · 项目面板槽无 occupant）')
+      return
+    }
+    if (sidebarMode === face) {
+      onToggleSidebar()
+      return
+    }
+    setSidebarMode(face)
+    setSidebarCollapsed(false)
+  }, [projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode])
+  // 搜索工作面：本 PR 仅占位。SessionsPane 的搜索框是面板内 state（searchOpen +
+  // 局部 ref），没有跨 bundle 的聚焦通路（新开一条通路属侧栏插件的活，超出本 PR
+  // 活动栏范围），故按定稿先占位。
+  // TODO(search-face): 待侧栏插件暴露「展开并聚焦搜索框」的注入面后接上。
+  const onSearchFace = useCallback(() => {
+    console.debug('[activity-bar] 搜索工作面（占位：侧栏搜索框尚无跨 bundle 聚焦通路）')
+  }, [])
+  // 插件工作面：本 PR 仅占位。集成中心（PR4）才建槽——届时插件图标切换
+  // 「侧栏与会话区让位、集成中心全幅」（design 画板 E 状态②）。
+  // TODO(PR4): 集成中心建槽后，此处改为切换插件工作面。
+  const onPluginsFace = useCallback(() => {
+    console.debug('[activity-bar] 插件工作面（占位：集成中心 PR4 建槽）')
   }, [])
   // 传给 GridView 的折叠槽位集（useMemo 稳引用，折叠时才含 sidebar）。
   const COLLAPSED_SIDEBAR = useMemo<ReadonlySet<string>>(
@@ -719,21 +839,11 @@ export function IdeAppFrame({
     if (slot === 'corum.sidebar') {
       // 侧栏（design.pen col-nav）：left-body 内的圆角 18 玻璃卡片（项目/任务双
       // 模式）。顶部贯通标题栏行（窗口标题栏 + Agent 标题栏）在 AppFrame 主 JSX
-      // 渲染，不在此 leaf 内。折叠态（design J0PbdL）：leaf 被 GridView 收成
-      // 56px，渲染竖排图标轨（含展开按钮），替代完整会话列表。
-      if (sidebarCollapsed) {
-        return (
-          <SidebarRail
-            onExpand={onToggleSidebar}
-            onTogglePanels={onTogglePanels}
-            onToggleTerminal={onToggleTerminal}
-            onOpenPlugins={openPluginManager}
-            themePreference={themePreference}
-            onToggleTheme={onToggleTheme}
-            settingsSlot={renderSlot('sidebar.settings', { wide: false })}
-          />
-        )
-      }
+      // 渲染，不在此 leaf 内。折叠态：leaf 被 GridView 收成 collapsedWidth=56，
+      // 只隐藏内容——**不再渲染图标轨**（PR3：原 SidebarRail 折叠替身已退役，
+      // 活动栏本就是常驻 56px 图标列，再画一行图标即是重复；「展开侧栏」入口随之
+      // 改到活动栏——点当前激活的工作面图标 ⇄ 收起/展开，见 ActivityBar 注释）。
+      if (sidebarCollapsed) return null
       return (
         <div className={css.sidebarPane}>
           <div className={css.sidebarPaneBody}>
@@ -754,8 +864,7 @@ export function IdeAppFrame({
       )
     }
     return content
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderSlot, themePreference, onToggleTheme, onToggleSidebar, onTogglePanels, onToggleTerminal, openPluginManager, sidebarCollapsed])
+  }, [renderSlot, sidebarCollapsed])
   const popOutSlot = useCallback((slot: GridSlot) => {
     const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
     void bridge?.openFloating?.(slot)
@@ -899,7 +1008,6 @@ export function IdeAppFrame({
             onToggleTerminal={onToggleTerminal}
             onOpenPlugins={openPluginManager}
             sidebarCollapsed={sidebarCollapsed}
-            settingsSlot={renderSlot('sidebar.settings', { wide: false })}
           />
         </div>
         {/* 会话段（会话标题 + 状态胶囊 + 常驻 Agent 胶囊 + 轨迹）已迁出本行
@@ -910,25 +1018,41 @@ export function IdeAppFrame({
             本行从此只剩**窗口控制**（红绿灯让位 + 全局图标按钮），宽度收到侧栏右缘。 */}
       </div>
 
-      {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。
-          终端 corum.panel 已纳入网格（默认底部行），可调宽、可与其他区域自由
-          组合。leafTopOffset 给 root row 的 sidebar/conversation 格内容下移
-          54px（40 标题栏 + 14 间距）让位上方标题栏浮层；right-col 格 offset=0
-          顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。 */}
-      <div className={css.mainRow} data-gridview ref={mainRowRef}>
-        <GridView
-          root={grid}
-          renderSlot={renderGridSlot}
-          onResize={onGridResize}
-          onDrop={onGridDrop}
-          onPopOut={popOutSlot}
-          onDropNewSlot={onDropNewSlot}
-          detachedSlots={effectiveDetached}
-          transparentSlots={IDE_TRANSPARENT_SLOTS}
-          leafTopOffset={TITLEBAR_CLEARANCE}
-          collapsedSlots={COLLAPSED_SIDEBAR}
-          lockedSlots={lockedSlots}
+      {/* 工作面行（PR3）：左 = 常驻活动栏（**网格外**的固定 56px 列），
+          右 = 自由二维网格（GridView）。活动栏刻意不走网格内新槽——网格数学
+          （leafMinSize / collapsedWidth / drop 目标）会把它算进布局，而它是
+          壳级导航、不是用户可拖拽/可隐藏的区域（那是 PR4 集成中心的活）。 */}
+      <div className={css.workbenchRow}>
+        <ActivityBar
+          sidebarMode={sidebarMode}
+          projectAvailable={projectAvailable}
+          sidebarCollapsed={sidebarCollapsed}
+          onSelectFace={onSelectFace}
+          onSearch={onSearchFace}
+          onPlugins={onPluginsFace}
+          settingsSlot={renderSlot('sidebar.settings', { wide: false })}
         />
+
+        {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。
+            终端 corum.panel 已纳入网格（默认底部行），可调宽、可与其他区域自由
+            组合。leafTopOffset 给 root row 的 sidebar/conversation 格内容下移
+            54px（40 标题栏 + 14 间距）让位上方标题栏浮层；right-col 格 offset=0
+            顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。 */}
+        <div className={css.mainRow} data-gridview ref={mainRowRef}>
+          <GridView
+            root={grid}
+            renderSlot={renderGridSlot}
+            onResize={onGridResize}
+            onDrop={onGridDrop}
+            onPopOut={popOutSlot}
+            onDropNewSlot={onDropNewSlot}
+            detachedSlots={effectiveDetached}
+            transparentSlots={IDE_TRANSPARENT_SLOTS}
+            leafTopOffset={TITLEBAR_CLEARANCE}
+            collapsedSlots={COLLAPSED_SIDEBAR}
+            lockedSlots={lockedSlots}
+          />
+        </div>
       </div>
 
       {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer). */}

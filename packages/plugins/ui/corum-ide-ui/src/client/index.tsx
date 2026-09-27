@@ -37,7 +37,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
-import type { GridActions, PanelActions } from './service.ts'
+import type { GridActions, PanelActions, SidebarMode } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 import {
   SessionStatusPill, SessionTrajectoryButton, FloatingCloseButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
@@ -292,6 +292,10 @@ export function apply(ctx: ClientContext): void {
         return {
           setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
           attachGridActions: (a: GridActions) => { layout.attachGrid(a) },
+          // 活动栏工作面面（PR3）：setSidebarMode 直通 ctx.layout 的幂等写
+          // （PR2 已建通路）——活动栏「任务/项目」点击写它，侧栏骨架按同一份
+          // 跨 bundle 单例状态切换面板（不再需要侧栏内部的模式切换 UI）。
+          setSidebarMode: (mode: SidebarMode) => { layout.setSidebarMode(mode) },
           // 插件中心触发：壳不持面板（业务 chrome 已拆出），经 LayoutController
           // → grid actions 订阅面通知，corum-ide-plugin-manager-ui 插件认领并
           // 打开自己的 modal 面板（三-2 服务化，原 CustomEvent 广播已退役）。
@@ -300,6 +304,15 @@ export function apply(ctx: ClientContext): void {
             theme: {
               getSnapshot: () => ctx.theme.getTheme().preference,
               subscribe: (fn: () => void) => ctx.on('theme/change', fn),
+            },
+            // 活动栏的两个选择器源（PR3）：当前侧栏模式 + 项目工作面可用性。
+            // 前者复用 PR2 的服务快照源；后者 = `corum.sidebar.project` 槽占用
+            // 判定（与 corum-ide-sidebar-ui 的 projectOccupied 同一判据，社区版
+            // 无 occupant ⇒ false ⇒ 活动栏项目图标置灰 + lock 角标）。
+            sidebarMode: layout.sidebarModeSnapshot(),
+            projectOccupied: {
+              getSnapshot: () => ctx.slots.entriesOfSlot('corum.sidebar.project').length > 0,
+              subscribe: (fn: () => void) => ctx.slots.subscribe('corum.sidebar.project', fn),
             },
           },
         }

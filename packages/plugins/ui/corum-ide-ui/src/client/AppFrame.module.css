@@ -72,7 +72,6 @@
 /* 段内按钮/可点控件显式 no-drag（确保可点；这些类自身也已声明 no-drag）。 */
 .titlebarDrag .navIconBtn,
 .titlebarDrag .navPluginBtn,
-.titlebarDrag .navSettingsSeat,
 .titlebarDrag .agentTrajBtn,
 .titlebarDrag button,
 .titlebarDrag [role="button"] {
@@ -135,37 +134,10 @@
   color: var(--dsw-alias-brand-primary);
 }
 
-/* 设置触发器座位：覆盖 SettingsShell trigger/rail 样式为标题栏小图标按钮
-   （28×28 圆角 8，与其他 navIconBtn 对齐）。需用 .trigger.rail 双类选择器
-   抬特异性——SettingsShell 的 .trigger.rail（36×36 圆形 + 垂直 margin）
-   是双类，单属性选择器赢不了它。 */
-.navSettingsSeat {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  color: var(--dsw-alias-label-secondary);
-}
-/* 触发器图标颜色对齐设计稿 label-secondary（与其它标题栏图标一致；
-   SettingsShell 触发器默认 label-primary 过白）。 */
-.navSettingsSeat [class*='_trigger'] {
-  color: var(--dsw-alias-label-secondary);
-}
-.navSettingsSeat [class*='_trigger']:hover {
-  color: var(--dsw-alias-label-primary);
-}
-.navSettingsSeat [class*='_trigger'],
-.navSettingsSeat [class*='_trigger'][class*='_rail'] {
-  width: 28px;
-  height: 28px;
-  margin: 0;
-  padding: calc(6px * var(--corum-density-scale, 1));
-  border-radius: 8px;
-  justify-content: center;
-  gap: 0;
-}
-.navSettingsSeat [class*='_triggerLabel'] {
-  display: none; /* 标题栏只留图标 */
-}
+/* 设置触发器座位（.navSettingsSeat）随 PR3 移除：座位已归活动栏底部组
+   （.railSettingsSeat）。该槽是 single 槽（occupant = SettingsShell），
+   常驻活动栏与标题栏两条挂载点会同时实例化 ⇒ 两个设置面板 + onboarding
+   弹层渲染两次，故标题栏那份必须去掉。 */
 
 /* 插件中心按钮（design.pen action-插件中心 jyVpw）：h28 padding[0,8] 圆角 8，
    blocks 16 + 「插件」文字 12/600，图标与文字 gap 4。 */
@@ -550,6 +522,18 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* Workbench Row（PR3 活动栏式布局，design.pen IrWFV 画板 E）：左 = 常驻活动栏
+   （网格外固定 56px 列），右 = 自由二维网格（GridView）。活动栏走「网格外」
+   路径（与 titlebarRow 同款思路）——它是壳级导航、不是用户可拖拽/可隐藏的网格
+   区域，故不进网格权重体系（否则会被算进 leafMinSize / collapsedWidth /
+   drop 目标）。min-width:0 保证窗口变窄时网格先让位、活动栏不被压扁。 */
+.workbenchRow {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
 /* Main Row: the free 2-D grid (GridView). Flex container so the recursive
    branch/leaf layout owns the space. */
 .mainRow {
@@ -615,17 +599,6 @@
 .sidebarFoot {
   flex: none;
   margin-top: auto;
-}
-
-/* The 56px rail: expand toggle on top, settings seat at the foot. */
-.sidebarRail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
-  height: 100%;
-  padding: calc(10px * var(--corum-density-scale, 1)) 0;
-  box-sizing: border-box;
 }
 
 .railButton {
@@ -972,74 +945,154 @@
   overflow: hidden;
 }
 
-/* 侧栏折叠轨（design.pen L1 侧栏折叠态 J0PbdL 的 col-nav，56px 竖排图标栏）：
-   玻璃卡片外观与展开态 sidebarPane 一致（col-nav 圆角 18），内容为一列
-   24×24 图标按钮（上：展开/新会话/添加工作区/搜索；下：面板/终端/插件/
-   主题/设置），垂直居中分布。 */
-.sidebarRail {
+/* 侧栏折叠：leaf 由 GridView 收成 collapsedWidth=56，内容隐藏（renderGridSlot
+   折叠态返回 null）。原折叠轨 SidebarRail 已退役（PR3：活动栏常驻，折叠替身
+   与它重复），故不再有 .sidebarRail / .railBtn。 */
+
+/* ── 活动栏（PR3，design.pen IrWFV 画板 E 定稿：活动栏 = 工作面切换器）──
+   常驻 56px 竖排图标列，渲染在网格**外**（AppFrame 的 .workbenchRow 左列），
+   不进网格权重体系。结构自上而下：鲸鱼 logo 28 / 主导航组（任务·项目·搜索）/
+   spacer / 底部组（插件·设置）。
+
+   顶部让位 40px（= 窗口标题栏行高，与 TITLEBAR_CLEARANCE 的 sidebar 格同款）：
+   栏自身仍占满 frame 全高（玻璃底贯通到窗口顶，与画板 E 的 fill_container
+   一致），只有**内容**下移——否则鲸鱼 logo（y=10..38）会压在 macOS 红绿灯
+   （hiddenInset + trafficLightPosition{12,13}，约 x=12..76 / y=13..25）上。
+   画板 E 是无窗口 chrome 的示意图，故这条由本 PR 按壳既有约定补。 */
+.activityBar {
+  position: relative;
+  flex: none;
+  width: 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: calc(4px * var(--corum-density-scale, 1));
   height: 100%;
   min-height: 0;
-  padding: calc(10px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
+  padding: calc(40px + 10px * var(--corum-density-scale, 1)) 0 calc(10px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
   overflow: hidden;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 18px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border-right: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
-.railBtn {
+/* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。壳自带静态资源
+   经 corumapp:// 协议取，不随主题换图（图标自带底色，深浅两态都成立）。 */
+.railLogo {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  object-fit: cover;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* 图标组（design dTF8x 主导航组 / aIZcQ 底部组）。 */
+.railGroup {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+}
+/* 组间弹性留白（design KBKWI spacer）：把底部组推到栏底。 */
+.railSpacer {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* 图标钮（design e66pz/h9Xyr/CtfBu/…）：40×40 r10。 */
+.railItem {
+  position: relative;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
+  /* border-box：激活态要加 1px 描边（见 .railItem[data-active]），必须保证
+     按钮外框恒为 40×40，否则激活瞬间尺寸跳 2px、指示条的 left 也随之偏。 */
+  box-sizing: border-box;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
-.railBtn:hover {
+.railItem:hover {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
-.railBtn:focus-visible {
+/* 激活态（design e66pz）：$glass-2 底 + $glass-border 1px 描边 + 左侧 2px
+   $brand-primary 指示条。描边是必需的——激活底与栏底同为 $glass-2，无描边时
+   按钮边界不可见（design 的非激活钮 strokeWidth 是 #00000000，激活钮才是
+   $glass-border）。指示条 = design R9OuW（x=2、2×20 r2，相对 56 宽的栏）；
+   命中框 40 宽居中于栏内 ⇒ 其左缘在栏的 x=8；absolute 的 left 以**padding box**
+   为基准，而本态自带 1px 描边 ⇒ 基准被内缩到 x=9 ⇒ left = 2-9 = -7px。 */
+.railItem[data-active] {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+.railItem[data-active]::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary);
+}
+.railItem:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
 }
-/* 设置触发器座位：对齐 railBtn 的 24×24 图标钮（覆盖 SettingsShell 触发器
-   默认的宽按钮形态，与 navSettingsSeat 同法）。 */
+/* 置灰态（design h9Xyr btn 40×40 r10 · 置灰）：社区版项目工作面不可用。
+   仍可点（点了走升级引导占位），故不动 pointer-events，只降视觉。 */
+.railItem[data-locked] {
+  color: var(--dsw-alias-label-dimmed);
+}
+/* 社区版 lock 角标（design a7y2Pc：11px，落按钮右下角）。 */
+.railLock {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  color: var(--dsw-alias-label-secondary);
+  pointer-events: none;
+}
+/* 设置座位（sidebar.settings 槽触发器）：与 railItem 同尺寸 40×40 r10，
+   覆盖 SettingsShell 触发器默认的宽按钮形态（与 navSettingsSeat 同法）。
+   本座位在底部组，无激活态（设置是弹层，不是工作面）。 */
 .railSettingsSeat {
+  position: relative;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  color: var(--dsw-alias-label-secondary);
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: var(--dsw-alias-label-primary);
 }
 .railSettingsSeat:hover {
-  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 .railSettingsSeat [class*='_trigger'],
 .railSettingsSeat [class*='_trigger'][class*='_rail'] {
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 40px;
   margin: 0;
-  padding: calc(3px * var(--corum-density-scale, 1));
-  border-radius: 8px;
+  padding: 0;
+  border-radius: 10px;
   justify-content: center;
   gap: 0;
   color: inherit;
 }
 .railSettingsSeat [class*='_triggerLabel'] {
-  display: none; /* 折叠轨只留图标 */
+  display: none; /* 活动栏只留图标 */
 }
 
 .overlayLayer {
