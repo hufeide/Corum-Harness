@@ -73,6 +73,26 @@ export interface SessionsPaneInjected {
    * 冻结成缺席（插件中心可动态启停插件，这不是假想情况）。
    */
   resolveSaveSession?: (() => ((sessionId: SessionId) => Promise<void>) | undefined) | undefined
+  /**
+   * 会话行**项目徽标**的数据源（PR7，闭源对接点，见 {@link useProjectBadge}）。
+   *
+   * 开源仓拿不到「会话 → 项目」映射（项目实体/索引读取器在闭源
+   * `@corum/corum-project`，会话摘要 `SessionSummary` 只有 `cwd`、无 `projectId`），
+   * 故本字段**缺省 undefined ⇒ 徽标不渲染**（不留空胶囊、不报错）。闭源侧把它
+   * （连同下面的 `openProjectWorkface`）加进本槽的 inject 面即可点亮徽标——
+   * **加两个可选字段就行，无需改本组件**。
+   */
+  resolveProjectBadge?: ProjectBadgeResolver | undefined
+  /**
+   * 点项目徽标 → 切到该项目工作面。闭源侧注入实现为
+   * `(projectId) => { sidebarModeLayout(ctx).setSidebarMode('project') }`
+   * （窄化能力面写法见 `corum-ui-conversation/src/client/apply.ts` 的
+   * `SidebarModeCapableLayout`，红线 3：不 import 实现包、不耦合类型）。
+   *
+   * 与数据源同款：缺省 undefined ⇒ 徽标不渲染（**不留死按钮**——有数据但点了
+   * 没反应的胶囊比不显示更糟）。
+   */
+  openProjectWorkface?: ((projectId: string) => void) | undefined
 }
 
 /** 相对时间标签（2026-08-28 用户定调：中文「N 分钟/N 小时/N 天」）。 */
@@ -172,6 +192,89 @@ function collapseSessions(
 function isTaskSession(row: SessionSummary): boolean {
   return isTaskSessionId(row.id) && row.origin !== 'subagent'
 }
+
+/**
+ * 会话行项目徽标的**数据模型**（PR7）。
+ *
+ * `projectId` 是「切到哪个项目工作面」的身份（供 `openProjectWorkface` 定位），
+ * `name` 是胶囊上显示的项目名（KKC / 矩道…）。两者都由数据源给出——组件不猜、
+ * 不从 cwd 末段派生（工作区目录名 ≠ 项目名）。
+ */
+export interface ProjectBadgeInfo {
+  readonly projectId: string
+  readonly name: string
+}
+
+/**
+ * 把一条会话投影成徽标信息；无项目归属返回 `undefined`（**不是空对象**）。
+ *
+ * 之所以是「解析器」而不是「快照」：它与 `resolveSaveSession` 同因——槽的 inject
+ * 面被 ui-renderer 按 entry **永久缓存**（`rootInjectCache` 只跑一次 `runInject`），
+ * 投影成常量会在「项目插件晚于侧栏装配」时永久冻结成缺席。闭源侧照此形态提供即可。
+ */
+export type ProjectBadgeResolver = (session: SessionSummary) => ProjectBadgeInfo | undefined
+
+/**
+ * 会话行的项目徽标数据源（PR7 定稿，**闭源对接点**）。
+ *
+ * ## 为什么开源仓恒为空 —— 调研结论（2026-09-27）
+ *
+ * 项目模式已整体迁出闭源仓 `Corum-Harness-Project`（`@corum/corum-project`），
+ * 本仓只剩 task 模式，故**开源侧没有任何可用的「会话 → 项目」映射**：
+ *
+ * | 候选数据面 | 实测结论 |
+ * | --- | --- |
+ * | `SessionSummary`（会话列表） | 只有 `cwd`，**无 projectId/项目名字段**（官方基座类型） |
+ * | `listTaskAgents`（corumAgent RPC） | 返回 cwd/profileId/title/lastActive，同样无项目 |
+ * | `ctx.workspaces`（工作区列表） | 每个 task 会话天然归属一个工作区，**那个工作区几乎恒等于「本项目自己」**，拿它当徽标只会把目录名挂满每一行 |
+ * | 工作区索引 `$CORUM_HOME/projects/<id>/project.json`（`workspace-identity.ts` 可读） | 字段只有 id/name/cwd/type——`name` 是**工作区条目名**（≈目录名），且 task 工作区恒为 `type:'task'`，反解出来不是项目 |
+ * | 闭源 `corumProject/listProjects` / `listWorkspaceSessions` | **确实能给出项目名 + cwd**——但要打闭源 namespace，且开源组件读它会在纯开源组合下打到不存在的端点 |
+ * | `AgentRegistry.laneOf(sessionId)`（泳道归属索引） | 泳道会话才有归属，而泳道会话（`corum-proj*`）**不进 task 列表**（`isTaskSession` 过滤），对 task 行恒为 undefined |
+ *
+ * ⇒ 开源仓的实现就是**返回空值**：徽标不渲染、不报错、不留空胶囊。UI 与点击
+ * 行为已完整交付（渲染位 + 样式 + `setSidebarMode('project')` 通路）。
+ *
+ * ## 闭源怎么点亮（三处小改，都在闭源仓）
+ *
+ * 1. 在本槽（`corum.sidebar.sessions`）的 inject 面加两个字段：
+ *    `resolveProjectBadge`（用 `listProjects` 的 `name` + `listWorkspaceSessions` 的
+ *    `cwd` 建 cwd → 项目表，按 `session.cwd` 命中）与 `openProjectWorkface`
+ *    （`(id) => sidebarModeLayout(ctx).setSidebarMode('project')`，
+ *    窄化面写法同 `corum-ui-conversation` 的 `SidebarModeCapableLayout`）；
+ * 2. 想同时「定位该项目」，在 `setSidebarMode('project')` 旁再走闭源项目面板自己的
+ *    定位动作（本组件不假设它的形态）；
+ * 3. 无需改本组件、无需改本仓任何类型——两个字段都是**可选**的。
+ *
+ * ## 形态说明（与「`useProjectBadge(session)` 每行一调」的差别）
+ *
+ * 取的是**解析器入参**而非 session 入参：会话行在 `groups.map(...)` / `rows.map(...)`
+ * 里渲染，在循环体里调 Hook 违反 Hooks 规则（行数会随折叠/展开变化）。故本 Hook
+ * 在 `SessionsPane` 顶层调**一次**、返回一个纯函数，由各行按需调用——对外语义等价
+ * （「该会话有没有项目」），且不赌 Hook 调用顺序。
+ *
+ * @param resolver - inject 面下发的解析器；缺席（开源组合）返回的函数恒为 `undefined`。
+ * @returns 按会话解析徽标信息的纯函数；数据源缺席时恒返回 `undefined`。
+ */
+export function useProjectBadge(
+  resolver: ProjectBadgeResolver | undefined,
+): (session: SessionSummary) => ProjectBadgeInfo | undefined {
+  // 无状态投影：resolver 每次渲染按引用比较（inject 面被缓存 ⇒ 引用稳定），
+  // useCallback 只是省掉每行一个新闭包，不是正确性依赖。
+  return useCallback(
+    (session: SessionSummary) => resolver?.(session),
+    [resolver],
+  )
+}
+
+/**
+ * 会话行的项目徽标数据源（PR7）——**开源仓的取值恒为 `undefined`**。
+ *
+ * 这是 `useProjectBadge` 的缺省解析器：本仓没有「会话 → 项目」映射（见上方调研
+ * 表），所以任何用到它的地方都解析出 `undefined` ⇒ 徽标不渲染。存在的价值是把
+ * 「开源仓无项目」表达成**一处显式常量**而不是散落的 `undefined`，也让闭源侧一眼
+ * 看到替换点（把 inject 面的 `resolveProjectBadge` 填上即可，本常量随之没人用）。
+ */
+export const NO_PROJECT_BADGE: ProjectBadgeResolver = () => undefined
 
 /** 分组方式（官方视图选项：按工作区 / 单列表）。 */
 type GroupBy = 'workspace' | 'flat'
@@ -357,6 +460,11 @@ export function SessionsPane(props: SessionsPaneInjected) {
   const visibleResults = results?.filter(item => isTaskSessionId(item.sessionId)) ?? null
   // 搜索态双重防护：query 已清空（<2 字）时即使 results 因迟到写回也不进搜索分支。
   const searching = query.trim().length >= 2 && visibleResults !== null
+
+  // 会话行项目徽标数据源（PR7，闭源对接点；开源组合下 resolveProjectBadge 缺席
+  // ⇒ projectBadgeOf 恒返回 undefined ⇒ 徽标整体不渲染）。
+  const projectBadgeOf = useProjectBadge(props.resolveProjectBadge ?? NO_PROJECT_BADGE)
+  const openProjectWorkface = props.openProjectWorkface
 
   // 搜索结果行附加上下文：标题（列表 store 的 displayTitle）+ 所属工作区名。
   const workspaceOfSession = useCallback((sessionId: SessionId): string | undefined => {
@@ -567,6 +675,8 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onForkRow={(id) => { void props.fork(id).catch(() => { /* 错误经列表 store 投影 */ }) }}
                 onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
                 onSaveRow={saveRow}
+                projectBadgeOf={projectBadgeOf}
+                onOpenProject={openProjectWorkface}
                 pendings={pendings}
               />
             ))
@@ -584,6 +694,8 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onFork={() => { void props.fork(row.id).catch(() => {}) }}
                 onArchive={() => { void props.archive(row.id).catch(() => {}) }}
                 onSave={saveRow === undefined ? undefined : () => { saveRow(row.id) }}
+                projectBadge={projectBadgeOf(row)}
+                onOpenProject={openProjectWorkface}
                 pendings={pendings}
               />
             ))
@@ -624,7 +736,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
 }
 
 /** 一个工作区分组（design d-*：组行 + 组内会话行）。 */
-function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, onSaveRow, pendings }: {
+function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, onSaveRow, projectBadgeOf, onOpenProject, pendings }: {
   group: { key: string; workspace: WorkspaceView | null; sessions: readonly SessionSummary[] }
   collapsed: boolean
   /** 组内是否已「展开其余 N 个会话」（与整组 `collapsed` 正交，见调用方注释）。 */
@@ -644,6 +756,10 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
   onArchiveRow: (id: SessionId) => void
   /** 保存会话日志到…（可选：存档插件缺席时不传 ⇒ 菜单项不渲染）。 */
   onSaveRow?: ((id: SessionId) => void) | undefined
+  /** 会话行项目徽标数据源（PR7；开源组合下恒 undefined ⇒ 不渲染）。 */
+  projectBadgeOf: (session: SessionSummary) => ProjectBadgeInfo | undefined
+  /** 点徽标 → 切到该项目工作面（PR7；缺席时徽标不渲染，不留死按钮）。 */
+  onOpenProject?: ((projectId: string) => void) | undefined
   pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -740,6 +856,8 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
                 onFork={() => { onForkRow(row.id) }}
                 onArchive={() => { onArchiveRow(row.id) }}
                 onSave={onSaveRow === undefined ? undefined : () => { onSaveRow(row.id) }}
+                projectBadge={projectBadgeOf(row)}
+                onOpenProject={onOpenProject}
                 pendings={pendings}
               />
             ))}
@@ -766,12 +884,12 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
 }
 
 /**
- * One session row (design session-row): live status dot + title + relative
- * time. Double-clicking the title turns it into an in-place rename field
- * (Enter submits, Escape cancels, blur submits) backed by the injected
- * rename RPC.
+ * One session row (design session-row): live status dot + title + optional
+ * project badge + relative time. Double-clicking the title turns it into an
+ * in-place rename field (Enter submits, Escape cancels, blur submits) backed
+ * by the injected rename RPC.
  */
-function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, onSave, pendings }: {
+function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, onSave, projectBadge, onOpenProject, pendings }: {
   row: SessionSummary
   active: boolean
   nested?: boolean
@@ -784,6 +902,10 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   onArchive: () => void
   /** 保存会话日志到…（可选：存档插件缺席时不传 ⇒ 菜单项不渲染）。 */
   onSave?: (() => void) | undefined
+  /** 项目徽标（PR7）：undefined = 无归属/数据源缺席 ⇒ 不渲染（不留空胶囊）。 */
+  projectBadge?: ProjectBadgeInfo | undefined
+  /** 点徽标 → 切到该项目工作面（缺席时徽标不渲染，不留死按钮）。 */
+  onOpenProject?: ((projectId: string) => void) | undefined
   pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const [draft, setDraft] = useState(rowTitle(row))
@@ -888,6 +1010,15 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
           )}
         </span>
       )}
+      {/* 项目徽标（PR7，design row · 徽标 KKC/矩道）：标题与时间之间的品牌小胶囊。
+          两个条件都为真才渲染——（1）有项目归属数据（projectBadge 非 undefined）、
+          （2）有切换动作（onOpenProject 非 undefined）。缺任一条都不渲染：
+          「有数据但点了没反应」比「不显示」更糟。
+          判定在这里、渲染交给 ProjectBadge（必填 props 子组件）——回调里不再依赖
+          外层参数的窄化（窄化在闭包内是否保留随 TS 版本而异，不必赌）。 */}
+      {projectBadge !== undefined && onOpenProject !== undefined && (
+        <ProjectBadge badge={projectBadge} onOpen={onOpenProject} />
+      )}
       <span className={css.srTime}>{timeLabel(row.updatedAt)}</span>
     </div>
   )
@@ -921,6 +1052,40 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
       }}
       anchor={rowEl}
     />
+  )
+}
+
+/**
+ * 会话行项目徽标（PR7，design row · 徽标 KKC/矩道）：brand 描边 999 圆角小胶囊
+ * + 项目名；点击切到该项目的工作面（`onOpen` 由 inject 面注入，闭源实现为
+ * `ctx.layout.setSidebarMode('project')`）。
+ *
+ * props 都是**必填**：渲染条件（有数据 + 有动作）由调用方（SessionRow）判定，
+ * 本组件只负责「有数据时的样子与行为」，不留「点了没反应」的死按钮。
+ */
+function ProjectBadge({ badge, onOpen }: {
+  badge: ProjectBadgeInfo
+  onOpen: (projectId: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className={css.projectBadge}
+      title={`打开项目「${badge.name}」`}
+      aria-label={`打开项目「${badge.name}」`}
+      onClick={(e) => {
+        // 整行的 onClick 是「打开会话」，徽标的语义是「切项目工作面」——
+        // 不拦冒泡会把两件事一起做了。
+        e.stopPropagation()
+        onOpen(badge.projectId)
+      }}
+      // 双击/右键同样拦下：整行那两处分别是「就地重命名」与「会话行菜单」，
+      // 在徽标上触发它们都是误操作。
+      onDoubleClick={(e) => { e.stopPropagation() }}
+      onContextMenu={(e) => { e.stopPropagation() }}
+    >
+      {badge.name}
+    </button>
   )
 }
 
