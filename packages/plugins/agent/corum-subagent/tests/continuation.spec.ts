@@ -2022,7 +2022,7 @@ describe('continuable adjacent-Agent delivery', () => {
 })
 
 describe('continuable settlement delivery', () => {
-  it('tells the parent what the child finished with, without being asked', async () => {
+  it('tells the parent what the child finished with, without being asked（无 relay ⇒ 仍附 closing message）', async () => {
     const { ctx, parent } = await setup([textResponse('the answer'), textResponse('parent ack')])
     const started = await ctx.subagents.startContinuable(startSpec(parent))
     await waitNoActivation(ctx, started.childId)
@@ -2057,6 +2057,28 @@ describe('continuable settlement delivery', () => {
     // description can promise it; bookkeeping "did it report?" would make the
     // promise conditional on a channel this manager does not own.
     await vi.waitFor(() => { expect(settlementNotices(parent)).toHaveLength(1) })
+    // …but its **content** must not repeat what the child already relayed
+    // (fork 2026-09-27: 用户实机看到 `agent-message` 与 `subagent-settled` 内容重合)。
+    const notice = settlementNotices(parent)[0]!
+    expect(notice.text).toBe(
+      `Background subagent ${started.childId} finished and will do no further work unless you send it more.`
+      + '\nIt already reported to you in this epoch — its closing message is not repeated here; '
+      + 'ask it for more, or read its session, if you need the full account.',
+    )
+    expect(notice.text).not.toContain('Its closing message:')
+    expect(notice.text).not.toContain('the answer')
+  })
+
+  it('★ 没有 relay 过时仍引用 closing message（去重不得误伤）', async () => {
+    const { ctx, parent } = await setup([textResponse('the answer'), textResponse('parent ack')])
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+
+    await vi.waitFor(() => { expect(settlementNotices(parent)).toHaveLength(1) })
+    expect(settlementNotices(parent)[0]!.text).toBe(
+      `Background subagent ${started.childId} finished and will do no further work unless you send it more.`
+      + '\nIts closing message:\nthe answer',
+    )
   })
 
   it('delivers the terminal reason when the child never had a chance to report', async () => {

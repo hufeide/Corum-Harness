@@ -257,6 +257,22 @@ interface Activation {
    * not exist, so its teardown owes the parent no settlement account.
    */
   announced: boolean
+  /**
+   * corum（fork 增量，2026-09-27）：本 epoch 内该子会话**是否已经用消息工具
+   * 把它自己的内容投递给父会话**（`source.kind: 'agent-message'`, `form: 'relay'`）。
+   *
+   * 为什么需要：子 Agent 会按提示词主动 relay 一份汇报，而结算通知随后又把
+   * `terminal.output`（closing message）原文再贴一遍 ⇒ 父会话里出现两条**内容重合**的
+   * 注入行（用户实机反馈），既吵又白烧上下文。记账后，结算通知在"已经投递过"时只保留
+   * 一行摘要 + 一句指向语。
+   *
+   * ⚠️ 注意与「投递本身是否无条件」的区别：**通知照样无条件投递**（父侧工具描述承诺过，
+   * 见 `delivers settlement even when the child already sent a message` 用例）；这里只影响
+   * 通知**正文是否重复子 Agent 的 closing message**。
+   *
+   * Activation 本身就是一个 epoch（每次唤醒都新建），故无需重置。
+   */
+  deliveredToParent: boolean
   /** Renewed whenever a settlement watcher must re-observe quiescence. */
   poke: PromiseWithResolvers<void>
 }
@@ -908,6 +924,8 @@ export class SubagentContinuationManager {
     }
     const message = agentMessage(sender, content)
     this.sendWaking(parent, message, () => { this.sendAgentMessage(parent, message) })
+    // 投递成功后记账（抛错时不记）：结算通知据此不再重复 closing message。
+    activation.deliveredToParent = true
     return message.id
   }
 
@@ -1434,6 +1452,7 @@ export class SubagentContinuationManager {
       disposal: undefined,
       accepted: new Set(),
       announced: false,
+      deliveredToParent: false,
       poke: Promise.withResolvers<void>(),
     }
     // After transfer, any failure must dispose the created handle, remove the
@@ -1808,9 +1827,18 @@ export class SubagentContinuationManager {
       const message = createUserMessage({
         content: [
           { type: 'text' as const, text: summary },
-          ...terminal.output === undefined
-            ? [{ type: 'text' as const, text: 'It left no closing message.' }]
-            : [{ type: 'text' as const, text: 'Its closing message:' }, ...terminal.output],
+          // fork（corum 2026-09-27）：本 epoch 内它已经 relay 过内容 ⇒ 不再把 closing
+          // message 原文再贴一遍（会与上面那条 `agent-message` 内容重合）。摘要仍在，
+          // 需要全文时父 Agent 可以让它继续说、或直接读它的会话。
+          ...activation.deliveredToParent
+            ? [{
+                type: 'text' as const,
+                text: 'It already reported to you in this epoch — its closing message is not repeated here; '
+                  + 'ask it for more, or read its session, if you need the full account.',
+              }]
+            : terminal.output === undefined
+              ? [{ type: 'text' as const, text: 'It left no closing message.' }]
+              : [{ type: 'text' as const, text: 'Its closing message:' }, ...terminal.output],
         ],
         source: {
           kind: 'subagent-settled' as const,
