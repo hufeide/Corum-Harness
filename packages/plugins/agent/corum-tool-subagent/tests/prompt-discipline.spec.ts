@@ -142,7 +142,11 @@ describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督
 
   it('允许的量化只有机制常量（默认超时 / 上限 / 同回合一次）', () => {
     const text = lines.join('\n')
-    expect(text).toContain('60s by default')
+    // 2026-09-27：真值来源 = 官方 `packages/shell/bash-local/src/index.ts:102-103`
+    // （`timeoutMs` 默认 120_000、`maxTimeoutMs` 默认 600_000，均为 volatile 可配）。
+    // 旧门禁把错值 `60s` 钉死了 —— 门禁也会把假事实固化，故这里同时禁掉它。
+    expect(text).toContain('120s by default')
+    expect(text).not.toContain('60s by default')
     expect(text).toContain('600000')
     expect(text).toContain('retry the exact same command once')
   })

@@ -1094,7 +1094,7 @@ export function corumEfficiencyDisciplineLines(): string[] {
     // not `cat` / `head` / `tail` / `sed -n` / `less`"）**极性相反** ⇒ 子 Agent 拿两个块，选省轮次的那个。
     // 现在口径唯一：`grep` 定位、`read` 解释。
     '- READ CODE WITH `read`, NOT THE SHELL. To understand a file, open it with `read` (the whole file, or an offset/limit window) — never `cat` / `head` / `tail` / `sed -n` / `awk`. `grep` tells you WHERE to look; `read` tells you WHAT the code does. Shell extraction is for text you pipe, not for code you must reason about.',
-    '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 60s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
+    '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 120s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
     '- KEEP EACH COMMAND ON ONE LINE, statements joined with `;` or `&&`, so that a loosely delimited fragment cannot do something other than what you intended.',
     '- EVERY CALL GETS A FRESH SHELL. No cwd, variable or function persists between calls, so never rely on a `cd` from an earlier call: chain `cd <dir> && <cmd>` inside one call, or pass `workdir`.',
     '- PUT LONG-RUNNING OR NOT-YET-NEEDED COMMANDS IN THE BACKGROUND. A server, a watcher, a long build or a long test suite belongs behind `run_in_background: true`, so the call returns a handle at once and the conversation is not blocked; read that handle with `job_output` and stop it with `job_kill`. Never replace that handle with "wait a moment, then look again". Do not background a command whose result you need before the next step; do not background an operation that would stop or restart the runtime this session depends on; do not start a background process whose output cannot be retrieved.',
@@ -3636,7 +3636,9 @@ export function apply(ctx: Context, config: Config): void {
           // 却正是沙箱升级纪律的读者。
           lines.push(
             '',
-            'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.',
+            // 2026-09-27 跨块一致性：默认 `orchestrate` 是**前台**（调用返回时全部结算 ⇒ 没有通知、也没有「并行期间」），
+            // 故这句必须限定在**后台委派**上，否则模型会等一个不会来的通知 / 或以为 orchestrate 期间还能并行推进。
+            'After a BACKGROUND delegation, keep doing useful work while children run; when each settles you are notified with its outcome. A foreground delegation — including the default `orchestrate` call — returns everything in that call, so there is nothing to wait for in parallel.',
             'A BACKGROUND subagent is NOT a job: there is no job id to poll and no `job_output` to read. Track it with `list_agents` (list running/known children), steer or follow up with `send_message`, ask it to stop with `interrupt_agent` (a request that returns without waiting; its own children keep running), and wait for its settlement notice — or simply keep working and act when the notice arrives. `send_message` reaches BACKGROUND (continuable) children only: a foreground one-shot child (`run_in_background: false`) is terminal once it settles, and messaging it is rejected.',
           )
           return lines.join('\n')
