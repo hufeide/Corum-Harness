@@ -55,6 +55,8 @@ export interface McpPoolOptions {
   readonly leaseTimeoutMs?: number
   /** 租约 TTL：持有者崩死时的兜底回收。默认 `leaseTimeoutMs * 2`。 */
   readonly leaseTtlMs?: number
+  /** 引用计数归零后的停止宽限期（ms）。默认 3s；见 `DEFAULT_STOP_GRACE_MS`。 */
+  readonly stopGraceMs?: number
   /** 解析服务定义（默认读全局注册表 `~/.corum/mcp-servers.json`）。 */
   readonly resolve?: (serverName: string) => McpServerConfig | undefined
   /** 日志出口（默认静默；宿主侧接 cordis logger）。 */
@@ -111,6 +113,43 @@ export function describeOwner(owner: McpLeaseOwner | undefined): string {
 
 const DEFAULT_LEASE_TIMEOUT_MS = 60_000
 
+/**
+ * 引用计数归零后**延迟这么久**才真的停进程（缺省 3s；`CORUM_MCP_STOP_GRACE_MS` 可覆盖）。
+ *
+ * ## 为什么必须有（2026-09-27 实机预判 + 用户要求）
+ *
+ * 用户要求「保存 profile 只改授权、**不再重启 MCP 进程**」。而保存会触发一次预设重挂：
+ * 旧常驻 scope 先被销毁（代理行卸载 ⇒ 引用计数 -1）、新 scope 再挂上（+1）。若该 server
+ * 只有**一个** profile 授权，计数就会瞬间 1 → 0 → 1 —— 没有宽限期的话，池会在那个瞬间
+ * 把进程杀掉、再起一个新的：**pid 变了，正是用户不接受的行为**。
+ *
+ * 宽限期把"卸载"与"停进程"解耦：窗口内任何一次 `retain` 都会取消停止。真到了窗口结束还没人
+ * 用，才停进程（避免长期占着资源）。
+ */
+const DEFAULT_STOP_GRACE_MS = 3_000
+
+/**
+ * 从环境变量读租约时长（运维旋钮；设置 UI 落地前先用它，也让实机验收能在合理时间内触发超时）。
+ *
+ * · `CORUM_MCP_LEASE_TIMEOUT_MS` —— 忙时排队超时（超时即拒绝并告知持有者）。
+ * · `CORUM_MCP_LEASE_TTL_MS` —— 持有者崩死时的兜底回收时长（缺省 = 超时 × 2）。
+ *
+ * 解析失败/非正数一律回落到默认值（配置写错不该让 MCP 起不来）。
+ * @param env - 环境变量表（测试可注入）。
+ * @returns 两个时长。
+ */
+export function leaseTimeoutsFromEnv(env: NodeJS.ProcessEnv = process.env): { leaseTimeoutMs: number; leaseTtlMs?: number; stopGraceMs: number } {
+  const read = (raw: string | undefined): number | undefined => {
+    if (raw === undefined || raw.trim() === '') return undefined
+    const value = Number(raw)
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+  }
+  const leaseTimeoutMs = read(env.CORUM_MCP_LEASE_TIMEOUT_MS) ?? DEFAULT_LEASE_TIMEOUT_MS
+  const ttl = read(env.CORUM_MCP_LEASE_TTL_MS)
+  const stopGraceMs = read(env.CORUM_MCP_STOP_GRACE_MS) ?? DEFAULT_STOP_GRACE_MS
+  return { leaseTimeoutMs, ...(ttl !== undefined ? { leaseTtlMs: ttl } : {}), stopGraceMs }
+}
+
 /** 定义指纹：只有这些字段变了才算「换了进程」（用户判据：改配置不该重启进程，除非定义变了）。 */
 export function fingerprintOf(config: McpServerConfig): string {
   const relevant = config.transport === 'stdio'
@@ -162,12 +201,14 @@ class PooledServer {
   private readonly toolListeners = new Set<(tools: readonly McpPoolTool[]) => void>()
   private connecting: Promise<void> | undefined
   private refs = 0
+  /** 待执行的停止定时器（引用计数归零后进入宽限期）。 */
+  private stopTimer: NodeJS.Timeout | undefined
   private holder: { owner: McpLeaseOwner; token: symbol; since: number } | undefined
   private queue: Waiter[] = []
 
   constructor(
     private readonly definition: McpServerConfig,
-    private readonly options: { leaseTimeoutMs: number; leaseTtlMs: number; log: (level: 'info' | 'warn', message: string) => void },
+    private readonly options: { leaseTimeoutMs: number; leaseTtlMs: number; stopGraceMs: number; log: (level: 'info' | 'warn', message: string) => void },
     private readonly onEmpty: () => void,
   ) {}
 
@@ -182,15 +223,30 @@ class PooledServer {
   /** 引用计数 +1；返回释放函数（幂等）。最后一枚释放 ⇒ 停进程。 */
   retain(): () => void {
     this.refs += 1
+    // 宽限期内又有人要 ⇒ 取消待停（这正是"保存 profile 不重启进程"的实现点）。
+    if (this.stopTimer !== undefined) {
+      clearTimeout(this.stopTimer)
+      this.stopTimer = undefined
+      this.options.log('info', `MCP pool: "${this.serverName}" was re-authorized within the stop grace — keeping pid as is`)
+    }
     let released = false
     return () => {
       if (released) return
       released = true
       this.refs -= 1
       if (this.refs > 0) return
-      this.options.log('info', `MCP pool: last authorization for "${this.serverName}" released — stopping its process`)
-      void this.dispose()
-      this.onEmpty()
+      // 不立刻停：给一次"重挂同一 preset"的窗口，避免保存 profile 就换进程。
+      this.options.log(
+        'info',
+        `MCP pool: last authorization for "${this.serverName}" released — stopping in ${this.options.stopGraceMs}ms unless re-authorized`,
+      )
+      this.stopTimer = setTimeout(() => {
+        this.stopTimer = undefined
+        void this.dispose()
+        this.onEmpty()
+      }, this.options.stopGraceMs)
+      // 定时器不该拖住进程退出。
+      this.stopTimer.unref?.()
     }
   }
 
@@ -305,6 +361,10 @@ class PooledServer {
 
   /** 关连接（引用计数归零或定义变更时）。 */
   async dispose(): Promise<void> {
+    if (this.stopTimer !== undefined) {
+      clearTimeout(this.stopTimer)
+      this.stopTimer = undefined
+    }
     const client = this.client
     const transport = this.transport
     this.client = undefined
@@ -433,15 +493,17 @@ class PooledServer {
  */
 export class McpPool {
   private readonly servers = new Map<string, PooledServer>()
-  private readonly options: { leaseTimeoutMs: number; leaseTtlMs: number; log: (level: 'info' | 'warn', message: string) => void }
+  private readonly options: { leaseTimeoutMs: number; leaseTtlMs: number; stopGraceMs: number; log: (level: 'info' | 'warn', message: string) => void }
   private readonly resolveDefinition: (serverName: string) => McpServerConfig | undefined
   private disposed = false
 
   constructor(options: McpPoolOptions = {}) {
-    const leaseTimeoutMs = options.leaseTimeoutMs ?? DEFAULT_LEASE_TIMEOUT_MS
+    const fromEnv = leaseTimeoutsFromEnv()
+    const leaseTimeoutMs = options.leaseTimeoutMs ?? fromEnv.leaseTimeoutMs
     this.options = {
       leaseTimeoutMs,
-      leaseTtlMs: options.leaseTtlMs ?? leaseTimeoutMs * 2,
+      leaseTtlMs: options.leaseTtlMs ?? fromEnv.leaseTtlMs ?? leaseTimeoutMs * 2,
+      stopGraceMs: options.stopGraceMs ?? fromEnv.stopGraceMs,
       log: options.log ?? (() => {}),
     }
     this.resolveDefinition = options.resolve ?? (name => getServer(name))

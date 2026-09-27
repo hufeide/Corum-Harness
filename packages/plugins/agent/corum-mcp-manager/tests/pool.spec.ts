@@ -14,14 +14,14 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { McpLeaseTimeoutError, McpPool, describeOwner } from '../src/pool.ts'
+import { McpLeaseTimeoutError, McpPool, describeOwner, leaseTimeoutsFromEnv } from '../src/pool.ts'
 import { publicToolName } from '../src/tool-naming.ts'
 import type { McpServerConfig } from '../src/types.ts'
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-mcp.mjs')
 
 /** 造一个「注册表里只有 fake 一个服务」的池（定义可被测试改写）。 */
-function makePool(overrides: { leaseTimeoutMs?: number; leaseTtlMs?: number } = {}): {
+function makePool(overrides: { leaseTimeoutMs?: number; leaseTtlMs?: number; stopGraceMs?: number } = {}): {
   pool: McpPool
   definitions: Map<string, McpServerConfig>
 } {
@@ -31,6 +31,7 @@ function makePool(overrides: { leaseTimeoutMs?: number; leaseTtlMs?: number } = 
   const pool = new McpPool({
     resolve: name => definitions.get(name),
     log: () => {},
+    stopGraceMs: stopGrace,
     ...overrides,
   })
   return { pool, definitions }
@@ -42,6 +43,9 @@ function payloadOf(result: unknown): Record<string, unknown> {
   const text = content[0]?.text ?? '{}'
   return JSON.parse(text) as Record<string, unknown>
 }
+
+/** 停止宽限期（测试里调短，避免拖慢套件）。 */
+const stopGrace = 150
 
 const ownerA = { agentId: 'agent-A' }
 const ownerB = { agentId: 'agent-B' }
@@ -190,7 +194,11 @@ describe('MCP 池：引用计数与进程生命周期', () => {
     const stillThere = Number(payloadOf(await pool.callTool('fake', 'echo', {}, ownerB)).pid)
     expect(stillThere).toBe(pid)
     releaseB()
-    await tick(200)
+    // 宽限期内进程**仍在**（这正是「保存 profile 不重启进程」的实现点）；
+    // 断言点必须落在宽限期内（首版我按 200ms 断言、而默认宽限 150ms ⇒ 已经停了，红）。
+    await tick(60)
+    expect(alive(pid)).toBe(true)
+    await tick(stopGrace + 250)
     expect(alive(pid)).toBe(false)
     await pool.disposeAll()
   })
@@ -270,5 +278,80 @@ describe('工具命名：与官方 dsh-mcp-client 逐字一致', () => {
     // 这里把官方真实行为钉死（含具体哈希），免得后人"顺手修正"成看起来更合理的样子。
     expect(publicToolName('srv', 'a/b c')).toBe('mcp__srv__a_b_c_4545e0115f58')
     expect(publicToolName('srv', 'a'.repeat(70))).toHaveLength(64)
+  })
+})
+
+describe('租约时长的运维旋钮（设置 UI 落地前用环境变量）', () => {
+  it('缺省 = 60s，TTL 缺省由池按 ×2 推导', () => {
+    expect(leaseTimeoutsFromEnv({})).toEqual({ leaseTimeoutMs: 60_000, stopGraceMs: 3_000 })
+  })
+
+  it('★ 读得到覆盖值；非法值回落默认（配置写错不该让 MCP 起不来）', () => {
+    expect(leaseTimeoutsFromEnv({ CORUM_MCP_LEASE_TIMEOUT_MS: '2000' }))
+      .toEqual({ leaseTimeoutMs: 2000, stopGraceMs: 3_000 })
+    expect(leaseTimeoutsFromEnv({ CORUM_MCP_LEASE_TIMEOUT_MS: '2000', CORUM_MCP_LEASE_TTL_MS: '5000' }))
+      .toEqual({ leaseTimeoutMs: 2000, leaseTtlMs: 5000, stopGraceMs: 3_000 })
+    for (const bad of ['', '  ', 'abc', '0', '-1', 'NaN']) {
+      expect(leaseTimeoutsFromEnv({ CORUM_MCP_LEASE_TIMEOUT_MS: bad }).leaseTimeoutMs).toBe(60_000)
+    }
+  })
+
+  it('★ 池真的按覆盖值超时（2s 的旋钮在真子进程上生效）', async () => {
+    const previous = process.env.CORUM_MCP_LEASE_TIMEOUT_MS
+    process.env.CORUM_MCP_LEASE_TIMEOUT_MS = '120'
+    const definitions = new Map<string, McpServerConfig>([
+      ['fake', { name: 'fake', transport: 'stdio', command: process.execPath, args: [FIXTURE] }],
+    ])
+    const pool = new McpPool({ resolve: name => definitions.get(name), log: () => {} })
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const running = pool.callTool('fake', 'slow', { delayMs: 400 }, ownerA)
+      await expect(pool.callTool('fake', 'echo', {}, ownerB)).rejects.toBeInstanceOf(McpLeaseTimeoutError)
+      await running
+    } finally {
+      release()
+      await pool.disposeAll()
+      if (previous === undefined) delete process.env.CORUM_MCP_LEASE_TIMEOUT_MS
+      else process.env.CORUM_MCP_LEASE_TIMEOUT_MS = previous
+    }
+  })
+})
+
+describe('停止宽限期：保存 profile 不得重启 MCP 进程（2026-09-27 实机预判 + 用户要求）', () => {
+  it('★ 引用计数归零后不立刻停；窗口内再次授权 ⇒ pid 不变', async () => {
+    const { pool } = makePool({ stopGraceMs: 400 })
+    const releaseFirst = pool.retain('fake')
+    const p1 = Number(payloadOf(await pool.callTool('fake', 'echo', {}, ownerA)).pid)
+    releaseFirst()
+    await tick(80)
+    // 窗口内又被授权（= 保存 profile 触发的"卸载 → 重挂"）
+    const releaseSecond = pool.retain('fake')
+    await tick(500)
+    expect(alive(p1)).toBe(true)
+    const p2 = Number(payloadOf(await pool.callTool('fake', 'echo', {}, ownerA)).pid)
+    expect(p2).toBe(p1)
+    releaseSecond()
+    await tick(600)
+    expect(alive(p1)).toBe(false)
+    await pool.disposeAll()
+  })
+
+  it('★ 窗口内没人要 ⇒ 到点停进程（不长期占资源）', async () => {
+    const { pool } = makePool({ stopGraceMs: 120 })
+    const release = pool.retain('fake')
+    const pid = Number(payloadOf(await pool.callTool('fake', 'echo', {}, ownerA)).pid)
+    release()
+    await tick(60)
+    expect(alive(pid)).toBe(true)
+    await tick(250)
+    expect(alive(pid)).toBe(false)
+    await pool.disposeAll()
+  })
+
+  it('旋钮可覆盖宽限期（含非法值回落）', () => {
+    expect(leaseTimeoutsFromEnv({}).stopGraceMs).toBe(3000)
+    expect(leaseTimeoutsFromEnv({ CORUM_MCP_STOP_GRACE_MS: '500' }).stopGraceMs).toBe(500)
+    expect(leaseTimeoutsFromEnv({ CORUM_MCP_STOP_GRACE_MS: 'nope' }).stopGraceMs).toBe(3000)
   })
 })
