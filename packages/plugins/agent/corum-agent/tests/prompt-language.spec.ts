@@ -24,7 +24,12 @@ function source(name: string): string {
 // 闭源仓 Corum-Harness-Project 若要那两条纪律，需在那里自建等价扫描。
 
 describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', () => {
-  it('指挥者人格段（CONDUCTOR_PERSONA）无 CJK', () => {
+  it('指挥者人格段（CONDUCTOR_PERSONA）无 CJK，且不得夹带实测调用计数 / 内部日期', () => {
+    // 写作纪律（同 prompt-discipline 的 H 组）：提示词只讲规则与判据，实测数字与内部日期属台账/文档，
+    // 进提示词会被模型当承诺或依据（2026-09-27 扫出："across eleven calls"、"Observed in practice 2026-09-27"）。
+    expect(CONDUCTOR_PERSONA).not.toMatch(/\b20\d\d-\d\d-\d\d\b/)
+    expect(CONDUCTOR_PERSONA).not.toMatch(/\b(eleven|twelve|thirteen|fourteen|fifteen)\b/)
+    expect(CONDUCTOR_PERSONA).not.toMatch(/across \d+ calls/)
     expect(CONDUCTOR_PERSONA).not.toMatch(CJK)
   })
 
