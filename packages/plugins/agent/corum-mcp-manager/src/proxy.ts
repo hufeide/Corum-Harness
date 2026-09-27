@@ -118,6 +118,13 @@ interface McpPoolFace {
     owner: McpLeaseOwner,
     options?: { readonly signal?: AbortSignal },
   ): Promise<unknown>
+  /**
+   * 池自己的日志出口（可选）。
+   *
+   * 代理**必须复用它**而不是自己写 `ctx.logger`：2026-09-27 实测 dev 宿主的 `ctx.logger` 不落盘，
+   * 于是代理的 "N tool(s) available" / "首次同步仍在跑" 这类关键行全丢了（排查竞态时因此多花了一轮）。
+   */
+  log?(level: 'info' | 'warn', message: string): void
 }
 
 /** 日志出口。 */
@@ -274,10 +281,13 @@ export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void
     ctx.logger.warn(`corum-mcp-proxy(${serverName}): corumMcpPool/tools service missing — no MCP tools registered`)
     return
   }
-  const log: ProxyLog = (level, message) => {
-    if (level === 'warn') ctx.logger.warn(message)
-    else ctx.logger.info(message)
-  }
+  // 优先用池的日志出口（可能已被 `CORUM_MCP_POOL_LOG` 接到文件），退化为 ctx.logger。
+  const log: ProxyLog = pool.log !== undefined
+    ? (level, message) => { pool.log?.(level, message) }
+    : (level, message) => {
+        if (level === 'warn') ctx.logger.warn(message)
+        else ctx.logger.info(message)
+      }
   // 引用计数：本行存在期间，该 server 的进程保持存活（最后一行卸载才停）。
   let release: (() => void) | undefined
   try {

@@ -52,15 +52,18 @@ declare module '@deepseek-ai/cordis' {
 
 /** 宿主级池服务。 */
 export class McpPoolService extends McpPool {
+  /** 建好（可能已接文件的）日志出口，供代理行复用。 */
+  readonly log: (level: 'info' | 'warn', message: string) => void
+
   constructor(ctx: Context, options: McpPoolOptions = {}) {
     const toCtxLogger = (level: 'info' | 'warn', message: string): void => {
       if (level === 'warn') ctx.logger.warn(message)
       else ctx.logger.info(message)
     }
-    super({
-      ...options,
-      log: options.log ?? poolLogSink(process.env, toCtxLogger),
-    })
+    // ⚠️ 必须在 `super()` **之前**算好（派生类构造器里 `super` 之前不能碰 `this`）。
+    const sink = options.log ?? poolLogSink(process.env, toCtxLogger)
+    super({ ...options, log: sink })
+    this.log = sink
     // 宿主退出时把 server 进程一起收掉（否则会留孤儿进程）。
     // 用 `ctx.effect`（本仓卸载钩子的统一惯例：artgen / memory / sandbox-local 都这么写）；
     // `ctx.on('dispose')` 在这个 cordis 版本里不在 Events 类型面上。
