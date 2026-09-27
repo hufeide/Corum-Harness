@@ -6,6 +6,8 @@
  *     归属从哪来、`isError` 会不会抛、换代与回滚的顺序、signal 有没有透传。这些用桩才看得清。
  *   · **真池 + 真子进程**（末条）：验端到端确实跑通（注册到调用到结果），避免"桩对了、真链断了"。
  */
+import { readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -260,5 +262,22 @@ describe('MCP 代理行：与真池 + 真子进程的端到端', () => {
     // 调用结束后租约已归还（没有把 server 占住）
     expect(pool.snapshot()[0]?.holder).toBeUndefined()
     await pool.disposeAll()
+  })
+})
+
+describe('池日志出口：CORUM_MCP_POOL_LOG（dev 宿主 ctx.logger 不落盘的替代观测面）', () => {
+  it('未设变量 ⇒ 原样走 ctx.logger；设了 ⇒ 同时追加文件', async () => {
+    const { poolLogSink } = await import('../src/mcp-pool-service.ts')
+    const seen: string[] = []
+    const fallback = (level: string, message: string) => { seen.push(`${level}:${message}`) }
+    poolLogSink({}, fallback as never)('info', 'no-file')
+    expect(seen).toEqual(['info:no-file'])
+
+    const file = join(tmpdir(), `corum-pool-log-${Date.now()}.txt`)
+    const sink = poolLogSink({ CORUM_MCP_POOL_LOG: file } as never, fallback as never)
+    sink('warn', 'busy: held by agent-A')
+    expect(seen).toContain('warn:busy: held by agent-A')
+    expect(readFileSync(file, 'utf8')).toContain('busy: held by agent-A')
+    rmSync(file, { force: true })
   })
 })
