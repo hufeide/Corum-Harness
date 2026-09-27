@@ -227,6 +227,15 @@
     # 壳只持触发器不再持面板。
     - id: ide-plugin-manager
       name: '@corum/corum-ide-plugin-manager-ui'
+    # 集成中心 ·「插件」内容页（PR5）：GPT 式插件市场 + 已装管理
+    # （design.pen yXkOK F1）。**本行只负责让包被加载**；页面本体经
+    # `corum.integrations.plugins` 槽挂进集成中心 —— 该父槽由集成中心骨架
+    # （PR4，活动栏「插件」图标 + 全屏独占工作面 + 左侧子导航）声明，PR4 尚未
+    # 合入，故本包的槽注入在 src/client/index.tsx 里**有意注释掉**：包已装配、
+    # UI 不挂载（父槽缺席时 slots.inject 本也不会触发，注释是显式表达这份预期）。
+    # PR4 合入后删掉该文件的注释标记即可生效，本行不用动。
+    - id: ide-integrations
+      name: '@corum/corum-ide-integrations-ui'
     # 状态栏已整体移除（corum.statusBar 槽不再由 ide-shell 声明/渲染）；
     # @corum/corum-ide-statusbar-ui 插件代码保留在 packages/plugins/ui/ide-statusbar
     # 备查，如需恢复可重新挂载本行。
