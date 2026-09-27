@@ -178,7 +178,9 @@ describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
     expect(CONDUCTOR_PERSONA).toContain('Planning, notes and long-running objectives stay with your own todo / goal tools')
     // 单一事实源守卫：规则表确实在机制段源码里（四模式共享的唯一出处）。
     const sectionSrc = readFileSync(join(import.meta.dirname, '../../corum-tool-subagent/src/index.ts'), 'utf8')
-    expect(sectionSrc).toContain('Choose the right delegation form by the shape of the work')
+    // 2026-09-27 重排：表头改为「SHORTEST PATH WINS — … Choose the form by the shape of the work:」。
+    expect(sectionSrc).toContain('SHORTEST PATH WINS')
+    expect(sectionSrc).toContain('Choose the form by the shape of the work')
     expect(sectionSrc).toContain('`subagent_fork`')
     expect(sectionSrc).toContain('`orchestrate`')
   })
