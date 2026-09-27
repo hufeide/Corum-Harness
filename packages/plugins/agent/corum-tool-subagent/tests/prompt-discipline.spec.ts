@@ -85,11 +85,19 @@ describe('决策点分工 — 只读调研不走写能力子 Agent（源码扫�
 describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督调试框架 / 项目特例', () => {
   const lines = [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()]
 
-  it('两个导出块是机制段唯一事实源（段内不再内联字面量）', () => {
-    expect(SRC).toContain('lines.push(...corumEfficiencyDisciplineLines())')
-    expect(SRC).toContain('lines.push(...corumSandboxEscalationLines())')
+  it('两个导出块是唯一事实源，且挂在 `corum:execution-discipline` 段（2026-09-27 投送修复后）', () => {
+    // 投送修复：两块纪律原先 push 进 `corum:subagent-orchestration`，而那段有「委派工具可见才
+    // 渲染」的守卫 ⇒ worker 子会话（没有委派工具）读到空串 ⇒ 纪律消失。现在独立成段、
+    // 不依赖任何工具可见性；两个 builder 仍只调用一次（唯一事实源）。
+    expect(SRC).toContain("name: 'corum:execution-discipline'")
+    expect(SRC).toContain('[...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()]')
+    expect((SRC.match(/corumEfficiencyDisciplineLines\(\)/g) ?? []).length).toBe(2) // 定义 + 唯一调用
+    expect((SRC.match(/corumSandboxEscalationLines\(\)/g) ?? []).length).toBe(2)
+    // 段内不得再内联字面量，也不得回到编排段（连坐清空的老路）。
     expect(SRC).not.toContain("'EFFICIENCY DISCIPLINE (measured on real delegations")
     expect(SRC).not.toContain('one delegation made 111 bash calls')
+    expect(SRC).not.toContain('lines.push(...corumEfficiencyDisciplineLines())')
+    expect(SRC).not.toContain('lines.push(...corumSandboxEscalationLines())')
   })
 
   it('不得出现实测数字（墙钟分钟 / 缺陷数 / 百分比 / 工具调用计数）', () => {

@@ -128,3 +128,36 @@ describe('编排段重排：归属 / 去重 / 顺序', () => {
     expect(orchestrationBody).toContain('partial results arriving as they settle')
   })
 })
+
+/**
+ * 投送门禁（2026-09-27 用户要求「修理」）：效率 / 沙箱两块执行纪律原先只 push 进
+ * `corum:subagent-orchestration`，而那段开头有「委派工具可见才渲染」的守卫 ⇒ worker 子会话
+ * （没有委派工具）读到空串 ⇒ 纪律消失，而沙箱那块里明写着「In a DELEGATED CHILD session …」。
+ *
+ * 修法：纪律块独立成 `corum:execution-discipline` 段，text 是常量、不依赖任何工具可见性；
+ * 子会话拿到它靠 preset 生成的继承（`child-agent.ts` 的 `composeFrom`）。
+ * 本组把这两件事都钉成断言 —— 注意这是**源码级**投送保证，不是渲染级实测。
+ */
+describe('投送：执行纪律段与委派工具可见性解耦', () => {
+  const sectionStart = SRC.indexOf("name: 'corum:execution-discipline'")
+  const sectionBody = sectionStart === -1 ? '' : SRC.slice(sectionStart, SRC.indexOf('})', sectionStart))
+
+  it('★ 纪律段的 text 不依赖工具可见性（否则 worker 子会话读到空串）', () => {
+    expect(sectionStart).toBeGreaterThan(-1)
+    expect(sectionBody).not.toContain('tools.get')
+    expect(sectionBody).not.toContain('mounted ===')
+    expect(sectionBody).toContain('corumEfficiencyDisciplineLines()')
+    expect(sectionBody).toContain('corumSandboxEscalationLines()')
+  })
+
+  it('继承前提可审计：子会话经 composeFrom join 父的 preset 生成', () => {
+    const childSrc = readFileSync(join(import.meta.dirname, '../../corum-subagent/src/child-agent.ts'), 'utf8')
+    expect(childSrc).toContain("'agentPresets')?.composeFrom(childCtx, parent.ctx)")
+  })
+
+  it('编排段不再承载纪律块（不得回退到会被连坐清空的位置）', () => {
+    const orchestrationBody = SRC.slice(SRC.indexOf("name: 'corum:subagent-orchestration'"))
+    expect(orchestrationBody).not.toContain('corumEfficiencyDisciplineLines()')
+    expect(orchestrationBody).not.toContain('corumSandboxEscalationLines()')
+  })
+})

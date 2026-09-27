@@ -3490,6 +3490,25 @@ export function apply(ctx: Context, config: Config): void {
         ? ''
         : 'This agent runs in PTC mode: every tool below is called from inside `run_code` (e.g. `await tools.subagent({...})`), not as a direct tool call. '
 
+    // fork（corum）2026-09-27 投送修复：**执行纪律段与委派工具可见性解耦**。
+    //
+    // 归因（第一次归因是错的，见 LESSONS 纪律）：两块纪律原先只 push 进
+    // `corum:subagent-orchestration`，而那段开头有可见性守卫
+    // （`runtimeCtx.tools.get(toolName, scope) === undefined ⇒ ''`）。子会话**确实继承了注册**
+    // ——`child-agent.ts` 的 `agentPresets.composeFrom(childCtx, parent.ctx)` 把子会话 join 到父的
+    // preset 生成（`agent-preset-registry/src/index.ts:273`）—— 但 worker 子会话**没有委派工具**
+    // ⇒ 那段渲染为空串 ⇒ 两块纪律随之消失。而沙箱那块里明写着
+    // 「In a DELEGATED CHILD session the retry IS adjudicated …」：**写给子会话的规则，子会话读不到**。
+    //
+    // 修法：纪律块独立成段，**不依赖任何工具可见性**（凡有 shell 或沙箱的 Agent 都需要它）。
+    // 版本仍是单一事实源：两个 builder 只在此处调用（原先在编排段里的两行 push 已删除）。
+    // research 实例也会注册同名段 —— 文本完全相同，同名覆盖无副作用。
+    runtimeCtx.systemPrompt.section({
+      name: 'corum:execution-discipline',
+      order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_BASH') + 1,
+      text: () => [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()].join('\n'),
+    })
+
     if (corumReadonlyResearch || (backgroundEnabled && continuable)) {
       // The section follows provider availability without its own manual
       // lifecycle: empty text is omitted from rendered prompts while the tool is
@@ -3607,8 +3626,9 @@ export function apply(ctx: Context, config: Config): void {
             const engineTools = [hasWorkflow ? '`workflow`' : '', hasRalph ? '`ralph`' : ''].filter(Boolean).join(' and ')
             lines.push(`IMPORTANT: ${engineTools} children are created by their own engine${hasWorkflow && hasRalph ? 's' : ''} — they do NOT get isolated worktrees, ledger entries or settlement notices, and nothing merges their work. Use them for read-only audits or work that does not need merging; for parallel WRITES that need isolation + merge, use \`orchestrate\` instead.`)
           }
-          lines.push(...corumEfficiencyDisciplineLines())
-          lines.push(...corumSandboxEscalationLines())
+          // 效率/沙箱两块纪律**不在这里**：它们独立成 `corum:execution-discipline` 段
+          // （2026-09-27 投送修复），以免被本段的可见性守卫连坐清空 —— 子会话没有委派工具，
+          // 却正是沙箱升级纪律的读者。
           lines.push(
             '',
             'After delegating, keep doing useful work while children run; when each settles you are notified with its outcome.',
