@@ -39,6 +39,7 @@ export function apply(ctx: Context): void {
 export {
   CORUM_EXECUTION_DISCIPLINE_SECTION,
   corumEfficiencyDisciplineLines,
+  corumMinimalDisciplineLines,
   corumSandboxEscalationLines,
 } from './execution-discipline.ts'
 

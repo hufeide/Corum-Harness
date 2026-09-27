@@ -180,7 +180,13 @@ describe('投送：执行纪律段的两条注入路径', () => {
     } as never))
     expect(text).toContain('EFFICIENCY DISCIPLINE')
     expect(text).toContain('SANDBOX DENIALS AND ESCALATION')
-    expect(text).toContain('READ CODE WITH')
+    // 2026-09-27（审查员 C 报）：minimal 被裁到 persona/tool-bash/filesystem/tool-fs
+    // ⇒ 提示词里**不得**点名它没有的工具（指令与能力矛盾）。
+    for (const absent of ['`grep`', '`glob`', '`job_output`', '`job_kill`', 'subagent', 'orchestrate']) {
+      expect(text, `minimal 提示词点名了不存在的工具：${absent}`).not.toContain(absent)
+    }
+    // 沙箱块是工具无关的 ⇒ 必须整段在（单一事实源）。
+    expect(text).toContain('sandbox_permissions')
   })
 
   it('子会话继承前提可审计（preset 生成 join）', () => {

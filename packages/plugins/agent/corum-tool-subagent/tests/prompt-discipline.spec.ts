@@ -150,11 +150,14 @@ describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督
 
   it('允许的量化只有机制常量（默认超时 / 上限 / 同回合一次）', () => {
     const text = lines.join('\n')
-    // 2026-09-27：真值来源 = 官方 `packages/shell/bash-local/src/index.ts:102-103`
-    // （`timeoutMs` 默认 120_000、`maxTimeoutMs` 默认 600_000，均为 volatile 可配）。
-    // 旧门禁把错值 `60s` 钉死了 —— 门禁也会把假事实固化，故这里同时禁掉它。
-    expect(text).toContain('120s by default')
-    expect(text).not.toContain('60s by default')
+    // 2026-09-27（对抗审查员 C 更正）：真值来源是**运行时行 config** ——
+    // `node_modules/.pnpm/@deepseek-ai+dsh-base@0.1.3-alpha.1.../cordis.patch.yml:221-224`
+    // 的 `bash-sandbox` 行写死 `timeoutMs: 60000`，`LocalBashExecutor.resolve()` 用
+    // `request.timeoutMs ?? rowConfig.timeoutMs` ⇒ 不传 per-call 就是 **60s**。
+    // 我先前拿 `/Users/kukucai/dsh`（现在是 dsh-v0.1.7-rc.2 ✗ 非运行时）里 bash-local 的
+    // **库默认 120_000** 当依据，把对的改成错的 —— 教训见 docs/LESSONS.md §4.36。
+    expect(text).toContain('60s by default')
+    expect(text).not.toContain('120s by default')
     expect(text).toContain('600000')
     expect(text).toContain('retry the exact same command once')
   })

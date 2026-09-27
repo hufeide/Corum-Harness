@@ -28,6 +28,35 @@
 /** 段名（root scope 注册者与守卫共用；改名要同步 `prompt-discipline.spec.ts`）。 */
 export const CORUM_EXECUTION_DISCIPLINE_SECTION = 'corum:execution-discipline'
 
+/**
+ * fork（corum）2026-09-27（对抗审查员 C 报：投送对了、**内容写错了工具面**）：
+ * **极简模式专用**的执行纪律。
+ *
+ * 背景：极简模式的 preset 被裁到 `persona / tool-bash / filesystem / tool-fs` 四行
+ * （`compile.ts` 的 minimal 分支），**没有** `grep`/`glob`（tool-fs-search）、**没有**
+ * `job_output`/`job_kill`（tool-jobs），也没有任何子 Agent 工具。直接注入通用两块会把
+ * 「不存在的工具」写进提示词 —— 指令与能力矛盾，本仓反复交手的那类病。
+ *
+ * 做法：沙箱块**整段复用**（工具无关）；效率块按**工具面**挑句，共享句子逐字复用，
+ * 只有「读文件」那条需要一版不提 `grep`/`glob` 的改写。
+ */
+export function corumMinimalDisciplineLines(): string[] {
+  const keep = (line: string): boolean =>
+    line === 'EFFICIENCY DISCIPLINE:'
+    || line.startsWith('- KNOW YOUR SHELL')
+    || line.startsWith('- KEEP EACH COMMAND ON ONE LINE')
+    || line.startsWith('- EVERY CALL GETS A FRESH SHELL')
+    || line.startsWith('- REPORT SCOPE')
+  const readRule = '- READ FILES WITH `read`, NOT THE SHELL. Open a file with `read` (the whole file, or an offset/limit window) — never `cat` / `head` / `tail` / `sed -n` / `awk`. This includes logs and PID files. The shell is for a live stream you must follow (`tail -f`) or for text you pipe.'
+  return [
+    '',
+    ...corumEfficiencyDisciplineLines().flatMap(
+      line => line === 'EFFICIENCY DISCIPLINE:' ? [line, readRule] : keep(line) ? [line] : [],
+    ),
+    ...corumSandboxEscalationLines(),
+  ]
+}
+
 export function corumEfficiencyDisciplineLines(): string[] {
   return [
     '',
@@ -38,7 +67,7 @@ export function corumEfficiencyDisciplineLines(): string[] {
     // not `cat` / `head` / `tail` / `sed -n` / `less`"）**极性相反** ⇒ 子 Agent 拿两个块，选省轮次的那个。
     // 现在口径唯一：`grep` 定位、`read` 解释。
     '- READ CODE WITH `read`, NOT THE SHELL. To understand a file, open it with `read` (the whole file, or an offset/limit window) — never `cat` / `head` / `tail` / `sed -n` / `awk`. `grep` tells you WHERE to look; `read` tells you WHAT the code does. This includes logs and PID files — `read` them (it takes an offset/limit window). The shell is for a live stream you must follow (`tail -f`) or for text you pipe, not for reading a file you must reason about.',
-    '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 120s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
+    '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 60s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
     '- KEEP EACH COMMAND ON ONE LINE, statements joined with `;` or `&&`, so that a loosely delimited fragment cannot do something other than what you intended.',
     '- EVERY CALL GETS A FRESH SHELL. No cwd, variable or function persists between calls, so never rely on a `cd` from an earlier call: chain `cd <dir> && <cmd>` inside one call, or pass `workdir`.',
     '- PUT LONG-RUNNING OR NOT-YET-NEEDED COMMANDS IN THE BACKGROUND. A server, a watcher, a long build or a long test suite belongs behind `run_in_background: true`, so the call returns a handle at once and the conversation is not blocked; read that handle with `job_output` and stop it with `job_kill`. Never replace that handle with "wait a moment, then look again". Do not background a command whose result you need before the next step; do not background an operation that would stop or restart the runtime this session depends on; do not start a background process whose output cannot be retrieved.',

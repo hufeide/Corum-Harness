@@ -24,7 +24,7 @@
  * @module @corum/corum-agent/compile
  */
 
-import { corumEfficiencyDisciplineLines, corumSandboxEscalationLines } from '@corum/corum-orchestration'
+import { corumMinimalDisciplineLines } from '@corum/corum-orchestration'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
@@ -496,7 +496,7 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   // （persistent-shell / pty / terminal-bash）⇒ 它同样需要效率与沙箱纪律。
   // 故在**人格段**里追加同一对 builder（单一事实源 = @corum/corum-orchestration）。
   const personaTextWithDiscipline = isComplete
-    ? [personaText, [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()].join('\n')].join('\n')
+    ? [personaText, corumMinimalDisciplineLines().join('\n')].join('\n')
     : personaText
 
   const rows: CordisRow[] = [
