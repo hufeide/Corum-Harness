@@ -246,7 +246,13 @@ if [[ "$MODE" == "packaged" ]]; then
   APP_BIN="$APP_PATH/Contents/MacOS/Corum"
   PID_FILE="$RUN_DIR/pack-$PORT.pid"
   LOG_FILE="$RUN_DIR/pack-$PORT.log"
-  SELF_MARK="$ROOT/packages/desktop/dist/mac-arm64/Corum.app"
+  # ⚠️ 2026-09-27 实测缺口：这里原先把 SELF_MARK 写死成 `dist/mac-arm64/Corum.app`，
+  # 于是「用 CORUM_PACK_APP 指向**已安装**副本（/Applications/Corum.app）启动的打包实例」
+  # 永远过不了 is_self ⇒ `stop/restart/update --mode=packaged` 全部拒杀（报「PID 不是本实例」），
+  # 只能绕过脚本用 osascript 退应用。SELF_MARK 必须跟着**实际管理的那个 APP_PATH**走：
+  # 它与 dist 路径一样具体（都是我们被明确告知要管的那个 bundle），而 PID 文件 + is_self
+  # 双条件不变，故安全性不降。
+  SELF_MARK="$APP_PATH"
 else
   SELF_MARK="$ROOT/packages/desktop"
 fi
