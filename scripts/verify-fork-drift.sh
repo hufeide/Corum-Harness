@@ -1274,8 +1274,11 @@ if [ -d "$VENDORED_PRESETS" ]; then
   # 只读搜索子 Agent 的指引必须与 orchestrate 可见性解耦（2026-09-10 用户需求
   # 「每个 Agent 都配备了 search Agent，所有模式都应该提到这一点」）。
   SUBAGENT_TOOL_SRC="$REPO_ROOT/packages/plugins/agent/corum-tool-subagent/src/index.ts"
+  # 2026-09-27 重排：条目文案由 `- ANY read-only work` 改为 `- READ-ONLY work (research, search,
+  # fact-finding …`（同段去重后只出现一次）。判据不变：只读指引存在 **且** 挂在 hasResearch 分支上
+  # ⇒ 不依赖 orchestrate 可见性（所有带 worker 实例的模式都会提到）。
   if code_has 'hasResearch' "$SUBAGENT_TOOL_SRC" \
-    && code_has 'ANY read-only work' "$SUBAGENT_TOOL_SRC" \
+    && code_has 'READ-ONLY work (research, search, fact-finding' "$SUBAGENT_TOOL_SRC" \
     && code_has 'subagent_research' "$SUBAGENT_TOOL_SRC"; then
     pass "只读搜索子 Agent 指引与 orchestrate 可见性解耦（所有带 worker 的模式都会提到）"
   else
