@@ -19,6 +19,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { compilePreset } from '../../corum-agent/src/compile.ts'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
 /** 只读实例与写实例共用的"非只读"条件块起始位置。 */
@@ -130,34 +131,60 @@ describe('编排段重排：归属 / 去重 / 顺序', () => {
 })
 
 /**
- * 投送门禁（2026-09-27 用户要求「修理」）：效率 / 沙箱两块执行纪律原先只 push 进
- * `corum:subagent-orchestration`，而那段开头有「委派工具可见才渲染」的守卫 ⇒ worker 子会话
- * （没有委派工具）读到空串 ⇒ 纪律消失，而沙箱那块里明写着「In a DELEGATED CHILD session …」。
+ * 投送门禁（2026-09-27 用户要求「要注入」后的架构）。
  *
- * 修法：纪律块独立成 `corum:execution-discipline` 段，text 是常量、不依赖任何工具可见性；
- * 子会话拿到它靠 preset 生成的继承（`child-agent.ts` 的 `composeFrom`）。
- * 本组把这两件事都钉成断言 —— 注意这是**源码级**投送保证，不是渲染级实测。
+ * 两块执行纪律（效率 / 沙箱升级）的读者不只是「能委派的 Agent」：子会话正是沙箱升级纪律的读者
+ * （块里写着 "In a DELEGATED CHILD session …"）。故投送路径改为两条：
+ *   ① standard / ptc / cordis / conductor 与所有子会话：`corum-agent` 在 **root scope** 注册
+ *      `corum:execution-discipline`（所有 corum 会话继承）；
+ *   ② minimal：preset 是 `complete`（system-prompt 只渲染 persona）⇒ 段进不去，由 `compile.ts`
+ *      把它追加进编译出的人格段。
+ * 本组把「不再挂在会被连坐清空的位置」与「minimal 真拿得到」都钉住（后者是**编译级**断言）。
  */
-describe('投送：执行纪律段与委派工具可见性解耦', () => {
-  const sectionStart = SRC.indexOf("name: 'corum:execution-discipline'")
-  const sectionBody = sectionStart === -1 ? '' : SRC.slice(sectionStart, SRC.indexOf('})', sectionStart))
+describe('投送：执行纪律段的两条注入路径', () => {
+  const SERVICE = readFileSync(join(import.meta.dirname, '../../corum-agent/src/agent-service.ts'), 'utf8')
+  const COMPILE = readFileSync(join(import.meta.dirname, '../../corum-agent/src/compile.ts'), 'utf8')
 
-  it('★ 纪律段的 text 不依赖工具可见性（否则 worker 子会话读到空串）', () => {
-    expect(sectionStart).toBeGreaterThan(-1)
-    expect(sectionBody).not.toContain('tools.get')
-    expect(sectionBody).not.toContain('mounted ===')
-    expect(sectionBody).toContain('corumEfficiencyDisciplineLines()')
-    expect(sectionBody).toContain('corumSandboxEscalationLines()')
+  it('① root scope 段：text 为常量、不依赖任何工具可见性', () => {
+    const i = SERVICE.indexOf('name: CORUM_EXECUTION_DISCIPLINE_SECTION,')
+    expect(i).toBeGreaterThan(-1)
+    const body = SERVICE.slice(i, SERVICE.indexOf('})', i))
+    expect(body).not.toContain('tools.get')
+    expect(body).toContain('corumEfficiencyDisciplineLines()')
+    expect(body).toContain('corumSandboxEscalationLines()')
+    // 段的注册范围是 root：写在 corum-agent 的服务里（tool-policy / host-identity 同处）。
+    expect(SERVICE).toContain('ctx.systemPrompt.section({')
   })
 
-  it('继承前提可审计：子会话经 composeFrom join 父的 preset 生成', () => {
+  it('② minimal：纪律被追加进编译出的人格段（complete 模式唯一通路）', () => {
+    expect(COMPILE).toContain('personaTextWithDiscipline')
+    expect(COMPILE).toContain('isComplete')
+    expect(COMPILE).toContain('text: personaTextWithDiscipline,')
+  })
+
+  it('★ minimal 编译产物**真的**含两块纪律（编译级投送证据）', () => {
+    const text = JSON.stringify(compilePreset({
+      id: 'minimal-discipline-probe',
+      nickname: '极简纪律探针',
+      title: '探针',
+      dimension: '研发',
+      baseMode: 'minimal',
+      prompt: 'probe',
+      model: { provider: 'localhost', model: 'deepseek-v4-pro' },
+      skills: [],
+      mcpServers: [],
+      terminal: { mode: 'sandbox' },
+      memoryPolicy: { scope: 'agent' },
+      version: 1,
+      trust: 'user',
+    } as never))
+    expect(text).toContain('EFFICIENCY DISCIPLINE')
+    expect(text).toContain('SANDBOX DENIALS AND ESCALATION')
+    expect(text).toContain('READ CODE WITH')
+  })
+
+  it('子会话继承前提可审计（preset 生成 join）', () => {
     const childSrc = readFileSync(join(import.meta.dirname, '../../corum-subagent/src/child-agent.ts'), 'utf8')
     expect(childSrc).toContain("'agentPresets')?.composeFrom(childCtx, parent.ctx)")
-  })
-
-  it('编排段不再承载纪律块（不得回退到会被连坐清空的位置）', () => {
-    const orchestrationBody = SRC.slice(SRC.indexOf("name: 'corum:subagent-orchestration'"))
-    expect(orchestrationBody).not.toContain('corumEfficiencyDisciplineLines()')
-    expect(orchestrationBody).not.toContain('corumSandboxEscalationLines()')
   })
 })

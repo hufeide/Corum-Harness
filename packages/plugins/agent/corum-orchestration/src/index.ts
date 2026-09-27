@@ -37,6 +37,12 @@ export function apply(ctx: Context): void {
 }
 
 export {
+  CORUM_EXECUTION_DISCIPLINE_SECTION,
+  corumEfficiencyDisciplineLines,
+  corumSandboxEscalationLines,
+} from './execution-discipline.ts'
+
+export {
   CorumOrchestration,
   // fork（corum）2026-09-16：集成被机制拒绝的**类型化**错误——调用方据 `kind` 区分
   // 「分支没进 HEAD」与「进了 HEAD 但声明式 verify 没过」（两者的通知与出路相反）。

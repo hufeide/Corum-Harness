@@ -15,11 +15,12 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  corumSandboxEscalationLines,
   corumSchedulingDescription,
   corumSchedulingSectionText,
   corumRunInBackgroundDescription,
 } from '../src/index.ts'
+// 2026-09-27：两块执行纪律已下沉到 @corum/corum-orchestration（本包不再持有）。
+import { corumSandboxEscalationLines } from '@corum/corum-orchestration'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
 

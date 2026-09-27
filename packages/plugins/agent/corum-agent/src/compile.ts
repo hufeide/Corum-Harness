@@ -24,6 +24,7 @@
  * @module @corum/corum-agent/compile
  */
 
+import { corumEfficiencyDisciplineLines, corumSandboxEscalationLines } from '@corum/corum-orchestration'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
@@ -489,13 +490,21 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     (typeof profile.persona === 'string' && profile.persona.trim() !== '') ||
     profile.prompt.trim() !== ''
   const personaText = hasSubstance ? composed : basePersona
+  // fork（corum）2026-09-27（用户要求「要注入」）：极简模式是 `complete`
+  // （`config.complete: true` + `includeRuntimeContext: false`）⇒ system-prompt **只渲染 persona 段**，
+  // 连 root scope 的 `corum:execution-discipline` 也进不来；而 minimal 的 preset 里有 shell
+  // （persistent-shell / pty / terminal-bash）⇒ 它同样需要效率与沙箱纪律。
+  // 故在**人格段**里追加同一对 builder（单一事实源 = @corum/corum-orchestration）。
+  const personaTextWithDiscipline = isComplete
+    ? [personaText, [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()].join('\n')].join('\n')
+    : personaText
 
   const rows: CordisRow[] = [
     {
       id: 'persona',
       name: '@deepseek-ai/dsh-persona',
       config: {
-        text: personaText,
+        text: personaTextWithDiscipline,
         ...(isComplete ? { complete: true, includeRuntimeContext: false } : {}),
       },
     },

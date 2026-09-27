@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 import {
   corumEfficiencyDisciplineLines,
   corumSandboxEscalationLines,
-} from '../src/index.ts'
+} from '@corum/corum-orchestration'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
 
@@ -85,19 +85,27 @@ describe('决策点分工 — 只读调研不走写能力子 Agent（源码扫�
 describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督调试框架 / 项目特例', () => {
   const lines = [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()]
 
-  it('两个导出块是唯一事实源，且挂在 `corum:execution-discipline` 段（2026-09-27 投送修复后）', () => {
-    // 投送修复：两块纪律原先 push 进 `corum:subagent-orchestration`，而那段有「委派工具可见才
-    // 渲染」的守卫 ⇒ worker 子会话（没有委派工具）读到空串 ⇒ 纪律消失。现在独立成段、
-    // 不依赖任何工具可见性；两个 builder 仍只调用一次（唯一事实源）。
-    expect(SRC).toContain("name: 'corum:execution-discipline'")
-    expect(SRC).toContain('[...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()]')
-    expect((SRC.match(/corumEfficiencyDisciplineLines\(\)/g) ?? []).length).toBe(2) // 定义 + 唯一调用
-    expect((SRC.match(/corumSandboxEscalationLines\(\)/g) ?? []).length).toBe(2)
-    // 段内不得再内联字面量，也不得回到编排段（连坐清空的老路）。
+  it('两个导出块是唯一事实源，且**两处注入点**都用它们（2026-09-27 投送重构后）', () => {
+    // 架构：builder 定义在 `@corum/corum-orchestration` 的 execution-discipline.ts（唯一定义处）；
+    // 注入点两处、各调一次：
+    //   · corum-agent/src/agent-service.ts —— **root scope** 段（所有 corum 会话 + 子会话继承）
+    //   · corum-agent/src/compile.ts —— minimal 是 `complete`（只渲染 persona）⇒ 追加进人格段
+    const definitions = readFileSync(
+      join(import.meta.dirname, '../../corum-orchestration/src/execution-discipline.ts'), 'utf8')
+    expect((definitions.match(/export function corumEfficiencyDisciplineLines\(\)/g) ?? []).length).toBe(1)
+    expect((definitions.match(/export function corumSandboxEscalationLines\(\)/g) ?? []).length).toBe(1)
+    const service = readFileSync(join(import.meta.dirname, '../../corum-agent/src/agent-service.ts'), 'utf8')
+    const compileSrc = readFileSync(join(import.meta.dirname, '../../corum-agent/src/compile.ts'), 'utf8')
+    for (const src of [service, compileSrc]) {
+      expect((src.match(/corumEfficiencyDisciplineLines\(\)/g) ?? []).length).toBe(1)
+      expect((src.match(/corumSandboxEscalationLines\(\)/g) ?? []).length).toBe(1)
+    }
+    // 段不再由 tool-subagent 注册（旧的连坐清空位置不得回潮）。
+    expect(SRC).not.toContain("name: 'corum:execution-discipline'")
+    expect(SRC).not.toContain('corumEfficiencyDisciplineLines()')
+    // 段内不得再内联字面量。
     expect(SRC).not.toContain("'EFFICIENCY DISCIPLINE (measured on real delegations")
     expect(SRC).not.toContain('one delegation made 111 bash calls')
-    expect(SRC).not.toContain('lines.push(...corumEfficiencyDisciplineLines())')
-    expect(SRC).not.toContain('lines.push(...corumSandboxEscalationLines())')
   })
 
   it('★ 跨块一致性：读文件口径唯一（不得一边禁 `sed -n`/`head`/`cat`、一边推荐它们读代码）', () => {
@@ -216,7 +224,11 @@ describe('I 沙箱升级 — 被拒 → 同回合升级一次 → 由用户裁�
  *      「广域调研交给 research」三阶段引导。
  */
 describe('机制段能力感知（2026-09-20 D1/D2 修复）', () => {
-  const source = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+  // 2026-09-27：这两块已下沉到 @corum/corum-orchestration 的 execution-discipline.ts。
+  const source = readFileSync(
+    join(import.meta.dirname, '../../corum-orchestration/src/execution-discipline.ts'),
+    'utf8',
+  )
 
   it('D1：守卫命令按能力表述，不再假定读者能跑构建', () => {
     expect(source).toContain('run the repository guard ONCE in full **if you can run commands**')

@@ -137,7 +137,13 @@ import {
 import type { ConductorMode } from './conductor.ts'
 // fork（corum）：机制 deny 的收敛口径与 scope 可见工具名——与 fork #10 同源
 // （docs/LESSONS.md §6.18：机制生成的名字必须按运行时注册面收敛）。
-import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
+import {
+  CORUM_EXECUTION_DISCIPLINE_SECTION,
+  corumEfficiencyDisciplineLines,
+  corumNarrowDenyFilter,
+  corumSandboxEscalationLines,
+  corumVisibleToolNames,
+} from '@corum/corum-orchestration'
 
 /**
  * fork（corum）：官方 0.1.3 session-persistence 改 handle seam —— 顶层
@@ -565,6 +571,20 @@ export class CorumAgentService extends TypertRemoteService {
       name: TOOL_POLICY_SECTION,
       order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') - 50,
       text: TOOL_POLICY_TEXT,
+    })
+    /**
+     * 执行纪律段（**root scope**，所有 corum 会话与子会话继承；2026-09-27 从 corum-tool-subagent 上移）。
+     *
+     * 为什么必须 root scope：这两块（效率 / 沙箱升级）不只「能委派的 Agent」要读 —— 子会话正是沙箱
+     * 升级纪律的读者（块里明写 "In a DELEGATED CHILD session …"）。原先它们挂在
+     * `corum:subagent-orchestration` 段里，而那段有「委派工具可见才渲染」的守卫 ⇒ worker 子会话
+     * （没有委派工具）读到空串。也不能只挂 preset scope：minimal 是 `complete`（只渲染 persona）
+     * ⇒ 段完全进不去，那条路由 `compile.ts` 把它追加进人格段。
+     */
+    ctx.systemPrompt.section({
+      name: CORUM_EXECUTION_DISCIPLINE_SECTION,
+      order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') + 1,
+      text: () => [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()].join('\n'),
     })
     /**
      * 宿主身份段（root scope，所有 corum 会话继承）：把「本会话跑在哪个实例 / home /
