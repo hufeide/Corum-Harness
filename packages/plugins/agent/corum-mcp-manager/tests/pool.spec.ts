@@ -233,6 +233,16 @@ describe('MCP 池：定义指纹（改配置要不要换进程）', () => {
     }
   })
 
+  it('★ 注册表里被停用的服务 ⇒ 不起进程、明确报错（改 disabled 立即生效，不必重写 preset）', async () => {
+    const definitions = new Map<string, McpServerConfig>([
+      ['off', { name: 'off', transport: 'stdio', command: process.execPath, args: [FIXTURE], disabled: true }],
+    ])
+    const pool = new McpPool({ resolve: name => definitions.get(name), log: () => {} })
+    expect(() => pool.retain('off')).toThrow(/disabled/)
+    expect(pool.snapshot()).toEqual([])
+    await pool.disposeAll()
+  })
+
   it('注册表里没有该服务 ⇒ 明确报错（不静默）', async () => {
     const { pool } = makePool()
     expect(() => pool.retain('nope')).toThrow(/not in the registry/)

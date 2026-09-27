@@ -965,7 +965,8 @@ export function corumVisibleToolNames(ctx: Context): ReadonlySet<string> {
  *
  * BUG-6（2026-09-11）：deny 中的裸 MCP 服务名（如 `pencil-mcp`）需要展开为
  * 带前缀的完整工具名列表（`mcp__<服务名>__*`）。MCP 工具在系统中的注册名是
- * `mcp__<服务名>__<工具名>` 格式（dsh-mcp-client），但 compile.ts 的
+ * `mcp__<服务名>__<工具名>` 格式（与官方 dsh-mcp-client 逐字一致的名字，
+ * 现由 @corum/corum-mcp-manager/proxy 复刻，见其 tool-naming.ts），但 compile.ts 的
  * `mcpDenyNames` 只放了服务名本身。本函数在收敛时把裸服务名展开为该服务的
  * 全部已知工具名，保持 deny 语义（research 实例真的禁掉 MCP 工具）。
  *

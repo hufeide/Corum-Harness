@@ -13,7 +13,7 @@
  *                   customSkillDirs = 集中技能库里该 Agent 被授权的目录，
  *                   即 `<CORUM_HOME>/skills/<绑定名>`；技能实体由 corum
  *                   统一管理，Agent 只按 name 引用，不复制文件）
- *   mcpServers    → dsh-mcp-client 追加行（每 server 一行）
+ *   mcpServers    → corum-mcp-proxy 追加行（每 server 一行，只带 serverName）
  *   terminal      → **保持官方两行**（一次性 tool-bash/tool-pwsh，2026-09-14 撤销
  *                   了 persistent-shell 持久终端组覆盖；sandbox 由 host 层提供）
  *   filesystem    → 追加 fs-local + str-replace-editor 组（与 standard 沙箱
@@ -607,28 +607,24 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   const fsSearchIdx = rows.findIndex(r => r.id === 'tool-fs-search')
   rows.splice(fsSearchIdx + 1, 0, filesystem)
 
-  // corum 追加 ④：MCP（profile.mcpServers 授权的服务，注册表解析完整配置）。
-  const mcpServers = resolveMcpServers(profile.mcpServers)
-  for (const mcp of mcpServers) {
-    const config: Record<string, unknown> = {
-      serverName: mcp.name,
-      transport: mcp.transport,
-    }
-    if (mcp.transport === 'stdio') {
-      config.command = mcp.command
-      if (mcp.args !== undefined && mcp.args.length > 0) config.args = mcp.args
-      if (mcp.env !== undefined) config.env = mcp.env
-      if (mcp.cwd !== undefined) config.cwd = mcp.cwd
-      if (mcp.toolCallTimeoutMs !== undefined) config.toolCallTimeoutMs = mcp.toolCallTimeoutMs
-    } else {
-      config.url = mcp.url
-      if (mcp.headers !== undefined) config.headers = mcp.headers
-      if (mcp.toolCallTimeoutMs !== undefined) config.toolCallTimeoutMs = mcp.toolCallTimeoutMs
-    }
+  // corum 追加 ④：MCP（profile.mcpServers 授权的服务）。
+  //
+  // **2026-09-27 改造**（用户模型：「框架统一管理，自始至终只有一个进程；可授权给多个 Agent
+  // 使用，但独占状态，不支持并发使用」）：行由 `@deepseek-ai/dsh-mcp-client`（自带完整定义 ⇒
+  // 每个 preset 各起一套进程、改配置要重挂）改为 **`@corum/corum-mcp-manager/proxy`（只带
+  // serverName）**。进程与独占租约由宿主池 `corumMcpPool` 负责，于是：
+  //   · 多 profile / 多 Agent 授权共用**同一个** server 进程（池按服务名 + 定义指纹持有）；
+  //   · 改注册表里的 args/env 不必重写每个 preset（池自己按指纹换进程）；
+  //   · 保存 profile 只改授权（挂/卸代理行），**不再重启 MCP 进程**；
+  //   · 调用经独占租约（忙则排队，超时拒绝并告知持有者）。
+  //
+  // 这里**仍然解析注册表**：停用/不存在的服务不编行（与改造前一致），只是不再把定义写进行里
+  // ——定义在运行时由池从注册表读取（唯一事实源仍在 `~/.corum/mcp-servers.json`）。
+  for (const mcp of resolveMcpServers(profile.mcpServers)) {
     rows.push({
       id: `mcp-${mcp.name}`,
-      name: '@deepseek-ai/dsh-mcp-client',
-      config,
+      name: '@corum/corum-mcp-manager/proxy',
+      config: { serverName: mcp.name },
     })
   }
 

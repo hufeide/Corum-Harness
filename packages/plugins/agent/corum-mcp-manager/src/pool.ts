@@ -455,6 +455,9 @@ export class McpPool {
   private serverFor(serverName: string): PooledServer {
     const definition = this.resolveDefinition(serverName)
     if (definition === undefined) throw new Error(`MCP server "${serverName}" is not in the registry`)
+    // 停用的服务**不起进程**（注册表是唯一事实源；改 `disabled` 立即生效，不必重写 preset）。
+    // 代理行会捕获并 warn、零工具，preset 照常挂载（fail-soft）。
+    if (definition.disabled === true) throw new Error(`MCP server "${serverName}" is disabled in the registry`)
     const existing = this.servers.get(serverName)
     if (existing !== undefined) {
       if (existing.fingerprint === fingerprintOf(definition)) return existing

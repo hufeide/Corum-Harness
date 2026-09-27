@@ -3,7 +3,8 @@
  *
  * 管理 ~/.corum/mcp-servers.json 中的 MCP 服务配置。
  * AgentProfile 通过 mcpServers: string[] 引用授权的服务名，
- * 编译 preset 时从注册表读取配置生成 dsh-mcp-client 行。
+ * 编译 preset 时从注册表读取配置生成 **corum-mcp-proxy 行**（只带 serverName；进程与独占租约
+ * 由宿主池 `corumMcpPool` 持有，见 pool.ts/proxy.ts）。
  *
  * 继承 TypertRemoteService，暴露 /api/mcpManager/* RPC 端点。
  * @module @corum/corum-mcp-manager/mcp-manager-service
