@@ -27,12 +27,15 @@
 .sidebar:not([data-wide]) > :not(.brandRow) {
   display: none;
 }
-.sidebar:not([data-wide]) .brand,
-.sidebar:not([data-wide]) .modeSwitch {
+/* 窄轨只保留品牌卡；品牌行新增的版本小字与档位徽标一并隐去（PR1 不改窄轨形态，
+   折叠态维持原样，不让 11px 小字挤进窄轨）。 */
+.sidebar:not([data-wide]) .brandCol,
+.sidebar:not([data-wide]) .modeSwitch,
+.sidebar:not([data-wide]) .editionBadge {
   display: none;
 }
 
-/* ── 品牌与模式切换 ─────────────────────────────────────────────────── */
+/* ── 品牌行（品牌卡 + 版本小字 + 档位徽标；模式切换见下方 modeSwitch 组）────── */
 
 .brandRow {
   flex: none;
@@ -44,7 +47,7 @@
 }
 /* brand-logo（design W7RwT1 2026-08-28 定稿 v7）：矩道品牌卡 134×54 圆角 10
    （鲸鱼+矩道+Corum Harness+Powered by DSH 一体卡，自带彩色描边，深/浅主题
-   同一张）。行高 54 撑开 brand-row，mode-switch（36 高）垂直居中。 */
+   同一张）。PR1 起卡下多一行版本小字（.brandMeta），右侧档位徽标垂直居中。 */
 .brand {
   position: relative;
   flex: none;
@@ -61,12 +64,90 @@
   height: 54px;
   object-fit: contain;
 }
+/* 品牌卡 + 版本小字行的列容器（PR1：品牌行左侧）。brand-row 的行高由它撑开
+   （54 卡 + 一行 11px 小字），右侧档位徽标垂直居中。 */
+.brandCol {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+/* 版本小字行：「v0.1.0 · 社区版」+ 复制诊断信息按钮（11px 次级色，见设计稿）。
+   复制按钮用「默认隐形、hover / 聚焦才显形」的形态，避免常驻图标抢品牌卡的视觉。 */
+.brandMeta {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+.brandVersion {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.copyDiag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.brandRow:hover .copyDiag,
+.copyDiag:focus-visible {
+  opacity: 1;
+}
+.copyDiag:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+/* 档位徽标胶囊（PR1）：与 .modeSwitch 同形的玻璃底、999 圆角、22 高。
+   社区版 = 中性灰；PRO = brand 描边 + brand 字 + 星形图标（data-edition 区分）。 */
+.editionBadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  height: 22px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.editionBadge[data-edition='pro'] {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
+}
+.editionBadgeIcon {
+  flex: none;
+}
 .brandDivider {
   flex: none;
   height: 1px;
   background: var(--corum-glass-border);
 }
 
+/* PR1：modeSwitch「项目|任务」滑块已从 SidebarSkeleton 删除（模式切换改由活动栏
+   承担，PR3），下面这组类**暂无引用者**——按定稿保守保留，待 PR3 决定复用或清理。 */
 .modeSwitch {
   flex: none;
   position: relative;
@@ -126,6 +207,7 @@
   color: var(--corum-label-on-brand);
 }
 .modeSeg:focus-visible,
+.copyDiag:focus-visible,
 .btnNew:focus-visible,
 .btnOpenProject:focus-visible,
 .btnNewProject:focus-visible,
@@ -1283,6 +1365,7 @@
   .pane[data-flipping='in'] {
     animation: paneFadeIn 0.15s linear both;
   }
+  /* modeSwitch 无引用者（PR1 保留待 PR3），其 reduced-motion 降级一并保留。 */
   .modeSwitch::before {
     transition-duration: 0.01ms;
   }

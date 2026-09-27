@@ -30,7 +30,64 @@ ipcRenderer.on('corum:open-notification-center', () => {
   for (const listener of [...notificationCenterListeners]) listener()
 })
 
+/**
+ * `window.corumDesktop` 的形状（桥的权威声明）。AGENTS.md 红线 1 的合法 window
+ * 挂载例外：只写一次、只读；消费侧按红线 3 用**本地能力接口**收窄自己用到的那
+ * 几个方法（tray-bridge / session-archive 的既有形态），不 import 本文件。
+ */
+export interface CorumDesktopBridge {
+  /** 应用版本号（主进程 `app.getVersion()`）：品牌行的版本小字用。 */
+  getAppVersion: () => Promise<string>
+  /** Dev: hot-restart the host bridge child (host-side code changed). */
+  restartHost: () => Promise<{ ok: boolean }>
+  /** Open one slot's content in a detached floating window (?floating=<slotKey>). */
+  openFloating: (slotKey: string) => Promise<{ ok: boolean; error?: string }>
+  /** Close a detached floating window; omitted slotKey closes them all. */
+  closeFloating: (slotKey?: string) => Promise<{ ok: boolean; closed: number }>
+  /** 发一条系统通知（见实现处的完整说明）。 */
+  notifyNative: (request: {
+    title: string
+    body?: string
+    silent?: boolean
+    notificationId?: string
+  }) => Promise<{ ok: boolean; error?: string }>
+  /** 订阅系统通知点击。 */
+  onNativeNotificationClick: (callback: (payload: { notificationId: string | null }) => void) => () => void
+  /** 把未读数推给主进程（菜单栏标题上的数字）。 */
+  setNotificationCount: (count: { unread: number; total: number }) => void
+  /** 取「常驻模式」一次性提示的展示资格。 */
+  getTrayHint: () => Promise<{ resident: boolean; firstTime: boolean }>
+  /** 主进程托盘菜单点了「通知中心」→ 展开渲染层的通知面板。 */
+  onOpenNotificationCenter: (callback: () => void) => () => void
+  /** Main window: subscribe to slot detach/restore (floating open/close). */
+  onFloatingChange: (callback: (slotKey: string, detached: boolean) => void) => () => void
+  /** Main window: subscribe to floating-window drag coordinates (live dock preview). */
+  onFloatingDrag: (callback: (payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void) => () => void
+  /** Save one session's log ZIP via a native save dialog. */
+  saveSessionLog: (sessionId: string) => Promise<{ path: string | null; error?: string }>
+  /** Import session log ZIP(s) via a native open dialog. */
+  importSessionLog: () => Promise<{ imported: string[]; skipped: string[]; cancelled?: boolean; error?: string }>
+  /** Physically delete one session after a native confirm dialog. */
+  deleteSession: (sessionId: string) => Promise<{ deleted: boolean; wasLive?: boolean; cancelled?: boolean; error?: string }>
+  /** Pick a working directory via a native open-directory dialog (project cwd). */
+  pickDirectory: (options?: { title?: string; defaultPath?: string }) => Promise<{ path: string | null; cancelled?: boolean; error?: string }>
+  /** 壳层 combo 管理页：读取所有已配置且可用的 combo。 */
+  listCombos: () => Promise<unknown[]>
+  /** 壳层 combo 管理页：按 combo 注入 env/cwd/覆盖规则并启动 dsh host。 */
+  launchCombo: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 记录 combo 使用时间。 */
+  touchCombo: (id: string) => Promise<{ ok: boolean }>
+}
+
 contextBridge.exposeInMainWorld('corumDesktop', {
+  /**
+   * 应用版本号（主进程 `app.getVersion()`）。IPC 而不是 sendSync：同步 IPC 会
+   * 阻塞 renderer，而版本号只在品牌行挂载时拉一次，异步足够（调用方缓存进
+   * React state）。取不到时调用方静默不显示版本——桥不该为「拿不到一个字串」抛。
+   */
+  getAppVersion: (): Promise<string> =>
+    ipcRenderer.invoke('corum:app-version'),
+
   /** Dev: hot-restart the host bridge child (host-side code changed). */
   restartHost: (): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('corum:host-restart'),
