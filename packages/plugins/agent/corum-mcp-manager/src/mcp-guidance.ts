@@ -35,8 +35,12 @@ export function mcpGuidanceSectionName(serverName: string): string {
 /**
  * 生成段文本（**纯函数**，便于单测）。
  *
- * 标题用中文「MCP 工具使用指导」+ 服务名，正文原样引用 `guidance`：指导文本由用户/服务作者
- * 撰写，我们不重写、不翻译（改写会把具体命令与参数名弄错）。
+ * 包装文本（标题 / 接入说明 / 截断提示）**一律英文** —— 模型可见提示词的语言纪律（用户 2026-09-10
+ * 定调「提示词都以英文编写」，守卫 `prompt-language.spec.ts`）；本文件此前漏在守卫覆盖之外，
+ * 2026-09-27 扫出并修 **同时补了本包门禁**（`tests/guidance-language.spec.ts`）。
+ *
+ * 正文原样引用 `guidance`：指导文本由用户/服务作者撰写，我们不重写、不翻译（改写会把具体命令与
+ * 参数名弄错）—— 故若 `guidance` 本身是中文，正文仍保持原样，那是内容而非包装。
  *
  * @param serverName - 服务名。
  * @param guidance - 注册表里的指导文本。
@@ -46,13 +50,13 @@ export function mcpGuidanceSectionText(serverName: string, guidance: string | un
   const body = (guidance ?? '').trim()
   if (body === '') return ''
   const clipped = body.length > MCP_GUIDANCE_MAX_CHARS
-    ? `${body.slice(0, MCP_GUIDANCE_MAX_CHARS)}\n…（使用指导过长已截断）`
+    ? `${body.slice(0, MCP_GUIDANCE_MAX_CHARS)}\n… (guidance truncated — it is too long to include in full)`
     : body
   return [
-    `## MCP 工具使用指导：${serverName}`,
+    `## MCP tool usage: ${serverName}`,
     '',
-    `本会话已接入 MCP 服务 \`${serverName}\`（工具名形如 \`mcp__${serverName}__<工具>\`）。`,
-    '上手要点：',
+    `This session has the MCP server \`${serverName}\` connected (its tool names look like \`mcp__${serverName}__<tool>\`).`,
+    'How to use it:',
     '',
     clipped,
   ].join('\n')
