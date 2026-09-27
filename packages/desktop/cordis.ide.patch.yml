@@ -59,8 +59,19 @@
 - id: ui-deliverables
   disabled: true
 
+# 2026-09-27：**取消对 ui-goal 的禁用**（用户实测「目标组件完全不显示」⇒ 根因就是本行）。
+#
+# 当初（0.1.2）禁用的理由是「硬依赖 uiConversation 服务 ⇒ 永久 pending、阻塞 web boot」，
+# 并以为「目标面板由 @corum/corum-ide-* 自研接管」——**后半句从未成立**：corum 侧没有任何
+# goal 组件（packages/plugins 里零个 goal 文件）⇒ 目标功能被整体丢掉，不是被替代。
+#
+# 该理由现已不成立：`@corum/corum-ui-conversation`（fork 接管官方 ui-conversation）自己
+# 提供同名 `uiConversation` 服务。**隔离实例实测**（home=/tmp/corum-goal-home、`:9333`、
+# 日志自报 `desktop mode: ide`）：
+#   · 客户端清单 47 → **48**，出现 `@deepseek-ai/dsh-client-ui-goal` ✓
+#   · 日志与控制台**均无** `waiting for service: uiConversation` ✓（boot 未被阻塞）
+#   · 页面注入官方 GoalBar 样式 `.…_goalGlyph` ⇒ 模块确已挂载 ✓
 - id: ui-goal
-  disabled: true
 
 # 官方轨迹视图 ui-trajectory：**禁用**（2026-09-09，fork #12 接管）。
 # 原形态是 conversation.view 槽的「对话 / 轨迹」选项卡；corum 定调的形态是
