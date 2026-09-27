@@ -70,3 +70,59 @@ describe('工具描述准确性：机制主张与实现对齐', () => {
     expect(SRC).toContain('ask it to stop with `interrupt_agent` (a request that returns without waiting; its own children keep running)')
   })
 })
+
+/**
+ * 编排段重排（2026-09-27 用户要求「整段重新编排」）的结构门禁。
+ *
+ * 归属划分（重排后）：`tool:subagent`（order 2800，`corumSchedulingSectionText`）只讲**本工具的
+ * 调度与生命周期**；跨工具的**形式选择 + 成本判据**全部归 `corum:subagent-orchestration`（2801），
+ * 且**最短路径原则置顶**。三条不变式：① 归属不回流；② 同一判据不重复；③ 原则在机制段之前。
+ */
+describe('编排段重排：归属 / 去重 / 顺序', () => {
+  const schedStart = SRC.indexOf('export function corumSchedulingSectionText')
+  const schedEnd = SRC.indexOf('\n/**', schedStart)
+  const schedBody = schedStart === -1 ? '' : SRC.slice(schedStart, schedEnd)
+  const orchestrationStart = SRC.indexOf("name: 'corum:subagent-orchestration'")
+  const orchestrationBody = SRC.slice(orchestrationStart)
+
+  it('★ 归属：2800 段（本工具调度）不得再谈别的委派工具', () => {
+    expect(schedStart).toBeGreaterThan(-1)
+    expect(schedEnd).toBeGreaterThan(schedStart)
+    // 正面：本工具的调度事实仍在
+    expect(schedBody).toContain('ALWAYS runs in the FOREGROUND')
+    expect(schedBody).toContain('Use ${toolName} in the background by default')
+    expect(schedBody).toContain('TERMINAL when it settles')
+    // 反面：跨工具选择已搬走（旧文案里的这句是重排前唯一的"选 orchestrate"出处）
+    expect(schedBody).not.toContain('orchestrate')
+    expect(schedBody).not.toContain('final integrator')
+  })
+
+  it('★ 最短路径原则置顶，且在机制段之前', () => {
+    const principle = orchestrationBody.indexOf('SHORTEST PATH WINS')
+    const mechanism = orchestrationBody.indexOf('How the mechanism works')
+    expect(principle).toBeGreaterThan(-1)
+    expect(mechanism).toBeGreaterThan(principle)
+    expect(orchestrationBody).toContain('pick the fewest calls that solve the task')
+  })
+
+  it('★ 去重：只读与"一个自洽实现"在工作形态表里各只出现一次', () => {
+    // 重排前 `- READ-ONLY work (research, search, fact-finding…` 与 `ONE focused, self-contained`
+    // 各出现两遍（无条件清单 + hasResearch/hasOrchestrate 分支）。
+    expect((SRC.match(/- READ-ONLY work \(research, search, fact-finding/g) ?? []).length).toBe(1)
+    expect((SRC.match(/ONE focused, self-contained/g) ?? []).length).toBe(1)
+    // 旧的弱版比较句（把对手设成"串行"）不得回潮——真实对手是 N 个后台并发委派。
+    expect(SRC).not.toContain('far better than several sequential')
+  })
+
+  it('★ 成本判据完整：工具调用数/通知数/隔离额度/手动集成 四要素 + 选长路的三种例外', () => {
+    for (const phrase of [
+      'N tool calls',
+      'N settlement notices landing in your context',
+      'exceeding it FAILS the call',
+      'a manual `integrate` afterwards',
+    ]) expect(orchestrationBody).toContain(phrase)
+    expect(orchestrationBody).toContain('Keep N separate `subagent` calls ONLY when the pieces are genuinely NOT independent')
+    expect(orchestrationBody).toContain('steer one mid-flight')
+    expect(orchestrationBody).toContain('partial results arriving as they settle')
+  })
+})

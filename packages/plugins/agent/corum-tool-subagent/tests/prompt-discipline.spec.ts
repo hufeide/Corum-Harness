@@ -59,15 +59,21 @@ describe('决策点分工 — 只读调研不走写能力子 Agent（源码扫�
     expect(start).toBeLessThan(SRC.indexOf('parameters: {', start))
   })
 
-  it('机制段：只读与写两条并列在选择清单最前，且带负向规则', () => {
-    const block = between('Choose the right delegation form by the shape of the work:', 'if (hasFork)')
+  it('机制段：最短路径原则置顶，只读/写/执行型验收三条并列在选择清单最前', () => {
+    // 2026-09-27 重排：原则句置顶（`SHORTEST PATH WINS`），三条并列在最前；
+    // 旧的 `- ONE focused, self-contained subtask …` 条目已并入"改文件"那条（去重）。
+    const block = between('SHORTEST PATH WINS', 'if (hasOrchestrate)')
+    const principleAt = block.indexOf('SHORTEST PATH WINS')
     const readAt = block.indexOf('- READ-ONLY work')
     const writeAt = block.indexOf('- Work that CHANGES files')
-    const singleAt = block.indexOf('- ONE focused, self-contained subtask that must create or modify files')
-    expect(readAt).toBeGreaterThanOrEqual(0)
+    const verifyAt = block.indexOf('- EXECUTABLE verification')
+    expect(principleAt).toBe(0)
+    expect(readAt).toBeGreaterThan(principleAt)
     expect(writeAt).toBeGreaterThan(readAt)
-    expect(singleAt).toBeGreaterThan(writeAt)
-    expect(block).toContain('call `subagent_research`')
+    expect(verifyAt).toBeGreaterThan(writeAt)
+    // 条目统一为 `→ \`工具名\`` 风格（重排时去掉了冗余的 "call" 一词）。
+    expect(block).toContain('→ `subagent_research`')
+    expect(block).toContain('one call, one result')
   })
 
   it('机制段：隔离是「改动」的属性，只读委派不消耗隔离面', () => {

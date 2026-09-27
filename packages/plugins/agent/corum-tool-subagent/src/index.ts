@@ -3530,16 +3530,18 @@ export function apply(ctx: Context, config: Config): void {
             `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
             '',
             'SHORTEST PATH WINS — pick the fewest calls that solve the task. Choose the form by the shape of the work:',
-            '- Work that CHANGES files (ONE focused, self-contained implementation or scoped fix) → `subagent`: one call, one result.',
-            // fork（corum）2026-09-14：**执行型验收**必须走写能力工具（用户点名「主 Agent 派
-            // research 去验收」）。验收分两种，旧文案把两者都塞进只读清单，于是需要跑断言/造
-            // fixture/落盘证据的验收被派给没有 write 的子会话 ⇒ 派单自相矛盾（实证会话
-            // `6364e3ea`：「不许改任何文件」与「必须造 fixture」并存）。
-            '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.',
           ]
+          // 三条并列在最前（只读 → 写 → 执行型验收）。只读是**条件**条目（research 实例缺席时
+          // 不能提它），故用 push 逐条拼装而不是静态数组字面量。
           if (hasResearch) {
             lines.push('- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — checking an implementation against a spec, comparing output against expected values, or running read-only commands like `git log` / `ls`) → `subagent_research`. It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline — never try to background it (`run_in_background: true` is rejected). Its sandbox is pinned to `read-only` and write/edit are denied, so it can investigate freely and can never modify the repo. One or two questions: call it directly, several angles in ONE message.')
           }
+          lines.push('- Work that CHANGES files (ONE focused, self-contained implementation or scoped fix) → `subagent`: one call, one result.')
+          // fork（corum）2026-09-14：**执行型验收**必须走写能力工具（用户点名「主 Agent 派
+          // research 去验收」）。验收分两种，旧文案把两者都塞进只读清单，于是需要跑断言/造
+          // fixture/落盘证据的验收被派给没有 write 的子会话 ⇒ 派单自相矛盾（实证会话
+          // `6364e3ea`：「不许改任何文件」与「必须造 fixture」并存）。
+          lines.push('- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.')
           if (hasFork) {
             lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')
           }
