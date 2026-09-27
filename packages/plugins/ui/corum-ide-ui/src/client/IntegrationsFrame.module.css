@@ -1,0 +1,221 @@
+/*
+ * IntegrationsFrame —— 集成中心（design.pen yXkOK 画板 F 定稿，PR4）。
+ *
+ * 逐帧对照（画板 F `CeM2r` 的面板 + `t4cBj6` 面板头 + `Vyfds` 子导航 +
+ * `wXUJu` 内容区）：
+ *   面板   = $glass-1 底 + $glass-border 1px 描边，纵向 flex，占满剩余全宽全高。
+ *   面板头 = 48 高、padding [0,12]、gap 8、底边 1px 分隔线。
+ *   子导航 = 118 宽、右边界 1px 分隔线、padding [10,8]、gap 2。
+ *   内容区 = padding 12、gap 10。
+ * 密度缩放（--corum-density-scale）与字号缩放（--corum-ui-font-scale）全仓统一，
+ * 数值与 AppFrame.module.css 的活动栏（.railItem 的 40×40 r10 + 2px 指示条）
+ * 同一套 token 与同一套换算写法。
+ */
+
+/* 面板本体：活动栏右侧的全部宽度（集成中心是「没有侧栏部分的工作面」）。 */
+.panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
+}
+
+/* 面板头（画板 F t4cBj6）：48 高，icon 26 + 标题 13.5/600 + spacer + × 24。
+   顶栏让位 40px（画板 F 的壳无窗口 chrome，本壳必须补）：壳的窗口标题栏行是覆盖
+   左列的 absolute 浮层，集成中心打开时它整行隐藏（见 AppFrame），故面板头自己
+   承担那 40px 让位 + 窗口拖拽（app-region:drag，见下）。 */
+.header {
+  -webkit-app-region: drag;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  height: calc(48px * var(--corum-density-scale, 1) + 40px);
+  box-sizing: border-box;
+  padding: 40px calc(12px * var(--corum-density-scale, 1)) 0;
+  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+
+/* 面板标题图标座（画板 F QEeGy：26×26 r8 · $glass-2 底 + $glass-border 描边，
+   icon 15 · $brand-text）。 */
+.headerIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
+/* 面板标题（画板 F NlQhw：13.5 / 600 / $label-primary）。 */
+.headerTitle {
+  margin: 0;
+  font-size: calc(13.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+/* 头部的弹性留白（画板 F MBZlf `sp`）。 */
+.headerSpacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 关闭钮（画板 F v4Jf8B：24×24 r7 · 透明底 + $glass-border 描边，icon x 13 ·
+   $label-secondary）。语义 = 回到会话布局（侧边栏与会话区恢复）。 */
+.closeBtn {
+  -webkit-app-region: no-drag;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.closeBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.closeBtn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+/* 面板体（画板 F h4Pyc）：左 = 子导航 118，右 = 内容区占满剩余。 */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* 子导航（画板 F Vyfds：118 宽、右边界 1px、padding [10,8]、gap 2）。 */
+.subNav {
+  flex: none;
+  width: 118px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  border-right: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  overflow-y: auto;
+}
+
+/* 子导航项（画板 F oTczH：行高 30、左内缩 8 —— 该 8px 是激活指示条的落位
+   gutter：指示条在项框 x=2，pill 从 x=8 起，二者不重叠）。 */
+.subNavItem {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 0 0 calc(8px * var(--corum-density-scale, 1));
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* 激活指示条（画板 F j2agW7：项内 x=2 的 2×20 r2 $brand-primary，垂直居中）。
+   absolute 的参照系是**包含块的 padding box**——padding 在 padding box 之内、
+   不移动其原点 ⇒ 上面那 8px 左内缩不影响本值，`left: 2px` 就是项内 x=2
+   （与画板 F 的 `padding [0,0,0,8]` + `layoutPosition x=2` 逐帧一致）。 */
+.subNavItem[data-active]::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary);
+}
+
+/* 激活 pill（画板 F LXBpE：行内 30 高 r8、padding [0,8]、gap 6；激活 $glass-2 底 +
+   $glass-border 描边）。未激活也保留 1px 透明描边——否则激活瞬间内容宽度跳
+   2px、图标与文字会平移。 */
+.subNavPill {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  width: 100%;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.subNavItem:hover .subNavPill {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.subNavItem[data-active] .subNavPill {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border-color: var(--corum-glass-border, var(--dsw-alias-border-l1));
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
+.subNavItem:focus-visible .subNavPill {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+/* 子导航项文案（画板 F iVYcj/SOjKU：11.5；激活 600，未激活 normal）。 */
+.subNavLabel {
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.subNavItem[data-active] .subNavLabel {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 内容区（画板 F wXUJu：padding 12、gap 10）：三个内容子槽之一。
+   纵向 flex；**滚动条永远在外层**（overflow 用 auto 而非 scroll），页面自身
+   不设 flex:1（`> *` 的 flex:none + min-height:0）——PR6 两页的根是 fragment
+   （迁出前靠设置壳的 `.body` 提供内边距与滚动），到集成中心后由本容器承担；
+   插件页自带内部滚动（`.page` height:100%），在本容器里也不产生双滚动条。 */
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+/* 内容区直接子项不收缩（列表页靠外层滚动，避免卡片被压扁成一条缝）。 */
+.content > * {
+  flex: none;
+  min-height: 0;
+}

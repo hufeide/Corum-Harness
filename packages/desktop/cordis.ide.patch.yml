@@ -228,24 +228,22 @@
     - id: ide-plugin-manager
       name: '@corum/corum-ide-plugin-manager-ui'
     # 集成中心 ·「插件」内容页（PR5）：GPT 式插件市场 + 已装管理
-    # （design.pen yXkOK F1）。**本行只负责让包被加载**；页面本体经
+    # （design.pen yXkOK F1）。**本行 = 加载 + 挂载**：页面本体经
     # `corum.integrations.plugins` 槽挂进集成中心 —— 该父槽由集成中心骨架
-    # （PR4，活动栏「插件」图标 + 全屏独占工作面 + 左侧子导航）声明，PR4 尚未
-    # 合入，故本包的槽注入在 src/client/index.tsx 里**有意注释掉**：包已装配、
-    # UI 不挂载（父槽缺席时 slots.inject 本也不会触发，注释是显式表达这份预期）。
-    # PR4 合入后删掉该文件的注释标记即可生效，本行不用动。
+    # （@corum/corum-ide-ui，PR4 已合入：活动栏「插件」图标 + 全屏独占工作面 +
+    # 左侧子导航）声明，本包 client apply 里的 ctx.slots.inject 已转正为 live
+    # 代码（声明先于注册由 inject 保证）。
     - id: ide-integrations
       name: '@corum/corum-ide-integrations-ui'
     # 集成中心内容页（PR6）：MCP 页（McpPage）+ 技能页（SkillsPage）。
     # 两页原为设置中心的 SettingsMcpSection / SettingsSkillsSection，PR6 迁出为
     # 集成中心的内容页 —— 设置中心已同步删掉 mcp / skills 两条 SECTION_DEFS 注册。
     #
-    # **本行 = 加载不挂载**：包在组合里加载（bundle 进 __DSH_BOOT__ 图、页面组件
-    # 可被消费），但本包的 client apply **有意不注册任何槽**。原因：两个内容页的
-    # 槽 `corum.integrations.mcp` / `corum.integrations.skills` 的**声明权归 PR4 的
-    # 集成中心骨架**（声明 = 排他渲染权），本包若抢先声明，骨架落地时会撞
-    # 「already declared」。骨架合入后：由骨架在这两行声明子槽，本包再把
-    # src/client/index.tsx 模块头注释里的两段 ctx.slots.inject/register 打开即可。
+    # **本行 = 加载 + 挂载**：本包的 client apply 把两个页面经 ctx.slots.inject
+    # 注册进 `corum.integrations.mcp` / `corum.integrations.skills` —— 两槽的
+    # **声明权归骨架 @corum/corum-ide-ui**（声明 = 排他渲染权），PR4 已合入并在
+    # 它的 root 条目 children 表里声明，本包只作 occupant（不自己声明，否则撞
+    # 「already declared」）。
     - id: ide-integrations-pages
       name: '@corum/corum-ide-integrations-pages-ui'
     # 状态栏已整体移除（corum.statusBar 槽不再由 ide-shell 声明/渲染）；

@@ -60,6 +60,15 @@
   pointer-events: auto;
 }
 
+/* 集成中心打开时的整行隐藏（PR4）。不能用 UA 的 `[hidden]{display:none}` 兜底：
+   作者样式恒胜 UA 样式，而 `.titlebarRow{display:flex}` 就是作者声明 ⇒ 必须显式
+   写一条作者规则。(0,2,0) > (0,1,0)，无需 !important。
+   本行宽度锚在侧栏右缘，而集成中心是全屏独占工作面：留着它既无意义，又会与
+   集成中心面板头抢顶部 40px。窗口拖拽改由面板头承担（IntegrationsFrame）。 */
+.titlebarRow[hidden] {
+  display: none;
+}
+
 /* 标题栏行的拖拽段：整段 app-region:drag（内层按钮各自 no-drag）。
    注意 -webkit-app-region 非继承属性、初始值 none，且「子元素覆盖父级」只对
    显式声明了 app-region 的后代生效——未声明的后代落入父级 drag 命中区（可拖）。
@@ -547,6 +556,19 @@
   display: flex;
 }
 
+/* 集成中心打开时的 GridView 保活隐藏（PR4，design.pen 画板 F）：
+   保持挂载、只隐藏——条件渲染（卸载）会重置会话视图整棵子树的组件态
+   （Monaco 内容/撤销栈、xterm 缓冲、会话滚动位），「× 关闭回会话布局」
+   之后用户看到的是被清空的工作面。
+
+   ⚠️ 本规则**必需**：不能用 UA 的 `[hidden]{display:none}` 兜底——作者样式恒胜
+   UA 样式，而上面 `.mainRow[data-gridview]{display:flex}` 正是作者声明 ⇒ 不加
+   这条，`hidden` 会被完全压制、集成中心与网格同时显示（两列并排）。
+   特异性 (0,2,0) 与 data-gridview 那条相同、源码顺序在后 ⇒ 后者胜出。 */
+.mainRow[hidden] {
+  display: none;
+}
+
 /* (legacy grid tracks — superseded by GridView, kept for reference)
 .mainRow {
   display: grid;
@@ -975,6 +997,22 @@
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   border-right: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
+}
+
+/* 集成中心打开时，栏顶 40px 让位段补回窗口拖拽（PR4）。
+   会话布局下那一段由 titlebarRow 的拖拽段覆盖（该行宽度含活动栏，见其 style
+   的 `width: sidebarRight`）；集成中心打开时该行整行隐藏（见上方
+   `.titlebarRow[hidden]`），而集成中心面板从 x=56 起 ⇒ 红绿灯所在的左上
+   56×40 会变成拖拽死角（用户抓红绿灯那一带拖窗的直觉动作会失效）。
+   本元素只补回这块命中区：absolute 脱离 flex 流、无背景无内容，不改变视觉；
+   它压在 40px 的 padding 让位段上，不覆盖 logo（y=50 起）与任何图标钮。 */
+.railDragBand {
+  -webkit-app-region: drag;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
 }
 /* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。壳自带静态资源
    经 corumapp:// 协议取，不随主题换图（图标自带底色，深浅两态都成立）。 */

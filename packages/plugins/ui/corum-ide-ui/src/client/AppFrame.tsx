@@ -36,6 +36,8 @@ import {
 import { IDE_GRID_SLOTS, IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
 // fork（corum）：开发者模式开关（同 bundle 设置域，localStorage + 同 bundle 事件）。
 import { useDeveloperMode } from './settings/developer-mode.ts'
+// 集成中心（PR4）：全屏独占工作面的面板本体（壳内渲染，不走网格/槽座位）。
+import { IntegrationsFrame, type IntegrationsSection, type IntegrationsSectionSlot } from './IntegrationsFrame.tsx'
 import css from './AppFrame.module.css'
 
 /**
@@ -142,8 +144,34 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
   )
 }
 
-/** 工作面标识（活动栏主导航组的两项；搜索/插件/设置为非工作面动作）。 */
-type WorkbenchFace = 'task' | 'project'
+/**
+ * 工作面标识（活动栏主导航组的两项 + 集成中心）。
+ *
+ * ⚠️ 与 `SidebarMode`（`'task' | 'project'`，`ctx.layout` 的**跨 bundle 单例**
+ * 状态）**刻意不同域**：`'integrations'` 只活在 AppFrame 的本地 state 里，
+ * 永远不会被写进 `setSidebarMode`（该服务只认 task/project，写进去是脏数据，
+ * 且侧栏骨架没有任何面板能渲染它）。三者的关系：
+ *   - `task` / `project` → 直接写 sidebarMode（侧栏骨架按它换面板）；
+ *   - `integrations`     → 只切本组件渲染的行布局（会话区让位），sidebarMode
+ *                          保持原值不动 ⇒ × 关闭回到会话布局时侧栏还停在
+ *                          用户离开前的工作面（设计稿「回到会话布局」的语义）。
+ */
+type WorkbenchFace = 'task' | 'project' | 'integrations'
+
+/**
+ * 侧栏工作面（= 可写 sidebarMode 的那两项）。
+ *
+ * 取 `WorkbenchFace` 与 `SidebarMode` 的**交集**而不是 `Exclude<…>`：'integrations'
+ * 不在 SidebarMode 里，自然被减掉；同时若将来 sidebarMode 域变了（如去掉
+ * 'project'），这里**自动跟随**、`onSelectFace('project')` 的调用点即刻编译错。
+ * 这样「能写服务的 face」永远等于两个域的交集，不需要第三处人工同步。
+ *
+ * 为什么 onSelectFace 收这个域而不是 `WorkbenchFace`：活动栏主导航组只可能传
+ * task/project，收窄后**类型系统直接拦住** `setSidebarMode('integrations')` 这类
+ * 误写（该服务只认 task/project；写进去是脏数据，且侧栏骨架没有面板能渲染它）。
+ * 编译器是这条纪律的第一道闸，运行期无需再判。
+ */
+type SidebarFace = Extract<WorkbenchFace, SidebarMode>
 
 /** 活动栏 logo 落点（corumapp:// 壳静态资源；与 brand_card / 环境背景同通路）。 */
 const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
@@ -159,42 +187,57 @@ const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
  * 作为 leaf 内替身渲染，且是「侧栏功能快捷键堆」；本组件**常驻**渲染在网格
  * **外**（AppFrame 的 workbenchRow，GridView 左侧），语义改为工作面切换器。
  *
- * 工作面语义（画板 E 的四条 flow）：
+ * 工作面语义（画板 E 的四条 flow + 画板 F 的集成中心）：
  *   - 任务 → 侧栏任务面板 + 会话主区（= sidebarMode 'task'，开箱默认布局）；
  *   - 项目 → 侧栏项目面板 + 项目主区（= sidebarMode 'project'）；社区版
  *     `corum.sidebar.project` 无 occupant ⇒ 图标置灰 + lock 角标，点击只走
  *     升级引导占位（TODO(project-face)：引导弹层未接入，不假装已切换）；
  *   - 搜索 → 本 PR 占位（SessionsPane 的搜索框没有跨 bundle 触发通路）；
- *   - 插件 → 本 PR 占位（集成中心 PR4 才建槽）；
+ *   - 插件 → **集成中心全屏独占工作面**（PR4）：侧边栏与会话区一起让位，
+ *     面板占满活动栏右侧全部宽度（画板 F；集成中心是统一模型里「没有侧栏
+ *     部分的工作面」，故全幅是自然结果而不是特例）。激活态由 AppFrame 本地
+ *     state 决定（画板 F 的指示条 + $glass-2 底）；
  *   - 设置 → `sidebar.settings` 槽座位（复用 SettingsShell 触发器，行为不变）；
  *   - 点**当前激活**的工作面图标 ⇄ 折叠 / 展开侧边栏（design 状态③ 的联动）。
  *
- * 刻意**不**走网格内新槽（那是 PR4 集成中心的活，且 grid 数学会把常驻列算进
- * leafMinSize / collapsedWidth / drop 目标）。
+ * 刻意**不**走网格内新槽（进入网格就会被算进 leafMinSize / collapsedWidth /
+ * drop 目标，而它是壳级工作面切换、不是用户可拖拽/可隐藏的区域）。
  */
-function ActivityBar({ sidebarMode, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot }: {
-  /** 当前侧栏模式（ctx.layout 的 sidebarMode 快照，经 root inject 面绑为选择器 Hook）。 */
-  sidebarMode: SidebarMode
+function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot }: {
+  /**
+   * 当前工作面的**导出值**（= 集成中心打开 ? 'integrations' : sidebarMode）。
+   *
+   * 由 AppFrame 导出、本组件只读：活动栏是工作面切换器，「谁在工作」是它唯一
+   * 需要的状态。集成中心并没有自己的可写 state——它打开时 sidebarMode 保持
+   * 原值（那是「收回后回到哪个侧栏工作面」的记忆）。
+   */
+  face: WorkbenchFace
   /** 项目工作面可用性（`corum.sidebar.project` 槽占用判定）；社区版恒 false。 */
   projectAvailable: boolean
   /** 侧栏是否收起（决定激活项 tooltip 的展开/收起文案）。 */
   sidebarCollapsed: boolean
   /** 点「任务 / 项目」：切工作面；已是当前工作面时 = 折叠 / 展开侧栏。 */
-  onSelectFace: (face: WorkbenchFace) => void
+  onSelectFace: (face: SidebarFace) => void
   /** 搜索工作面（本 PR 占位）。 */
   onSearch: () => void
-  /** 插件工作面（本 PR 占位，待 PR4 集成中心建槽）。 */
+  /** 插件工作面：切集成中心全屏独占（PR4）。 */
   onPlugins: () => void
   /** 设置座位：`sidebar.settings` 槽的渲染结果（SettingsShell 触发器 + 面板）。 */
   settingsSlot: ReactNode
 }) {
-  const taskActive = sidebarMode === 'task'
-  const projectActive = sidebarMode === 'project' && projectAvailable
+  const taskActive = face === 'task'
+  const projectActive = face === 'project' && projectAvailable
+  const integrationsActive = face === 'integrations'
   /** 工作面 tooltip：激活项额外提示「点此收起/展开侧栏」（状态③ 的可发现性）。 */
   const faceTitle = (label: string, active: boolean): string =>
     (active ? `${label} · 点此${sidebarCollapsed ? '展开' : '收起'}侧栏` : label)
+  /** 「集成中心」图标的 tooltip：激活时的动作是**收起面板**，不是收起侧栏。 */
+  const pluginsTitle = integrationsActive ? '集成中心 · 点此收起（回到会话布局）' : '集成中心'
   return (
     <div className={css.activityBar} role="toolbar" aria-label="活动栏（工作面切换器）" aria-orientation="vertical">
+      {/* 集成中心打开时补回栏顶窗口拖拽（会话布局下由 titlebarRow 的拖拽段覆盖，
+          该行此时整行隐藏——见 AppFrame.module.css 的 .railDragBand 注释）。 */}
+      {integrationsActive && <div className={css.railDragBand} aria-hidden="true" />}
       {/* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。 */}
       <img className={css.railLogo} src={ACTIVITY_BAR_LOGO_SRC} alt="" draggable={false} />
 
@@ -244,12 +287,16 @@ function ActivityBar({ sidebarMode, projectAvailable, sidebarCollapsed, onSelect
       {/* spacer（design KBKWI）：把底部组推到栏底（margin-top auto）。 */}
       <div className={css.railSpacer} />
       <div className={css.railGroup}>
+        {/* 「插件」= 集成中心工作面（画板 F：点亮即全屏独占；再点收回）。
+            激活态 = $glass-2 底 + 左侧 2px $brand-primary 指示条（同 railItem 语言）。 */}
         <button
           type="button"
           className={css.railItem}
           data-face="plugins"
-          title="插件"
-          aria-label="插件工作面"
+          data-active={integrationsActive || undefined}
+          aria-pressed={integrationsActive}
+          title={pluginsTitle}
+          aria-label="集成中心工作面"
           onClick={onPlugins}
         >
           <Blocks size={20} strokeWidth={2} />
@@ -355,7 +402,14 @@ function FloatingChrome({ slotKey }: { slotKey: string }) {
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.trajectory' | 'corum.tabStrip' | 'corum.panel'>
+  & PropsRenderSlots<
+    | 'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings'
+    | 'corum.sidebar' | 'corum.editor' | 'corum.trajectory' | 'corum.tabStrip' | 'corum.panel'
+    // 集成中心三个内容子槽（PR4）：AppFrame 只**转交**渲染面给 IntegrationsFrame
+    // （收窄到这三个键，见 IntegrationsFrameProps），自己不 renderSlot 它们。
+    // 三者是 root 条目 children 表里的声明键 ⇒ 在此登记后 renderSlot 才有该域。
+    | IntegrationsSectionSlot
+  >
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & {
     /** 主题偏好选择器 hook（inject hooks.theme 绑定而来，selector 形式）。 */
@@ -427,6 +481,19 @@ export function IdeAppFrame({
   // sidebarModeSnapshot / corum.sidebar.project 槽占用判定），活动栏据此定激活态。
   const sidebarMode = useSidebarMode(m => m)
   const projectAvailable = useProjectOccupied(occupied => occupied)
+  // ── 集成中心工作面（PR4）──
+  // 两个都是**壳本地 state**（不入 ctx.layout）：
+  //   - integrationsOpen：集成中心是否占屏。true ⇒ workbenchRow 右列渲染集成中心
+  //     面板代替 GridView（GridView 保持挂载但 CSS 隐藏，见下方 workbenchRow 注释）；
+  //   - integrationsSection：面板内子导航选中项（插件 / MCP 服务器 / 技能）。
+  // 联动规则（单一写点，避免两处状态打架）：
+  //   - 点活动栏「任务/项目」→ 收回集成中心（写 sidebarMode，会话布局复活）；
+  //   - 点活动栏「插件」→ 翻开 / 收回（再点一次收回 = 画板 F「× 关闭」的等价入口）；
+  //   - 点面板头的 × → 收回。
+  // 「收回后回到哪个工作面」不发散成第三份状态：集成中心期间 sidebarMode
+  // **保持不动**（本 PR 不写它），故收回即自然回到用户离开前的那个侧栏工作面。
+  const [integrationsOpen, setIntegrationsOpen] = useState(false)
+  const [integrationsSection, setIntegrationsSection] = useState<IntegrationsSection>('plugins')
   // 会话标题/空态判定（isHero）已随会话段迁往 session-bar.tsx：那里由槽 occupant
   // 直接读 `useSessions` 投影（槽是会话作用域，自带 sessionId），本组件不再需要。
   const frameRef = useRef<HTMLDivElement | null>(null)
@@ -562,17 +629,26 @@ export function IdeAppFrame({
   const onToggleSidebar = useCallback(() => {
     setSidebarCollapsed(c => !c)
   }, [])
-  // ── 活动栏工作面切换（PR3）──
+  // ── 活动栏工作面切换（PR3 + PR4）──
   // 点「任务/项目」= 写 ctx.layout 的 sidebarMode（工作面的跨 bundle 单例状态，
-  // 侧栏骨架按它切换任务/项目面板）；点**当前激活**的工作面图标 = 折叠/展开侧栏
-  // （design 画板 E 状态③ 的联动，取代旧 SidebarRail 的展开按钮）。切工作面时
-  // 一并确保侧栏是展开态——否则点了图标侧栏还收着，用户看不到工作面内容。
-  const onSelectFace = useCallback((face: WorkbenchFace) => {
+  // 侧栏骨架按它切换任务/项目面板）+ 关掉集成中心（切走即收起，否则新工作面
+  // 会被集成中心面板挡住、用户以为点击没生效）；点**当前激活**的工作面图标 =
+  // 折叠/展开侧栏（design 画板 E 状态③ 的联动，取代旧 SidebarRail 的展开按钮）。
+  // 切工作面时一并确保侧栏是展开态——否则点了图标侧栏还收着，用户看不到工作面内容。
+  const onSelectFace = useCallback((face: SidebarFace) => {
     if (face === 'project' && !projectAvailable) {
       // 社区版：corum.sidebar.project 槽无 occupant（项目工作面是闭源内容）。
       // TODO(project-face): 升级引导弹层未接入（PR 未定）——本 PR 只置灰 + 记日志，
       // 不写 sidebarMode（写了也没有面板可渲染，且会污染跨 bundle 的服务状态）。
       console.debug('[activity-bar] 项目工作面不可用（社区版 · 项目面板槽无 occupant）')
+      return
+    }
+    // 集成中心开着时：这一击只负责收回（会话布局复活），不叠加「折叠侧栏」——
+    // 否则一次点击同时关面板 + 收起侧栏，用户看到的是「点任务结果侧栏没了」。
+    if (integrationsOpen) {
+      setIntegrationsOpen(false)
+      if (sidebarMode !== face) setSidebarMode(face)
+      setSidebarCollapsed(false)
       return
     }
     if (sidebarMode === face) {
@@ -581,7 +657,7 @@ export function IdeAppFrame({
     }
     setSidebarMode(face)
     setSidebarCollapsed(false)
-  }, [projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode])
+  }, [integrationsOpen, projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode])
   // 搜索工作面：本 PR 仅占位。SessionsPane 的搜索框是面板内 state（searchOpen +
   // 局部 ref），没有跨 bundle 的聚焦通路（新开一条通路属侧栏插件的活，超出本 PR
   // 活动栏范围），故按定稿先占位。
@@ -589,11 +665,15 @@ export function IdeAppFrame({
   const onSearchFace = useCallback(() => {
     console.debug('[activity-bar] 搜索工作面（占位：侧栏搜索框尚无跨 bundle 聚焦通路）')
   }, [])
-  // 插件工作面：本 PR 仅占位。集成中心（PR4）才建槽——届时插件图标切换
-  // 「侧栏与会话区让位、集成中心全幅」（design 画板 E 状态②）。
-  // TODO(PR4): 集成中心建槽后，此处改为切换插件工作面。
+  // 插件工作面（PR4 完成）：活动栏「插件」图标 ⇄ 集成中心全屏独占工作面
+  // （design.pen 画板 F 定稿）。切换只动本组件 state——sidebarMode 保持原值，
+  // 故 × 关闭后侧栏还停在用户离开前的那个工作面（画板 F「回到会话布局」）。
   const onPluginsFace = useCallback(() => {
-    console.debug('[activity-bar] 插件工作面（占位：集成中心 PR4 建槽）')
+    setIntegrationsOpen(open => !open)
+  }, [])
+  // 集成中心面板头的 × 关闭：回会话布局（画板 F 的关闭语义——侧边栏与会话区恢复）。
+  const onCloseIntegrations = useCallback(() => {
+    setIntegrationsOpen(false)
   }, [])
   // 传给 GridView 的折叠槽位集（useMemo 稳引用，折叠时才含 sidebar）。
   const COLLAPSED_SIDEBAR = useMemo<ReadonlySet<string>>(
@@ -760,6 +840,8 @@ export function IdeAppFrame({
   // 2026-09-10「顶栏归会话」后本行不再覆盖对话区，故只需侧栏右缘一个锚点
   // （会话段的锚点测量已随 session-bar 迁走，改为量自身宿主 <header>）。
   const [sidebarRight, setSidebarRight] = useState(296)
+  // 依赖 integrationsOpen：集成中心打开期间侧栏被隐藏（量到 0），关闭后本行
+  // 要用**立即**重量到的几何复位——否则会拿旧值/0 闪一帧（下一次 interval 才修）。
   useEffect(() => {
     let raf: number | null = null
     const measure = () => {
@@ -769,7 +851,12 @@ export function IdeAppFrame({
       // branchCell 是 .leaf 的父格——用 leaf 上溯一层命中。
       const sidebarLeaf = document.querySelector('[data-slot="corum.sidebar"]')
       const sidebar = sidebarLeaf?.parentElement ?? null
-      if (sidebar !== null) setSidebarRight(Math.round(sidebar.getBoundingClientRect().right))
+      if (sidebar !== null) {
+        const w = Math.round(sidebar.getBoundingClientRect().right)
+        // 隐藏态（集成中心打开 / 侧栏 leaf 未布局）量到 0——0 是假几何，不是
+        // 真实宽度，写进去会让本行塌成 0 宽并留下错值。跳过本轮，保留上次真值。
+        if (w > 0) setSidebarRight(w)
+      }
     }
     const schedule = () => { raf ??= requestAnimationFrame(measure) }
     // leaf 可能尚未挂载/布局变化——监听窗口 resize + 定期兜底测量。
@@ -781,7 +868,7 @@ export function IdeAppFrame({
       window.clearInterval(interval)
       if (raf !== null) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [integrationsOpen])
 
   // 从面板拖入新区域到网格中某 leaf 的某侧。
   const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
@@ -989,13 +1076,19 @@ export function IdeAppFrame({
           「Agent 标题栏」（会话标题 + 状态胶囊 + 轨迹，b4p03B，假数据占位，
           覆盖对话区正上方）。right-col（编辑器/资源管理器/终端）顶到窗口顶，
           其上方无标题栏（下方 mainRow 占满 frame 全高，由 GridView 的
-          leafTopOffset 给 sidebar/conversation 格让位本行）。 */}
+          leafTopOffset 给 sidebar/conversation 格让位本行）。
+
+          **集成中心打开时整行隐藏**（PR4）：该行的宽度锚在侧栏右缘，而集成中心
+          是全屏独占工作面——本行（含那排只作用于会话布局的图标按钮）留在画面上
+          既无意义、又和集成中心的面板头抢顶部 40px。窗口拖拽由面板头自己承担
+          （IntegrationsFrame 的 .header 是 app-region:drag）。 */}
       <div
         className={css.titlebarRow}
         /* 浮层宽度 = 侧栏右缘（2026-09-10 用户定调：会话段搬进
            conversation.session.header，本行只剩主窗口的窗口控制）。
            右侧（对话区/编辑器/终端上方）无浮层——纯内容区。 */
         style={{ right: 'auto', width: sidebarRight }}
+        hidden={integrationsOpen}
       >
         {/* 窗口标题栏宽度跟随侧栏右缘（设计稿：覆盖侧栏正上方，侧栏拖拽时一起变）。
             该段整段 app-region:drag（窗口拖拽），内层按钮 no-drag。 */}
@@ -1018,13 +1111,30 @@ export function IdeAppFrame({
             本行从此只剩**窗口控制**（红绿灯让位 + 全局图标按钮），宽度收到侧栏右缘。 */}
       </div>
 
-      {/* 工作面行（PR3）：左 = 常驻活动栏（**网格外**的固定 56px 列），
-          右 = 自由二维网格（GridView）。活动栏刻意不走网格内新槽——网格数学
-          （leafMinSize / collapsedWidth / drop 目标）会把它算进布局，而它是
-          壳级导航、不是用户可拖拽/可隐藏的区域（那是 PR4 集成中心的活）。 */}
+      {/* 工作面行（PR3 活动栏 + PR4 集成中心）：左 = 常驻活动栏（**网格外**的
+          固定 56px 列），右 = 自由二维网格（GridView）**或**集成中心全屏面板。
+          活动栏刻意不走网格内新槽——网格数学（leafMinSize / collapsedWidth /
+          drop 目标）会把它算进布局，而它是壳级导航、不是用户可拖拽/可隐藏的区域。
+
+          集成中心全幅（design.pen 画板 F）：右列由 GridView 换成 IntegrationsFrame
+          （占满活动栏右侧全部宽度；侧边栏与会话区**一起**让位——集成中心是统一
+          模型里「没有侧栏部分的工作面」，故全幅是自然结果）。
+
+          **GridView 保活方案：保持挂载 + CSS 隐藏**（`hidden` 属性 + display:none），
+          不是条件渲染。理由：条件渲染=卸载，会重置会话视图整棵子树的组件态
+          （Monaco 编辑器内容与撤销栈、终端 xterm 缓冲、对话区滚动位、details 抽屉），
+          「× 关闭回会话布局」之后用户看到的是被清空的工作面。这与 GridView 的
+          detached 语义（脱出的 leaf 不挂载 occupant）刻意相反，是画板 F「平时隐藏、
+          × 关闭回会话布局」这条语义要求的。
+          代价（如实登记，不在本 PR 处理）：隐藏期间 GridView 的 ResizeObserver 测到
+          0 尺寸 → layout() 早退（w<=0 即 return），格子样式不被改写；重新显示时
+          ResizeObserver 立即回调，按**离开时的 weights** 重排。窗口在隐藏期间被
+          缩放的话，frames 的 frameBox/weights 落后于新尺寸 ⇒ 重排后各列回到旧像素
+          占比（偏离「等比重标定」），再拖一次 sash 即恢复。属可接受的回退，
+          不在本 PR 动 grid/GridView 一行（心脏手术纪律）。 */}
       <div className={css.workbenchRow}>
         <ActivityBar
-          sidebarMode={sidebarMode}
+          face={integrationsOpen ? 'integrations' : sidebarMode}
           projectAvailable={projectAvailable}
           sidebarCollapsed={sidebarCollapsed}
           onSelectFace={onSelectFace}
@@ -1037,8 +1147,15 @@ export function IdeAppFrame({
             终端 corum.panel 已纳入网格（默认底部行），可调宽、可与其他区域自由
             组合。leafTopOffset 给 root row 的 sidebar/conversation 格内容下移
             54px（40 标题栏 + 14 间距）让位上方标题栏浮层；right-col 格 offset=0
-            顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。 */}
-        <div className={css.mainRow} data-gridview ref={mainRowRef}>
+            顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。
+
+            集成中心打开时本行整列隐藏（不是卸载——见上方保活方案注释）。 */}
+        <div
+          className={css.mainRow}
+          data-gridview
+          ref={mainRowRef}
+          hidden={integrationsOpen}
+        >
           <GridView
             root={grid}
             renderSlot={renderGridSlot}
@@ -1053,10 +1170,27 @@ export function IdeAppFrame({
             lockedSlots={lockedSlots}
           />
         </div>
+
+        {/* 集成中心（PR4，design.pen 画板 F）：全屏独占工作面面板。
+            壳直接在网格外渲染它（不经槽座位）——它是**工作面**而非可拖拽区域，
+            网格内会成为用户能拖走/隐藏的 leaf（同活动栏的理由）。
+            内容页由两个内容包经 ctx.slots.inject 挂进三个子槽（声明权在本壳
+            index.tsx 的 root children 表）。 */}
+        {integrationsOpen && (
+          <IntegrationsFrame
+            section={integrationsSection}
+            onSelectSection={setIntegrationsSection}
+            onClose={onCloseIntegrations}
+            renderSlot={renderSlot}
+          />
+        )}
       </div>
 
-      {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer). */}
-      {panels.details > 0
+      {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer).
+          集成中心打开时不渲染：它是**会话区**的详情抽屉（absolute 覆盖右缘、
+          z-index 10），留着会浮在集成中心面板上方（面板 z-index 更低）——
+          与「侧边栏与会话区均隐藏」这条语义相悖。 */}
+      {!integrationsOpen && panels.details > 0
         ? (
           <>
             <div className={css.detailsBackdrop} onClick={() => actions.closeDetails()} />

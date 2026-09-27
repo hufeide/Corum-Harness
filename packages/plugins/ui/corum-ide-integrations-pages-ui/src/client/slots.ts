@@ -1,39 +1,33 @@
 /**
- * 集成中心槽位契约（PR6）。
+ * 集成中心槽位契约（PR6；PR4 收口）。
  *
- * 集成中心的内容页（MCP / 技能）由本包交付；**槽位声明权归 PR4 的集成中心骨架**
- * ——骨架在它自己的 `ctx.slots.register({ name: 'root', children: {...} })`
- * 里声明这两个洞，本包只作为 occupant 注册内容（`ctx.slots.inject` 保证时序）。
+ * 集成中心的内容页（MCP / 技能）由本包交付；**槽位声明权归集成中心骨架**
+ * ——`@corum/corum-ide-ui` 在它自己的 `ctx.slots.register({ name: 'root',
+ * children: {...} })` 里声明这两个洞（以及 `corum.integrations.plugins`），
+ * 本包只作为 occupant 注册内容（`ctx.slots.inject` 保证「声明先于注册」的时序）。
  *
- * 类型为什么住在这里：`corum-ui-settings-models` 同法——扩展槽的类型随
- * 「首先引入该槽的那个包」走。PR4 落地骨架时**不需要**再声明一次类型；若它也写了
- * 同一批键，只要类型逐字相同，TS 的接口合并是合法的（不同则报「Subsequent
- * property declarations must have the same type」——以本文件为准）。
+ * ## 类型为什么不再住在这里（PR4 收口）
+ * 本文件原先把 `corum.integrations.mcp` / `.skills` 两键 declare 进 SlotMap，
+ * 当时写的是「PR4 只需逐字相同即合法合并」。PR4 落地时按**声明权 = 契约真源**
+ * 的纪律把这个权限收敛回骨架包：SlotMap 是合并接口，同名键在两处声明且
+ * `owner` 类型不同即 TS2717 编译错，与其靠「两处逐字相同」维持，不如只留一个
+ * 真源点。故此处改为一行 type-only 消费（拉入骨架的键 + owner 面），本文件只
+ * 保留槽名常量——它才是本包真正需要的那一件东西。
  *
  * @module corum-ide-integrations-pages-ui/slots
  */
 import type { SlotMap } from '@deepseek-ai/dsh-client-ui-slots'
-
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface SlotMap {
-    /** 集成中心 · MCP 页（内容区；owner 面为空标记——页面自带全部数据面）。 */
-    'corum.integrations.mcp': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
-    /** 集成中心 · 技能页（内容区；owner 面为空标记）。 */
-    'corum.integrations.skills': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
-  }
-}
+// Type-only：拉入骨架包声明的 `corum.integrations.*` 键与 owner 面。
+import type {} from '@corum/corum-ide-ui/client'
 
 /**
- * 集成中心内容页的 owner 面：**空标记**。
+ * 集成中心内容页的 owner 面：**空标记**（真源在骨架包，此处只转发便于本包内引用）。
  *
  * 页面所需的 RPC 面经 `IntegrationsRpcContext` 下发（本包 `client/face.tsx`），
  * 不从 owner props 走——owner 面留给骨架将来要下发的壳级状态（如当前工作面），
  * 现在不预设任何字段，避免先占位再删。
  */
-export interface IntegrationsPageOwnerProps {
-  /** 标记字段：owner 面当前刻意为空。 */
-  children?: never
-}
+export type { IntegrationsPageOwnerProps } from '@corum/corum-ide-ui/client'
 
 /** 集成中心内容页的槽名（骨架声明、本包占用；单一事实源）。 */
 export const INTEGRATIONS_PAGE_SLOTS = {
