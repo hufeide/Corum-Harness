@@ -121,7 +121,9 @@ describe('编排段重排：归属 / 去重 / 顺序', () => {
       'exceeding it FAILS the call',
       'a manual `integrate` afterwards',
     ]) expect(orchestrationBody).toContain(phrase)
-    expect(orchestrationBody).toContain('Keep N separate `subagent` calls ONLY when the pieces are genuinely NOT independent')
+    // 2026-09-27 结构化：由一整句改为「表头 + 三条子项」，断言随之按结构拆开。
+    expect(orchestrationBody).toContain('Keep N separate `subagent` calls ONLY when:')
+    expect(orchestrationBody).toContain('the pieces are genuinely NOT independent')
     expect(orchestrationBody).toContain('steer one mid-flight')
     expect(orchestrationBody).toContain('partial results arriving as they settle')
   })

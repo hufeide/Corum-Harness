@@ -3547,8 +3547,14 @@ export function apply(ctx: Context, config: Config): void {
           }
           if (hasOrchestrate) {
             lines.push(
-              '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls. N separate delegations cost N tool calls, N settlement notices landing in your context, one session-level isolation slot each (that budget is small, and exceeding it FAILS the call), and — when they are writes — a manual `integrate` afterwards; ONE `orchestrate` call fans out with the engine\'s wider limit, returns every result in one place, and (with `merge.verify`) merges, verifies and commits for you. This is the shortest path for "split this into modules A/B/C", "do these 4 migrations", or THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
-              '- Keep N separate `subagent` calls ONLY when the pieces are genuinely NOT independent (each needs the previous result), when you must steer one mid-flight (`send_message` / `interrupt_agent`), or when partial results arriving as they settle is what you want.',
+              '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls.',
+              '  - Cost of N separate delegations: N tool calls; N settlement notices landing in your context; one session isolation slot each, and exceeding it FAILS the call; plus a manual `integrate` afterwards when they are writes.',
+              '  - Cost of ONE `orchestrate`: engine fan-out (wider limit); every result in one place; `merge.verify` merges, verifies and commits for you.',
+              '  - Shortest path for: "split this into modules A/B/C"; "do these 4 migrations"; THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
+              '- Keep N separate `subagent` calls ONLY when:',
+              '  - the pieces are genuinely NOT independent (each needs the previous result);',
+              '  - you must steer one mid-flight (`send_message` / `interrupt_agent`);',
+              '  - partial results arriving as they settle is what you want.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
               '- A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running. Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`. Never assume a delegated write has landed — read the result, which states where the work is. Read-only research delegations are not isolated (they write nothing). Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
