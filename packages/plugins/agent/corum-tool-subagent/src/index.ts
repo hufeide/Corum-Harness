@@ -1176,7 +1176,7 @@ export function corumSchedulingSectionText(options: { readonly backgroundEnabled
   if (options.readonlyResearch) {
     return ptcPrefix + 'This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass `run_in_background: true` (it is rejected) — a backgrounded investigation leaves you guessing or repeating work. It has a shell for read-only commands (`git log`, `ls`, reading PID/log files, a verify script\'s `status`) but its sandbox is pinned to `read-only` and write/edit are denied, so it can never modify the repo. Fan out several research calls in ONE message when you need answers from different angles.'
   }
-  return ptcPrefix + `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result — a foreground run is one-shot and TERMINAL when it settles, so \`send_message\` cannot reach it afterwards. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message. IMPORTANT: when you need to fan out SEVERAL parallel sub-tasks (especially parallel WRITE tasks), use the \`orchestrate\` tool instead of issuing multiple ${toolName} calls — one orchestrate call gives every task its own isolated worktree AND a final integrator that merges + verifies + commits them for you; multiple bare ${toolName} calls leave you to integrate each branch by hand.`
+  return ptcPrefix + `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result — a foreground run is one-shot and TERMINAL when it settles, so \`send_message\` cannot reach it afterwards. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message. `
 }
 
 /**
@@ -3522,28 +3522,31 @@ export function apply(ctx: Context, config: Config): void {
           const hasWorkflow = runtimeCtx.tools.get('workflow', context.scope) !== undefined
           const hasRalph = runtimeCtx.tools.get('ralph', context.scope) !== undefined
           if (!hasOrchestrate && !hasResearch && !hasFork && !hasWorkflow && !hasRalph) return ''
+          // fork（corum）2026-09-27 重排（用户要求「整段重新编排」）：把**跨工具的形式选择**
+          // 归到本段，并**置顶最短路径原则**；只读/写/编排三类条目**各出现一次**（旧版
+          // `READ-ONLY work` 与 `ONE focused` 各重复了一遍）。相邻的 `tool:subagent` 段（order 2800）
+          // 只保留本工具的调度与生命周期事实，「多个并行写就用 orchestrate」这句已搬到这里。
           const lines = [
             `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
             '',
-            'Choose the right delegation form by the shape of the work:',
-            '- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — e.g. checking an implementation against a spec, or comparing output against expected values) → call `subagent_research`.',
-            '- Work that CHANGES files → call `subagent`.',
-            '- ONE focused, self-contained subtask that must create or modify files (an implementation, a scoped fix) → call `subagent`.',
+            'SHORTEST PATH WINS — pick the fewest calls that solve the task. Choose the form by the shape of the work:',
+            '- Work that CHANGES files (ONE focused, self-contained implementation or scoped fix) → `subagent`: one call, one result.',
             // fork（corum）2026-09-14：**执行型验收**必须走写能力工具（用户点名「主 Agent 派
             // research 去验收」）。验收分两种，旧文案把两者都塞进只读清单，于是需要跑断言/造
             // fixture/落盘证据的验收被派给没有 write 的子会话 ⇒ 派单自相矛盾（实证会话
             // `6364e3ea`：「不许改任何文件」与「必须造 fixture」并存）。
-            '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → call `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.',
+            '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.',
           ]
           if (hasResearch) {
-            lines.push('- ANY read-only work — searching the codebase, reading files, tracing a call path, summarizing a module, gathering facts, answering "how does X work", or running read-only commands (`git log`, `ls`, a verify script\'s `status`) → call `subagent_research`. It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you get the findings inline instead of waiting for a notice — never try to background it (`run_in_background: true` is rejected). It has a shell but its sandbox is pinned to `read-only` and the mutating tools (write/edit/str_replace_editor) are denied, so it can investigate freely and can never modify the repo. Fan out several such searches in ONE message when you need answers from different angles.')
+            lines.push('- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — checking an implementation against a spec, comparing output against expected values, or running read-only commands like `git log` / `ls`) → `subagent_research`. It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline — never try to background it (`run_in_background: true` is rejected). Its sandbox is pinned to `read-only` and write/edit are denied, so it can investigate freely and can never modify the repo. One or two questions: call it directly, several angles in ONE message.')
           }
           if (hasFork) {
-            lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → call `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')
+            lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')
           }
           if (hasOrchestrate) {
             lines.push(
-              '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
+              '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls. N separate delegations cost N tool calls, N settlement notices landing in your context, one session-level isolation slot each (that budget is small, and exceeding it FAILS the call), and — when they are writes — a manual `integrate` afterwards; ONE `orchestrate` call fans out with the engine\'s wider limit, returns every result in one place, and (with `merge.verify`) merges, verifies and commits for you. This is the shortest path for "split this into modules A/B/C", "do these 4 migrations", or THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
+              '- Keep N separate `subagent` calls ONLY when the pieces are genuinely NOT independent (each needs the previous result), when you must steer one mid-flight (`send_message` / `interrupt_agent`), or when partial results arriving as they settle is what you want.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
               '- A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running. Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`. Never assume a delegated write has landed — read the result, which states where the work is. Read-only research delegations are not isolated (they write nothing). Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',

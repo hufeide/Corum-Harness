@@ -227,7 +227,6 @@
     # 壳只持触发器不再持面板。
     - id: ide-plugin-manager
       name: '@corum/corum-ide-plugin-manager-ui'
-<<<<<<< HEAD
     # 集成中心 ·「插件」内容页（PR5）：GPT 式插件市场 + 已装管理
     # （design.pen yXkOK F1）。**本行只负责让包被加载**；页面本体经
     # `corum.integrations.plugins` 槽挂进集成中心 —— 该父槽由集成中心骨架
@@ -237,7 +236,6 @@
     # PR4 合入后删掉该文件的注释标记即可生效，本行不用动。
     - id: ide-integrations
       name: '@corum/corum-ide-integrations-ui'
-=======
     # 集成中心内容页（PR6）：MCP 页（McpPage）+ 技能页（SkillsPage）。
     # 两页原为设置中心的 SettingsMcpSection / SettingsSkillsSection，PR6 迁出为
     # 集成中心的内容页 —— 设置中心已同步删掉 mcp / skills 两条 SECTION_DEFS 注册。
@@ -250,7 +248,6 @@
     # src/client/index.tsx 模块头注释里的两段 ctx.slots.inject/register 打开即可。
     - id: ide-integrations-pages
       name: '@corum/corum-ide-integrations-pages-ui'
->>>>>>> wt/wt-d5b621
     # 状态栏已整体移除（corum.statusBar 槽不再由 ide-shell 声明/渲染）；
     # @corum/corum-ide-statusbar-ui 插件代码保留在 packages/plugins/ui/ide-statusbar
     # 备查，如需恢复可重新挂载本行。
