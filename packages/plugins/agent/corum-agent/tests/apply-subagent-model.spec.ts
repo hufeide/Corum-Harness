@@ -118,6 +118,38 @@ describe('applySubagentModelForSession — 委派机制模型永久切换', () =
     expect(existsSync(join(h.home, '.agent-presets', p.id, 'agent.json'))).toBe(true)
   })
 
+  it('(a3) ★ 机制自有字段 specBaseline 不得在保存时丢失（2026-09-27 实测 conductor-lead）', () => {
+    // 现象：`saveProfileRemote` 用**显式白名单**重建 profile ⇒ 不在 `SaveProfileInput` 里的
+    // 字段被静默丢掉。丢 `specBaseline` 的后果不是"少个字段"，而是 `refreshFromSpec` 会把
+    // **用户当前值**当成 spec 值 ⇒ 用户自定义从此可被后续 spec 升级覆盖。
+    const baseline = { nickname: '指挥模式', baseMode: 'conductor', prompt: 'spec 写下的提示词' }
+    const p = profile({ trust: 'system', specBaseline: baseline })
+    const h = setup()
+    h.writeProfile(p)
+
+    const path = join(h.home, '.agent-presets', p.id, 'agent.json')
+    const before = (JSON.parse(readFileSync(path, 'utf8')) as AgentProfile).version
+
+    h.service.saveProfileRemote({
+      id: p.id,
+      baseMode: p.baseMode,
+      prompt: p.prompt,
+      model: p.model,
+      skills: p.skills,
+      mcpServers: p.mcpServers,
+      terminal: p.terminal,
+      memoryPolicy: p.memoryPolicy,
+      trust: p.trust,
+    })
+
+    const saved = JSON.parse(readFileSync(path, 'utf8')) as AgentProfile
+    expect(saved.specBaseline).toEqual(baseline)
+    // 顺带确认这次保存真的走了真实落盘路径（system profile 会多写一次：内建刷新路径也落盘，
+    // 故只断言"确实前进过"，不钉死步长）
+    expect(saved.version).toBeGreaterThan(before ?? 0)
+  })
+
+
   it('(a2) reasoningEffort 透传写入', () => {
     const p = profile()
     const h = setup()

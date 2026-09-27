@@ -1186,6 +1186,18 @@ export class CorumAgentService extends TypertRemoteService {
     // 补偿基准：第一次写盘**之前**取存量快照（补偿变化检测用；进 persistProfileAndRecompile
     // 时盘上已是新值，再取就失真了——见该方法的注释）。
     const previousSnapshot = loadProfile(input.id)
+
+    // 机制自有字段必须**原样带过**：它们不在 `SaveProfileInput`（UI 可编辑子集）里，客户端
+    // 也拿不到。`specBaseline` 记录「spec 上次写下的值」，保存时丢掉它 ⇒ `refreshFromSpec`
+    // 会把**用户当前值**误当成 spec 值 ⇒ 用户自定义从此可被后续 spec 升级静默覆盖
+    // （2026-09-27 实测 `conductor-lead` 的 agent.json 带此字段，而它会被任何一次保存丢掉）。
+    //
+    // 纪律：今后任何**不由 SaveProfileInput 承载**的 AgentProfile 字段，都要在这里显式带过；
+    // 想加通用「保留所有未知字段」的合并要慎重——白名单里那些「留空即清除」的字段语义会被
+    // 存量值反向复活（既有语义：入参留空 = 清掉该字段）。
+    if (previousSnapshot?.specBaseline !== undefined) {
+      profile.specBaseline = previousSnapshot.specBaseline
+    }
     saveProfile(profile)
 
     // 编译并落盘 agent.cordis.yml + preset.yml
