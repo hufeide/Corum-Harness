@@ -217,11 +217,7 @@ export type ProjectBadgeResolver = (session: SessionSummary) => ProjectBadgeInfo
 /**
  * 会话行的项目徽标数据源（PR7 定稿，**闭源对接点**）。
  *
-<<<<<<< HEAD
- * ## 为什么开源仓恒为 null —— 调研结论（2026-09-2x）
-=======
  * ## 为什么开源仓恒为空 —— 调研结论（2026-09-27）
->>>>>>> wt/wt-d8b97b
  *
  * 项目模式已整体迁出闭源仓 `Corum-Harness-Project`（`@corum/corum-project`），
  * 本仓只剩 task 模式，故**开源侧没有任何可用的「会话 → 项目」映射**：
@@ -235,11 +231,7 @@ export type ProjectBadgeResolver = (session: SessionSummary) => ProjectBadgeInfo
  * | 闭源 `corumProject/listProjects` / `listWorkspaceSessions` | **确实能给出项目名 + cwd**——但要打闭源 namespace，且开源组件读它会在纯开源组合下打到不存在的端点 |
  * | `AgentRegistry.laneOf(sessionId)`（泳道归属索引） | 泳道会话才有归属，而泳道会话（`corum-proj*`）**不进 task 列表**（`isTaskSession` 过滤），对 task 行恒为 undefined |
  *
-<<<<<<< HEAD
- * ⇒ 开源仓的实现就是**返回 null**：徽标不渲染、不报错、不留空胶囊。UI 与点击
-=======
  * ⇒ 开源仓的实现就是**返回空值**：徽标不渲染、不报错、不留空胶囊。UI 与点击
->>>>>>> wt/wt-d8b97b
  * 行为已完整交付（渲染位 + 样式 + `setSidebarMode('project')` 通路）。
  *
  * ## 闭源怎么点亮（三处小改，都在闭源仓）
@@ -253,10 +245,6 @@ export type ProjectBadgeResolver = (session: SessionSummary) => ProjectBadgeInfo
  *    定位动作（本组件不假设它的形态）；
  * 3. 无需改本组件、无需改本仓任何类型——两个字段都是**可选**的。
  *
-<<<<<<< HEAD
- * @param resolver - inject 面下发的解析器；缺席（开源组合）返回 `null`。
- * @returns 按会话解析徽标信息的函数；数据源缺席时恒返回 `undefined`。
-=======
  * ## 形态说明（与「`useProjectBadge(session)` 每行一调」的差别）
  *
  * 取的是**解析器入参**而非 session 入参：会话行在 `groups.map(...)` / `rows.map(...)`
@@ -266,7 +254,6 @@ export type ProjectBadgeResolver = (session: SessionSummary) => ProjectBadgeInfo
  *
  * @param resolver - inject 面下发的解析器；缺席（开源组合）返回的函数恒为 `undefined`。
  * @returns 按会话解析徽标信息的纯函数；数据源缺席时恒返回 `undefined`。
->>>>>>> wt/wt-d8b97b
  */
 export function useProjectBadge(
   resolver: ProjectBadgeResolver | undefined,
@@ -279,8 +266,6 @@ export function useProjectBadge(
   )
 }
 
-<<<<<<< HEAD
-=======
 /**
  * 会话行的项目徽标数据源（PR7）——**开源仓的取值恒为 `undefined`**。
  *
@@ -291,7 +276,6 @@ export function useProjectBadge(
  */
 export const NO_PROJECT_BADGE: ProjectBadgeResolver = () => undefined
 
->>>>>>> wt/wt-d8b97b
 /** 分组方式（官方视图选项：按工作区 / 单列表）。 */
 type GroupBy = 'workspace' | 'flat'
 /** 组内排序方式（官方视图选项：手动排序 = 工作区账号顺序 / 最近更新）。 */
@@ -479,11 +463,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
 
   // 会话行项目徽标数据源（PR7，闭源对接点；开源组合下 resolveProjectBadge 缺席
   // ⇒ projectBadgeOf 恒返回 undefined ⇒ 徽标整体不渲染）。
-<<<<<<< HEAD
-  const projectBadgeOf = useProjectBadge(props.resolveProjectBadge)
-=======
   const projectBadgeOf = useProjectBadge(props.resolveProjectBadge ?? NO_PROJECT_BADGE)
->>>>>>> wt/wt-d8b97b
   const openProjectWorkface = props.openProjectWorkface
 
   // 搜索结果行附加上下文：标题（列表 store 的 displayTitle）+ 所属工作区名。
