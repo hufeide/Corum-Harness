@@ -526,6 +526,7 @@ build_all() {
   # 直调各包 .bin，避开 pnpm run 的 verify-deps 自动 install。
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ui-base"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-ui"
+  build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-integrations-pages-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-sidebar-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-explorer-ui"
   build_ui_pkg "$ROOT/packages/plugins/ui/corum-ide-panel-bottom-ui"
@@ -533,7 +534,7 @@ build_all() {
   for pkg in "$ROOT"/packages/plugins/*/*; do
     [[ -f "$pkg/package.json" && -d "$pkg/src" && -d "$pkg/lib" ]] || continue
     case "$pkg" in
-      */ui/corum-ui-base|*/ui/corum-ide-ui|*/ui/corum-ide-sidebar-ui|*/ui/corum-ide-explorer-ui|*/ui/corum-ide-panel-bottom-ui) continue ;;
+      */ui/corum-ui-base|*/ui/corum-ide-ui|*/ui/corum-ide-integrations-pages-ui|*/ui/corum-ide-sidebar-ui|*/ui/corum-ide-explorer-ui|*/ui/corum-ide-panel-bottom-ui) continue ;;
     esac
     build_plugin_pkg "$pkg"
   done

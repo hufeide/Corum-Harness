@@ -1,21 +1,26 @@
 /**
- * SettingsMcpSection — MCP 与集成设置页（设计稿 2026-09 复刻版）。
+ * McpPage — 集成中心 · MCP 页（PR6：自设置中心 SettingsMcpSection 迁出）。
  *
  * 数据链路：mcpManager/listServers（列表）+ testConnection（工具数/运行状态）
  * + getServer（编辑回填）+ saveServer/deleteServer + getServerReferences（绑定）。
- * 视图结构按设计稿三态：主列表（v167UO）/ 详情视图（gTFZK，页内非弹窗）/
+ * 视图结构（设计稿 2026-09）：主列表（v167UO）/ 详情视图（gTFZK，页内非弹窗）/
  * 添加视图（YEGzN，页内表单）/ 删除确认（Jbn7a，居中弹窗）。
  * rpc 为 null 时降级为静态占位提示。
+ *
+ * 迁出改动仅三处：① 组件名 McpSection → McpPage；② RPC 来源
+ * useCorumRpc（设置壳 CorumRpcContext）→ useIntegrationsRpc（本包注入面，
+ * 同形同义）；③ Switch/CSS module 换成本包自持副本。
+ * 三视图内部逻辑（RPC 方法名与参数）逐字未动。
  */
 
 import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronUp, Info, Plus, Trash2, TriangleAlert } from 'lucide-react'
-import { Switch } from '../Switch.tsx'
-import { GlassButton, useCorumRpc } from '../shared.tsx'
+import { Switch } from './Switch.tsx'
+import { useIntegrationsRpc } from './face.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
-import css from '../SettingsSections.module.css'
+import css from './IntegrationsPages.module.css'
 
 /* ── 数据模型（mcpManager RPC 投影） ────────────────────────────────── */
 
@@ -690,8 +695,8 @@ function McpAddView({ rpc, onBack }: {
 
 /* ── Section 入口：三视图切换 ──────────────────────────────────────── */
 
-export function McpSection() {
-  const rpc = useCorumRpc()
+export function McpPage() {
+  const rpc = useIntegrationsRpc()
   const [view, setView] = useState<{ kind: 'list' } | { kind: 'detail'; name: string } | { kind: 'add' }>({ kind: 'list' })
 
   if (rpc === null) return <p className={css.hintText}>RPC 服务未就绪。</p>

@@ -24,6 +24,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@corum/corum-ide-sidebar-ui': { zhName: '会话列表', zhDesc: '左侧会话与项目导航栏。' },
   '@corum/corum-ide-explorer-ui': { zhName: '资源管理器', zhDesc: '（已并入编辑器合并卡）右侧文件树浏览与文件打开。' },
   '@corum/corum-ide-panel-bottom-ui': { zhName: '底部面板', zhDesc: '底部终端 / 待办 / 队列面板。' },
+  '@corum/corum-ide-integrations-pages-ui': { zhName: '集成中心内容页', zhDesc: 'MCP 服务器与技能两个内容页（PR6 自设置中心迁出；待 PR4 骨架接管挂载）。' },
   '@corum/corum-ui-settings-models': { zhName: '模型设置', zhDesc: '模型与服务商配置页（含图片输入开关）。' },
   '@corum/corum-ui-model-selection': { zhName: '模型选择器', zhDesc: '会话内的模型切换与不可用提示。' },
 

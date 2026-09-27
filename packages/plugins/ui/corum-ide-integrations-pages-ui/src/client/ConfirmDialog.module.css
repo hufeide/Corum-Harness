@@ -1,0 +1,163 @@
+/* ConfirmDialog —— 统一确认提示框样式（全 token，深浅主题自动翻转） */
+
+/* ── 居中模态 ─────────────────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  padding: calc(16px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-1);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
+}
+
+.closeBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.closeBtn:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* ── 内联气泡（设计稿 DKRwC confirm-pop）───────────────────────────── */
+/* 调用方容器需 position:relative；默认贴右下方向上弹出。 */
+
+.inlinePop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 224px;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-1);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+  z-index: 20;
+}
+
+/* ── 共享内部元素 ─────────────────────────────────────────────────── */
+
+.title {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.dialog .title {
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
+  font-weight: 700;
+}
+
+.message {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.5;
+}
+
+.dialog .message {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+}
+
+.warning {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  color: var(--dsw-alias-state-error-primary);
+  line-height: 1.4;
+}
+
+.dialog .warning {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+}
+
+.row {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding-top: calc(4px * var(--corum-density-scale, 1));
+}
+
+.cancelBtn {
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+}
+
+.cancelBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.confirmBtnDanger {
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-state-error-primary);
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--corum-label-on-brand);
+}
+
+.confirmBtnPrimary {
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-brand-primary, var(--corum-state-running));
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--corum-label-on-brand);
+}
+
+.confirmBtnDanger:disabled,
+.confirmBtnPrimary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
