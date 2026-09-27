@@ -2063,3 +2063,46 @@ pnpm override 生效：
   `index.ts` 的 `errorMessage` 含 JSON.stringify 增量 / `pnpm-workspace.yaml` 的 link override
   在位 / `desktop-host/package.json` 登记 / `pack-macos.mjs` 含闭包断言
   （`JSON.stringify(error)` 必须在闭包那份里，缺失或退回官方即打包失败）。
+
+## 19. 第 17 个 fork 包：`@corum/corum-goal-round-driver`（2026-09-27，goal 轮不再空转）
+
+**为什么 fork**：官方驱动的判据只有 `agent.status === 'idle'`。而后台委派（`subagent` 带
+`background: true`）**一交派出去、父 Agent 的回合就结束变 idle**（子在跑）⇒ 驱动立刻认定
+「空闲了、该继续推进」⇒ 生成新一轮提示词并 `followup`。用户实测到的现象：
+
+> 「Agent 在指派子代理或者等待结果时反复唤醒」——每等一次结果就空转一轮，既吵又白烧上下文。
+
+官方包里没有可插的 seam（决策在 `readyToDrive` 内部），所以只能整包 fork。
+
+**增量（唯一）**：
+- 新增 `PendingDelegations` 登记表 + `isSelfOrDescendant` 助手（沿用**官方公开事件**
+  `subagent/start` / `subagent/end`，载荷 `(info, parent)`；`end` 必与 `start` 配对，官方
+  `invariant.ts` 正在校验这一点）。
+- `readyToDrive` 追加 `&& !pending.pendingUnder(state.agent, id => ctx.agents.get(id))`
+  ⇒ **该 Agent（含其派生的子/孙 Agent）名下尚有在飞 run 时不开新轮**。
+- `subagent/end` 到达时对发起方 `requestDrive(stateFor(parent))` ⇒ 结果回来就继续推进
+  （先前因为闸门被挡住，不会有人再唤醒父 Agent；不接这一步就会**卡住**）。
+- `prompt.ts` / 其余逻辑与官方逐字节一致（提示词文本零改动）。
+- 事件面按 dev-conventions §2.4 用**局部能力接口**收窄（`subagent/start|end` 的 `Events` 合并声明
+  在 subagent 包侧，本包看不到）。
+
+**装配**：官方行在 base bundle 的 insert 块内 ⇒ 沿用本仓纪律「先禁用官方行 + 在 desktop
+patch 的 insert 段以不同行 id 挂 fork」：`- id: goal-round-driver / disabled: true` +
+`- id: corum-goal-round-driver / name: '@corum/corum-goal-round-driver'`（`packages/desktop/
+cordis.patch.yml`）。闭包登记：`packages/desktop/package.json` +
+`packages/desktop/desktop-host/package.json`（守卫 §15a 会拦漏登记）。
+
+**风险**：官方若重写 `readyToDrive` 或事件载荷（`SubagentRunEndInfo.runId`）需三方合并；
+`isSelfOrDescendant` 依赖 `session.header.parentSession`（durable，官方格式 v2 起稳定）。
+
+**验证**：
+- `tsdown` 出 2 个 entry（`index`/`invariant`，external 6 个 dsh 依赖）；bundle 内含
+  `PendingDelegations` 增量 ✓；`typecheck` 绿。
+- 单测 `tests/pending-delegation.spec.ts`（9 条，纯逻辑）：自己/子/孙命中、`end` 后放行、
+  无关子树不影响、祖先不可解析时安全 false、未知 runId 的 `end` 空操作。
+- 组合层实测：隔离实例（`--home=/tmp/…`、`:9333`、`desktop mode: ide`）**启动干净**，
+  无 duplicate / waiting-for-service 报错 ✓。
+- `scripts/verify-fork-drift.sh` 全绿（含 §15a 闭包登记检查）。
+- ⚠️ **官方 1125 行 spec 未复用**：它依赖官方 `dsh-agent-loop-testkit` 的装配，而 corum 锁定的
+  **已发布**官方包与 dsh checkout 源码存在错位（实测 `ctx.agentLoop` 应用后仍 pending、无报错），
+  在 corum 树里跑不起来。替代保证 = 上述纯逻辑单测 + 与官方原文的逐块增量标记 + 实机验收。

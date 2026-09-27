@@ -175,6 +175,15 @@
 - id: sandbox
   disabled: true
 
+# goal 轮驱动（fork #17，2026-09-27）：官方判据只有「`agent.status === 'idle'`」，而后台委派一
+# 交派出去、父 Agent 的回合就结束变 idle（子在跑）⇒ 驱动立刻空转开新轮 —— 用户实测
+# 「Agent 在指派子代理或等待结果时反复唤醒」。fork 增量 = **该 Agent（含其派生的子/孙）名下
+# 尚有在飞 subagent run 时不开新轮**，并在 `subagent/end` 时对发起方重新评估（结果回来继续推进）。
+# 官方行在 base bundle 的 insert 块内 ⇒ 沿用本文件纪律：先禁用官方行，再在下方 insert 段以
+# 不同行 id 挂 fork（官方事件名与提示词零改动，其它行零感知）。
+- id: goal-round-driver
+  disabled: true
+
 # ── desktop persona ─────────────────────────────────────────────────────────
 
 - id: system-prompt
@@ -258,6 +267,11 @@
     # （消除 REVIEW 的「SEAM 死代码」硬伤：continuable 路径隔离从此生效）。
     - id: corum-subagent
       name: '@corum/corum-subagent'
+
+    # Fork #17：goal 轮驱动（取代上方禁用的官方行）。唯一增量见该包 src/index.ts 的
+    # 「corum fork delta（fork #17）」段与 tests/pending-delegation.spec.ts。
+    - id: corum-goal-round-driver
+      name: '@corum/corum-goal-round-driver'
 
     # Fork #12：本地沙箱 provider 的 corum 版（取代上方禁用的官方 sandbox 行）。
     # 服务名 `sandbox` 不变（fork 的 LocalSandboxProvider super(ctx,'sandbox')

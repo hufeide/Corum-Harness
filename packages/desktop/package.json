@@ -120,6 +120,7 @@
     "@corum/corum-session-queue-revert": "workspace:*",
     "@corum/corum-skill-manager": "workspace:*",
     "@corum/corum-subagent": "workspace:*",
+    "@corum/corum-goal-round-driver": "workspace:*",
     "@corum/corum-tool-subagent": "workspace:*",
     "@corum/corum-ui-approval": "workspace:*",
     "@corum/corum-ui-base": "workspace:*",
