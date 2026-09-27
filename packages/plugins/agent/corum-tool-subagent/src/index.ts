@@ -1088,7 +1088,12 @@ export function corumEfficiencyDisciplineLines(): string[] {
   return [
     '',
     'EFFICIENCY DISCIPLINE:',
-    '- MERGE SMALL QUERIES. Batch every `grep`/`sed`/`nl`/`awk`/`head` extraction you need into ONE `bash` call instead of one call per fact: every extra call costs a full model round-trip.',
+    '- MERGE SMALL QUERIES. Batch the searches you need into ONE call — one `grep` / `glob` / `bash` invocation instead of one call per pattern: every extra call costs a full model round-trip.',
+    // 2026-09-27 跨块一致性修复（用户发现子 Agent 用 grep 当读）：旧文案把 `grep`/`sed`/`nl`/`awk`/`head`
+    // 的「提取」打包成一种省轮次的读法，与 root scope 的 `corum:tool-policy`（"Read files with `read` —
+    // not `cat` / `head` / `tail` / `sed -n` / `less`"）**极性相反** ⇒ 子 Agent 拿两个块，选省轮次的那个。
+    // 现在口径唯一：`grep` 定位、`read` 解释。
+    '- READ CODE WITH `read`, NOT THE SHELL. To understand a file, open it with `read` (the whole file, or an offset/limit window) — never `cat` / `head` / `tail` / `sed -n` / `awk`. `grep` tells you WHERE to look; `read` tells you WHAT the code does. Shell extraction is for text you pipe, not for code you must reason about.',
     '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 60s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
     '- KEEP EACH COMMAND ON ONE LINE, statements joined with `;` or `&&`, so that a loosely delimited fragment cannot do something other than what you intended.',
     '- EVERY CALL GETS A FRESH SHELL. No cwd, variable or function persists between calls, so never rely on a `cd` from an earlier call: chain `cd <dir> && <cmd>` inside one call, or pass `workdir`.',

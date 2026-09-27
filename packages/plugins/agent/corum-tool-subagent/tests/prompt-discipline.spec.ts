@@ -100,6 +100,25 @@ describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督
     expect(SRC).not.toContain('lines.push(...corumSandboxEscalationLines())')
   })
 
+  it('★ 跨块一致性：读文件口径唯一（不得一边禁 `sed -n`/`head`/`cat`、一边推荐它们读代码）', () => {
+    // 2026-09-27 用户发现子 Agent 用 grep 当读。根因不是模型任性，而是两块**都被继承**的文本极性相反：
+    //   · `corum:tool-policy`（root scope）：Read files with `read` — not `cat`/`head`/`tail`/`sed -n`/`less`
+    //   · `corumEfficiencyDisciplineLines()`（preset scope）：Batch every `grep`/`sed`/`nl`/`awk`/`head` extraction…
+    // 本组把「口径唯一」钉死：纪律块必须显式要求用 `read` 读代码，且不得再把 shell 提取当作读法。
+    const discipline = lines.join('\n')
+    expect(discipline).toContain('READ CODE WITH `read`, NOT THE SHELL')
+    expect(discipline).toContain('`grep` tells you WHERE to look; `read` tells you WHAT the code does')
+    expect(discipline).not.toContain('Batch every `grep`/`sed`/`nl`/`awk`/`head` extraction')
+    // 对面那一块（root scope 的工具策略）必须仍是同一口径 —— 两块的极性不得相反。
+    const policy = readFileSync(join(import.meta.dirname, '../../corum-agent/src/tool-policy.ts'), 'utf8')
+    expect(policy).toContain('Read files with `read` — not `cat` / `head` / `tail` / `sed -n` / `less`')
+    expect(policy).toContain('Reserve `bash` for real shell work')
+    // 子会话契约同口径（worker 是最容易"grep 命中即改"的角色）。
+    const childRoles = readFileSync(join(import.meta.dirname, '../../corum-subagent/src/child-roles.ts'), 'utf8')
+    expect(childRoles).toContain('`grep` locates, `read` explains')
+    expect(childRoles).toContain('never edit from grep output alone')
+  })
+
   it('不得出现实测数字（墙钟分钟 / 缺陷数 / 百分比 / 工具调用计数）', () => {
     const text = lines.join('\n')
     for (const banned of [/\b7m40s\b/, /\b111\b/, /\b91\b/, /\b26%\b/, /minutes? of wall clock/, /ZERO new defects/i]) {
