@@ -26,6 +26,7 @@ import {
 // 2026-09-20：子 Agent 角色契约已迁到 `@corum/corum-subagent` 的 child-roles.ts（它的
 // 消费者是子 scope 的影子段，不再由 corum-agent 提供）。
 import { CHILD_WORKER_ROLE, PERSONA_INJECTION_MAX_CHARS, RESEARCHER_ROLE } from '../../corum-subagent/src/child-roles.ts'
+import { compilePreset } from '../src/compile.ts'
 
 const PRESET_DIR = join(import.meta.dirname, '../../../../desktop/shipped-presets/official')
 
@@ -159,6 +160,53 @@ describe('CONDUCTOR_PERSONA — 人格段写作纪律', () => {
     expect(CONDUCTOR_PERSONA).toContain('subagent')
     expect(CONDUCTOR_PERSONA).toContain('subagent_research')
     expect(CONDUCTOR_PERSONA).toContain('orchestrate')
+  })
+
+  it('★ 单一事实源：形式表只在机制段，人格段只留索引式指向语（2026-09-27 用户要求统一）', () => {
+    // 背景：`CONDUCTOR_PERSONA` 原先自带一张 5 条 bullet 的「形式选择表」，与
+    // `corum-tool-subagent` 注入的 `corum:subagent-orchestration`（四模式共享、按工具可见性
+    // 动态裁剪）重复 ⇒ 两处措辞各自漂移。现在规则表只保留在机制段，人格段留「点名入口 + 指向」
+    // 的索引句：模型仍找得到入口，但不复述规则。
+    //
+    // ⚠️ 断言按**表形态**（bullet 前缀 + 映射箭头），不按关键词 —— 人格段别处会合法提到
+    // `subagent_research` / `orchestrate`（三阶段调研、指向语），按关键词断言会误伤。
+    expect(CONDUCTOR_PERSONA).not.toMatch(/^- (Read-only|One focused|Work you can keep|Several genuinely independent)/m)
+    expect(CONDUCTOR_PERSONA).not.toMatch(/→\s*`(subagent|subagent_research|orchestrate)`/)
+    expect(CONDUCTOR_PERSONA).not.toContain('Choose the right delegation form')
+    // 指向语 + 保留的那条 todo/goal 事实（机制段不覆盖它，故必须留在人格段）
+    expect(CONDUCTOR_PERSONA).toContain('specified in the subagent section of this prompt')
+    expect(CONDUCTOR_PERSONA).toContain('Planning, notes and long-running objectives stay with your own todo / goal tools')
+    // 单一事实源守卫：规则表确实在机制段源码里（四模式共享的唯一出处）。
+    const sectionSrc = readFileSync(join(import.meta.dirname, '../../corum-tool-subagent/src/index.ts'), 'utf8')
+    expect(sectionSrc).toContain('Choose the right delegation form by the shape of the work')
+    expect(sectionSrc).toContain('`subagent_fork`')
+    expect(sectionSrc).toContain('`orchestrate`')
+  })
+
+  it('★ 层序守卫：conductor 编译产物的 delegation 组挂 corum worker 实例（否则机制段不注册，指向语悬空）', () => {
+    // 指向语的前提是机制段真的会被注入：`corum:subagent-orchestration` 只由 corum worker 实例
+    // 注册（`isWorkerInstance` + 工具可见）。若编译产物把 delegation 组挂成官方包，指向语就指向空。
+    const text = JSON.stringify(compilePreset({
+      id: 'conductor-layer-guard',
+      nickname: '层序守卫',
+      title: '层序守卫',
+      dimension: '研发',
+      baseMode: 'conductor',
+      prompt: 'guard',
+      model: { provider: 'localhost', model: 'deepseek-v4-pro' },
+      skills: [],
+      mcpServers: [],
+      terminal: { mode: 'sandbox' },
+      memoryPolicy: { scope: 'agent' },
+      version: 1,
+      trust: 'user',
+    } as never))
+    expect(text).toContain('id: delegation')
+    expect(text).toContain('@corum/corum-tool-subagent')
+    expect(text).toContain('tool-subagent-research')
+    // 编译产物带的是**合并后**的人格段（指向语在位、形式表不在）——单一事实源在真链路成立。
+    expect(text).toContain('specified in the subagent section of this prompt')
+    expect(text).not.toContain('Choose the right delegation form')
   })
 })
 
