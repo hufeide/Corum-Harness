@@ -1336,6 +1336,230 @@
   opacity: 0.55;
 }
 
+/* ── PR2 footer 用户区（design.pen Aotdf 画板 D）───────────────────── */
+/* 侧栏最底一行 48px：分割线（.footerDivider 与 .brandDivider 同形）+ 左侧
+   「32px 圆形头像 + 本机使用 / 未登录」+ 右侧两个图标按钮（更新 / 设置）。
+   用户菜单锚在 footer 行上向上弹出，故 footer 自身 position: relative。 */
+.footerDivider {
+  flex: none;
+  height: 1px;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-border);
+}
+.sidebarFooter {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-height: 48px;
+  /* footer 只是 popover 的定位锚（tabIndex=-1 仅为 Esc 关闭后归还焦点），
+     整行不需要聚焦环。 */
+  outline: none;
+}
+/* 左侧头像 + 两行文字（点击 = 弹菜单）。 */
+.footerUser {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
+  margin-left: calc(-6px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.footerUser:hover,
+.footerUser:focus-visible {
+  background: var(--corum-glass-2);
+}
+/* 32px 圆形头像（lucide user 占位图标；登录体系未接入，无真实头像图）。 */
+.footerAvatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 50%;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.footerUserCol {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+.footerUserName {
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.footerUserSub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 1.2;
+  white-space: nowrap;
+}
+/* 右侧两个图标按钮（更新 / 设置）。 */
+.footerActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(2px * var(--corum-density-scale, 1));
+}
+.footerIconBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.footerIconBtn:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+}
+/* 「有更新」红点角标：静态占位（更新机制未接入，见 SidebarSkeleton 的 TODO）。
+   一圈玻璃描边把红点从图标上「垫」起来（同 Fluent 徽标观感）。 */
+.footerDot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-error-primary, var(--dsw-alias-brand-primary));
+  box-shadow: 0 0 0 1.5px var(--corum-glass-1, var(--dsw-alias-bg-base));
+  pointer-events: none;
+}
+/* 菜单项里的红点贴在 14px 图标右上角（承载盒就是图标本身，故负偏移）。 */
+.footerMenuIconWrap .footerDot {
+  top: -2px;
+  right: -2px;
+}
+/* 用户菜单（轻量 popover）：自 footer 行向上弹出，~200px 宽。
+   ⚠️ 网格 .leaf 与 GridView 容器都带 overflow:hidden，绝对定位的 popover 会被
+   裁在侧栏内——这是既定形态（菜单宽 200 > 侧栏内容宽时贴边对齐），不引 portal。 */
+.footerMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: calc(1px * var(--corum-density-scale, 1));
+  width: 200px;
+  box-sizing: border-box;
+  padding: calc(6px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-base));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  animation: menuEnter 0.14s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes menuEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* 菜单头：头像 + 用户名 + 档位小徽标（.editionBadge 原形，与品牌行同形同色）。 */
+.footerMenuHead {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
+}
+.footerMenuName {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.footerMenuDivider {
+  height: 1px;
+  margin: calc(2px * var(--corum-density-scale, 1)) 0;
+  background: var(--corum-glass-border);
+}
+/* 菜单项：14px 图标 + 13px 文字，hover 玻璃底（与 .teamSr / .manageRow 同法）。 */
+.footerMenuItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: 100%;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.footerMenuItem:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+}
+/* 「升级 PRO」：brand 色文字（仅社区版出现，PRO 版不渲染该行）。 */
+.footerMenuItem[data-brand='true'] {
+  color: var(--dsw-alias-brand-primary);
+}
+.footerMenuIcon {
+  flex: none;
+}
+/* 图标位（「检查更新」项需要红点叠在图标上，故用 inline-flex 小盒承载）。 */
+.footerMenuIconWrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 「检查更新」项右侧小字（有更新时的版本提示），如「v0.2.0 可用」。 */
+.footerMenuVersion {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  white-space: nowrap;
+}
+.footerMenuLabel {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 关于小弹层：一行版本号。 */
+.footerAbout {
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes contentEnter {
   from { opacity: 0; transform: rotateY(-4deg); }
   to { opacity: 1; transform: rotateY(0); }
@@ -1384,6 +1608,17 @@
     animation: none;
     transition-duration: 0.01ms;
   }
+  /* PR2 footer 用户菜单：入场动画降级为纯透明度。 */
+  .footerMenu {
+    animation: footerFadeIn 0.15s linear both;
+  }
+  .footerIconBtn {
+    transition-duration: 0.01ms;
+  }
+}
+@keyframes footerFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ── 骨架模式面板容器与反转动画（DESIGN §7.10）─────────────────────── */

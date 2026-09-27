@@ -50,6 +50,23 @@ export interface SidebarSkeletonInjected {
   }
   /** 写侧栏模式（直通 ctx.layout.setSidebarMode）。 */
   setSidebarMode: (mode: SidebarMode) => void
+  /**
+   * 打开设置中心某 section（PR2 footer 用户区：齿轮按钮 = 'general'、
+   * 菜单「账户与用量」= 'account'）。直通 ctx.layout.openSettingsSection →
+   * 壳广播 OPEN_SETTINGS_SECTION_EVENT，SettingsShell 监听后 openSection(id)
+   * 打开面板并选中该页。
+   *
+   * ⚠️ **为何不渲染 `sidebar.settings` 槽座位**（PR2 调研结论）：该槽由壳
+   * root 条目的 children 表声明，而槽注册运行时**一槽只能被声明一次**
+   * （`register` 对已声明子槽直接抛 `slot "sidebar.settings" is already
+   * declared`）；同时组件侧 `renderSlot` 绑定只认**自己条目**的 children 表
+   * （ui-renderer/scoped-slots.tsx 的 `entry.children?.[key]` 检查，未声明即抛
+   * SlotOwnershipError）。两条合起来 ⇒ 骨架（corum.sidebar 的 occupant）
+   * **既不能声明、也不能渲染** sidebar.settings，无法复用 SettingsShell 触发器。
+   * 故退化为壳既有的「打开设置某 section」信号：行为等价（设置中心照常打开并
+   * 落在指定页），零死按钮。
+   */
+  openSettingsSection: (id: string) => void
 }
 
 /** Required services: the slots registry + the runtime object layer + the official connection rpc + the layout face (ctx.layout.openNewTaskForm)。 */
@@ -103,6 +120,10 @@ export function apply(ctx: ClientContext): void {
             sidebarMode: ctx.layout.sidebarModeSnapshot(),
           },
           setSidebarMode: (mode) => { ctx.layout.setSidebarMode(mode) },
+          // PR2 footer 用户区：设置入口不复用 sidebar.settings 槽座位（不可行，
+          // 原因见 SidebarSkeletonInjected.openSettingsSection 的注释），改走
+          // 壳既有的「打开设置中心某 section」信号。
+          openSettingsSection: (id) => { ctx.layout.openSettingsSection(id) },
         }),
       },
       SidebarSkeleton,
