@@ -281,3 +281,44 @@ describe('池日志出口：CORUM_MCP_POOL_LOG（dev 宿主 ctx.logger 不落盘
     rmSync(file, { force: true })
   })
 })
+
+describe('首次同步必须是有界 await（2026-09-27 实机竞态：冷启动首回合看不到 MCP 工具）', () => {
+  it('★ 返回的 promise 在工具注册完成后才 resolve（挂好即工具在场）', async () => {
+    const { pool } = stubPool([{ name: 'echo' }])
+    const registry = registryStub()
+    const { ctx } = stubContext(pool, registry.tools)
+    const applied = apply(ctx as never, { serverName: 'fake' })
+    expect(registry.registered.size).toBe(0) // 还没 await
+    await applied
+    expect([...registry.registered.keys()]).toEqual(['mcp__fake__echo'])
+  })
+
+  it('★ 连不上/超时：有界返回且只 warn（绝不让 preset 挂载失败）', async () => {
+    const never = {
+      retain: () => () => {},
+      listTools: () => new Promise(() => {}),
+      onToolsChanged: () => () => {},
+      callTool: async () => ({ content: [] }),
+    }
+    const registry = registryStub()
+    const { ctx, warnings } = stubContext(never, registry.tools)
+    const started = Date.now()
+    await apply(ctx as never, { serverName: 'fake', initialSyncTimeoutMs: 120 })
+    expect(Date.now() - started).toBeLessThan(1500)
+    expect(registry.registered.size).toBe(0)
+    expect(warnings.join(' ')).toContain('initial sync still running')
+  })
+
+  it('apply 永不 reject：listTools 抛错也只 warn', async () => {
+    const broken = {
+      retain: () => () => {},
+      listTools: async () => { throw new Error('ECONNREFUSED') },
+      onToolsChanged: () => () => {},
+      callTool: async () => ({ content: [] }),
+    }
+    const registry = registryStub()
+    const { ctx, warnings } = stubContext(broken, registry.tools)
+    await expect(apply(ctx as never, { serverName: 'fake' })).resolves.toBeUndefined()
+    expect(warnings.join(' ')).toContain('ECONNREFUSED')
+  })
+})

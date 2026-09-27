@@ -47,7 +47,27 @@ export const inject: string[] = ['corumMcpPool', 'tools']
 export interface McpProxyConfig {
   /** 注册表里的服务名（= `~/.corum/mcp-servers.json` 的 `name`）。 */
   readonly serverName: string
+  /**
+   * 首次同步（连接 + 注册工具）的等待上限（ms，默认 {@link DEFAULT_INITIAL_SYNC_TIMEOUT_MS}）。
+   *
+   * 只给测试/排障用；`compile.ts` 不写它。
+   */
+  readonly initialSyncTimeoutMs?: number
 }
+
+/**
+ * 首次同步的等待上限。
+ *
+ * ## 为什么首次同步必须**有界地 await**（2026-09-27 实机缺陷）
+ *
+ * 原先首次同步是 fire-and-forget。冷启动时它要做的事是**真连一次 MCP server**（几百 ms 起），
+ * 而 agent 回合的工具面在更早的时刻就快照了 ⇒ 实机复现：**冷启动后第一条泳道的首回合报
+ * 「无 mcp__ 工具」，第二回合才有 5 个**（池已连上后不再复现）。工具缺席对用户就是"配了没用"。
+ *
+ * 有界（而不是无限等）：连不上**绝不能**把 preset 挂载卡死——超时后照常挂载并 `warn`，
+ * 后续由工具表变更通知补上（`onToolsChanged` 那条路仍在）。
+ */
+const DEFAULT_INITIAL_SYNC_TIMEOUT_MS = 5_000
 
 /** 模型可见内容块（本地收窄；官方 `ContentBlock` 的超集足够我们用）。 */
 interface ContentBlockLike {
@@ -241,8 +261,9 @@ function createSyncer(
  *
  * @param ctx - preset scope 的 cordis 上下文。
  * @param config - `{ serverName }`。
+ * @returns 首次同步的**有界** promise（cordis loader 会 await 它）；永不 reject。
  */
-export function apply(ctx: Context, config: McpProxyConfig): void {
+export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void> {
   const serverName = config?.serverName
   if (typeof serverName !== 'string' || serverName.trim() === '') {
     throw new Error('corum-mcp-proxy: config.serverName is required (non-empty string)')
@@ -269,6 +290,20 @@ export function apply(ctx: Context, config: McpProxyConfig): void {
   const sync = createSyncer(serverName, pool, tools, log)
   // 工具表变更（重连后服务端动态改表）⇒ 换代注册。
   ctx.effect(() => pool.onToolsChanged(serverName, () => { void sync() }), 'corumMcpProxy.onToolsChanged')
-  // 首次同步**不 await**：连接慢/失败不能拖住 preset 挂载（连上后会按需补上工具）。
-  void sync()
+  // 首次同步：**有界地等它完成**，让本行"挂好"时工具已经在场上（否则冷启动那一回合会看不到工具）。
+  const timeoutMs = config.initialSyncTimeoutMs ?? DEFAULT_INITIAL_SYNC_TIMEOUT_MS
+  const initial = sync()
+  const bounded = Promise.race([
+    initial,
+    new Promise<void>(resolve => {
+      const timer = setTimeout(() => {
+        log('warn', `corum-mcp-proxy(${serverName}): initial sync still running after ${timeoutMs}ms — mounting without waiting (tools appear once it finishes)`)
+        resolve()
+      }, timeoutMs)
+      timer.unref?.()
+    }),
+  ])
+  // 返回 Promise：cordis 的 loader 会 await 插件应用（这是"挂好即工具在场"的关键）。
+  // 永不 reject（超时/失败都在 sync 内部收敛成 warn），故不会让 preset 挂载失败。
+  return bounded
 }
