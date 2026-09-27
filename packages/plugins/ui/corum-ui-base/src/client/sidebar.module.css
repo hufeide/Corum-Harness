@@ -678,6 +678,37 @@
   color: var(--dsw-alias-label-secondary);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
 }
+/* 会话行项目徽标胶囊（PR7，design.pen row · 徽标 KKC/矩道）：品牌描边 999 圆角
+   小胶囊，位于时间左侧、标题与时间之间。点它切到项目工作面（见 SessionsPane 的
+   ProjectBadge）。深浅两态都读 brand 系列 token，不写死颜色。 */
+.projectBadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: calc(18px * var(--corum-density-scale, 1));
+  max-width: calc(72px * var(--corum-ui-font-scale, 1));
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+  border: 1px solid var(--dsw-alias-brand-primary);
+  border-radius: 999px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  font-family: inherit;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.projectBadge:hover {
+  background: var(--corum-glass-3);
+}
+.projectBadge:focus-visible {
+  outline: 2px solid var(--corum-glass-border-active);
+  outline-offset: 1px;
+}
 .srRename {
   padding: 0;
   border: none;
