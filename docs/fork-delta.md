@@ -2106,3 +2106,28 @@ cordis.patch.yml`）。闭包登记：`packages/desktop/package.json` +
 - ⚠️ **官方 1125 行 spec 未复用**：它依赖官方 `dsh-agent-loop-testkit` 的装配，而 corum 锁定的
   **已发布**官方包与 dsh checkout 源码存在错位（实测 `ctx.agentLoop` 应用后仍 pending、无报错），
   在 corum 树里跑不起来。替代保证 = 上述纯逻辑单测 + 与官方原文的逐块增量标记 + 实机验收。
+
+### 19.1 实机验收（2026-09-27）：闸门生效且**不会卡住**
+
+环境：隔离实例（`--home=/tmp/…`、`:9333`、`desktop mode: ide`），`CORUM_GOAL_TRACE=<file>` 打开
+计时追踪。会话内先 `create_goal`，再**后台**委派一个 `sleep 25` 的子 Agent，然后结束本轮：
+
+```
+14:28:17.547 start run=e0efb362… parent=corum-task-52dc2b65     ← 委派登记成功
+14:28:25.063 gate  BLOCK corum-task-52dc2b65 pending=1          ← turn/end 后不开新轮（治住空转）
+14:29:00.142 end   run=e0efb362… pendingAfter=0                 ← 结算事件到达
+14:29:00.142 end   → requestDrive(corum-task-52dc2b65)          ← 重新评估
+22:29:24.159 tool/call bash git -C … log --oneline              ← 新轮真的跑起来了（不卡住）
+```
+
+对照组（修正前，同一场景）：`turn/end 22:22:31.377` → `goal round=1 22:22:31.416`（**39ms** 空转 ✗）。
+
+**⚠️ 增量实现里踩过的坑（本轮实测）**：第一版照抄了错误签名 `(info, parent)`，而 fork #9 的声明是
+`'subagent/start'|'subagent/end'(this: Scoped<SubagentRuntime>, info)`，**发射端只 `callback(info)`**
+⇒ `parent` 恒 `undefined`、`parent.session` 抛错被 emitter 的 per-listener 容错**吞掉** ⇒ 闸门永不生效
+（实测正是 39ms 空转）。修法照 `corum-tool-subagent` 既有教训：**普通函数取 `this`** +
+`carrierKeyOf(this)` 解出父 Agent（`@deepseek-ai/dsh-scope`）。
+**这条教训的价值在于：单测全绿也发现不了它** —— 纯逻辑单测不覆盖事件接线；只有实机追踪能定位。
+
+`CORUM_GOAL_TRACE=<file>` 保留在 fork 里（默认关闭、零开销）：它就是本轮区分「事件没到」与
+「到了但没重评估」的唯一手段。

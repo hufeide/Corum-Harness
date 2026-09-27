@@ -6,6 +6,8 @@
 import { isDeepStrictEqual } from 'node:util'
 import { FiberState } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import { appendFileSync } from 'node:fs'
+import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { GoalMessageSource, GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
@@ -144,16 +146,27 @@ export function isSelfOrDescendant(
 }
 
 /**
- * 委派事件面（corum fork #17 的**局部能力接口**，dev-conventions §2.4）。
- *
- * `subagent/start` / `subagent/end` 的 `Events` 合并声明在 subagent 包侧，本包的程序看不到它
- * （官方 `packages/subagent/subagent` 与本仓 fork `@corum/corum-subagent` 各有一份声明）⇒ 按纪律
- * 用局部能力面 + 运行时存在性接法接入，而不是 import 实现包去拿类型。事件名与载荷
- * （`(info: {runId}, parent: Agent)`）与官方 `lifecycle.ts` 的声明一致。
+ * 委派事件载荷（本包只看 `runId`；其余字段由 subagent 包声明，本包的程序看不到那个
+ * `Events` 合并 ⇒ 按 dev-conventions §2.4 收窄，不 import 实现包去拿类型）。
  */
-interface SubagentRunEventFace {
-  readonly 'subagent/start': (info: { readonly runId?: unknown }, parent: Agent) => void
-  readonly 'subagent/end': (info: { readonly runId?: unknown }, parent: Agent) => void
+interface SubagentRunInfo {
+  readonly runId?: unknown
+}
+
+/**
+ * 诊断追踪（**按环境变量开关**）：`CORUM_GOAL_TRACE=/path/to.log` 时把委派登记与闸门判定
+ * 逐条追加到该文件。默认关闭、零开销；用于实机定位"闸门是否真的挡住/是否卡住"这类问题
+ * （本轮就是靠它区分「事件没到」与「到了但没重评估」）。
+ * @param message - 追踪行。
+ */
+function trace(message: string): void {
+  const file = process.env.CORUM_GOAL_TRACE
+  if (file === undefined || file === '') return
+  try {
+    appendFileSync(file, `${new Date().toISOString()} ${message}\n`)
+  } catch {
+    // 追踪不得影响机制本身
+  }
 }
 
 /** Install automatic same-session continuation and its race fences. */
@@ -197,7 +210,9 @@ export function apply(ctx: Context): void {
       && ctx.agents.get(state.agent.id) === state.agent
       && state.agent.status === 'idle'
       && !state.competingQueued
-      && !pending.pendingUnder(state.agent, sessionId => ctx.agents.get(sessionId))
+      && !(pending.pendingUnder(state.agent, sessionId => ctx.agents.get(sessionId))
+        ? (trace(`gate  BLOCK ${state.agent.id} pending=${pending.size}`), true)
+        : false)
   }
 
   /** Recheck every condition that an awaited checkpoint may have changed. */
@@ -342,16 +357,27 @@ export function apply(ctx: Context): void {
 
     // corum fork delta（fork #17）：登记/摘除在飞委派；`end` 到达即对发起方重新评估，
     // 于是"结果回来了"会继续推进（先前因为闸门被挡住，不会有人再唤醒父 Agent）。
-    const subagentEvents = ctx as unknown as {
-      on<K extends keyof SubagentRunEventFace>(name: K, handler: SubagentRunEventFace[K]): () => void
-    }
-    subagentEvents.on('subagent/start', (info, parent) => {
-      pending.start(String(info.runId), parent)
-    })
-    subagentEvents.on('subagent/end', (info, parent) => {
+    // ⚠️ 父 Agent 在 dispatch 的 **`this`（scope carrier）**里，**不是第二参数**：
+    // fork #9 声明为 `'subagent/start'|'subagent/end'(this: Scoped<SubagentRuntime>, info)`，
+    // 发射端只 `callback(info)`。**照抄 corum-tool-subagent 的既有教训**（那里曾写成
+    // `(info, parentAgent)` ⇒ 恒 undefined ⇒ 抛错被 emitter 的 per-listener 容错吞掉 ⇒
+    // 逻辑从未生效）：用普通函数取 `this`，经 `carrierKeyOf` 解出父 Agent；取不到就跳过
+    // （宁可不登记，也不要抛错后被静默吞掉）。
+    ctx.on('subagent/start' as never, (function (this: unknown, info: SubagentRunInfo) {
+      const parent = carrierKeyOf(this) as unknown as Agent | undefined
+      trace(`start run=${String(info.runId)} parent=${parent?.id ?? 'UNRESOLVED'}`)
+      if (parent !== undefined) pending.start(String(info.runId), parent)
+    }) as never)
+    ctx.on('subagent/end' as never, (function (this: unknown, info: SubagentRunInfo) {
+      const parent = carrierKeyOf(this) as unknown as Agent | undefined
       pending.end(String(info.runId))
-      requestDrive(stateFor(parent))
-    })
+      trace(`end   run=${String(info.runId)} parent=${parent?.id ?? 'UNRESOLVED'} pendingAfter=${pending.size}`)
+      // 结果回来 ⇒ 重新评估（先前被闸门挡住的唤醒不会再有人补，不接这步会卡住）。
+      if (parent !== undefined) {
+        requestDrive(stateFor(parent))
+        trace(`end   → requestDrive(${parent.id})`)
+      }
+    }) as never)
 
     ctx.on('agent/disposed', ({ agent }) => { states.delete(agent) })
     ctx.on('agent/created', ({ agent }) => {

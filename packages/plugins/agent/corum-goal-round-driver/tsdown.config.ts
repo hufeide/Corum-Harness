@@ -25,6 +25,7 @@ export default defineConfig(() => [
       '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-invariants',
       '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-scope',
       '@deepseek-ai/dsh-session',
     ],
   },
