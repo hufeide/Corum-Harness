@@ -32,12 +32,12 @@ export function corumEfficiencyDisciplineLines(): string[] {
   return [
     '',
     'EFFICIENCY DISCIPLINE:',
-    '- MERGE SMALL QUERIES. Batch the searches you need into ONE call — one `grep` / `glob` / `bash` invocation instead of one call per pattern: every extra call costs a full model round-trip.',
+    '- MERGE SMALL QUERIES. Batch the searches you need into as few calls as possible — one `grep` over a whole directory beats one call per file, and `glob` finds files without reading them: every extra call costs a full model round-trip.',
     // 2026-09-27 跨块一致性修复（用户发现子 Agent 用 grep 当读）：旧文案把 `grep`/`sed`/`nl`/`awk`/`head`
     // 的「提取」打包成一种省轮次的读法，与 root scope 的 `corum:tool-policy`（"Read files with `read` —
     // not `cat` / `head` / `tail` / `sed -n` / `less`"）**极性相反** ⇒ 子 Agent 拿两个块，选省轮次的那个。
     // 现在口径唯一：`grep` 定位、`read` 解释。
-    '- READ CODE WITH `read`, NOT THE SHELL. To understand a file, open it with `read` (the whole file, or an offset/limit window) — never `cat` / `head` / `tail` / `sed -n` / `awk`. `grep` tells you WHERE to look; `read` tells you WHAT the code does. Shell extraction is for text you pipe, not for code you must reason about.',
+    '- READ CODE WITH `read`, NOT THE SHELL. To understand a file, open it with `read` (the whole file, or an offset/limit window) — never `cat` / `head` / `tail` / `sed -n` / `awk`. `grep` tells you WHERE to look; `read` tells you WHAT the code does. This includes logs and PID files — `read` them (it takes an offset/limit window). The shell is for a live stream you must follow (`tail -f`) or for text you pipe, not for reading a file you must reason about.',
     '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 120s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
     '- KEEP EACH COMMAND ON ONE LINE, statements joined with `;` or `&&`, so that a loosely delimited fragment cannot do something other than what you intended.',
     '- EVERY CALL GETS A FRESH SHELL. No cwd, variable or function persists between calls, so never rely on a `cd` from an earlier call: chain `cd <dir> && <cmd>` inside one call, or pass `workdir`.',
@@ -55,7 +55,7 @@ export function corumEfficiencyDisciplineLines(): string[] {
     //
     // 修法：D1 改为**按能力表述**（能跑命令的读者才跑守卫；跑不了的读者读报告 + 点读 diff，
     // 验证归委派方），D2 收窄到「重复同一校验」并明确 research 的独立调查**是**有效证据。
-    '- BUDGET YOUR OWN VERIFICATION. Self-checking means at most three things: (1) read your own diff, (2) run the repository guard ONCE in full **if you can run commands**, (3) at most 3 targeted checks on the riskiest points you touched. That is the entire budget. If your tools do not let you run the guard — a read-only shell, or no shell at all — you do not get to skip verification: check what you can read, and state plainly which checks you could not run and who owns them.',
+    '- BUDGET YOUR OWN VERIFICATION. Self-checking means at most three things: (1) read your own diff, (2) run the repository guard ONCE in full **only if this session is allowed to build/test** (an isolated worker is not — its worktree has no dependencies, and that run belongs to the delegating agent), (3) at most 3 targeted checks on the riskiest points you touched. That is the entire budget. If your tools do not let you run the guard — a read-only shell, no shell at all, or a scope that forbids builds — you do not get to skip verification: check what you can read, and state plainly which checks you could not run and who owns them.',
     '- REPEATING A CHECK IS NOT VERIFICATION. Re-running the same check through another delegation, from the same context, reads the same code and produces no new evidence — that buys no confidence, so spend the budget on your own diff and a few targeted checks. This is about **re-running a check you already ran**, not about investigation: an independent `subagent_research` child reads the code itself in its own context and **is** valid evidence, which is exactly why broad investigation belongs with it.',
     '- REPORT SCOPE. State how many steps and how many tool calls the run took, so the cost and the progress of the work are legible to whoever reads the result.',
   ]
@@ -67,9 +67,12 @@ export function corumEfficiencyDisciplineLines(): string[] {
  * 这段文本同时注入主会话与子会话（preset scope 共享，子 Agent 经
  * `agentPresets.composeFrom` 继承父的 preset scope 段），所以弹窗承诺必须双分岔：
  * 主会话的审批策略是 `ask`（弹窗真实存在），子会话的审批策略钉死为 `never`
- * （`corum-subagent/src/child-agent.ts` 的 `captureDelegatedPolicyOverrides`，
- * `approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never'`），
- * 子会话拿不到可审批通路。措辞纪律同 {@link corumEfficiencyDisciplineLines}。
+ * （`corum-subagent/src/child-agent.ts` 的 `captureDelegatedPolicyOverrides`）。
+ *
+ * ⚠️ 2026-09-27 更正：早期文本说子会话的 `approvalPolicy` 钉死为 `'never'`、「拿不到可审批通路」——
+ * 那条依据已过时：2026-09-26 为放行提权通路，子会话改为按父策略播种（`'ask'`），并配了升级应答器。
+ * 现在的三种结局是：落在委派方所持范围内 ⇒ 直接批准；否则 ⇒ 交给用户；**目标为本仓库 ⇒ 直接拒、不出卡**。
+ * 措辞纪律同 {@link corumEfficiencyDisciplineLines}。
  * @returns 机制段的沙箱升级行（含前置空行）。
  */
 export function corumSandboxEscalationLines(): string[] {
@@ -78,7 +81,7 @@ export function corumSandboxEscalationLines(): string[] {
     'SANDBOX DENIALS AND ESCALATION:',
     '- A blocked file operation reports a `[sandbox: file access denied under <mode> mode]` marker. That is a policy decision, not a failure of the command: read the marker instead of assuming the denial.',
     '- When a wider mode would let the command succeed, retry the exact same command once, in the same turn, with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. In a session whose approval policy is `ask` that retry raises the approval prompt, and the user\'s answer to it is the consent — do not detour through chat to ask first.',
-    '- In a DELEGATED CHILD session the retry IS adjudicated, and there are exactly three outcomes. It is granted outright when it stays within what the delegating agent itself holds. Otherwise the request is put in front of the user. And it is **refused without any prompt** when the command targets the CURRENT repository — its other branches, worktrees, refs or shared `.git` — because a delegated child may READ that repository but never write outside its own worktree; that refusal is not negotiable, and a session-wide "always allow" cannot lift it. So do retry with `sandbox_permissions` for anything OUTSIDE this repository (another repository, `/tmp`, a system path): that is the axis where permission can be granted. For the current repository do not retry at all — there is no card to wait for. Your scope also has a hard limit it can never widen — a read-only or isolated scope stays exactly as it was delegated. Either way a refusal is final for that command: report it as a conclusion in your final report so the caller sees it, instead of reworking around it or waiting for an approval that cannot come.',
+    '- In a DELEGATED CHILD session the retry IS adjudicated, and there are exactly three outcomes. It is granted outright when it stays within what the delegating agent itself holds. Otherwise the request is put in front of the user. And it is **refused without any prompt** when the command targets the CURRENT repository — its other branches, worktrees, refs or shared `.git` — because a delegated child may READ that repository but never write outside its own worktree; that refusal is not negotiable, and a session-wide "always allow" cannot lift it. So do retry with `sandbox_permissions` for anything OUTSIDE this repository (another repository, `/tmp`, a system path): that is the axis where permission can be granted. For the current repository do not retry at all — there is no card to wait for. Hard limits: a READ-ONLY scope can never widen (its ceiling is `read-only`). An ISOLATED scope may still ask for a wider tier, but its write boundary is by PATH — the parent tree, its other branches, worktrees, refs and the shared `.git` stay read-only to it. Either way a refusal is final for that command: report it as a conclusion in your final report so the caller sees it, instead of reworking around it or waiting for an approval that cannot come.',
     '- Escalate only from a real denial, never speculatively. If the session states that approval prompts are disabled, a denial is final: do not set `sandbox_permissions`.',
     '- A rejected escalation is final for that command: stop and explain it instead of working around it. It does not forbid attempting or escalating other commands later.',
   ]

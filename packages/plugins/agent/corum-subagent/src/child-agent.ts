@@ -227,10 +227,13 @@ export interface ChildComposition {
 export const SUBAGENT_DELEGATION_CONTEXT
   = 'You are a delegated subagent: your permission scope was fixed when you were started. If a command is '
     + 'blocked by the sandbox, you MAY retry that exact command once with `sandbox_permissions` plus a '
-    + 'one-sentence `justification` — the mechanism grants it when it stays within what the delegating agent '
-    + 'itself holds, and otherwise asks the user. That request never widens a hard limit (a read-only or '
-    + 'isolated scope stays as-is), so if it is refused the refusal is final: state the limitation in your '
-    + 'reply so the delegating agent can handle it instead of working around it.'
+    + 'one-sentence `justification`. For anything OUTSIDE the current repository the mechanism grants it when '
+    + 'it stays within what the delegating agent itself holds, and otherwise asks the user. Targeting the '
+    + 'CURRENT repository is the exception: that retry is refused WITHOUT any prompt (its other branches, '
+    + 'worktrees, refs and the shared `.git` are readable but never writable by a delegated child), so there '
+    + 'is no card to wait for. Hard limits: a read-only scope can never widen; an isolated scope may still ask '
+    + 'for a wider tier, but its write boundary is by PATH and does not move. Either way a refusal is final: '
+    + 'state the limitation in your reply so the delegating agent can handle it instead of working around it.'
 
 /**
  * Compose one child inside its creation window: join its parent's preset,
@@ -390,6 +393,8 @@ export function applyChildComposition(
    *
    * 硬天花板由**本组合已有的两个事实**推出，不新增透传字段：
    * `researcher`（只读研究）⇒ `read-only`；`confined`（隔离）⇒ `workspace-write`；否则不设界。
+   * ⚠️ 2026-09-27 更正：隔离**不再**构成档位天花板（2026-09-26 裁定，见 `escalation-policy.ts:51`）；
+   * 只读研究（`pinReadOnly`）才是唯一保留的硬天花板。隔离保留的是**按路径**的写边界（confinement）。
    * 这与 `captureDelegatedPolicyOverrides` 里 `pinReadOnly` 胜过 `confineToWorktree` 同序
    * （只读是更强的保证）。新增受限子 Agent 种类时改 `hardCeilingFor` 一处即可。
    *

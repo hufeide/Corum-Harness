@@ -3509,6 +3509,7 @@ export function apply(ctx: Context, config: Config): void {
               '  - Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`.',
               '  - Never assume a delegated write has landed — read the result, which states where the work is.',
               '  - Read-only research delegations are not isolated (they write nothing).',
+              '  - **`isolation: "main"` is the non-isolated route** (an `orchestrate` task takes the same value): the child works directly in your REAL tree with your sandbox mode, so it CAN build, install, `git push` or merge — and its edits are already yours (nothing to integrate). Use it only when the work really needs that; the default isolated route is what keeps concurrent writers apart.',
               '  - Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
               '- **Child model routing is NOT yours to choose.**',
               '  - Neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed).',

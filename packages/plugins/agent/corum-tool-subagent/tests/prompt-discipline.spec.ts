@@ -231,7 +231,10 @@ describe('机制段能力感知（2026-09-20 D1/D2 修复）', () => {
   )
 
   it('D1：守卫命令按能力表述，不再假定读者能跑构建', () => {
-    expect(source).toContain('run the repository guard ONCE in full **if you can run commands**')
+    // 2026-09-27 修 F1（对抗审查员 A 报）：旧判据「if you can run commands」对 worker 为真，
+    // 而 worker 契约无条件禁构建 ⇒ 两块相反。改为「**only if this session is allowed to build/test**」。
+    expect(source).toContain('run the repository guard ONCE in full **only if this session is allowed to build/test**')
+    expect(source).toContain('an isolated worker is not')
     // 跑不了的人**不许跳过验证**，但要说明谁负责。
     expect(source).toContain('you do not get to skip verification')
     expect(source).toContain('state plainly which checks you could not run and who owns them')
