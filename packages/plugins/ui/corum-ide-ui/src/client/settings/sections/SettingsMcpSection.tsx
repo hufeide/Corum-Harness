@@ -38,6 +38,12 @@ interface McpServerConfigWire {
   description?: string
   /** 写给模型的**使用指导**（进提示词；与给人看的 description 不同）。 */
   guidance?: string
+  /** 独占/复用策略；缺省＝挂载时按工具面自动推导。 */
+  concurrency?: {
+    mode: 'exclusive' | 'per-resource' | 'parallel' | 'shared'
+    resourceArg?: string
+    maxConcurrent?: number
+  }
   transport: McpTransport
   command?: string
   args?: string[]
@@ -391,6 +397,21 @@ function McpDetailView({ rpc, name, onBack }: {
           <span className={css.mcpKvVal}>{server.description ?? '—'}</span>
         </div>
         <div className={css.mcpKv}>
+          <span className={css.mcpKvKey}>并发策略</span>
+          <span className={css.mcpKvVal}>
+            {config?.concurrency === undefined
+              ? '自动推导（挂载时按工具面）'
+              : config.concurrency.mode === 'per-resource'
+                ? `按资源并发 · ${config.concurrency.resourceArg ?? '?'}`
+                  + (config.concurrency.maxConcurrent !== undefined ? ` · 每桶 ≤${config.concurrency.maxConcurrent}` : '')
+                : config.concurrency.mode === 'parallel'
+                  ? `并行 · ${config.concurrency.maxConcurrent === undefined || config.concurrency.maxConcurrent === 0 ? '不限' : `≤${config.concurrency.maxConcurrent}`}`
+                  : config.concurrency.mode === 'shared'
+                    ? '完全不仲裁（shared）'
+                    : '整机独占（exclusive）'}
+          </span>
+        </div>
+        <div className={css.mcpKv}>
           <span className={css.mcpKvKey}>运行状态</span>
           <span className={connected ? css.mcpKvValSuccess : css.mcpKvValError}>{statusText}</span>
         </div>
@@ -663,6 +684,17 @@ function McpAddView({ rpc, onBack }: {
         />
         <span className={css.mcpHintDim}>
           这段会进提示词，仅对**授权了该服务**的 Agent 生效（保存后即时生效，不必重启）。留空则不注入。
+        </span>
+      </div>
+
+      {/* 独占/复用策略提示（静态）：真正的推导在连上 MCP 之后由代理行按工具面做 */}
+      <div className={css.mcpCard} style={{ gap: 6 }}>
+        <span className={css.mcpColLbl}>独占 / 复用策略（可留空＝自动推导）</span>
+        <span className={css.mcpHintDim}>
+          连上服务后按工具面推导：绑到既有实例（如 --browser-url=…:9333）⇒ 整机独占；按 filePath / pageId
+          等参数寻址 ⇒ 按资源并发（不同文档/page 可同时用，同一个排队）。要手动指定就在上面的 JSON 里加
+          {' '}<code>concurrency</code>：{'{ "mode": "parallel", "maxConcurrent": 4 }'}（mode 取
+          exclusive / per-resource / parallel / shared；maxConcurrent 0＝不限）。
         </span>
       </div>
 

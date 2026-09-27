@@ -65,7 +65,11 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   const startedAt = Date.now()
   publish({ tool: name, startedAt })
   try {
-    if (name === 'echo') return reply({ pid: process.pid, text: args.text ?? '', calls, startedAt })
+    if (name === 'echo') {
+      const delayMs = Number(args.delayMs ?? 0)
+      if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+      return reply({ pid: process.pid, text: args.text ?? '', calls, startedAt, endedAt: Date.now(), maxConcurrent })
+    }
     if (name === 'slow') {
       await new Promise(resolve => setTimeout(resolve, Number(args.delayMs ?? 0)))
       return reply({ pid: process.pid, startedAt, endedAt: Date.now(), maxConcurrent })

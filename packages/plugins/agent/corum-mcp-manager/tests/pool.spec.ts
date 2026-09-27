@@ -355,3 +355,158 @@ describe('停止宽限期：保存 profile 不得重启 MCP 进程（2026-09-27 
     expect(leaseTimeoutsFromEnv({ CORUM_MCP_STOP_GRACE_MS: 'nope' }).stopGraceMs).toBe(3000)
   })
 })
+
+describe('按资源仲裁（2026-09-27 用户口径：可复用的则不独占）', () => {
+  it('★ 不同资源**真并发**（服务端 maxConcurrent 必须为 2，且时间区间相交）', async () => {
+    const { pool } = makePool()
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const [a, b] = await Promise.all([
+        pool.callTool('fake', 'echo', { text: 'a', delayMs: 250 }, ownerA, { resource: 'doc-a' }),
+        pool.callTool('fake', 'echo', { text: 'b', delayMs: 250 }, ownerB, { resource: 'doc-b' }),
+      ])
+      const pa = payloadOf(a); const pb = payloadOf(b)
+      // 区间相交 = 真的同时在飞（不是排队后的顺序执行）
+      expect(Math.min(Number(pa.endedAt), Number(pb.endedAt)))
+        .toBeGreaterThan(Math.max(Number(pa.startedAt), Number(pb.startedAt)))
+      const stats = payloadOf(await pool.callTool('fake', 'stats', {}, ownerA))
+      expect(stats.maxConcurrent).toBe(2)
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
+  it('★ 同一资源串行：第二个必须等第一个结束', async () => {
+    const { pool } = makePool()
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const first = pool.callTool('fake', 'echo', { text: '1', delayMs: 200 }, ownerA, { resource: 'same.pen' })
+      const second = pool.callTool('fake', 'echo', { text: '2' }, ownerB, { resource: 'same.pen' })
+      const p1 = payloadOf(await first); const p2 = payloadOf(await second)
+      expect(Number(p2.startedAt)).toBeGreaterThanOrEqual(Number(p1.endedAt))
+      expect(payloadOf(await pool.callTool('fake', 'stats', {}, ownerA)).maxConcurrent).toBe(1)
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
+  it('★ 忙超时错误要同时点名**资源与持有者**（另一资源不受影响）', async () => {
+    const { pool } = makePool({ leaseTimeoutMs: 80 })
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const holding = pool.callTool('fake', 'echo', { text: 'hold', delayMs: 400 }, ownerA, { resource: 'doc-1' })
+      await expect(pool.callTool('fake', 'echo', { text: 'x' }, ownerB, { resource: 'doc-1' }))
+        .rejects.toBeInstanceOf(McpLeaseTimeoutError)
+      await expect(pool.callTool('fake', 'echo', { text: 'x' }, ownerB, { resource: 'doc-1' }))
+        .rejects.toThrow(/doc-1/)
+      // 另一个资源同时是空闲的 ⇒ 不该被 doc-1 的持有者挡住
+      const other = payloadOf(await pool.callTool('fake', 'echo', { text: 'ok' }, ownerB, { resource: 'doc-2' }))
+      expect(other.text).toBe('ok')
+      await holding
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
+  it('skipLease（shared 策略）：同资源也不排队', async () => {
+    const { pool } = makePool()
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const [a, b] = await Promise.all([
+        pool.callTool('fake', 'echo', { text: 'a', delayMs: 200 }, ownerA, { resource: 'same', skipLease: true }),
+        pool.callTool('fake', 'echo', { text: 'b', delayMs: 200 }, ownerB, { resource: 'same', skipLease: true }),
+      ])
+      const pa = payloadOf(a); const pb = payloadOf(b)
+      expect(Math.min(Number(pa.endedAt), Number(pb.endedAt)))
+        .toBeGreaterThan(Math.max(Number(pa.startedAt), Number(pb.startedAt)))
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+})
+
+describe('并行档 + 访问上限（用户 2026-09-27：非独占则可同时访问，只是可设上限）', () => {
+  it('★ 容量 2：两个并发放行、第三个排队直到腾槽', async () => {
+    const { pool } = makePool()
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const [a, b] = await Promise.all([
+        pool.callTool('fake', 'echo', { text: 'a', delayMs: 300 }, ownerA, { limit: 2 }),
+        pool.callTool('fake', 'echo', { text: 'b', delayMs: 300 }, ownerB, { limit: 2 }),
+      ])
+      const pa = payloadOf(a); const pb = payloadOf(b)
+      // 容量 2 ⇒ 两者真并发（区间相交）
+      expect(Math.min(Number(pa.endedAt), Number(pb.endedAt)))
+        .toBeGreaterThan(Math.max(Number(pa.startedAt), Number(pb.startedAt)))
+      expect(payloadOf(await pool.callTool('fake', 'stats', {}, ownerA)).maxConcurrent).toBe(2)
+
+      // 占满两个槽后，第三个必须排队（同一桶、容量 2）
+      const holding = [
+        pool.callTool('fake', 'echo', { text: 'h1', delayMs: 250 }, ownerA, { limit: 2 }),
+        pool.callTool('fake', 'echo', { text: 'h2', delayMs: 250 }, ownerB, { limit: 2 }),
+      ]
+      await tick(60)
+      const queued = pool.callTool('fake', 'echo', { text: 'q' }, ownerA, { limit: 2 })
+      await tick(60)
+      expect(pool.snapshot()[0]?.queueLength).toBe(1)
+      await Promise.all([...holding, queued])
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
+  it('★ 超时文本要写明「槽位占用情况」（N/M slots）与全部持有者', async () => {
+    const { pool } = makePool({ leaseTimeoutMs: 80 })
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const holding = [
+        pool.callTool('fake', 'echo', { text: 'h1', delayMs: 400 }, ownerA, { limit: 2 }),
+        pool.callTool('fake', 'echo', { text: 'h2', delayMs: 400 }, ownerB, { limit: 2 }),
+      ]
+      await tick(30)
+      // ⚠️ 只发**一次**超时调用并复用它做断言：首版我连发三次断言，第三次发出时前两个慢调用
+      // 已经跑完腾出槽位 ⇒ 它直接成功（promise resolved），红。测试代码必须先保证前置条件成立。
+      const error = await pool
+        .callTool('fake', 'echo', { text: 'q' }, { agentId: 'agent-C' }, { limit: 2 })
+        .then(() => undefined, (e: unknown) => e)
+      expect(error).toBeInstanceOf(McpLeaseTimeoutError)
+      expect(String((error as Error).message)).toMatch(/2\/2 slots/)
+      expect(String((error as Error).message)).toMatch(/agent-A.*agent-B/)
+      await Promise.all(holding)
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
+  it('容量不限（Infinity / 0）：同桶也不排队', async () => {
+    const { pool } = makePool()
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      for (const limit of [Number.POSITIVE_INFINITY, 0]) {
+        const [a, b] = await Promise.all([
+          pool.callTool('fake', 'echo', { text: 'a', delayMs: 150 }, ownerA, { limit }),
+          pool.callTool('fake', 'echo', { text: 'b', delayMs: 150 }, ownerB, { limit }),
+        ])
+        const pa = payloadOf(a); const pb = payloadOf(b)
+        expect(Math.min(Number(pa.endedAt), Number(pb.endedAt)))
+          .toBeGreaterThan(Math.max(Number(pa.startedAt), Number(pb.startedAt)))
+      }
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+})

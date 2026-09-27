@@ -35,6 +35,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { concurrencyLimitOf, deriveConcurrencyPolicy, resourceValueOf, type McpConcurrencyDecision } from './concurrency.ts'
 import { getServer } from './registry-store.ts'
 import { mcpGuidanceSectionName, mcpGuidanceSectionText } from './mcp-guidance.ts'
 import type { McpLeaseOwner, McpPoolTool } from './pool.ts'
@@ -198,8 +199,19 @@ export function canonicalResultOf(result: unknown, rawName: string): McpCanonica
   }
 }
 
-/** 造一条工具定义（把原始名与公共名分开持有：**协议层只用原始名**）。 */
-function createDefinition(serverName: string, tool: McpPoolTool, pool: McpPoolFace): McpProxyToolDefinition {
+/**
+ * 造一条工具定义（把原始名与公共名分开持有：**协议层只用原始名**）。
+ *
+ * `decision` 是**本次工具面**推导出的独占/复用策略（2026-09-27 用户口径：可复用的则不独占）：
+ * `per-resource` 时从调用参数取资源值当租约键（不同文档/页面并发、同一个串行）；
+ * `exclusive`/`shared` 时不带资源值（前者整机独占，后者完全不仲裁）。
+ */
+function createDefinition(
+  serverName: string,
+  tool: McpPoolTool,
+  pool: McpPoolFace,
+  decision: McpConcurrencyDecision,
+): McpProxyToolDefinition {
   const rawName = tool.name
   return {
     name: publicToolName(serverName, rawName),
@@ -208,8 +220,12 @@ function createDefinition(serverName: string, tool: McpPoolTool, pool: McpPoolFa
     parameters: tool.inputSchema ?? { type: 'object', properties: {} },
     output: outputOf(rawName),
     execute: async (args, exec) => {
+      const resource = decision.mode === 'per-resource' ? resourceValueOf(args, decision.resourceArg) : undefined
       const result = await pool.callTool(serverName, rawName, args, ownerOf(exec), {
         ...(exec.signal !== undefined ? { signal: exec.signal } : {}),
+        ...(resource !== undefined ? { resource } : {}),
+        // 桶容量（信号量上限）：exclusive=1、parallel=可配（缺省不限）、per-resource=每桶可配（缺省 1）。
+        ...(decision.mode === 'shared' ? { skipLease: true } : { limit: concurrencyLimitOf(decision) }),
       })
       return canonicalResultOf(result, rawName)
     },
@@ -238,6 +254,20 @@ function createSyncer(
       log('warn', `corum-mcp-proxy(${serverName}): tools/list failed: ${String(error)}`)
       return
     }
+    // 本代工具面 → 有效独占/复用策略（显式配置 > 绑既有实例 > 自持目标 > 工具面共同资源参数 > 保守默认）。
+    const decision = deriveConcurrencyPolicy({
+      config: getServer(serverName),
+      tools: listed.map(tool => ({ name: tool.name, ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}) })),
+    })
+    log(
+      'info',
+      `corum-mcp-proxy(${serverName}): concurrency=${decision.mode}`
+      + (decision.resourceArg !== undefined ? `(${decision.resourceArg})` : '')
+      + (decision.mode === 'exclusive' || decision.mode === 'shared'
+        ? ''
+        : ` limit=${concurrencyLimitOf(decision) === Number.POSITIVE_INFINITY ? '∞' : concurrencyLimitOf(decision)}`)
+      + ` — ${decision.reason}`,
+    )
     const definitions = new Map<string, McpProxyToolDefinition>()
     for (const tool of listed) {
       const publicName = publicToolName(serverName, tool.name)
@@ -245,7 +275,7 @@ function createSyncer(
         log('warn', `corum-mcp-proxy(${serverName}): server listed "${tool.name}" more than once — ignoring this generation`)
         return
       }
-      definitions.set(publicName, createDefinition(serverName, tool, pool))
+      definitions.set(publicName, createDefinition(serverName, tool, pool, decision))
     }
     const previous = disposers
     disposers = new Map()

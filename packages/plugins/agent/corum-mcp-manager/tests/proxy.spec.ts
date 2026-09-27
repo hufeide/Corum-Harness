@@ -25,7 +25,10 @@ function stubPool(tools: readonly { name: string; description?: string; inputSch
     listTools: string[]
     released: number
     changed: (tools: readonly never[]) => void
-    invoked: { serverName: string; tool: string; args: unknown; owner: unknown; signal?: AbortSignal }[]
+    invoked: {
+      serverName: string; tool: string; args: unknown; owner: unknown
+      signal?: AbortSignal; resource?: string; skipLease?: boolean
+    }[]
   } = { retain: [], listTools: [], released: 0, changed: () => {}, invoked: [] }
   const pool = {
     retain(serverName: string) {
@@ -40,8 +43,19 @@ function stubPool(tools: readonly { name: string; description?: string; inputSch
       calls.changed = listener
       return () => {}
     },
-    async callTool(serverName: string, tool: string, args: unknown, owner: unknown, options?: { signal?: AbortSignal }) {
-      calls.invoked.push({ serverName, tool, args, owner, ...(options?.signal !== undefined ? { signal: options.signal } : {}) })
+    async callTool(
+      serverName: string,
+      tool: string,
+      args: unknown,
+      owner: unknown,
+      options?: { signal?: AbortSignal; resource?: string; skipLease?: boolean },
+    ) {
+      calls.invoked.push({
+        serverName, tool, args, owner,
+        ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+        ...(options?.resource !== undefined ? { resource: options.resource } : {}),
+        ...(options?.skipLease === true ? { skipLease: true } : {}),
+      })
       return { content: [{ type: 'text', text: `ok:${tool}` }] }
     },
   }
@@ -383,5 +397,64 @@ describe('MCP 使用指导段（2026-09-27 用户需求：让 LLM 快速上手�
     apply(ctx as never, { serverName: 'not-in-registry' })
     await tick(10)
     expect(sections).toHaveLength(0)
+  })
+})
+
+describe('代理行按策略传资源键（2026-09-27 用户口径：可复用的则不独占）', () => {
+  /** 在临时 home 里写一份注册表，供 `getServer` 读到策略。 */
+  function withRegistry(servers: unknown[], body: () => Promise<void>): Promise<void> {
+    const previousHome = process.env.CORUM_HOME
+    const home = mkdtempSync(join(tmpdir(), 'corum-policy-'))
+    writeFileSync(join(home, 'mcp-servers.json'), JSON.stringify({ servers }))
+    process.env.CORUM_HOME = home
+    return body().finally(() => {
+      if (previousHome === undefined) delete process.env.CORUM_HOME
+      else process.env.CORUM_HOME = previousHome
+      rmSync(home, { recursive: true, force: true })
+    })
+  }
+
+  it('★ per-resource ⇒ 每次调用把参数值当资源键传给池', async () => {
+    await withRegistry(
+      [{ name: 'fake', transport: 'stdio', command: '/bin/echo', concurrency: { mode: 'per-resource', resourceArg: 'text' } }],
+      async () => {
+        const { pool, calls } = stubPool([{ name: 'echo' }])
+        const registry = registryStub()
+        const { ctx } = stubContext(pool, registry.tools)
+        apply(ctx as never, { serverName: 'fake' })
+        await tick(10)
+        const definition = registry.registered.get('mcp__fake__echo')
+        await definition?.execute({ text: 'doc-1' }, { agent: { id: 'a' } })
+        await definition?.execute({ text: '' }, { agent: { id: 'a' } })
+        expect(calls.invoked[0]?.resource).toBe('doc-1')
+        // 空串 ⇒ 不传资源（= 整机键），避免空资源被当成一个独立资源
+        expect(calls.invoked[1]?.resource).toBeUndefined()
+      },
+    )
+  })
+
+  it('★ shared ⇒ skipLease（完全不仲裁）；exclusive ⇒ 不传资源也不跳租约', async () => {
+    await withRegistry(
+      [
+        { name: 'shared-srv', transport: 'stdio', command: '/bin/echo', concurrency: { mode: 'shared' } },
+        { name: 'excl-srv', transport: 'stdio', command: '/bin/echo', concurrency: { mode: 'exclusive' } },
+      ],
+      async () => {
+        const sharedRun = stubPool([{ name: 'echo' }])
+        const sharedRegistry = registryStub()
+        apply(stubContext(sharedRun.pool, sharedRegistry.tools).ctx as never, { serverName: 'shared-srv' })
+        await tick(10)
+        await sharedRegistry.registered.get('mcp__shared-srv__echo')?.execute({}, { agent: { id: 'a' } })
+        expect(sharedRun.calls.invoked[0]?.skipLease).toBe(true)
+
+        const exclRun = stubPool([{ name: 'echo' }])
+        const exclRegistry = registryStub()
+        apply(stubContext(exclRun.pool, exclRegistry.tools).ctx as never, { serverName: 'excl-srv' })
+        await tick(10)
+        await exclRegistry.registered.get('mcp__excl-srv__echo')?.execute({}, { agent: { id: 'a' } })
+        expect(exclRun.calls.invoked[0]?.skipLease).toBeUndefined()
+        expect(exclRun.calls.invoked[0]?.resource).toBeUndefined()
+      },
+    )
   })
 })
