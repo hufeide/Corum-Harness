@@ -1,0 +1,565 @@
+/*
+ * PluginsPage —— 集成中心 ·「插件」页（design.pen yXkOK F1）的样式。
+ *
+ * token 口径（不出现裸 hex，全部走 corum 玻璃层 / 官方 alias 层）：
+ *   $glass-1/2/3                → --corum-glass-1/2/3
+ *   $glass-border(-active)      → --corum-glass-border(-active)
+ *   $label-primary/secondary/tertiary/dimmed → --dsw-alias-label-*
+ *   $brand-primary / $brand-text             → --dsw-alias-brand-primary / --dsw-alias-brand-text
+ *   $state-success              → --dsw-alias-state-success-primary
+ *   $label-on-brand             → --corum-label-on-brand（深色下是近黑，保证品牌底上可读）
+ * 尺寸一律乘 --corum-density-scale（界面密度设置；见 corum-ide-ui/client/ui-density.ts）。
+ * 间距/圆角按 design.pen 的「note · 三处形态说明」定稿：卡片 $glass-2 底 r12 padding 12，
+ * 分组内间距 8、分组之间 10；图标 36 r10 $glass-3 底；「+」即装钮 28 圆形。
+ * 唯一一条非 token 取色是下拉菜单的投影（--pg-shadow），声明在 .page 根上，
+ * 与参考实现 PluginManagerPanel.module.css 的 --pm-shadow / SettingsSections
+ * 的 --plg-shadow 同口径（design.pen 变量表里没有阴影变量，故不冒充 --corum-*）。
+ */
+
+/* ── 页面骨架 ─────────────────────────────────────────────────────────────── */
+
+.page {
+  --pg-shadow: rgb(0 0 0 / 25%);
+
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── 1. 页头：标题 + 搜索 + 添加▾ ─────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+.headerTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+.searchBox {
+  flex: 1;
+  min-width: 90px;
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  height: 28px;
+  padding: 0 calc(9px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+
+.searchIcon { color: var(--dsw-alias-label-tertiary); flex: none; }
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11.5px;
+  font-family: inherit;
+}
+.searchInput::placeholder { color: var(--dsw-alias-label-tertiary); }
+
+/* 「添加 ▾」按钮 + 下拉（design.pen v1Hw9 / EFWj6） */
+.addWrap { position: relative; flex: none; }
+
+.addBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  height: 28px;
+  padding: 0 calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.addBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.addBtn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+
+.addMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 168px;
+  padding: calc(4px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-1);
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
+  box-shadow: 0 12px 32px var(--pg-shadow);
+}
+
+.addOption {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: 100%;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11.5px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.addOption:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.addOptionIcon { display: inline-flex; color: var(--dsw-alias-label-tertiary); flex: none; }
+.addOptionText { flex: 1; }
+
+/* ── 来源条（添加▾ 选中来源后内联展开）─────────────────────────────────── */
+
+.sourceBar {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+
+.sourceLabel {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.sourceInput {
+  flex: 1;
+  min-width: 80px;
+  height: 26px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+}
+.sourceInput:focus { border-color: var(--corum-glass-border-active); }
+.sourceInput::placeholder { color: var(--dsw-alias-label-tertiary); font-family: inherit; }
+
+.sourceBtn {
+  flex: none;
+  height: 26px;
+  padding: 0 calc(11px * var(--corum-density-scale, 1));
+  border: 0;
+  border-radius: 7px;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sourceBtn:disabled { opacity: .5; cursor: default; }
+
+.sourceCancel {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.sourceCancel:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+
+/* ── 2. 内部 tab：市场 | 已装 ─────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: calc(14px * var(--corum-density-scale, 1));
+  border-bottom: 1px solid var(--corum-glass-border);
+}
+
+.tab {
+  position: relative;
+  padding: calc(5px * var(--corum-density-scale, 1)) 0 calc(7px * var(--corum-density-scale, 1));
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color .15s;
+}
+.tab:hover { color: var(--dsw-alias-label-secondary); }
+.tabActive { color: var(--dsw-alias-label-primary); }
+/* 激活指示条（design.pen indicator 2px $brand-primary） */
+.tabActive::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary);
+}
+
+/* ── 4. 内容区 ────────────────────────────────────────────────────────────── */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+.hintText { margin: 0; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+.errorText { margin: 0; font-size: 11.5px; color: var(--dsw-alias-state-error-primary); }
+
+/* 系统插件 note（design.pen niasa） */
+.note {
+  margin: 0;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 分段 chip：公开 | 个人 */
+.scopeRow { display: flex; align-items: center; gap: calc(4px * var(--corum-density-scale, 1)); }
+
+.scopeChip {
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.scopeChip:hover { color: var(--dsw-alias-label-secondary); }
+.scopeChipActive {
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-brand-text);
+}
+
+/* ── 分类分组卡片流 ───────────────────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.section + .section { margin-top: calc(2px * var(--corum-density-scale, 1)); }
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+}
+
+.sectionLabel {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.sectionChev { color: var(--dsw-alias-label-tertiary); flex: none; }
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+/* ── 卡片（市场卡片与已装卡片共用一套外形）───────────────────────────────── */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+  transition: border-color .15s;
+}
+.card:hover { border-color: var(--corum-glass-border-active); }
+.card[data-off] { opacity: .62; }
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(9px * var(--corum-density-scale, 1));
+}
+
+/* 图标 36 r10 $glass-3 底 */
+.cardIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-brand-text);
+}
+
+.cardMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+}
+
+.cardName {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 一行描述（超出省略） */
+.cardDesc {
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「+」即装钮：28 圆形 $brand-primary 底 + $label-on-brand 图标；已装换 $state-success + check */
+.installBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+  cursor: pointer;
+  transition: filter .15s;
+}
+.installBtn:hover { filter: brightness(1.12); }
+.installBtn:disabled { cursor: default; }
+.installBtn[data-installed] {
+  background: var(--dsw-alias-state-success-primary);
+  color: var(--corum-label-on-brand);
+}
+
+/* 底部行：作者·版本小字（JetBrains Mono 9.5px）/ 已装态 = 版本 chip + 操作 */
+.cardFoot {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding-top: calc(2px * var(--corum-density-scale, 1));
+}
+
+.cardAuthor {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footSpacer { flex: 1; }
+
+.versionChip {
+  flex: none;
+  max-width: 96px;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
+  border-radius: 6px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 启用开关（同设置页插件卡片的 plgSwitch 形态） */
+.switch {
+  flex: none;
+  position: relative;
+  width: 26px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  cursor: pointer;
+  transition: background .15s;
+}
+.switch[data-off] { background: var(--corum-glass-3); }
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 13px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--corum-label-on-brand);
+  transition: left .15s;
+}
+.switch[data-off] .switchKnob { left: 2px; }
+.switch:disabled { opacity: .5; cursor: default; }
+
+.setBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 22px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.setBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.setBtn:disabled { opacity: .5; cursor: default; }
+
+.delBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: color .15s;
+}
+.delBtn:hover { color: var(--dsw-alias-state-error-primary); }
+.delBtn:disabled { opacity: .5; cursor: default; }
+
+/* 「配置」就地展开的详情面板 */
+.detailPanel {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding-top: calc(8px * var(--corum-density-scale, 1));
+  border-top: 1px solid var(--corum-glass-border);
+}
+
+.detailRow { display: flex; gap: calc(8px * var(--corum-density-scale, 1)); }
+
+.detailLabel {
+  flex: none;
+  width: 56px;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailValue {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-all;
+}
+
+/* ── 5. 操作反馈条 ────────────────────────────────────────────────────────── */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+}
+
+.noticeText { flex: 1; font-size: 11px; color: var(--dsw-alias-label-secondary); }
+
+.noticeAction {
+  flex: none;
+  padding: calc(3px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-brand-text);
+  font-size: 10.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.noticeClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.noticeClose:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
+/* 加载指示（「配置」拉详情时） */
+.spin { animation: pg-spin 900ms linear infinite; }
+
+@keyframes pg-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
