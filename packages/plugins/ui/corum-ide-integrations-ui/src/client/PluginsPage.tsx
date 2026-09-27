@@ -644,7 +644,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
                   <p className={css.hintText}>没有匹配的插件</p>
                 )}
                 {groups.map(({ section, rows }) => (
-                  <div key={section.id} className={css.section} data-empty={rows.length === 0 || undefined}>
+                  <div key={section.id} className={css.section}>
                     <div className={css.sectionHead}>
                       <span className={css.sectionLabel}>{section.label}</span>
                       <ChevronRight size={12} className={css.sectionChev} />
@@ -825,5 +825,5 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 }
 
 /** 供后续「分类完整列表页」复用的分节口径（当前页只做概览分组）。 */
-export { SECTIONS as PLUGIN_SECTIONS }
-export type { Section as PluginSection, SearchResult as PluginSearchResult, InstalledEntry as PluginInstalledEntry }
+export { SECTIONS }
+export type { Section, SearchResult }

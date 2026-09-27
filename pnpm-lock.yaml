@@ -602,6 +602,9 @@ importers:
       '@corum/corum-ide-explorer-ui':
         specifier: workspace:*
         version: link:../../plugins/ui/corum-ide-explorer-ui
+      '@corum/corum-ide-integrations-ui':
+        specifier: workspace:*
+        version: link:../../plugins/ui/corum-ide-integrations-ui
       '@corum/corum-ide-panel-bottom-ui':
         specifier: workspace:*
         version: link:../../plugins/ui/corum-ide-panel-bottom-ui

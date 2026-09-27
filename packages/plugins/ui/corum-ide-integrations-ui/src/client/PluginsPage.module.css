@@ -11,11 +11,16 @@
  * 尺寸一律乘 --corum-density-scale（界面密度设置；见 corum-ide-ui/client/ui-density.ts）。
  * 间距/圆角按 design.pen 的「note · 三处形态说明」定稿：卡片 $glass-2 底 r12 padding 12，
  * 分组内间距 8、分组之间 10；图标 36 r10 $glass-3 底；「+」即装钮 28 圆形。
+ * 唯一一条非 token 取色是下拉菜单的投影（--pg-shadow），声明在 .page 根上，
+ * 与参考实现 PluginManagerPanel.module.css 的 --pm-shadow / SettingsSections
+ * 的 --plg-shadow 同口径（design.pen 变量表里没有阴影变量，故不冒充 --corum-*）。
  */
 
 /* ── 页面骨架 ─────────────────────────────────────────────────────────────── */
 
 .page {
+  --pg-shadow: rgb(0 0 0 / 25%);
+
   display: flex;
   flex-direction: column;
   gap: calc(10px * var(--corum-density-scale, 1));
@@ -101,7 +106,7 @@
   border-radius: 10px;
   background: var(--corum-glass-1);
   backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .22);
+  box-shadow: 0 12px 32px var(--pg-shadow);
 }
 
 .addOption {

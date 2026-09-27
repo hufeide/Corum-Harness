@@ -34,7 +34,7 @@ import { PluginsPage } from './PluginsPage.tsx'
 // 页面本体的对外出口：挂载点（PR4 的骨架，或后续直接渲染本页的组合）从
 // `@corum/corum-ide-integrations-ui/client` 取组件与它的 props 类型。
 export { PluginsPage }
-export type { PluginsPageProps, InstalledEntry, PluginSearchResult } from './PluginsPage.tsx'
+export type { PluginsPageProps, InstalledEntry, SearchResult } from './PluginsPage.tsx'
 
 /**
  * 集成中心「插件」内容页的槽 key（占位名，PR4 的骨架声明同名父槽后生效）。

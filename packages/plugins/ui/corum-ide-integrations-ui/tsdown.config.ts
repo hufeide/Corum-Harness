@@ -25,7 +25,7 @@ export default defineConfig(() => [
   },
   {
     name: `${CLIENT_ID}/client`,
-    entry: { client: 'src/client/index.tsx' },
+    entry: { client: 'src/client/index.ts' },
     outDir: 'lib',
     format: 'cjs',
     platform: 'browser',
