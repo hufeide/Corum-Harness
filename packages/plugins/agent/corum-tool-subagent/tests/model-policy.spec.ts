@@ -361,7 +361,9 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   })
 
   it('★ 提示词不再宣告「机制会自动重试」（改版后这句话是假的）', () => {
-    const prompt = between('Child model routing is NOT yours to choose', '\n')
+    // 2026-09-27 结构化：该条由单行拆成「表头 + 子项」，故取样到下一个 bullet 表头为止
+    // （断言强度不变：两条事实都必须出现在提示词里）。
+    const prompt = between('Child model routing is NOT yours to choose', '- **Declare `merge.verify`')
     expect(prompt).not.toContain('automatically retries')
   })
 
@@ -461,7 +463,9 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     const anchor = 'Child model routing is NOT yours to choose'
     const start = SRC.indexOf(anchor)
     expect(start, `anchor not found: ${anchor}`).toBeGreaterThanOrEqual(0)
-    const line = SRC.slice(start, SRC.indexOf('\n', start))
+    // 2026-09-27 结构化：该条由单行拆成「表头 + 子项」⇒ 取样面由「一行」扩到「该块结束」。
+    // 断言强度不变（三条事实仍必须出现在提示词里，且旧承诺仍不得回潮）。
+    const line = SRC.slice(start, SRC.indexOf('- **Declare `merge.verify`', start))
     expect(line).toContain('never try to route a child elsewhere')
     // 2026-09-18 改版后的真实承诺：机制问用户并按其答案行动；模型自己不许改路由。
     expect(line).toContain('asks the user what to do')

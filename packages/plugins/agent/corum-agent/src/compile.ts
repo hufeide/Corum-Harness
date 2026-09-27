@@ -316,7 +316,10 @@ const BASE_MODE_PERSONA: Record<BaseMode, string> = {
   // 指挥模式：无用户身份段时用指挥者人格（+ 模型/目录占位行）。
   conductor: `${CONDUCTOR_PERSONA}\n\nYou are powered by the {{model}} model. Your working directory is {{cwd}}.`,
   minimal: 'You are a helpful software engineer assistant.',
-  cordis: 'You are a coding agent powered by the {{model}} model, running on the DeepSeek Harness. Your working directory is {{cwd}}.\n\nYou can read and modify the harness you run on. Its composition is Cordis: every capability is a plugin row in a `cordis.yml`, and an agent preset is one such file mounted for a single session.',
+  cordis: 'You are a coding agent powered by the {{model}} model, running on the DeepSeek Harness. Your working directory is {{cwd}}.\n'
+    + '\nYou can read and modify the harness you run on. Its composition is Cordis:\n'
+    + '- Every capability is a plugin row in a `cordis.yml`.\n'
+    + '- An agent preset is one such file, mounted for a single session.',
 }
 
 /**

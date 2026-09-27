@@ -1176,7 +1176,11 @@ export function corumSchedulingSectionText(options: { readonly backgroundEnabled
   if (options.readonlyResearch) {
     return ptcPrefix + 'This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass `run_in_background: true` (it is rejected) — a backgrounded investigation leaves you guessing or repeating work. It has a shell for read-only commands (`git log`, `ls`, reading PID/log files, a verify script\'s `status`) but its sandbox is pinned to `read-only` and write/edit are denied, so it can never modify the repo. Fan out several research calls in ONE message when you need answers from different angles.'
   }
-  return ptcPrefix + `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set \`run_in_background: false\` only when your next action depends on that subagent's result — a foreground run is one-shot and TERMINAL when it settles, so \`send_message\` cannot reach it afterwards. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message. `
+  return ptcPrefix + `Use ${toolName} in the background by default.`
+    + `\n- Start independent delegations together in one assistant message and continue useful work while they run.`
+    + `\n- Set \`run_in_background: false\` only when your next action depends on that subagent's result: a foreground run is one-shot and TERMINAL when it settles.`
+    + `\n  - Consequence: \`send_message\` cannot reach it afterwards.`
+    + `\n- When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.`
 }
 
 /**
@@ -3534,7 +3538,13 @@ export function apply(ctx: Context, config: Config): void {
           // 三条并列在最前（只读 → 写 → 执行型验收）。只读是**条件**条目（research 实例缺席时
           // 不能提它），故用 push 逐条拼装而不是静态数组字面量。
           if (hasResearch) {
-            lines.push('- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — checking an implementation against a spec, comparing output against expected values, or running read-only commands like `git log` / `ls`) → `subagent_research`. It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline — never try to background it (`run_in_background: true` is rejected). Its sandbox is pinned to `read-only` and write/edit are denied, so it can investigate freely and can never modify the repo. One or two questions: call it directly, several angles in ONE message.')
+            lines.push(
+              '- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — checking an implementation against a spec, comparing output against expected values, or running read-only commands like `git log` / `ls`) → `subagent_research`.',
+              '  - It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline.',
+              '  - It cannot be backgrounded: `run_in_background: true` is rejected.',
+              '  - Its sandbox is pinned to `read-only` and write/edit are denied, so it can investigate freely and can never modify the repo.',
+              '  - One or two questions: call it directly. Several angles: send them in ONE message.',
+            )
           }
           lines.push('- Work that CHANGES files (ONE focused, self-contained implementation or scoped fix) → `subagent`: one call, one result.')
           // fork（corum）2026-09-14：**执行型验收**必须走写能力工具（用户点名「主 Agent 派
@@ -3557,12 +3567,27 @@ export function apply(ctx: Context, config: Config): void {
               '  - partial results arriving as they settle is what you want.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running. Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`. Never assume a delegated write has landed — read the result, which states where the work is. Read-only research delegations are not isolated (they write nothing). Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
-              '- Isolation is a property of CHANGE, not of delegation: it exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
-              '- Child model routing is NOT yours to choose: neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed). In `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not: the mechanism owns the route. The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route. Never ask the user to pick a model; never try to route a child elsewhere. If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and then acts on that answer; you must not try to change any model or route yourself. Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
-              '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Declaring `merge` at all means the mechanism finishes the job — it merges + commits the isolated branches once every task is done. Omitting `merge` keeps the branches for you; then finish them yourself with the explicit action `subagent { integrate: true }`, because an unmerged branch is invisible work.',
-              '- INTEGRATION IS THE MECHANISM\'S when you declare `merge` (it merges + verifies + commits once every task is done — never a child\'s job). Without `merge`, YOU finish it with the explicit `subagent { integrate: true }`; a pending-integration notice is raised either way so branches cannot silently strand. NEVER delegate a main-tree write to an ISOLATED child and expect it to land: that child works in its own worktree, so its writes cannot reach the parent tree.',
-              '- `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
+              '- **Isolation is a property of CHANGE, not of delegation.**',
+              '  - A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running.',
+              '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
+              '  - Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`.',
+              '  - Never assume a delegated write has landed — read the result, which states where the work is.',
+              '  - Read-only research delegations are not isolated (they write nothing).',
+              '  - Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
+              '- **Child model routing is NOT yours to choose.**',
+              '  - Neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed).',
+              '  - In `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not: the mechanism owns the route.',
+              '  - The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route.',
+              '  - Never ask the user to pick a model; never try to route a child elsewhere.',
+              '  - If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and then acts on that answer; you must not try to change any model or route yourself.',
+              '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
+              '- **Declare `merge.verify` for `orchestrate`**: how to build/run/verify THIS repo after merging (you know this repo best).',
+              '  - Declaring `merge` at all means the mechanism finishes the job — it merges + commits the isolated branches once every task is done.',
+              '  - Omitting `merge` keeps the branches for you; then finish them yourself with the explicit action `subagent { integrate: true }`, because an unmerged branch is invisible work.',
+              '- **INTEGRATION IS THE MECHANISM\'S when you declare `merge`** (it merges + verifies + commits once every task is done — never a child\'s job).',
+              '  - Without `merge`, YOU finish it with the explicit `subagent { integrate: true }`; a pending-integration notice is raised either way so branches cannot silently strand.',
+              '  - NEVER delegate a main-tree write to an ISOLATED child and expect it to land: that child works in its own worktree, so its writes cannot reach the parent tree.',
+              '- **Task scheduling**: `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
             )
           } else {
             lines.push(
