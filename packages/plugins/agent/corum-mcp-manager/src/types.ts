@@ -25,6 +25,19 @@ export interface McpStdioServer {
   toolCallTimeoutMs?: number
   /** 停用后不再编译进 preset、不自动探测连接。 */
   disabled?: boolean
+  /**
+   * **写给模型的使用指导**（2026-09-27 用户需求：「给一个 MCP 工具简单的使用指导，让 LLM 能够快速上手」）。
+   *
+   * 与 `description`（给人看的服务简介）不同：这段会进**提示词**，只对该服务被授权的 profile 生效。
+   * 官方 schema 只给每个工具 30~70 字的"干什么"（实测 `pencil__execute` 的描述甚至是
+   * "Use get_app_state if you don't have execute documentation"——把指导推给另一个工具），
+   * 缺的正是"何时用 / 怎么组合 / 有什么坑"。
+   *
+   * 建议写法（短才好用，建议 ≤ 1200 字）：① 一句话用途；② 典型调用顺序（先读什么再写什么）；
+   * ③ 坑（例如"同一文档不能被两个 Agent 同时改"）；④ 若该服务自带 skill 工具（如 Pencil 的
+   * `read_skill`），在这里点名"先读它"。
+   */
+  guidance?: string
 }
 
 /** streamable-http 传输的 MCP 服务配置。 */
@@ -42,6 +55,8 @@ export interface McpHttpServer {
   toolCallTimeoutMs?: number
   /** 停用后不再编译进 preset、不自动探测连接。 */
   disabled?: boolean
+  /** 写给模型的使用指导；语义与 stdio 变体一致（见 {@link McpStdioServer.guidance}）。 */
+  guidance?: string
 }
 
 /** MCP 服务配置（判别联合）。 */

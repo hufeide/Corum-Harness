@@ -6,7 +6,7 @@
  *     归属从哪来、`isError` 会不会抛、换代与回滚的顺序、signal 有没有透传。这些用桩才看得清。
  *   · **真池 + 真子进程**（末条）：验端到端确实跑通（注册到调用到结果），避免"桩对了、真链断了"。
  */
-import { readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -320,5 +320,68 @@ describe('首次同步必须是有界 await（2026-09-27 实机竞态：冷启�
     const { ctx, warnings } = stubContext(broken, registry.tools)
     await expect(apply(ctx as never, { serverName: 'fake' })).resolves.toBeUndefined()
     expect(warnings.join(' ')).toContain('ECONNREFUSED')
+  })
+})
+
+describe('MCP 使用指导段（2026-09-27 用户需求：让 LLM 快速上手）', () => {
+  it('★ 纯函数：空指导 ⇒ 空串（不注入）；有指导 ⇒ 带服务名与原文', async () => {
+    const { mcpGuidanceSectionText, mcpGuidanceSectionName, MCP_GUIDANCE_MAX_CHARS } = await import('../src/mcp-guidance.ts')
+    expect(mcpGuidanceSectionText('srv', undefined)).toBe('')
+    expect(mcpGuidanceSectionText('srv', '   ')).toBe('')
+    const text = mcpGuidanceSectionText('pencil-mcp', '先 read_skill 再动手。')
+    expect(text).toContain('pencil-mcp')
+    expect(text).toContain('先 read_skill 再动手。')
+    expect(text).toContain('mcp__pencil-mcp__')
+    // 过长要截断（注册表是用户可编辑文本，不能把提示词挤爆）
+    const long = mcpGuidanceSectionText('srv', 'x'.repeat(MCP_GUIDANCE_MAX_CHARS + 50))
+    expect(long).toContain('已截断')
+    expect(mcpGuidanceSectionName('srv')).toBe('corum:mcp-guidance:srv')
+  })
+
+  it('★ 注册表里有 guidance ⇒ 挂载时向所在 scope 注入该段（段名带服务名、正文含原文）', async () => {
+    const previousHome = process.env.CORUM_HOME
+    const home = mkdtempSync(join(tmpdir(), 'corum-guidance-'))
+    writeFileSync(join(home, 'mcp-servers.json'), JSON.stringify({
+      servers: [{ name: 'probe-mcp', transport: 'stdio', command: '/bin/echo', guidance: '先 get_app_state，再 batch_design；同一文件别并发改。' }],
+    }))
+    process.env.CORUM_HOME = home
+    try {
+      const { pool } = stubPool([{ name: 'echo' }])
+      const registry = registryStub()
+      const sections: Array<{ name: string; order: number; text: string }> = []
+      const ctx = {
+        ...stubContext(pool, registry.tools).ctx,
+        systemPrompt: {
+          section: (options: { name: string; order: number; text: string }) => { sections.push(options); return () => {} },
+          getSectionOrder: () => 100,
+        },
+      }
+      apply(ctx as never, { serverName: 'probe-mcp' })
+      await tick(10)
+      expect(sections).toHaveLength(1)
+      expect(sections[0]?.name).toBe('corum:mcp-guidance:probe-mcp')
+      expect(sections[0]?.text).toContain('先 get_app_state')
+      expect(sections[0]?.order).toBe(60)
+    } finally {
+      if (previousHome === undefined) delete process.env.CORUM_HOME
+      else process.env.CORUM_HOME = previousHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('注册表里没有该服务 / 没写 guidance ⇒ 不注入（也不抛）', async () => {
+    const { pool } = stubPool([{ name: 'echo' }])
+    const registry = registryStub()
+    const sections: Array<{ name: string }> = []
+    const ctx = {
+      ...stubContext(pool, registry.tools).ctx,
+      systemPrompt: {
+        section: (options: { name: string; order: number; text: string }) => { sections.push(options); return () => {} },
+        getSectionOrder: () => 100,
+      },
+    }
+    apply(ctx as never, { serverName: 'not-in-registry' })
+    await tick(10)
+    expect(sections).toHaveLength(0)
   })
 })

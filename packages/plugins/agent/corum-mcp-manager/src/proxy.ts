@@ -35,6 +35,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { getServer } from './registry-store.ts'
+import { mcpGuidanceSectionName, mcpGuidanceSectionText } from './mcp-guidance.ts'
 import type { McpLeaseOwner, McpPoolTool } from './pool.ts'
 import { publicToolName } from './tool-naming.ts'
 
@@ -297,6 +299,34 @@ export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void
     return
   }
   ctx.effect(() => release as () => void, 'corumMcpProxy.retain')
+  /**
+   * 使用指导段（2026-09-27 用户需求）：注册表里该 server 的 `guidance` 进 system prompt。
+   *
+   * 注入在**本行所在的 preset scope** 上 ⇒ 粒度正好是「这个 profile 授权了这个 server」；
+   * 且保存 profile 触发的重挂会重新注入 ⇒ 改指导与改授权同一条路径、都即时生效。
+   * 空指导不注入（不占提示词）。能力不可用（老宿主没有 systemPrompt 服务）时静默跳过。
+   */
+  const guidable = ctx as unknown as {
+    systemPrompt?: {
+      section(options: { name: string; order: number; text: string }): () => void
+      getSectionOrder(id: string): number
+    }
+  }
+  const guidanceText = mcpGuidanceSectionText(serverName, getServer(serverName)?.guidance)
+  if (guidanceText !== '' && guidable.systemPrompt !== undefined) {
+    try {
+      ctx.effect(
+        () => guidable.systemPrompt?.section({
+          name: mcpGuidanceSectionName(serverName),
+          order: guidable.systemPrompt.getSectionOrder('TOOL_BASH') - 40,
+          text: guidanceText,
+        }) ?? (() => {}),
+        'corumMcpProxy.guidance',
+      )
+    } catch (error: unknown) {
+      log('warn', `corum-mcp-proxy(${serverName}): guidance section could not be injected: ${String(error)}`)
+    }
+  }
   const sync = createSyncer(serverName, pool, tools, log)
   // 工具表变更（重连后服务端动态改表）⇒ 换代注册。
   ctx.effect(() => pool.onToolsChanged(serverName, () => { void sync() }), 'corumMcpProxy.onToolsChanged')

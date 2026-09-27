@@ -36,6 +36,8 @@ type TestConnectionResultWire =
 interface McpServerConfigWire {
   name: string
   description?: string
+  /** 写给模型的**使用指导**（进提示词；与给人看的 description 不同）。 */
+  guidance?: string
   transport: McpTransport
   command?: string
   args?: string[]
@@ -235,6 +237,8 @@ function McpDetailView({ rpc, name, onBack }: {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // 使用指导（2026-09-27 用户需求：给模型一段"何时用/怎么组合/坑"的上手说明）。
+  const [guidance, setGuidance] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -244,6 +248,7 @@ function McpDetailView({ rpc, name, onBack }: {
         if (cancelled) return
         if (full.server === undefined) { setError(`服务 "${name}" 未注册`); return }
         setConfig(full.server)
+        setGuidance(full.server.guidance ?? '')
         setServer({
           name: full.server.name,
           ...(full.server.description !== undefined ? { description: full.server.description } : {}),
@@ -529,6 +534,8 @@ function McpAddView({ rpc, onBack }: {
   const [startTimeout, setStartTimeout] = useState('60000')
   const [runTimeout, setRunTimeout] = useState('60000')
   const [busy, setBusy] = useState(false)
+  // 使用指导（2026-09-27 用户需求：给模型一段「何时用 / 怎么组合 / 坑」的上手说明）。
+  const [guidance, setGuidance] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const submit = async () => {
@@ -557,6 +564,7 @@ function McpAddView({ rpc, onBack }: {
             ? { env: parsed.env as Record<string, string> } : {}),
           ...(typeof parsed.cwd === 'string' ? { cwd: parsed.cwd } : {}),
           toolCallTimeoutMs: timeout,
+          ...(guidance.trim() !== '' ? { guidance: guidance.trim() } : {}),
         }
       : {
           name,
@@ -565,6 +573,7 @@ function McpAddView({ rpc, onBack }: {
           ...(parsed.headers !== undefined && typeof parsed.headers === 'object' && parsed.headers !== null
             ? { headers: parsed.headers as Record<string, string> } : {}),
           toolCallTimeoutMs: timeout,
+          ...(guidance.trim() !== '' ? { guidance: guidance.trim() } : {}),
         }
     if (transport === 'stdio' && input.command === '') { setError('stdio 配置缺少 command 字段'); return }
     if (transport !== 'stdio' && !input.url) { setError('SSE/WebSocket 配置缺少 url 字段'); return }
@@ -641,6 +650,29 @@ function McpAddView({ rpc, onBack }: {
         </div>
         <span className={css.mcpHintDim}>超时后该服务器将被标记为未连接，并自动尝试重连。</span>
       </div>
+
+      {/* 卡 4：使用指导（写给模型，2026-09-27） */}
+      <div className={css.mcpCard} style={{ gap: 10 }}>
+        <span className={css.mcpColLbl}>使用指导（写给模型）</span>
+        <textarea
+          className={css.mcpJsonEditor}
+          style={{ minHeight: 96 }}
+          value={guidance}
+          onChange={e => setGuidance(e.target.value)}
+          placeholder={'一句话用途；典型调用顺序；坑。例如：\n先 get_app_state 看当前打开的文件，再 batch_design；同一 .pen 文件不要并发改。'}
+        />
+        <span className={css.mcpHintDim}>
+          这段会进提示词，仅对**授权了该服务**的 Agent 生效（保存后即时生效，不必重启）。留空则不注入。
+        </span>
+      </div>
+
+      {/* 使用指导（写给模型）：只读展示，让用户知道"模型被告知了什么" */}
+      {guidance.trim() !== '' && (
+        <div className={css.mcpCard} style={{ gap: 8 }}>
+          <span className={css.mcpColLbl}>使用指导（写给模型，已进提示词）</span>
+          <pre className={css.mcpToolsPre} style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{guidance}</pre>
+        </div>
+      )}
 
       {error !== null && <p className={css.hintText}>{error}</p>}
 
