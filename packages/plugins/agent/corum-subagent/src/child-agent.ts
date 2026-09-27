@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // keeps its model-facing rows on the host plane, where the child already sees
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { corumNarrowDenyFilter, corumVisibleToolNames, confinementGuard } from '@corum/corum-orchestration'
+import { corumNarrowDenyFilter, corumVisibleToolNames, confinementGuard, type ConfinementScope } from '@corum/corum-orchestration'
 // fork（corum）2026-09-26：子 Agent 提权（用户 9-14 需求）——判定纯函数在 escalation-policy.ts，
 // 应答器在 escalation-answerer.ts。两者与 `approvalPolicy: 'ask'` 成对（见 capture 的头注）。
 import { installEscalationAnswerer } from './escalation-answerer.ts'
@@ -353,20 +353,32 @@ export function applyChildComposition(
    * 注册在 `childCtx`（子 Agent 自己的 scope）上 ⇒ **只作用于这个子会话**，不泄漏给它的
    * 父或兄弟；`track`/集成者/只读研究都不置 `confined`，因此不受影响。
    */
-  if (composition.confined === true) {
-    // 边界就地取子会话自己的 header.cwd（隔离建立时写死的 worktree 路径，且持久化）——
-    // 因此冷恢复重放同一份 composition 时边界自动正确，不必把路径再存进描述符。
-    const root = childCtx.agent?.session.header.cwd
-    if (root !== undefined && root !== '') {
-      // 主工作树根 = 委派方的 cwd（隔离要保护的对象）。**必须显式传**：工作区可能就建在
-      // 临时区之内（本仓测试与部分用户环境如此），只靠「worktree 之外都拦」会被临时区
-      // 允许集放行，门禁等于没装。
-      const parentTree = parent.session.header.cwd
-      childCtx.tools.guard(confinementGuard({
-        worktreeRoot: root,
-        ...parentTree !== undefined && parentTree !== '' ? { parentTreeRoot: parentTree } : {},
-      }))
-    }
+  /**
+   * fork（corum）2026-09-27：**隔离作用域算一次，两处共用**——写边界门禁（`tools.guard`）
+   * 与提权应答器（主仓目标的提权直接 refuse）必须是同一份边界，否则两处各算一遍迟早漂移。
+   *
+   * 边界就地取子会话自己的 `header.cwd`（隔离建立时写死的 worktree 路径，且持久化）——
+   * 因此冷恢复重放同一份 composition 时边界自动正确，不必把路径再存进描述符。
+   * 主树根 = 委派方的 cwd（隔离要保护的对象）。**必须显式传**：工作区可能就建在临时区
+   * 之内（本仓测试与部分用户环境如此），只靠「worktree 之外都拦」会被临时区允许集放行，
+   * 门禁等于没装。非 `confined`（集成者 / 主树子 Agent / 只读研究）⇒ `undefined`。
+   */
+  const confinementScope: ConfinementScope | undefined = composition.confined !== true
+    ? undefined
+    : ((): ConfinementScope | undefined => {
+        const root = childCtx.agent?.session.header.cwd
+        if (root === undefined || root === '') return undefined
+        const parentTree = parent.session.header.cwd
+        return {
+          worktreeRoot: root,
+          ...parentTree !== undefined && parentTree !== '' ? { parentTreeRoot: parentTree } : {},
+        }
+      })()
+
+  if (confinementScope !== undefined) {
+    // 单调性：guard 是「deny or abstain, never allow」，后注册者无法复活被拒的调用
+    // （与主 Agent 只读门禁同一机制，见 `@corum/corum-agent` 的 `permission-policy.ts`）。
+    childCtx.tools.guard(confinementGuard(confinementScope))
   }
 
   /**
@@ -390,6 +402,10 @@ export function applyChildComposition(
       // 故这里只看只读研究。理由见 hardCeilingFor 的头注。
       ...composition.kind === 'researcher' ? { pinReadOnly: true } : {},
     }),
+    // 2026-09-27 用户裁定：**主仓目标不可提权**。只给隔离子 Agent —— 主 Agent 与派到 main
+    // 上工作的集成者保留完整的 bash / 合并能力（T4 只约束隔离子 Agent）。给了它之后，
+    // 「沙箱层可提权」不再能穿透「不许碰主仓其它分支」这条线。
+    ...confinementScope !== undefined ? { confinement: confinementScope } : {},
     logger: parent.ctx.logger,
   })
 }

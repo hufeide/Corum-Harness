@@ -48,6 +48,9 @@ import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 // fork（corum）2026-09-26：corum 自有 waterfall 询问要**以父 Agent 为载体**（scopeTarget），
 // 与 `corum/model-ask` 同款 —— 子会话载体到不了用户面前。
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
+// fork（corum）2026-09-27：主仓目标的提权一律 refuse —— 复用隔离门禁的**同一个**判定
+// （单一事实源；`confinementGuard` 与本题权应答器因此不会各自漂移）。
+import { confinementViolation, type ConfinementScope } from '@corum/corum-orchestration'
 import {
   applySessionGrant,
   decideEscalation,
@@ -112,26 +115,55 @@ export function readEscalationRequest(
   events: readonly { readonly type: string; readonly data?: unknown }[],
   callId: string | undefined,
 ): ReadEscalationRequest | undefined {
+  const call = readToolCall(events, callId)
+  if (call === undefined) return undefined
+  const target = call.arguments['sandbox_permissions']
+  if (!isEscalationTarget(target)) return undefined
+  const justification = call.arguments['justification']
+  return {
+    mode: target,
+    ...(typeof justification === 'string' && justification !== ''
+      ? { justification }
+      : {}),
+  }
+}
+
+/**
+ * fork（corum）2026-09-27：按 `callId` 读回**原始工具调用面**（工具名 + 参数对象）。
+ *
+ * 提权判定需要两样东西，都从这一处取（单一解析点）：`sandbox_permissions`（= 提权目标，
+ * 见 {@link readEscalationRequest}）与**完整调用面**（= 判断这次提权是否打在主仓上，见
+ * `adjudicateEscalation` 里对 `confinementViolation` 的复用）。
+ *
+ * `name` 缺省时按 `'bash'` 处理：只有 `bash`/`pwsh` 才可能带 `sandbox_permissions`，而
+ * 既有代码在文案层也是这么兜的（`request.toolName ?? 'bash'`），保持一致。
+ *
+ * @param events - 子会话的事件流（`session.snapshotEvents()`）。
+ * @param callId - 本次审批请求关联的工具调用 id。
+ * @returns 解析后的调用面；读不出（无此 id / 非法 JSON / 非对象）时 `undefined`。
+ */
+export function readToolCall(
+  events: readonly { readonly type: string; readonly data?: unknown }[],
+  callId: string | undefined,
+): { readonly name: string; readonly arguments: Record<string, unknown> } | undefined {
   if (callId === undefined || callId === '') return undefined
   for (const event of events) {
     if (event.type !== 'tool/call') continue
-    const data = event.data as { callId?: unknown; arguments?: unknown } | undefined
+    const data = event.data as { callId?: unknown; name?: unknown; arguments?: unknown } | undefined
     if (data === undefined) continue
     // callId 两侧都转字符串比较：事件里是 ToolCallId（字符串品牌类型），审批请求里亦然，
     // 但品牌类型不可直接跨包比较，转成字符串是最稳的口径。
     if (String(data.callId ?? '') !== String(callId)) continue
     if (typeof data.arguments !== 'string') return undefined
     try {
-      const args = JSON.parse(data.arguments) as { sandbox_permissions?: unknown; justification?: unknown }
-      if (!isEscalationTarget(args.sandbox_permissions)) return undefined
+      const parsed = JSON.parse(data.arguments) as unknown
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
       return {
-        mode: args.sandbox_permissions,
-        ...(typeof args.justification === 'string' && args.justification !== ''
-          ? { justification: args.justification }
-          : {}),
+        name: typeof data.name === 'string' && data.name !== '' ? data.name : 'bash',
+        arguments: parsed as Record<string, unknown>,
       }
     } catch {
-      // 参数不是合法 JSON ⇒ 读不出请求 ⇒ 朝关闭倒（当作「不是提权」）。
+      // 参数不是合法 JSON ⇒ 读不出请求 ⇒ 朝关闭倒（调用方按「不是提权」处理）。
       return undefined
     }
   }
@@ -158,6 +190,15 @@ export interface EscalationAnswererDeps {
   readonly parent: Agent
   /** 本子 Agent 的**硬天花板**（隔离 / 只读研究，见 `hardCeilingFor`）。 */
   readonly hardCeiling: SandboxMode
+  /**
+   * fork（corum）2026-09-27：**隔离作用域**（只有 `confined` 子 Agent 才传）。
+   *
+   * 给了它 ⇒ 打在当前仓库（主仓）上的提权请求一律 `refuse`（连卡都不出，会话级授权也
+   * 豁免不了）。未给（集成者 / 主树子 Agent / 只读研究）⇒ 不做这道判定、行为与改动前
+   * 完全一致——用户 2026-09-27 裁定：这条硬线**只约束隔离子 Agent**，主 Agent 与派到
+   * main 上工作的 Agent（集成者）保留完整的 bash 与合并能力。
+   */
+  readonly confinement?: ConfinementScope | undefined
   /** 告警出口。 */
   readonly logger: { warn: (message: string) => void }
 }
@@ -177,6 +218,25 @@ export function adjudicateEscalation(
 ): { request: ReadEscalationRequest; verdict: EscalationVerdict } | undefined {
   const request = readEscalationRequest(childEvents, callId)
   if (request === undefined) return undefined
+  // fork（corum）2026-09-27：**主仓目标不可提权**（用户裁定：「子 Agent 不能操作除自己
+  // worktree 之外的其它分支（可读）」，且这一类越界无法提权获得）。
+  //
+  // 必须放在**一切之前**，三个理由：
+  //  · 早于 `P` 的读取——读不到父档位时既有逻辑会「上呈用户」，而这里根本不该问；
+  //  · 早于会话级授权——「总是允许」只把 `ask-user` 升成放行，`refuse` 永不被豁免；
+  //  · 复用门禁的同一个判定函数（`confinementViolation`，单一事实源）：`parent-tree`
+  //    就是「打在当前仓库上」。于是「沙箱层可提权」这条不再对这堵墙生效。
+  //
+  // 依据（2026-09-27 会话 corum-task-56b7d485，01:11:30）：隔离子会话用
+  // `git worktree remove --force …` + `git branch -D …`（**命令里没有绝对路径**）拿到
+  // 一次「允许一次」后，真的删掉了主仓的 worktree 与分支。
+  if (deps.confinement !== undefined) {
+    const call = readToolCall(childEvents, callId)
+    const violation = call === undefined ? undefined : confinementViolation(deps.confinement, call)
+    if (violation?.kind === 'parent-tree') {
+      return { request, verdict: { kind: 'refuse', reason: 'parent-tree' } }
+    }
+  }
   // `P` = 父 Agent **当前生效**档位。刻意不传 `mode`（传了会用「本次调用的显式档位」顶替
   // 会话策略，见官方 resolve() 的 `request.mode ?? overrideOf(session) ?? defaultMode`）。
   const parentMode = (deps.parent.ctx as unknown as { get: (name: string) => unknown })

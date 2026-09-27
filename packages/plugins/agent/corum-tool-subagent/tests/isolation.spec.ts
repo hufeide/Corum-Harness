@@ -23,6 +23,7 @@ import {
   corumIsGitRepo,
   corumIsolationBoundaryNotice,
   corumIsWriteTask,
+  corumResolveIsolationRequest,
   corumMarkSettled,
   corumNarrowDenyFilter,
   corumPendingIntegration,
@@ -125,6 +126,64 @@ describe('corumShouldIsolate — 不变式⑤：凡写委派恒隔离（2026-09-
     // @ts-expect-error 'off' 已按用户裁定清除（2026-09-16 不变式⑤）
     const forbidden: Parameters<typeof corumShouldIsolate>[0] = 'off'
     void forbidden
+  })
+
+  /**
+   * fork（corum）2026-09-27（用户裁定 A）：第 5 个形参是**逐次派发的语义出口**。
+   *
+   * 它不是把不变式⑤打开：`mode` / `taskIsolation` **仍然**关不掉隔离（上面几条用例覆盖），
+   * 只有调用方逐次显式声明 `isolation: 'main'`（= 这次要在主树/跨仓工作）才不建 worktree。
+   * 病根（会话 corum-task-56b7d485）：主 Agent 想让子 Agent 去主树/跨仓落盘却表达不出来，
+   * 只能派隔离子 Agent，于是一轮里 4 个零提交的撞墙子会话。
+   */
+  it('★ 显式 isolation:\'main\' ⇒ 不隔离（语义出口，不是 off 逃生口）', () => {
+    expect(corumShouldIsolate('write-tasks', true, false, false, 'main')).toBe(false)
+    expect(corumShouldIsolate('always', true, false, true, 'main')).toBe(false)
+    // 缺省 / 显式 worktree 仍是恒隔离（默认行为一字未改）。
+    expect(corumShouldIsolate('write-tasks', true, false, false, 'worktree')).toBe(true)
+    expect(corumShouldIsolate('write-tasks', true, false, false)).toBe(true)
+    // 只读研究即使声明 main 也只读（readonlyResearch 先判，沙箱层另有 read-only 钉）。
+    expect(corumShouldIsolate('always', true, true, false, 'main')).toBe(false)
+  })
+})
+
+/**
+ * fork（corum）2026-09-27（用户裁定 A）：`isolation` 的解析与**结构性矛盾拦截**。
+ *
+ * 用户裁定的原话：「有问题的是之前的主 Agent 指派子 Agent 时传入的参数不合适，比如希望
+ * 子 Agent 合并分支，但仍然派出了隔离的子 Agent 工作在新的 worktree 上」⇒ 矛盾的参数组合
+ * 必须在**派发之前**抛错，而不是让子 Agent 跑去撞隔离墙（那正是本场 20 次派发的浪费来源）。
+ */
+describe('corumResolveIsolationRequest — 隔离意图解析 + 矛盾 fail loud', () => {
+  it('缺省 ⇒ worktree 路线（不隔离需要显式声明）', () => {
+    expect(corumResolveIsolationRequest({})).toEqual({ placement: 'worktree', integrator: false })
+  })
+
+  it('isolation:\'main\' ⇒ placement=main', () => {
+    expect(corumResolveIsolationRequest({ isolation: 'main' })).toEqual({ placement: 'main', integrator: false })
+  })
+
+  it('档位取值（always / write-tasks）走 mode 维度，placement 仍 worktree', () => {
+    expect(corumResolveIsolationRequest({ isolation: 'always' })).toEqual({ mode: 'always', placement: 'worktree', integrator: false })
+    expect(corumResolveIsolationRequest({ isolation: 'write-tasks' })).toEqual({ mode: 'write-tasks', placement: 'worktree', integrator: false })
+  })
+
+  it('integrate:true 单独使用 ⇒ 集成者路线（在主树）', () => {
+    expect(corumResolveIsolationRequest({ integrate: true })).toEqual({ placement: 'worktree', integrator: true })
+  })
+
+  it('★ integrate:true + isolation 任意取值 ⇒ 抛错（两条路线混淆）', () => {
+    for (const bad of ['worktree', 'main', 'always', 'write-tasks'] as const) {
+      expect(() => corumResolveIsolationRequest({ integrate: true, isolation: bad }), `isolation=${bad}`).toThrow(/integrate: true already runs the child as the INTEGRATOR/)
+    }
+    // 错误文本必须给出两条合法路线（否则模型只会重试同一条）。
+    expect(() => corumResolveIsolationRequest({ integrate: true, isolation: 'worktree' })).toThrow(/isolation: "main"/)
+  })
+
+  it('★ 非法取值 ⇒ 抛错并列出词汇表（不静默退回默认）', () => {
+    for (const bad of ['off', 'MAIN', 'mainTree', '', 42, null] as const) {
+      expect(() => corumResolveIsolationRequest({ isolation: bad }), `isolation=${String(bad)}`).toThrow(/isolation must be one of/)
+    }
   })
 })
 
@@ -790,7 +849,7 @@ describe('corumIsolationBoundaryNotice — 父 Agent 可见的隔离边界', () 
   })
 
   it('语言纪律：工具结果里的说明用英文（与 prompt-language.spec.ts 同口径）', () => {
-    for (const boundary of ['parent-tree', 'skipped-non-git', 'worktree'] as const) {
+    for (const boundary of ['main-requested', 'skipped-non-git', 'worktree'] as const) {
       expect(/[\u4e00-\u9fff]/.test(corumIsolationBoundaryNotice(boundary, 'wt/x'))).toBe(false)
     }
   })

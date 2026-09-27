@@ -14,11 +14,11 @@
  *   · **没有有效修改 ⇒ 不提交**（否则每轮对话留下一条没有内容的提交）。
  */
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, appendFileSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, appendFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { hasEffectiveChanges, hasUncommittedChanges, settleCommit } from '../src/git-primitives.ts'
+import { hasEffectiveChanges, hasUncommittedChanges, independentRepoPathsOf, settleCommit } from '../src/git-primitives.ts'
 
 const scratch = mkdtempSync(join(tmpdir(), 'corum-git-core-'))
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }) })
@@ -171,5 +171,69 @@ describe('settleCommit — 没有有效修改就不提交（不留噪声提交�
     const fn = src.slice(src.indexOf('export function settleCommit('), src.indexOf('\n}', src.indexOf('export function settleCommit(')))
     expect(fn).not.toContain('--allow-empty')
     expect(fn, 'settleCommit 必须走 hasEffectiveChanges 准入').toContain('hasEffectiveChanges')
+  })
+})
+
+/**
+ * fork（corum）2026-09-27（用户裁定）：**独立嵌套 git 仓不进自动提交**。
+ *
+ * 由来（会话 corum-task-56b7d485，两次实测污染）：
+ *   · `cdb58d5 wip(isolated): auto-commit on settle` 把子 Agent 在 worktree 里新建的闭源仓
+ *     记成 **gitlink**（mode 160000）⇒ 随后被 port 进开源仓主树的索引（幽灵 submodule）；
+ *   · `456d3ef` 更严重：同一机制把剥离产物的 **36 个文件**提交进开源仓，进了 main 的祖先链，
+ *     只能用 `git filter-repo` 重写未推送段历史清掉。
+ * 用户裁定「嵌套新仓是独立产物」⇒ 收口提交必须排除它，并在提交信息里点名。
+ */
+describe('★ 独立嵌套 git 仓不进自动提交（2026-09-27）', () => {
+  /** 在 repo 里造一个真正的独立嵌套仓（有自己的 .git 与一次提交）。 */
+  function makeNested(repo: string, name: string): void {
+    const dir = join(repo, name)
+    mkdirSync(dir, { recursive: true })
+    const git = (...args: string[]): string =>
+      execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe', encoding: 'utf8' }).trim()
+    git('init', '-q')
+    git('config', 'user.email', 'nested@localhost')
+    git('config', 'user.name', 'nested')
+    writeFileSync(join(dir, 'inner.txt'), 'inner\n')
+    git('add', '-A')
+    git('commit', '-q', '--no-verify', '-m', 'inner init')
+  }
+
+  it('independentRepoPathsOf 只认「未跟踪顶层目录 + 其下有 .git」', () => {
+    const { repo } = makeRepo()
+    makeNested(repo, 'ClosedRepo')
+    writeFileSync(join(repo, 'plain-dir-file.txt'), 'x\n')
+    mkdirSync(join(repo, 'plain-dir'), { recursive: true })
+    writeFileSync(join(repo, 'plain-dir', 'a.txt'), 'a\n')
+    expect(independentRepoPathsOf(repo)).toEqual(['ClosedRepo'])
+  })
+
+  it('★★ 嵌套仓既不被收编也不产生 gitlink（ghost submodule 的根因）', () => {
+    const { repo, commitCount } = makeRepo()
+    makeNested(repo, 'ClosedRepo')
+    writeFileSync(join(repo, 'real-work.txt'), 'work\n')
+    expect(commitCount()).toBe(1)
+    expect(settleCommit(repo, 'wip(isolated): auto-commit on settle')).toBeUndefined()
+    expect(commitCount()).toBe(2)
+    const tracked = execFileSync('git', ['-C', repo, 'ls-files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    // 真工作照常收进提交；嵌套仓内容一个字都不进本仓。
+    expect(tracked).toContain('real-work.txt')
+    expect(tracked).not.toContain('ClosedRepo/inner.txt')
+    // 关键判据：索引里**没有** mode 160000 的条目。
+    const staged = execFileSync('git', ['-C', repo, 'ls-files', '-s'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    expect(staged).not.toContain('160000')
+    // 提交信息点名被排除的独立仓（可追责、可追溯）。
+    const body = execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    expect(body).toContain('ClosedRepo')
+  })
+
+  it('嵌套仓留在原地（没被删除、没被 ignore、也不阻塞提交）', () => {
+    const { repo } = makeRepo()
+    makeNested(repo, 'ClosedRepo')
+    writeFileSync(join(repo, 'a.txt'), 'a\n')
+    expect(settleCommit(repo, 'wip(x): y')).toBeUndefined()
+    expect(existsSync(join(repo, 'ClosedRepo', 'inner.txt'))).toBe(true)
+    expect(existsSync(join(repo, 'ClosedRepo', '.git'))).toBe(true)
+    expect(independentRepoPathsOf(repo)).toEqual(['ClosedRepo'])
   })
 })

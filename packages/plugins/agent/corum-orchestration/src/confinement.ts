@@ -72,6 +72,133 @@ const GIT_WRITE_SUBCOMMANDS = new Set([
 ])
 
 /**
+ * fork（corum）2026-09-27：**仓库级写**的 `git` 子命令——它们改的是**共享的 `.git`**
+ * （refs / 配置 / 其它 worktree / 远端跟踪引用），不是当前 worktree 的私有状态。
+ *
+ * ## 为什么单列一张表（而不是并进 {@link GIT_WRITE_SUBCOMMANDS}）
+ *
+ * 两者的判定后果不同：`GIT_WRITE_SUBCOMMANDS` 只决定「要不要审命令里的绝对路径」，
+ * 而本表决定「**没有**绝对路径时也要拒」。实测依据（2026-09-27 指挥模式会话
+ * `corum-task-56b7d485`，01:11:30）：隔离子会话 `5ddbd46e` 用
+ * `git worktree remove --force .corum-worktrees/wt-471e5f` 与 `git branch -D wt/wt-471e5f`
+ * —— 两条命令**都不含绝对路径**，文本门禁因此放行、只被沙箱拦下；用户点一次「允许一次」
+ * 就真的删掉了主仓的 worktree 与分支（子 Agent 随后不得不自行把分支恢复）。
+ *
+ * 用户裁定（2026-09-27）：「子 Agent 不能操作除自己 worktree 之外的其它分支（可读）」，
+ * 且这一类越界**不可提权获得** ⇒ 必须在门禁层硬拒，而不是留给沙箱 + 审批卡。
+ *
+ * ## 双用途子命令按**只读形态**豁免（否则会误伤裁定的另一半「可读」）
+ *
+ * 本表多数子命令既能读也能写：`git -C <主树> branch --list`、`git worktree list`、
+ * `git config --get`、`git remote -v` 都是**读**，而隔离明说 reads are still allowed
+ * ⇒ 由 {@link isGitReadOnlyForm} 逐个识别只读形态；识别不出写形态的**不拒**。
+ *
+ * ## 刻意**不**进本表的两类
+ *
+ *  · `init` / `clone`：写的是**目标目录**（不是共享 `.git`），且用户 2026-09-27 裁定
+ *    「嵌套新仓是独立产物」⇒ 它们留在 {@link GIT_WRITE_SUBCOMMANDS} 走路径判定：
+ *    `git init foo`（相对路径，落在自己 worktree 内）放行，`git init /仓外/x` 交权限层。
+ *  · `add`/`commit`/`merge`/`checkout`/`switch`/`reset`/`stash`/… ：作用域是**当前
+ *    worktree 自己的** index / HEAD / 分支（子 Agent 必须能提交与合并自己的分支）。
+ */
+const GIT_REPO_GLOBAL_SUBCOMMANDS = new Set([
+  'worktree', 'branch', 'tag', 'config', 'remote', 'submodule', 'update-ref',
+  'symbolic-ref', 'notes', 'replace', 'filter-branch', 'filter-repo',
+  'gc', 'prune', 'repack', 'pack-refs', 'reflog', 'push', 'fetch', 'pull',
+  'sparse-checkout', 'bisect',
+])
+
+/**
+ * 仓库级子命令的**只读形态**识别器（返回 `true` = 这条只是读）。
+ *
+ * 只登记「确定的读」：识别器缺失或未命中 ⇒ 视为写（保守）。`symbolic-ref` 需要数位置
+ * 参数，不走本表（见 {@link isGitReadOnlyForm}）。正则都以 `git <sub>` 所在的**单段**
+ * （{@link shellSegments} 切开后的段）为输入。
+ */
+const GIT_READ_ONLY_FORMS: Readonly<Record<string, (segment: string) => boolean>> = {
+  worktree: segment => /(^|\s)list(\s|$)/.test(segment),
+  branch: segment => /(^|\s)(--list|-l|-a|-r|-v|-vv|--show-current|--contains|--no-contains|--merged|--no-merged|--points-at|--format|--sort|--column)(\s|$)/.test(segment)
+    || /^git\s+branch\s*$/.test(segment),
+  tag: segment => /(^|\s)(-l|--list|--contains|--merged|--points-at|--format|--sort|--column)(\s|$)/.test(segment)
+    || /^git\s+tag\s*$/.test(segment),
+  config: segment => /(^|\s)(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--show-origin|--show-scope)(\s|$)/.test(segment),
+  remote: segment => /(^|\s)(-v|--verbose|show|get-url)(\s|$)/.test(segment) || /^git\s+remote\s*$/.test(segment),
+  submodule: segment => /(^|\s)(status|summary)(\s|$)/.test(segment),
+  notes: segment => /(^|\s)(list|show)(\s|$)/.test(segment) || /^git\s+notes\s*$/.test(segment),
+  reflog: segment => /(^|\s)(show|exists)(\s|$)/.test(segment) || /^git\s+reflog\s*$/.test(segment),
+  'sparse-checkout': segment => /(^|\s)list(\s|$)/.test(segment),
+  bisect: segment => /(^|\s)(log|view|visualize)(\s|$)/.test(segment),
+}
+
+/**
+ * **裸形态即只读**的仓库级子命令：不带位置参数时 git 只是打印列表/用法，不写任何东西。
+ *
+ * 为什么必须单列（2026-09-27 自查到的误伤面）：本表的存在让这些子命令进了「写形态」，
+ * 而写形态在**只读门禁**（指挥模式主 Agent 的只读 shell、研究子会话）下会被拒——
+ * `git config user.email`、`git branch`、`git tag`、`git worktree`、`git remote` 这类
+ * **无 flag 的读法**极常用，误伤一次就白烧一轮往返（本仓已有同类学费记录）。
+ *
+ * ⚠️ 刻意**不**含 `gc` / `prune` / `repack` / `fetch` / `pull` / `push` / `pack-refs` /
+ * `filter-branch` / `filter-repo` / `update-ref`：它们**裸跑就是写**（`git gc` 不传参数
+ * 照样回收对象，`git push` 会把当前分支推上去）。
+ */
+const GIT_BARE_IS_READ = new Set([
+  'branch', 'tag', 'worktree', 'remote', 'notes', 'reflog', 'submodule',
+  'replace', 'sparse-checkout', 'bisect', 'symbolic-ref', 'config',
+])
+
+/**
+ * 该段里的仓库级子命令是否只是**只读形态**。
+ * @param sub - 子命令名（{@link subcommandOf} 的产物）。
+ * @param segment - 该子命令所在的单个 shell 段。
+ */
+function isGitReadOnlyForm(sub: string, segment: string): boolean {
+  // 位置参数自子命令起算（第 1 个元素就是子命令本身），已跳过选项取值。
+  const positionals = positionalsFromSubcommand(segment)
+  // 裸形态（除子命令外没有位置参数）= 打印列表/用法 ⇒ 只读。
+  if (GIT_BARE_IS_READ.has(sub) && positionals.length <= 1) return true
+  if (sub === 'symbolic-ref') {
+    // `git symbolic-ref HEAD` 只打印；带第二个位置参数（`… HEAD refs/heads/x`）才是改引用。
+    // ⚠️ 必须用**跳过选项取值**后的位置参数（`git -C /repo symbolic-ref HEAD` 里的 `/repo`
+    // 是 `-C` 的取值，不是位置参数——首版按 token 数硬数，把这条只读命令误判成写）。
+    return positionals.length <= 2  // [子命令, HEAD]
+  }
+  // `git config <key>` 是读（打印值），`git config <key> <value>` 才写：与 symbolic-ref
+  // 同款的位置参数判据。带显式读 flag 的一律读。
+  if (sub === 'config') {
+    return /(^|\s)(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--show-origin|--show-scope)(\s|$)/.test(segment)
+      || positionals.length <= 2
+  }
+  const reader = GIT_READ_ONLY_FORMS[sub]
+  return reader !== undefined && reader(segment)
+}
+
+/**
+ * 命令里是否出现**仓库级写**（{@link GIT_REPO_GLOBAL_SUBCOMMANDS} 的写形态）。
+ *
+ * 与 {@link detectBashWrite} 同源：后者把它算作一种写形态（于是只读门禁也拦），本函数把
+ * 子命令名单独交出来，供写边界门禁判定「这条无绝对路径的写是否打在共享 `.git` 上」。
+ *
+ * @param command - bash 工具的 `command` 参数原文。
+ * @returns 命中的子命令名；没有时 `undefined`。
+ */
+export function gitRepoSideEffects(command: string): string | undefined {
+  for (const segment of shellSegments(command)) {
+    if (commandWordOf(segment) !== 'git') continue
+    const sub = subcommandOf(segment)
+    if (sub === undefined) continue
+    // ⚠️ 刻意**不**跳过 `GIT_WRITE_SUBCOMMANDS` 的成员：两张表是**重叠**的（`push` / `fetch`
+    // / `pull` / `tag` / `update-ref` / `gc` / `prune` 既改仓库又改共享 `.git`）。首版多写了
+    // 一句 skip，于是 `git push` / `git tag v1` / `git gc` 这些**无绝对路径**的仓库级写
+    // 全部漏判——本文件的新用例当场抓到（6 条红）。
+    if (!GIT_REPO_GLOBAL_SUBCOMMANDS.has(sub)) continue
+    if (isGitReadOnlyForm(sub, segment)) continue
+    return sub
+  }
+  return undefined
+}
+
+/**
  * 「选项 + 取值」形态的选项名（子命令定位必须连带跳过取值）。
  *
  * 刻意**只登记有把握的那几个**（不带取值的短开关一律不进本表，避免把值当选项跳过而
@@ -142,7 +269,7 @@ function commandWordOf(segment: string): string {
 }
 
 /**
- * 段内**第一个非选项词**（= 子命令位置），跳过命令名之后的选项与其取值。
+ * 段内**自子命令起**的全部位置参数（第 1 个元素就是子命令本身），跳过选项与其取值。
  *
  * ## 为什么必须跳过选项（2026-09-22 实测缺陷，**改动前就存在**）
  *
@@ -158,7 +285,7 @@ function commandWordOf(segment: string): string {
  * @param segment - 一条 shell 段（已按运算符切开）。
  * @returns 第一个非选项词；不存在时 `undefined`。
  */
-function subcommandOf(segment: string): string | undefined {
+function positionalsFromSubcommand(segment: string): string[] {
   const tokens = segment.split(/\s+/).filter(Boolean)
   let index = 0
   while (index < tokens.length) {
@@ -169,16 +296,39 @@ function subcommandOf(segment: string): string | undefined {
   }
   // 跳过命令名本身
   index += 1
+  const positionals: string[] = []
   while (index < tokens.length) {
     const token = tokens[index]!
-    if (!token.startsWith('-')) return token
+    if (!token.startsWith('-')) { positionals.push(token); index += 1; continue }
     // `--opt=value` 一体：跳过自身即可
     if (token.startsWith('--') && token.includes('=')) { index += 1; continue }
     // 已知「选项 + 取值」形态：连带跳过取值（`git -C /repo merge` 的关键）
     if (OPTIONS_TAKING_A_VALUE.has(token)) { index += 2; continue }
     index += 1
   }
-  return undefined
+  return positionals
+}
+
+/**
+ * 段内**自子命令起**的全部位置参数（第 1 个元素就是子命令本身），跳过选项与其取值。
+ *
+ * ## 为什么必须跳过选项（2026-09-22 实测缺陷，**改动前就存在**）
+ *
+ * 原实现直接取 `tokens[index + 1]`，于是 `git -C /repo merge` 的「第二个词」是 `-C`
+ * 而不是 `merge` ⇒ {@link detectBashWrite} 判不出这是写形态 ⇒ **`git -C <主树> merge`
+ * 这条越界命令在只读门禁下也从未被拦过**（实测会话 `corum-task-ef3f751e` 的 worker
+ * 正是用它把分支并进了主树）。凡「选项带取值」的形态都会踩中：`git -C /repo`、
+ * `git --git-dir=/repo/.git`、`rm -rf /repo/x`（`rm` 靠命令名已能判，但同类形态一致处理）。
+ *
+ * 判据：跳过 `-x` 短选项；**已知带取值的全局选项**（`-C` / `--git-dir` / `--work-tree`
+ * 等）连带跳过它的值；`--opt=value` 是一体，直接跳过自身。实现与
+ * {@link positionalsFromSubcommand} 同源（本函数取它的第一个元素）。
+ *
+ * @param segment - 一条 shell 段（已按运算符切开）。
+ * @returns 第一个非选项词；不存在时 `undefined`。
+ */
+function subcommandOf(segment: string): string | undefined {
+  return positionalsFromSubcommand(segment)[0]
 }
 
 /**
@@ -224,6 +374,15 @@ export function detectBashWrite(command: string): string | undefined {
 
     if (word === 'git' && sub !== undefined && GIT_WRITE_SUBCOMMANDS.has(sub)) {
       return `\`git ${sub}\` changes the repository`
+    }
+    // fork（corum）2026-09-27：**仓库级写**（共享 `.git`：refs / 其它 worktree / 配置）。
+    // 它必须算写形态，否则「无绝对路径 ⇒ 放行」这条会把 `git worktree remove --force x`
+    // 与 `git branch -D wt/x` 直接放过（实测 2026-09-27 会话 corum-task-56b7d485 的
+    // 01:11:30 事件）。只读形态（`branch --list` / `worktree list` / `config --get` …）
+    // 仍然放行——隔离不限制读。
+    if (word === 'git' && sub !== undefined && GIT_REPO_GLOBAL_SUBCOMMANDS.has(sub)
+      && !isGitReadOnlyForm(sub, segment)) {
+      return `\`git ${sub}\` changes the shared repository`
     }
     if (PACKAGE_COMMANDS.has(word) && sub !== undefined && PACKAGE_WRITE_SUBCOMMANDS.has(sub)) {
       return `\`${word} ${sub}\` installs or modifies dependencies`
@@ -283,44 +442,128 @@ export function absolutePathsIn(command: string): string[] {
 }
 
 /**
- * 构造一个**隔离子会话**的写边界门禁（agent-scoped `tools.guard`）。
+ * 越界种类——**唯一**区分「哪条轴」的词汇表（用户 2026-09-27 裁定）。
  *
- * ## 判定
- * - **变异工具**（`write`/`edit`/`str_replace_editor`）：路径参数 resolve 后落在
- *   边界外 ⇒ 拒绝。
- * - **shell**（`bash`/`pwsh`）：先过 {@link detectBashWrite}——只读命令一律放行
- *   （隔离**不**限制读，通知里明说「reads are still allowed for reference」）；
- *   写形态再要求命令里**没有**越界的绝对路径 / 家目录简写 ⇒ 否则拒绝。
- * - 其余工具：不表态（abstain）。
+ * - `parent-tree`：目标落在**当前仓库**里（含共享 `.git`、其它 worktree、其它分支），
+ *   或是一次作用于共享 `.git` 的仓库级写。⇒ **硬拒，且不可提权获得**。
+ * - `outside`：目标在当前仓库**之外**（另一个仓、家目录、系统路径……）。隔离的用意是
+ *   「并发改写不互相踩」，与「能不能碰仓外的东西」是**两条正交的轴** ⇒ 这里只报告种类，
+ *   由沙箱与审批决定（**可提权**），门禁本身**弃权**。
  *
- * ## 为什么不把 `<repo>/.git` 数据目录加进允许集
- *
- * 子会话**必须能提交**（`git add/commit` 要写 `<repo>/.git` 的数据目录），而那是
- * worktree 之外。但它的实现方式是：git 自己按内部记录去写，**命令文本里不出现**
- * 那些绝对路径（`git add -A` 没有任何绝对路径）⇒ 走「无绝对路径 ⇒ 放行」这条。
- * 而 `git -C <主树> merge` **会**把主树路径写进命令文本 ⇒ 被拦。
- * 若把 `.git` 数据目录加进允许集，`git -C <主树> …` 就会因为主树路径不在 `.git`
- * 下而被拒——仍拦得住；但 `<repo>/.git` 的**授权语义**属于 `@corum/corum-sandbox-local`
- * 那层（它有明确的安全评审与「不给 config/hooks」的边界，见 `docs/fork-delta.md` §15），
- * 本门禁不复制那份名单，避免两处名单漂移。
- *
- * @param options.worktreeRoot - 隔离子会话的 worktree 根（= 子会话 `header.cwd`）。
- * @param options.parentTreeRoot - 委派方的**主工作树**根（隔离要保护的对象）。
- *   **拒绝优先于允许**：它即便落在临时区之内（工作区就建在 /tmp 下的场景）也照样被拒——
- *   否则临时区允许集会把它一起放行，门禁等于没装（本仓测试环境正是这种形态）。
- * @returns 门禁函数；放行返回 `undefined`，拒绝返回可操作的拒绝文案。
+ * 两层的策略因此共用同一个判定（单一事实源，规范 §4a 的「两处对账」纪律）：
+ * {@link confinementGuard} 只拒 `parent-tree`；`corum-subagent` 的提权应答器对
+ * `parent-tree` 直接 refuse（连审批卡都不出，会话级授权也豁免不了）。
  */
-export function confinementGuard(options: {
+export type ConfinementViolationKind = 'parent-tree' | 'outside'
+
+/** 一次越界判定（`undefined` = 不表态：非写形态 / 无越界目标）。 */
+export interface ConfinementViolation {
+  readonly kind: ConfinementViolationKind
+  /** 可读原因（既用于拒绝文案，也用于测试断言；不含「isolated child:」前缀）。 */
+  readonly reason: string
+}
+
+/** 写边界门禁的作用域。 */
+export interface ConfinementScope {
+  /** 隔离子会话的 worktree 根（= 子会话 `header.cwd`）。 */
   readonly worktreeRoot: string
+  /** 委派方的**主工作树**根（隔离要保护的对象）；缺省时退化为「只有 worktree 边界」。 */
   readonly parentTreeRoot?: string | undefined
-}): (execution: {
+}
+
+/** 一条 shell 命令里的写目标（供门禁判定与单测直接驱动）。 */
+export interface ConfinementExecution {
   readonly name: string
   readonly arguments?: unknown
-}) => string | undefined {
-  const root = path.resolve(options.worktreeRoot)
-  const parentTree = options.parentTreeRoot === undefined || options.parentTreeRoot === ''
+}
+
+/**
+ * 取出命令里 `cd` / `pushd` 的**目标序列**（按段出现顺序，从 `start` 起算）。
+ *
+ * ## 为什么必须自己跟踪 cwd（2026-09-27 实测的漏判）
+ *
+ * 旧口径只看「命令文本里出现的**绝对路径**」，理由是「子会话 cwd 就是 worktree，相对路径
+ * 天然在界内」。该前提在 `cd` 之后就失效了：实测越界命令**三条全都以
+ * `cd /Users/kukucai/work/kkc-desktop` 开头**，随后的 `git worktree remove --force
+ * .corum-worktrees/wt-471e5f` 用的是**相对路径** ⇒ 绝对路径列表为空 ⇒ 门禁放行
+ * （`git worktree` 当时还不在任何写名单里，两道一起漏）。
+ *
+ * 于是：`cd` 到主仓（含 `cd ../..` 这类穿越）**本身**就是越界信号——它让后续所有相对
+ * 路径写都落在主仓里。目标按 `path.resolve(当前 cwd, 参数)` 逐个解析，`~` / `$HOME`
+ * 记成哨兵 `'~'`（与 {@link absolutePathsIn} 同一口径），`cd -` 等无法词法解析的形态
+ * 保守地也记 `'~'`。
+ *
+ * @param command - bash 工具的 `command` 参数原文。
+ * @param start - 起始 cwd（隔离子会话 = worktree 根）。
+ * @returns 解析后的 `cd` 目标序列（可能为空）。
+ */
+function cdTargetsOf(command: string, start: string): string[] {
+  const targets: string[] = []
+  let cwd = start
+  for (const segment of shellSegments(command)) {
+    // 子 shell / 代码块形态 `(cd x && …)`、`{ cd x; …; }`：剥掉前导括号再取命令词。
+    const bare = segment.replace(/^[({]+/, '').trim()
+    const word = commandWordOf(bare)
+    if (word !== 'cd' && word !== 'pushd') continue
+    const arg = bare.split(/\s+/).filter(Boolean).slice(1).find(token => !token.startsWith('-'))
+    if (arg === undefined || arg === '-' || arg === '~' || arg.startsWith('~/')
+      || arg === '$HOME' || arg.startsWith('$HOME/') || arg.startsWith('${HOME}')) {
+      targets.push('~')
+      cwd = '~'
+      continue
+    }
+    if (!arg.startsWith('/')) {
+      if (cwd === '~') { targets.push('~'); continue }
+      cwd = path.resolve(cwd, arg)
+      targets.push(cwd)
+      continue
+    }
+    cwd = path.resolve(arg)
+    targets.push(cwd)
+  }
+  return targets
+}
+
+/**
+ * 一条 shell 命令的全部写目标候选 = 显式绝对路径 / 家目录简写（{@link absolutePathsIn}）
+ * + `cd` 目标（{@link cdTargetsOf}）。去重，顺序保留。
+ */
+function writeTargetsOf(command: string, start: string): string[] {
+  const seen = new Set<string>(absolutePathsIn(command))
+  for (const target of cdTargetsOf(command, start)) seen.add(target)
+  return [...seen]
+}
+
+/**
+ * **隔离子会话写边界的唯一判定**（用户 2026-09-27 裁定后的两轴口径）。
+ *
+ * ## 判定
+ *
+ * - **变异工具**（`write`/`edit`/`str_replace_editor`）：路径参数 resolve 后落在
+ *   `parentTreeRoot` 内 ⇒ `parent-tree`；落在 worktree 与临时区之外 ⇒ `outside`。
+ * - **shell**（`bash`/`pwsh`）：先过 {@link detectBashWrite}——**只读命令一律不表态**
+ *   （隔离不限制读，通知里明说「reads are still allowed for reference」）；
+ *   写形态再逐个审写目标：`parent-tree` 优先于 `outside`（多目标命令里只要有一个打在
+ *   主仓上，整条就必须按硬线处理——否则 `cp 仓外 主仓` 会因先命中仓外而变成可提权）。
+ * - **无越界目标的仓库级写**（{@link gitRepoSideEffects}）：`git branch -D` / `git worktree
+ *   remove` / `git push` 这类改共享 `.git` 的命令**文本里没有绝对路径**，却作用于主仓
+ *   的其它分支与 worktree ⇒ `parent-tree`。唯一的例外是命令先 `cd` 进了 worktree 的
+ *   **子孙目录**（例如 worktree 内新建的独立仓，用户裁定它是独立产物）——那时
+ *   `git config` 打的是那个仓自己的 `.git`，门禁不表态，交由沙箱按路径判定。
+ * - 其余工具：不表态（abstain）。
+ *
+ * @param scope - 作用域（worktree 根 + 主树根）。
+ * @param execution - 一次工具调用（工具名 + 参数）。
+ * @returns 越界判定；不表态时 `undefined`。
+ */
+export function confinementViolation(
+  scope: ConfinementScope,
+  execution: ConfinementExecution,
+): ConfinementViolation | undefined {
+  const root = path.resolve(scope.worktreeRoot)
+  const parentTree = scope.parentTreeRoot === undefined || scope.parentTreeRoot === ''
     ? undefined
-    : path.resolve(options.parentTreeRoot)
+    : path.resolve(scope.parentTreeRoot)
   // 允许集与官方 `writableRoots` 的「workspace + /tmp + tmpdir」口径一致：在 /tmp 造
   // fixture 是 build/test 的常见需要，拦它只会制造误伤。真正的边界仍是沙箱（fix 1）。
   const allowed = [root, ...confinementTempRoots()]
@@ -328,41 +571,116 @@ export function confinementGuard(options: {
   /** 主工作树**优先于**允许集：工作区在临时区里时，临时允许不能把它一起放行。 */
   const inParentTree = (candidate: string): boolean =>
     parentTree !== undefined && isPathInside(candidate, parentTree) && !isPathInside(candidate, root)
-  const deny = (what: string): string =>
-    `isolated child: ${what} — writes are confined to your worktree (${root}). `
-    + 'Commit your work on your own branch inside the worktree; the parent (or the mechanism\'s integrator) merges it '
-    + 'into the main tree. Do not write, redirect into, or run git commands against the parent working tree.'
+
+  const args = execution.arguments
+  const argRecord = typeof args === 'object' && args !== null ? args as Record<string, unknown> : undefined
+
+  const pathArgs = MUTATION_TOOL_PATH_ARGS[execution.name]
+  if (pathArgs !== undefined && argRecord !== undefined) {
+    let outside: ConfinementViolation | undefined
+    for (const key of pathArgs) {
+      const value = argRecord[key]
+      if (typeof value !== 'string' || value === '') continue
+      const resolved = path.resolve(root, value)
+      if (inParentTree(resolved)) {
+        return { kind: 'parent-tree', reason: `${execution.name} targets "${value}" in the parent working tree` }
+      }
+      if (!inside(resolved)) {
+        outside ??= { kind: 'outside', reason: `${execution.name} targets "${value}" outside the worktree` }
+      }
+    }
+    return outside
+  }
+
+  if (execution.name === 'bash' || execution.name === 'pwsh') {
+    const command = argRecord?.['command']
+    if (typeof command !== 'string' || command === '') return undefined
+    const writeForm = detectBashWrite(command)
+    if (writeForm === undefined) return undefined
+    let outside: ConfinementViolation | undefined
+    for (const candidate of writeTargetsOf(command, root)) {
+      if (candidate === '~') {
+        return { kind: 'parent-tree', reason: `${writeForm} targets the home directory` }
+      }
+      if (inParentTree(candidate)) {
+        return { kind: 'parent-tree', reason: `${writeForm} targets "${candidate}" in the parent working tree` }
+      }
+      if (!inside(candidate)) {
+        outside ??= { kind: 'outside', reason: `${writeForm} targets "${candidate}" outside the worktree` }
+      }
+    }
+    const global = gitRepoSideEffects(command)
+    if (global !== undefined) {
+      const cwd = cdTargetsOf(command, root).at(-1)
+      // `cd` 到 worktree 的**子孙目录**（worktree 内新建的独立仓）不予判定——用户裁定
+      // 「嵌套新仓是独立产物」；那时 `git config` 等打的是那个仓自己的 `.git`。
+      const intoDescendant = cwd !== undefined && cwd !== '~' && cwd !== root && isPathInside(cwd, root)
+      if (!intoDescendant) {
+        return {
+          kind: 'parent-tree',
+          reason: `\`git ${global}\` changes the shared repository (other branches/worktrees of the parent tree)`,
+        }
+      }
+    }
+    return outside
+  }
+
+  return undefined
+}
+
+/**
+ * 构造一个**隔离子会话**的写边界门禁（agent-scoped `tools.guard`）。
+ *
+ * ## 判定（2026-09-27 两轴口径）
+ *
+ * 判定本体在 {@link confinementViolation}（单一事实源，提权应答器复用同一份）。本函数只
+ * 负责**策略**：`parent-tree` ⇒ 返回拒绝文案（硬拒，不可提权）；`outside` ⇒ **弃权**
+ * （返回 `undefined`，交给沙箱与审批 = 权限轴，可提权获得）。
+ *
+ * ## 与提权应答器的分工
+ *
+ * 本门禁是**文本/路径启发式**的一层（快、无 syscall），强边界仍是沙箱（fix 1，隔离期
+ * 子会话档位被钉成 `workspace-write`）。提权应答器复用同一判定，把「主仓目标」的提权
+ * 请求直接 refuse —— 于是「不可提权获得」这条不依赖本门禁是否判出那条命令。
+ *
+ * ## 为什么不把 `<repo>/.git` 数据目录加进允许集
+ *
+ * 子会话**必须能提交**（`git add/commit` 要写 `.git` 的数据目录），而那是 worktree 之外。
+ * 但它的实现方式是：git 自己按内部记录去写，**命令文本里不出现**那些绝对路径
+ * （`git add -A` 没有任何绝对路径）⇒ 走「无越界目标 ⇒ 放行」这条。而 `git -C <主树> merge`
+ * **会**把主树路径写进命令文本 ⇒ 被拦。若把 `.git` 数据目录加进允许集，
+ * `git -C <主树> …` 就会因为主树路径不在 `.git` 下而被拒——仍拦得住；但 `<repo>/.git`
+ * 的**授权语义**属于 `@corum/corum-sandbox-local` 那层（它有明确的安全评审与「不给
+ * config/hooks」的边界，见 `docs/fork-delta.md` §15），本门禁不复制那份名单，避免两处漂移。
+ *
+ * ## 已知残余缺口（如实标注，别当成已闭合）
+ *
+ * 判定基于命令文本。刻意混淆路径的写法（`$(pwd)/../..`、拼字符串、`env F=/repo cmd $F`）
+ * 判不出来 ⇒ 彼时靠沙箱拦（它会拒），但**沙箱那一层的提权是用户可批的** ⇒ 这类形态
+ * 仍有「用户误批一次就放行」的窗口。要真正闭合需要在沙箱 fork 里按真实路径禁写主仓
+ * （`docs/fork-delta.md` §15 的授权面），不在本轮范围。
+ *
+ * @param options.worktreeRoot - 隔离子会话的 worktree 根（= 子会话 `header.cwd`）。
+ * @param options.parentTreeRoot - 委派方的**主工作树**根（隔离要保护的对象）。
+ *   **拒绝优先于允许**：它即便落在临时区之内（工作区就建在 /tmp 下的场景）也照样被拒——
+ *   否则临时区允许集会把它一起放行，门禁等于没装（本仓测试环境正是这种形态）。
+ * @returns 门禁函数；放行返回 `undefined`，拒绝返回可操作的拒绝文案。
+ */
+export function confinementGuard(
+  options: ConfinementScope,
+): (execution: ConfinementExecution) => string | undefined {
+  const root = path.resolve(options.worktreeRoot)
   return (execution) => {
-    const args = execution.arguments
-    const argRecord = typeof args === 'object' && args !== null ? args as Record<string, unknown> : undefined
-
-    const pathArgs = MUTATION_TOOL_PATH_ARGS[execution.name]
-    if (pathArgs !== undefined && argRecord !== undefined) {
-      for (const key of pathArgs) {
-        const value = argRecord[key]
-        if (typeof value !== 'string' || value === '') continue
-        const resolved = path.resolve(root, value)
-        if (inParentTree(resolved)) return deny(`${execution.name} targets "${value}" in the parent working tree`)
-        if (!inside(resolved)) return deny(`${execution.name} targets "${value}" outside the worktree`)
-      }
-      return undefined
-    }
-
-    if (execution.name === 'bash' || execution.name === 'pwsh') {
-      const command = argRecord?.['command']
-      if (typeof command !== 'string' || command === '') return undefined
-      const writeForm = detectBashWrite(command)
-      // 只读命令一律放行：隔离限制的是「写」，通知里明说 reads are still allowed。
-      if (writeForm === undefined) return undefined
-      for (const candidate of absolutePathsIn(command)) {
-        if (candidate === '~') return deny(`${writeForm} — the command targets the home directory`)
-        if (inParentTree(candidate)) return deny(`${writeForm} — the command targets "${candidate}" in the parent working tree`)
-        if (!inside(candidate)) return deny(`${writeForm} — the command targets "${candidate}" outside the worktree`)
-      }
-      return undefined
-    }
-
-    return undefined
+    const violation = confinementViolation(options, execution)
+    // 只拒「当前仓库」这一条轴。仓外目标**弃权**（返回 undefined），交给沙箱 + 审批 =
+    // 权限轴（可提权获得）——用户 2026-09-27 裁定：隔离的用意是「并发改写不互相踩」，
+    // 与「能不能碰仓外的东西」是两条正交的轴。旧口径把两者一起硬拒，实测代价是整个
+    // 跨仓任务无法完成（会话 corum-task-56b7d485：子 Agent 带 danger-full-access 重试
+    // 两次仍被同一句驳回，机制只能把搬运外包给用户，其中一条配方还因 /tmp 被回收而失效）。
+    if (violation === undefined || violation.kind !== 'parent-tree') return undefined
+    return `isolated child: ${violation.reason} — writes are confined to your worktree (${root}). `
+      + 'Commit your work on your own branch inside the worktree; the parent (or the mechanism\'s integrator) merges it '
+      + 'into the main tree. Do not write, redirect into, or run git commands against the parent working tree.'
   }
 }
 

@@ -165,3 +165,61 @@ describe('escalationAskCopy —— 上呈用户时的文案（host 是唯一事�
     expect(escalationAskCopy('workspace-write', '').reason).toContain('no reason given')
   })
 })
+
+/**
+ * fork（corum）2026-09-27：**主仓目标不可提权**（用户裁定：「子 Agent 不能操作除自己
+ * worktree 之外的其它分支（可读）」，且这一类越界无法提权获得）。
+ *
+ * 由来：会话 `corum-task-56b7d485` 的 01:11:30 事件——隔离子会话 `5ddbd46e` 用
+ * `git worktree remove --force .corum-worktrees/wt-471e5f` 与 `git branch -D wt/wt-471e5f`
+ * （**两条命令里都没有绝对路径**）拿到一次「允许一次」后，真的删掉了主仓的 worktree 与
+ * 分支。修法：判定层识别「打在当前仓库上」⇒ `refuse`，连审批卡都不出。
+ */
+describe('★ 主仓目标的提权一律 refuse（2026-09-27 用户裁定）', () => {
+  const scope = { worktreeRoot: '/repo/.corum-worktrees/wt-abc123', parentTreeRoot: '/repo' }
+  const escalate = (command: string) => ({
+    sandbox_permissions: 'danger-full-access',
+    command,
+    justification: '需要清理遗留工作树',
+  })
+
+  const inParentTree: readonly string[] = [
+    'git worktree remove --force .corum-worktrees/wt-471e5f',
+    'git branch -D wt/wt-471e5f',
+    'cd /repo && git worktree remove --force .corum-worktrees/wt-x',
+    'rm -rf /repo/packages/x',
+    'echo hi > /repo/f.txt',
+  ]
+  for (const command of inParentTree) {
+    it(`refuse：${command}`, () => {
+      // 父档位给到最宽也不放行——这条线不吃权限档位。
+      const { parent } = makeParent('danger-full-access')
+      const r = adjudicateEscalation(
+        { parent, hardCeiling: 'danger-full-access', confinement: scope, logger: { warn: () => {} } },
+        [toolCall('c', escalate(command))],
+        'c',
+      )
+      expect(r?.verdict).toEqual({ kind: 'refuse', reason: 'parent-tree' })
+    })
+  }
+
+  it('★ 仓外目标仍走正常判定（T1：那是权限轴，可以提权获得）', () => {
+    const { parent } = makeParent('workspace-write')
+    const r = adjudicateEscalation(
+      { parent, hardCeiling: 'danger-full-access', confinement: scope, logger: { warn: () => {} } },
+      [toolCall('c', escalate('mkdir -p /Users/kukucai/work/Corum-Harness-Project'))],
+      'c',
+    )
+    expect(r?.verdict).toEqual({ kind: 'ask-user', reason: 'exceeds-parent-mode' })
+  })
+
+  it('★ 未给 confinement（集成者 / 主树子 Agent / 只读研究）⇒ 行为与改动前一致', () => {
+    const { parent } = makeParent('workspace-write')
+    const r = adjudicateEscalation(
+      { parent, hardCeiling: 'danger-full-access', logger: { warn: () => {} } },
+      [toolCall('c', escalate('git worktree remove --force .corum-worktrees/wt-x'))],
+      'c',
+    )
+    expect(r?.verdict).toEqual({ kind: 'ask-user', reason: 'exceeds-parent-mode' })
+  })
+})

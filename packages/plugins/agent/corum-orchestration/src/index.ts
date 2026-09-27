@@ -106,9 +106,17 @@ export {
   absolutePathsIn,
   confinementGuard,
   confinementTempRoots,
+  confinementViolation,
   detectBashWrite,
+  gitRepoSideEffects,
   isPathInside,
   stripQuoted,
+} from './confinement.ts'
+export type {
+  ConfinementExecution,
+  ConfinementScope,
+  ConfinementViolation,
+  ConfinementViolationKind,
 } from './confinement.ts'
 export type {
   CorumWorktreeChild,

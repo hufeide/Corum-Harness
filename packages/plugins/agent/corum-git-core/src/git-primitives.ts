@@ -237,15 +237,104 @@ export interface SettleCommitFailure {
 export function settleCommit(path: string, subject: string): SettleCommitFailure | undefined {
   if (!existsSync(path)) return undefined
   if (!hasEffectiveChanges(path)) return undefined
-  const added = runGitSync(path, ['add', '-A'])
+  // fork（corum）2026-09-27（用户裁定）：**独立嵌套 git 仓不进本仓的自动提交**——见
+  // {@link independentRepoPathsOf} 记录的那两次实测污染（gitlink 幽灵 submodule + 36 个
+  // 闭源文件进了开源仓历史）。有它时用 `:(exclude)` 逐条排除，并在提交信息里点名。
+  const independent = independentRepoPathsOf(path)
+  const added = runGitSync(path, independent.length === 0
+    ? ['add', '-A']
+    : ['add', '-A', '--', '.', ...independent.map(dir => `:(exclude)${dir}`)])
   if (added.code !== 0) return { path, reason: `git add failed: ${added.stderr.trim()}` }
+  // 纵深兜底：即便排除没命中（嵌套仓此前已被跟踪、或形态超出词法判据），也绝不让一条
+  // **gitlink**（mode 160000）进入收口提交——它是「另一个仓的指针」，不是本仓的文件。
+  const gitlinks = stagedGitlinkPathsOf(path)
+  if (gitlinks.length > 0) {
+    runGitSync(path, ['rm', '--cached', '-q', '--', ...gitlinks])
+  }
+  const message = independent.length === 0 && gitlinks.length === 0
+    ? subject
+    : `${subject}\n\nExcluded from this commit — independent nested git repositories are separate artifacts, not part of this one: ${[...independent, ...gitlinks].join(', ')}`
   const committed = runGitSync(path, [
     '-c', 'user.name=corum',
     '-c', 'user.email=corum@localhost',
-    'commit', '--no-verify', '-m', subject,
+    'commit', '--no-verify', '-m', message,
   ])
   if (committed.code === 0) return undefined
   return { path, reason: `git commit failed: ${committed.stderr.trim()}` }
+}
+
+/**
+ * fork（corum）2026-09-27：工作区里**独立嵌套 git 仓**的顶层路径（收口提交要排除的对象）。
+ *
+ * ## 为什么必须排除（实测：一次 gitlink 污染 + 一次真正的历史泄漏）
+ *
+ * `git add -A` 遇到「目录里有自己的 `.git`」时**不递归**，而是把它记成一条 **gitlink**
+ * （mode 160000，submodule 指针）。实测（会话 `corum-task-56b7d485`）：
+ *   · `cdb58d5 wip(isolated): auto-commit on settle` 把子 Agent 在 worktree 里新建的闭源仓
+ *     记成 gitlink；随后 `dcf5082 port wt/wt-471e5f` 把它搬进**开源仓主树的索引**（一条连
+ *     `.gitmodules` 都没有的幽灵 submodule）；
+ *   · `456d3ef` 更严重：同一个机制把剥离产物的 **36 个文件**提交进了开源仓，进了 `main`
+ *     的祖先链——后来只能 `git filter-repo` 重写未推送段的历史才清掉。
+ *
+ * 用户 2026-09-27 裁定：**嵌套新仓是独立产物**——子 Agent 建它、处理它、上报它，之后主
+ * Agent 再针对**那个仓**派隔离子 Agent。它不该被父仓的自动提交收编 ⇒ 本函数把它们找出来，
+ * 交给 {@link settleCommit} 排除并在提交信息里点名（可追责、可追溯）。
+ *
+ * 判据刻意只认「**未跟踪**的顶层目录 + 其下有 `.git`」：已跟踪的 gitlink 属历史遗留状态，
+ * 由集成侧另一道（`corumPortBranchDiff` 拒收仍带 gitlink 的分支）负责，不在这里静默改写索引。
+ *
+ * @param path - 目标 git 工作区。
+ * @returns 相对路径（去尾斜杠）数组；无独立仓时为空数组。
+ */
+export function independentRepoPathsOf(path: string): string[] {
+  if (!existsSync(path)) return []
+  let porcelain = ''
+  try {
+    porcelain = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], {
+      cwd: path,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch {
+    return []
+  }
+  const found = new Set<string>()
+  for (const line of porcelain.split('\n')) {
+    const text = line.trim()
+    if (!text.startsWith('??')) continue
+    const target = text.slice(2).trim().replace(/^"|"$/g, '').replace(/\/+$/, '')
+    // 只看顶层条目：`-unormal` 对含 `.git` 的目录只列顶层一行；带斜杠的条目属于更深层。
+    if (target === '' || target.includes('/')) continue
+    if (existsSync(join(path, target, '.git'))) found.add(target)
+  }
+  return [...found]
+}
+
+/**
+ * 已被 add 进索引的**gitlink**（mode 160000）路径（收口提交的纵深兜底）。
+ * @param path - 目标 git 工作区。
+ * @returns 路径数组（`git diff --cached --raw` 里 old/new 任一模式为 160000）。
+ */
+function stagedGitlinkPathsOf(path: string): string[] {
+  try {
+    const raw = execFileSync('git', ['diff', '--cached', '--raw'], {
+      cwd: path,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const out: string[] = []
+    for (const line of raw.split('\n')) {
+      const text = line.trim()
+      if (!text.startsWith(':')) continue
+      const [meta, file] = text.split('\t')
+      const fields = (meta ?? '').slice(1).split(' ')
+      if (fields[0] !== '160000' && fields[1] !== '160000') continue
+      if (file !== undefined && file !== '') out.push(file)
+    }
+    return out
+  } catch {
+    return []
+  }
 }
 
 /**

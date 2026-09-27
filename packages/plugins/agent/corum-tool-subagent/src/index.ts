@@ -617,7 +617,7 @@ type ForegroundToolResult = {
    * 以为完事」当默认结局，工作静默搁浅（作者本人 2026-09-18 就这么中招：两次隔离委派都
    * 没被提醒，手工 cherry-pick 收尾，机制台账从未翻成 integrated）。故现在**两档都报**。
    */
-  readonly isolationBoundary?: 'worktree' | 'skipped-non-git'
+  readonly isolationBoundary?: 'worktree' | 'skipped-non-git' | 'main-requested'
 }
 
 /**
@@ -1129,7 +1129,7 @@ export function corumSandboxEscalationLines(): string[] {
     'SANDBOX DENIALS AND ESCALATION:',
     '- A blocked file operation reports a `[sandbox: file access denied under <mode> mode]` marker. That is a policy decision, not a failure of the command: read the marker instead of assuming the denial.',
     '- When a wider mode would let the command succeed, retry the exact same command once, in the same turn, with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. In a session whose approval policy is `ask` that retry raises the approval prompt, and the user\'s answer to it is the consent — do not detour through chat to ask first.',
-    '- In a DELEGATED CHILD session the retry IS adjudicated: the mechanism grants it when it stays within what the delegating agent itself holds, and otherwise puts the request in front of the user. Your scope also has a hard limit it can never widen — a read-only or isolated scope stays exactly as it was delegated. So attempt the retry; if it is refused, that refusal is final: report it as a conclusion in your final report so the caller sees it, instead of reworking around it or waiting for an approval that cannot come.',
+    '- In a DELEGATED CHILD session the retry IS adjudicated, and there are exactly three outcomes. It is granted outright when it stays within what the delegating agent itself holds. Otherwise the request is put in front of the user. And it is **refused without any prompt** when the command targets the CURRENT repository — its other branches, worktrees, refs or shared `.git` — because a delegated child may READ that repository but never write outside its own worktree; that refusal is not negotiable, and a session-wide "always allow" cannot lift it. So do retry with `sandbox_permissions` for anything OUTSIDE this repository (another repository, `/tmp`, a system path): that is the axis where permission can be granted. For the current repository do not retry at all — there is no card to wait for. Your scope also has a hard limit it can never widen — a read-only or isolated scope stays exactly as it was delegated. Either way a refusal is final for that command: report it as a conclusion in your final report so the caller sees it, instead of reworking around it or waiting for an approval that cannot come.',
     '- Escalate only from a real denial, never speculatively. If the session states that approval prompts are disabled, a denial is final: do not set `sandbox_permissions`.',
     '- A rejected escalation is final for that command: stop and explain it instead of working around it. It does not forbid attempting or escalating other commands later.',
   ]
@@ -1257,6 +1257,75 @@ export function corumRunInBackgroundDescription(options: { readonly continuable:
   return options.continuable
     ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it — but note a foreground run is one-shot and TERMINAL when it settles: you cannot `send_message` it afterwards.'
     : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.'
+}
+
+/**
+ * fork（corum）2026-09-27（用户裁定 A）：`isolation` 参数的**词汇表**——两组取值共用一个键。
+ *
+ * - `'worktree'`（默认）/ `'main'`：**这次在哪工作**（`'main'` = 直接在主工作树，不建
+ *   worktree、不需要 integrate）；
+ * - `'always'` / `'write-tasks'`：**档位语义**（非写任务要不要也隔离）。写任务恒隔离，
+ *   这组值改不了它（invariant ⑤）。
+ *
+ * 两组取值不重叠，故不必让模型记两个键。
+ */
+export type CorumIsolationValue = 'worktree' | 'main' | 'always' | 'write-tasks'
+
+/**
+ * fork（corum）2026-09-27（用户裁定 A）：把模型声明的隔离意图解析成**两个正交维度**，并在
+ * 派发**之前**拦住结构性矛盾。
+ *
+ * ## 为什么需要它（实测病根，会话 corum-task-56b7d485）
+ *
+ * 主 Agent 想让子 Agent 去主树 / 跨仓落盘、甚至合并分支，但它能表达的只有「派一个
+ * `subagent`」，于是机制照 invariant ⑤ 建了隔离 worktree：20 次派发里有 4 个零提交的撞墙
+ * 子会话，3 次把搬运外包给用户。用户裁定：「有问题的是之前的主 Agent 指派子 Agent 时传入的
+ * 参数不合适」⇒ 让意图**可表达**，并让矛盾在派发前就报错。
+ *
+ * ## 两个维度
+ *
+ * - `mode`（`'always' | 'write-tasks'`，可缺省）：档位语义，缺省 = 用调用方默认档。
+ * - `placement`（`'worktree' | 'main'`）：这次在哪工作。
+ *
+ * ## 结构性矛盾 fail loud（而不是让子 Agent 去撞墙）
+ *
+ * `integrate: true` 走**集成者**路线（在主树合并 + verify + 提交），本身就不建 worktree。
+ * 此时再声明 `isolation` 的任何取值都说明调用方混淆了两条路线 ⇒ 直接抛错，并把「你到底想
+ * 要哪条」写进错误文本（这是本场最贵的那类浪费：白派一个子 Agent 去撞隔离墙）。
+ *
+ * @param request - 模型声明的 `integrate` / `isolation` 原文（未校验）。
+ * @returns `{ mode, placement, integrator }`。
+ * @throws 取值不在词汇表内，或与 `integrate: true` 结构性矛盾时。
+ */
+export function corumResolveIsolationRequest(request: {
+  readonly integrate?: boolean
+  readonly isolation?: unknown
+}): {
+  readonly mode?: 'always' | 'write-tasks'
+  readonly placement: 'worktree' | 'main'
+  readonly integrator: boolean
+} {
+  const raw = request.isolation
+  if (raw !== undefined && raw !== 'always' && raw !== 'write-tasks' && raw !== 'worktree' && raw !== 'main') {
+    throw new Error(
+      `isolation must be one of "worktree" (default), "main", "always", "write-tasks" — got ${JSON.stringify(raw)}. `
+      + 'Pass "main" when the child must write in your MAIN working tree or in another repository.',
+    )
+  }
+  const integrator = request.integrate === true
+  if (integrator && raw !== undefined) {
+    throw new Error(
+      'integrate: true already runs the child as the INTEGRATOR on your main working tree (it merges the isolated '
+      + `branches, verifies and commits) — do not also pass isolation: ${JSON.stringify(raw)}. `
+      + 'If you want the child to do main-tree/cross-repository WORK (not integration), drop `integrate` and pass '
+      + 'isolation: "main"; if you want its isolated branch merged, drop `isolation` and keep integrate: true.',
+    )
+  }
+  return {
+    ...raw === 'always' || raw === 'write-tasks' ? { mode: raw } : {},
+    placement: raw === 'main' ? 'main' : 'worktree',
+    integrator,
+  }
 }
 
 interface DelegationRunRequest {
@@ -1796,8 +1865,10 @@ export function apply(ctx: Context, config: Config): void {
         run_in_background?: boolean
         integrate?: boolean
         verify?: string
-        // fork（corum）：orchestrate 任务级隔离/只读覆盖（subagent 工具不传，用配置终值）。
-        taskIsolation?: 'always' | 'write-tasks'
+        // fork（corum）2026-09-27：**逐次派发的隔离声明**（subagent 的 `isolation` 参数与
+        // orchestrate 任务的同名键共用）。`'main'` = 直接在主工作树工作（不建 worktree）；
+        // `'always'|'write-tasks'` = 档位语义。解析与矛盾拦截见 corumResolveIsolationRequest。
+        isolation?: CorumIsolationValue
         taskResearch?: boolean
         // fork（corum）：本次调用内的 fan-out 任务数（并发感知隔离信号①；
         // subagent 工具不传 = 1）。
@@ -2037,10 +2108,16 @@ export function apply(ctx: Context, config: Config): void {
           : undefined
 
       // fork（corum）：写工具判定与隔离触发（纯函数，单测覆盖）。
+      // fork（corum）2026-09-27（用户裁定 A）：把逐次派发的隔离声明解析成两个正交维度，
+      // 结构性矛盾（`integrate: true` + `isolation`）在**派发之前**就抛错。
+      const corumIsolationRequest = corumResolveIsolationRequest({
+        ...args.integrate !== undefined ? { integrate: args.integrate } : {},
+        ...args.isolation !== undefined ? { isolation: args.isolation } : {},
+      })
       // 任务级覆盖（orchestrate 的 tasks[i].isolation/research）优先于实例固定终值
       // （2026-09-21 裁定：隔离机制恒定生效，实例侧不再是可配置项，故字面固化常量）。
       // `effReadonlyResearch` 已在上方 request 构造处解析（供只读沙箱钉使用）。
-      const effIsolationMode = args.taskIsolation ?? 'write-tasks'
+      const effIsolationMode = corumIsolationRequest.mode ?? 'write-tasks'
       const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, true)
       // fork（corum）：并发感知（2026-09-09 用户实机反馈「只派遣一个 TASK 时还是走了
       // 隔离工作区」）——隔离的存在理由是并发写冲突，没有并发就没有隔离的必要。
@@ -2063,7 +2140,7 @@ export function apply(ctx: Context, config: Config): void {
         || corumRunSpec.runInBackground
         || orchestration.entriesOf(corumSessionId).some(entry => entry.status === 'active')
         || orchestration.runningWriteChildrenOf(corumSessionId) > 0
-      let corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch, corumConcurrent)
+      let corumIsolate = corumShouldIsolate(effIsolationMode, corumIsWrite, effReadonlyResearch, corumConcurrent, corumIsolationRequest.placement)
       // fork（corum）：非 git 工作区自动降级（2026-09-09 用户需求）——隔离依赖 git
       // 仓库（worktree/branch/verify/integrate 全在 git 上），非 git 目录下强制不隔离，
       // 避免 `git worktree add` 报 `fatal: not a git repository`（实测 ai-lab）。即使用户
@@ -2096,10 +2173,14 @@ export function apply(ctx: Context, config: Config): void {
        * **2026-09-16 不变式⑤**：写委派恒隔离 ⇒ git 工作区下不再有「直落父树」这一档；
        * 唯一残留的「没隔离」是**非 git 工作区**的自动降级（worktree 建不出来）。
        */
-      const corumIsolationBoundary: 'worktree' | 'skipped-non-git' | undefined =
+      const corumIsolationBoundary: 'worktree' | 'skipped-non-git' | 'main-requested' | undefined =
         !corumIsWrite || effReadonlyResearch
           ? undefined
-          : corumIsolate ? 'worktree' : (corumIsolationSkipped ? 'skipped-non-git' : undefined)
+          : corumIsolate
+            ? 'worktree'
+            : corumIsolationRequest.placement === 'main'
+              ? 'main-requested'
+              : corumIsolationSkipped ? 'skipped-non-git' : undefined
 
       // fork（corum）：机制追加的 deny 必须收敛到「本 preset 真正注册的工具名」——
       // `tools.restrict()` 对未知名 fail-loud，而 corum 的写工具名单是平台硬编码
@@ -2695,6 +2776,14 @@ export function apply(ctx: Context, config: Config): void {
             type: 'boolean' as const,
             description: 'Set true to merge all isolated worktree branches of this session back into the main working tree, run the verification, and commit. Use after parallel development children have settled.',
           },
+          // fork（corum）2026-09-27（用户裁定 A）：**显式非隔离派发**。只读研究实例不声明它
+          // （research 恒不隔离、沙箱 read-only，声明了也没有意义）。
+          ...corumReadonlyResearch ? {} : {
+            isolation: {
+              type: 'string' as const,
+              description: 'Where this child works. Omit for the normal route: it gets its OWN isolated git worktree + branch, so its commits need `integrate: true` (or `orchestrate` with `merge`) before they reach your tree. Pass "main" ONLY when the child must write OUTSIDE this repository — materializing a new repository, touching a sibling checkout — or must land work straight into your tree: it then works directly in your main working tree with your own sandbox mode, so there is no branch and nothing to merge. Isolation is a WORKSPACE boundary (concurrent writers must not collide), not a permission wall; the trade-off is that another writer can collide with a "main" child. Do NOT combine with `integrate: true` — that is the integrator route and already runs on your tree.',
+            },
+          },
           // fork（corum）：主 Agent 声明的仓库验证方式（2026-09-08 用户定调：静态
           // 穷举不可能覆盖千奇百怪的项目——主 Agent 最懂这个仓库怎么编译/跑/验收）。
           verify: {
@@ -2742,7 +2831,7 @@ export function apply(ctx: Context, config: Config): void {
                    * **必须**同步在这里，否则整个结果会被 INVALID_TOOL_OUTPUT 吞掉
                    * （本仓已付过这个学费，见 HANDOFF-2026-09-16 §教训）。
                    */
-                  isolationBoundary: { type: 'string', enum: ['worktree', 'skipped-non-git'] },
+                  isolationBoundary: { type: 'string', enum: ['worktree', 'skipped-non-git', 'main-requested'] },
                 },
               },
             ],
@@ -2773,6 +2862,9 @@ export function apply(ctx: Context, config: Config): void {
             prompt: args.prompt,
             ...args.run_in_background !== undefined ? { run_in_background: args.run_in_background } : {},
             ...args.integrate !== undefined ? { integrate: args.integrate } : {},
+            // schema 只能表达 `type: 'string'`；词汇表与「非法值 fail loud」由
+            // `corumResolveIsolationRequest` 在派发前统一校验（spawnOne 内第一步就是它）。
+            ...args.isolation !== undefined ? { isolation: args.isolation as CorumIsolationValue } : {},
             ...args.verify !== undefined ? { verify: args.verify } : {},
           }, subagentProvider)
         },
@@ -2786,7 +2878,7 @@ export function apply(ctx: Context, config: Config): void {
             description: [
               'Orchestrate several subagents in ONE call. Two modes, same isolation and merge machinery:',
               '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `schema` (structured output) and `background`.',
-              '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await; hooks `agent`, `parallel`, `pipeline`, `phase`, `log`; end with `return <json-value>`). Use this when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
+              '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await). Hook signatures — `agent(prompt, opts)`: the PROMPT IS THE FIRST ARGUMENT and must be a non-empty string (`opts` is optional: `{ label, phase }`); `parallel(thunks)`, `pipeline(items, ...stages)`, `phase(title)`, `log(message)`. End with `return <json-value>`. Calling `agent({ prompt })` with a single object is REJECTED by the engine (`agent() requires a non-empty prompt string`) — always pass the prompt first. Use script mode when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
               'ISOLATION: every write task is ISOLATED in its own git worktree + branch — declarative tasks and scripted children alike, foreground or background, with no opt-out. Isolated children branch off HEAD, and the mechanism commits the parent tree right before creating the worktree, so an isolated child always sees the parent\'s latest committed work. Read-only research tasks are not isolated (they write nothing).',
               'FINISH: declare `merge.verify` (how to build/run/verify this repo) — declaring `merge` is what makes the mechanism merge + verify + commit the isolated branches once every task is done. Omit `merge` only when you intend to finish it yourself with `subagent { integrate: true }`; the call reports pending branches and raises a pending-integration notice either way, because branches you never merge are work nobody can see.',
             ].join('\n'),
@@ -2812,7 +2904,7 @@ export function apply(ctx: Context, config: Config): void {
                   properties: {
                     prompt: { type: 'string', required: true, description: 'The complete, self-contained task for this subagent. It does not share this conversation, so include everything it needs.' },
                     label: { type: 'string', description: 'A short (3-5 word) label for display.' },
-                    isolation: { type: 'string', enum: ['always', 'write-tasks'], description: 'Override isolation for this task. Every write task is isolated regardless (there is no opt-out); this only matters for a task whose tool face has no write ability, where `always` still forces a worktree. Defaults to the instance policy.' },
+                    isolation: { type: 'string', enum: ['worktree', 'main', 'always', 'write-tasks'], description: 'Where/how this task is isolated. `worktree` (default) = its own isolated git worktree + branch (merged later). `main` = it works DIRECTLY in your main working tree, no worktree and nothing to merge — pass it when the task must write outside the repository (another repo, a fresh repo to materialize) or must land straight into your tree. `always`/`write-tasks` only tune the mode for a task whose tool face cannot write (every write task is isolated regardless).' },
                     research: { type: 'boolean', description: 'Set true for a read-only research task (write tools denied, no worktree).' },
                     // fork（corum）2026-09-18：per-task `model` **已从 schema 剔除**。
                     //
@@ -2893,6 +2985,15 @@ export function apply(ctx: Context, config: Config): void {
                       // ——那会把 results + integration 一起吞掉，正是 Bug B 的反向形态
                       // （2026-09-16 实机复现抓到：只加了返回值、漏了 schema）。
                       rejected: { type: 'string', enum: ['unmerged', 'verify'] },
+                      // fork（corum）2026-09-20 加的**集成者报告正文**（用户要求「合并结果 +
+                      // 前面所有子 Agent 需要注意的点都汇总回主 Agent」）。
+                      // ⚠️ 2026-09-27 实机验收补声明：该字段加进返回值时**漏了 schema**，
+                      // 于是每次集成者产出报告都被 harness 判
+                      // `tool "orchestrate" returned invalid output: "value.integration.report"
+                      // is not a declared property` ——**整个 orchestrate 结果被顶替**（results
+                      // 全丢），子任务的隔离分支还留在那里没人合。正是上面 `rejected` 那条注释
+                      // 警告过的形态（2026-09-16 已因同一原因在 `rejected` 上栽过一次）。
+                      report: { type: 'string' },
                     },
                   },
                   /**
@@ -2905,7 +3006,7 @@ export function apply(ctx: Context, config: Config): void {
                     additionalProperties: false,
                     properties: {
                       indexes: { type: 'array', items: { type: 'integer' } },
-                      boundary: { type: 'string', enum: ['parent-tree', 'skipped-non-git'] },
+                      boundary: { type: 'string', enum: ['parent-tree', 'skipped-non-git', 'main-requested'] },
                     },
                   },
                 },
@@ -2918,7 +3019,7 @@ export function apply(ctx: Context, config: Config): void {
                   /** `childSessionId` = 集成者子会话（合并成功时才有；卡片「进入会话」按钮用）。 */
                   integration?: { pendingBranches: string[]; integrated: boolean; childSessionId?: string; error?: string; rejected?: 'unmerged' | 'verify'; report?: string }
                   /** 跑在父主工作区（没隔离）的任务序号与判据（见上）。 */
-                  parentTreeTasks?: { indexes: number[]; boundary: 'parent-tree' | 'skipped-non-git' }
+                  parentTreeTasks?: { indexes: number[]; boundary: 'parent-tree' | 'skipped-non-git' | 'main-requested' }
                 }
                 // 全结构化（用户 2026-09-16 选定 B）：orchestrate 结果**不再展平成文本投影**，
                 // 直接返回 JSON 对象——`results[].ok`/`error`/`output`、`integration.integrated`/
@@ -3145,7 +3246,7 @@ export function apply(ctx: Context, config: Config): void {
               const tasks = args.tasks as unknown as Array<{
                 prompt: string
                 label?: string
-                isolation?: 'always' | 'write-tasks'
+                isolation?: CorumIsolationValue
                 research?: boolean
                 model?: { provider: string; model: string; reasoningEffort?: string }
                 background?: boolean
@@ -3158,7 +3259,7 @@ export function apply(ctx: Context, config: Config): void {
                * 每任务行（`[task N · label] done|aborted|failed`）的格式——那个格式被
                * `corum-ui-chat` 的编排卡正则消费，改它会让卡片静默退化（见审查报告 F-02）。
                */
-              const parentTreeTasks: Array<{ index: number; boundary: 'parent-tree' | 'skipped-non-git' }> = []
+              const parentTreeTasks: Array<{ index: number; boundary: 'parent-tree' | 'skipped-non-git' | 'main-requested' }> = []
               const run = (index: number): Promise<{ index: number; ok: boolean; aborted?: boolean; output?: string; error?: string; label?: string }> => {
                 const task = tasks[index]
                 const base = { index, ...task.label !== undefined ? { label: task.label } : {} }
@@ -3170,7 +3271,7 @@ export function apply(ctx: Context, config: Config): void {
                   // 「continuable 默认后台」——否则任务落入 continuable 路径，
                   // orchestrate 无法前台汇合（CDP 端到端验证暴露的 bug）。
                   run_in_background: task.background === true,
-                  ...task.isolation !== undefined ? { taskIsolation: task.isolation } : {},
+                  ...task.isolation !== undefined ? { isolation: task.isolation } : {},
                   ...task.research !== undefined ? { taskResearch: task.research } : {},
                   ...task.schema !== undefined ? { taskSchema: task.schema } : {},
                   // fork（corum）2026-09-18：**不再转达 task.model**——per-task 模型面

@@ -260,6 +260,37 @@ export function corumIsGitRepo(cwd: string): boolean {
  * @param message - 落地提交的信息（缺省时用分支名）。
  * @returns 落盘结果——`applied` 为真表示分支的工作已在 HEAD 上。
  */
+/**
+ * fork（corum）2026-09-27：分支树尖里仍存在的 **gitlink**（mode 160000）路径。
+ *
+ * 只查 `touched`（本次 diff 涉及的路径）以省一次全树扫描；`git ls-tree -r` 不递归进 gitlink
+ * （它自己就是条目），故能如实列出 `160000 commit <sha>\t<path>`。
+ *
+ * @param cwd - 主树工作目录。
+ * @param branch - 待落盘的分支。
+ * @param paths - 该分支本次改动涉及的路径。
+ * @returns gitlink 路径数组；查询失败时返回空数组（宁可漏判也不误伤：落盘后集成侧的
+ *   验收仍会看到现场）。
+ */
+function gitlinkPathsInBranch(cwd: string, branch: string, paths: readonly string[]): string[] {
+  if (paths.length === 0) return []
+  try {
+    const out = execFileSync('git', ['ls-tree', '-r', branch, '--', ...paths], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return out
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('160000 ') && line.includes('\t'))
+      .map(line => line.slice(line.indexOf('\t') + 1))
+      .filter(line => line !== '')
+  } catch {
+    return []
+  }
+}
+
 export function corumPortBranchDiff(
   cwd: string,
   entry: Pick<CorumWorktreeEntry, 'branch' | 'base'>,
@@ -291,6 +322,21 @@ export function corumPortBranchDiff(
   if (patch.trim() === '') {
     // 分支相对 base 没有文本改动（例如只改了被忽略的产物）——不是错误。
     return fail('branch adds no diff against its base', base)
+  }
+  // fork（corum）2026-09-27（用户裁定）：**拒收仍带 gitlink 的分支**。gitlink（mode 160000）
+  // 是「另一个仓的指针」，不是本仓的文件——它一旦落进主树索引，就是一条连 `.gitmodules`
+  // 都没有的幽灵 submodule。实测：正是 `dcf5082 port wt/wt-471e5f: 1 file(s)` 把子 Agent
+  // 在 worktree 里新建的闭源仓指针搬进了开源仓主树（随后得单独派一个子会话去清）。
+  //
+  // 判据只看**分支树尖**是否仍含 gitlink（而不是看 diff）：于是「删除 gitlink 的那个提交」
+  // 照常可以落盘（`f6c8268` 那类清理不会被这条误伤）。
+  const gitlinks = gitlinkPathsInBranch(cwd, entry.branch, touched)
+  if (gitlinks.length > 0) {
+    return fail(
+      `branch ${entry.branch} tracks an INDEPENDENT nested git repository (gitlink/submodule pointer): ${gitlinks.slice(0, 3).join(', ')}${gitlinks.length > 3 ? ` (+${gitlinks.length - 3} more)` : ''} — that repository is a separate artifact, not a file of this one. Port it as its own repository (or leave it for the user) instead of merging a submodule pointer into this tree.`,
+      base,
+      patch.length,
+    )
   }
   // 落盘只动 HEAD（工作区一个字节都不碰），所以主树**有**未提交在制品本身不是
   // 阻塞——那正是这条口存在的场景。唯一的真冲突是「分支要改的文件在主树里也有
@@ -1011,7 +1057,19 @@ export function corumIsWriteTask(
  * ### `off` 已清除（同一次裁定）
  * 用户原话：「隔离恒定生效，**off 语义应该被清除**」。故 `mode` 只剩 `always` /
  * `write-tasks`，两者对写任务**等价**（都隔离）——保留 `write-tasks` 是为了不动存量
- * 配置的取值（它现在只是「写任务隔离」的同义词）。**没有逃生口**。
+ * 配置的取值（它现在只是「写任务隔离」的同义词）。
+ *
+ * ### 2026-09-27（用户裁定 A）：新增**语义出口** `isolation: 'main'`，档位出口仍然没有
+ *
+ * 实测病根（会话 `corum-task-56b7d485`）不是「隔离太严」，而是**派发参数表达不了意图**：
+ * 主 Agent 想让子 Agent 去主树 / 跨仓落盘（甚至合并），却只能派出一个隔离 worktree 子
+ * Agent，于是整轮在「派出去 → 撞墙 → 再派一个 → 再撞墙」里打转（20 次派发、4 个零提交
+ * 子会话、3 次把搬运外包给用户）。修法是让「这次在主树工作」**可表达**，且由调用方
+ * **逐次显式声明**：
+ *   · 它不是 `off`：`mode` 与任务级 `taskIsolation` **仍然无法**关掉隔离，写委派默认恒隔离；
+ *   · 它不改隔离的语义（工作区隔离 = 防并发改写互相踩），只是说明**这一次不需要那个壳**；
+ *   · 主仓硬线不受影响：派到主树的子 Agent 同样受「主 Agent 的权限面」约束，而隔离期那条
+ *     「不许写当前仓库非自己 worktree」对没有 worktree 的它本来就不适用。
  *
  * ### 边界（不是逃生口，是另一条轴）
  *  - `readonlyResearch`（只读研究实例/任务）：恒不隔离——它不落盘，无需隔离。
@@ -1026,15 +1084,23 @@ export function corumIsWriteTask(
  * @param readonlyResearch - 只读研究实例/任务（恒不隔离）。
  * @param concurrent - **已废弃、不再参与判定**（保留形参避免改动所有调用点与单测签名）。
  *   不变式⑤后写任务恒隔离，与并发无关；仅只读判定与 mode 生效。
+ * @param isolation - **本次派发的显式意图**（默认 `'worktree'`）：`'worktree'` = 常规隔离
+ *   路线（自己 worktree + 分支，要 integrate 才进主树）；`'main'` = 明确要求子 Agent
+ *   **直接在主工作树里工作**（跨仓 / 主树落盘 / 合并这类任务）。只有调用方逐次显式声明才
+ *   生效——预设与档位都表达不了它（见头注「语义出口」段）。
  */
 export function corumShouldIsolate(
   mode: 'always' | 'write-tasks',
   isWriteTask: boolean,
   readonlyResearch: boolean,
   concurrent = true,
+  isolation: 'worktree' | 'main' = 'worktree',
 ): boolean {
   void concurrent
   if (readonlyResearch) return false
+  // fork（corum）2026-09-27：显式「在主树工作」⇒ 不建 worktree。只读研究在上面已经返回，
+  // 故这里不可能把只读实例放进主树写（那条约束由 research 的沙箱 read-only + 工具面 deny 守）。
+  if (isolation === 'main') return false
   // 不变式⑤：凡写委派恒隔离（前台/后台/可继续一视同仁），无 off 逃生口。
   if (isWriteTask) return true
   // 非写任务（工具面被 deny 到无写能力）：只有显式 always 才隔离（保持既有语义）。
@@ -1710,7 +1776,7 @@ export function corumIntegratorPersona(
  *   实际就是省略掉了——而那一档恰恰是唯一需要模型采取动作的情形，见下方 `worktree` 分支文本）。
  */
 export function corumIsolationBoundaryNotice(
-  boundary: 'worktree' | 'skipped-non-git',
+  boundary: 'worktree' | 'skipped-non-git' | 'main-requested',
   branch?: string,
 ): string {
   if (boundary === 'worktree') {
@@ -1721,6 +1787,14 @@ export function corumIsolationBoundaryNotice(
     // 让模型记住「还要 integrate」是这条提示的全部意义。
     return `[corum isolation] this delegation ran in an ISOLATED worktree${branch === undefined || branch === '' ? '' : ` (branch ${branch})`} — its commits exist ONLY on that branch and are NOT in your working tree yet. `
       + 'You MUST finish it yourself with `subagent { integrate: true }` (merge + verify + commit); until you do, the work is invisible to everything else and the worktree is never reclaimed. Do not merge or cherry-pick the branch by hand — that bypasses the verify gate and leaves the mechanism ledger stale.'
+  }
+  if (boundary === 'main-requested') {
+    // fork（corum）2026-09-27（用户裁定 A）：`isolation: 'main'` 那一档。刻意与「非 git 降级」
+    // 分开写：两者都「没隔离」，但**原因与后果不同**——降级是环境所致（worktree 建不出来），
+    // 本档是调用方自己的选择（跨仓 / 主树落盘 / 合并）。措辞要让父 Agent 立刻明白两件事：
+    // ① 没有分支要合并（别再去 integrate）；② 产物已经在自己的树里，**在它上面继续动手之前
+    // 先看一眼**（并发写没有壳保护）。
+    return '[corum isolation] this delegation ran DIRECTLY IN YOUR MAIN WORKING TREE because you asked for it (`isolation: "main"`): there is no branch and nothing to merge — its edits are ALREADY in your tree, so read them before building on them. The worktree shell exists to keep concurrent writers from colliding: use the default isolated route unless the task really needs main-tree or cross-repository writes.'
   }
   return '[corum isolation] this delegation ran in the PARENT working tree (not isolated): the workspace is not a git repository, so isolation was skipped — its edits are ALREADY in your tree and nothing will merge them.'
 }

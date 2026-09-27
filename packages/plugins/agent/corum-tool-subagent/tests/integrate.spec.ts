@@ -14,7 +14,7 @@
  * 全部用真实临时 git 仓库驱动（无 mock），与 execute 层同一 git 命令面。
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -622,5 +622,67 @@ describe('集成者报告透传（2026-09-20 用户报障）', () => {
     const body = src.slice(i, src.indexOf('\n}', i))
     expect(body).toContain("block.type === 'text'")
     expect(body).toContain('.join(\'\')')
+  })
+})
+
+/**
+ * fork（corum）2026-09-27（用户裁定）：**拒收仍带 gitlink 的分支**。
+ *
+ * 由来（实测）：`dcf5082 port wt/wt-471e5f: 1 file(s)` —— 子 Agent 在自己的 worktree 里
+ * 新建了一个闭源仓（嵌套 git 仓），隔离收口把它记成 **gitlink**（mode 160000），port 又
+ * 把这条 gitlink 搬进了开源仓主树的索引：一条连 `.gitmodules` 都没有的**幽灵 submodule**。
+ * 用户裁定「嵌套新仓是独立产物」⇒ port 必须硬拒，而不是把指针合进来。
+ *
+ * 判据只看**分支树尖**是否仍含 gitlink（不看 diff）⇒ 「删除 gitlink」的清理提交照常可落盘。
+ */
+describe('★ corumPortBranchDiff 拒收 gitlink（独立嵌套仓，2026-09-27）', () => {
+  it('★ 分支带嵌套仓 ⇒ applied=false + 点名，且主树 HEAD 不前进', () => {
+    const { repo, worktree, entry } = makeRepoWithWorktree('wt-portgl1')
+    const nested = join(worktree, 'ClosedRepo')
+    mkdirSync(nested, { recursive: true })
+    const nestedGit = (...args: string[]): string =>
+      execFileSync('git', ['-C', nested, ...args], { stdio: 'pipe', encoding: 'utf8' }).trim()
+    nestedGit('init', '-q')
+    nestedGit('config', 'user.email', 'nested@localhost')
+    nestedGit('config', 'user.name', 'nested')
+    writeFileSync(join(nested, 'inner.txt'), 'inner\n')
+    nestedGit('add', '-A')
+    nestedGit('commit', '-q', '--no-verify', '-m', 'nested init')
+    // 在子分支上把嵌套仓「加进来」⇒ git 记成 gitlink（这正是实测那次收口提交的形态）。
+    execFileSync('git', ['-C', worktree, 'add', '-A'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', worktree, '-c', 'user.name=child', '-c', 'user.email=child@localhost',
+      'commit', '-q', '--no-verify', '-m', 'child: add nested repo'], { stdio: 'pipe' })
+    const branchTree = execFileSync('git', ['-C', worktree, 'ls-files', '-s'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    expect(branchTree).toContain('160000')          // 前提坐实：分支树里真有 gitlink
+    const headBefore = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    const result = corumPortBranchDiff(repo, entry)
+    expect(result.applied).toBe(false)
+    expect(result.error).toContain('INDEPENDENT nested git repository')
+    expect(result.error).toContain('ClosedRepo')
+    expect(execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(headBefore)
+    expect(execFileSync('git', ['-C', repo, 'ls-files', '-s'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).not.toContain('160000')
+  })
+})
+
+/**
+ * fork（corum）2026-09-27（T7 实机验收抓到）：**orchestrate 输出 schema 必须声明
+ * `integration.report`**。
+ *
+ * 实测原文：`Error: tool "orchestrate" returned invalid output: "value.integration.report"
+ * is not a declared property (additionalProperties: false)` —— 2026-09-20 把集成者报告正文
+ * 加进返回值时漏了 schema，于是**每次集成者产出报告，整个 orchestrate 结果都被顶替**
+ * （results 全丢），子任务的隔离分支留在那里没人合（实机：`wt/wt-bce8fc` 未合并）。
+ * 本用例按源码文本做对账：值里写 `report` ⇒ schema 里必须声明 `report`。
+ */
+describe('★ orchestrate 输出 schema ↔ 返回值对账（2026-09-27 实机缺陷）', () => {
+  it('integration.report 既在返回值里、也在 schema 里声明', () => {
+    const src = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+    // 返回值侧：`out.integration.report !== undefined ? { report: ... }`
+    expect(src).toContain('out.integration.report !== undefined ? { report:')
+    // schema 侧：integration 对象里声明了 report
+    const schemaStart = src.indexOf('integration: {')
+    expect(schemaStart).toBeGreaterThan(-1)
+    const schemaBlock = src.slice(schemaStart, schemaStart + 2000)
+    expect(schemaBlock).toContain('report: { type: \'string\' }')
   })
 })

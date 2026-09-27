@@ -20,6 +20,7 @@ import {
   absolutePathsIn,
   confinementGuard,
   confinementTempRoots,
+  confinementViolation,
   detectBashWrite,
   isPathInside,
   stripQuoted,
@@ -246,6 +247,163 @@ describe('confinementGuard — 隔离子会话的写边界（修法 2）', () =>
       expect(realGuard({ name: 'write', arguments: { file_path: join(wt, 'f.ts'), content: 'x' } })).toBeUndefined()
       // git -C 指向主树同样被拒（端到端复刻实测里那条 merge 命令）
       expect(realGuard({ name: 'bash', arguments: { command: `git -C ${base} merge x` } })).toBeDefined()
+    })
+  })
+})
+
+/**
+ * 2026-09-27 用户裁定的两轴口径：**隔离 = 工作区隔离**（防并发改写互相踩），与「能不能碰
+ * 仓外的东西」是两条正交的轴。因此：
+ *   · 主仓（含共享 `.git` / 其它分支 / 其它 worktree）⇒ 硬拒，**不可提权获得**；
+ *   · 主仓**之外**（另一个仓、系统路径……）⇒ 门禁**弃权**，交沙箱 + 审批（**可提权**）。
+ * 本组用例同时钉住两处实测漏判：`cd <主仓>` 开头（会话 corum-task-56b7d485 三条越界命令
+ * 全都这么写）与「无绝对路径的仓库级写」（01:11:30 那条 `git worktree remove` + `git branch -D`）。
+ */
+describe('★ 两轴口径（2026-09-27 用户裁定）：主仓硬线 vs 仓外交权限层', () => {
+  const guard = confinementGuard({ worktreeRoot: WORKTREE, parentTreeRoot: MAIN })
+  const bash = (command: string) => ({ name: 'bash', arguments: { command } })
+
+  describe('T1：主仓**之外**的目标弃权（门禁不管，交权限层 ⇒ 可提权）', () => {
+    // 由来：本场任务要把产物落到**另一个仓** `/Users/kukucai/work/Corum-Harness-Project`。
+    // 旧口径把「worktree 之外」一律硬拒 ⇒ 子 Agent 带 danger-full-access 重试两次仍被
+    // 同一句驳回，机制只能把搬运外包给用户。这类目标属于权限轴，门禁必须放手。
+    const outside = [
+      'mkdir -p /Users/kukucai/work/Corum-Harness-Project/packages/corum-project',
+      'mv /repo/.corum-worktrees/wt-abc123/Corum-Harness-Project /Users/kukucai/work/Corum-Harness-Project',
+      'rsync -a --delete /repo/.corum-worktrees/wt-abc123/Corum-Harness-Project/ /Users/kukucai/work/Corum-Harness-Project/',
+    ]
+    for (const command of outside) {
+      it(`弃权（不再硬拒）：${command.slice(0, 52)}…`, () => {
+        expect(guard(bash(command))).toBeUndefined()
+        expect(confinementViolation({ worktreeRoot: WORKTREE, parentTreeRoot: MAIN }, bash(command))?.kind).toBe('outside')
+      })
+    }
+
+    it('变异工具写仓外路径同样弃权（交沙箱判定）', () => {
+      const call = { name: 'write', arguments: { file_path: '/Users/kukucai/work/Corum-Harness-Project/package.json', content: '{}' } }
+      expect(guard(call)).toBeUndefined()
+      expect(confinementViolation({ worktreeRoot: WORKTREE, parentTreeRoot: MAIN }, call)?.kind).toBe('outside')
+    })
+
+    it('仓外的只读命令与临时区照旧不表态', () => {
+      expect(guard(bash('cd /tmp/scratch && echo hi > f.txt'))).toBeUndefined()
+      expect(guard(bash('git -C /Users/kukucai/work/Corum-Harness-Project log --oneline -3'))).toBeUndefined()
+    })
+  })
+
+  describe('T2a：`cd <主仓>` 本身即越界（它让后续相对路径写全落在主仓里）', () => {
+    it('★ 实测那三条命令的开头（cd 主仓 + 相对路径 git worktree remove）', () => {
+      expect(guard(bash(`cd ${MAIN} && git worktree remove --force .corum-worktrees/wt-471e5f`))).toBeDefined()
+      expect(guard(bash(`cwd=$(pwd); cd ${MAIN} && git worktree remove --force .corum-worktrees/wt-471e5f`))).toBeDefined()
+    })
+
+    it('★ `cd ../..` 穿越到主仓同样被拒（不含任何绝对路径）', () => {
+      expect(guard(bash('cd ../.. && rm -rf packages/plugins/agent/corum-agent/src/project.ts'))).toBeDefined()
+      expect(guard(bash('cd .. && echo hi > main-tree-file.txt'))).toBeDefined()
+    })
+
+    it('子 shell 形态 `(cd <主仓> && …)` 也认得出', () => {
+      expect(guard(bash(`(cd ${MAIN} && git commit -m x)`))).toBeDefined()
+    })
+  })
+
+  describe('T2a：无绝对路径的**仓库级写**（共享 .git）硬拒', () => {
+    const repoGlobal = [
+      'git worktree remove --force .corum-worktrees/wt-471e5f',
+      'git branch -D wt/wt-471e5f',
+      'git branch new-branch',
+      'git push origin main',
+      'git fetch origin',
+      'git tag v1.0.0',
+      'git config user.name kukucaiCndy',
+      'git remote add origin https://example.com/x.git',
+      'git update-ref refs/heads/main HEAD~1',
+      'git symbolic-ref HEAD refs/heads/other',
+      'git submodule add https://example.com/x.git vendor/x',
+      'git notes add -m x',
+      'git reflog expire --expire=now --all',
+      'git gc --prune=now',
+      'git config --global user.name x',
+      'git replace -d abc123',
+    ]
+    for (const command of repoGlobal) {
+      it(`拒：${command}`, () => {
+        expect(guard(bash(command))).toBeDefined()
+        expect(confinementViolation({ worktreeRoot: WORKTREE, parentTreeRoot: MAIN }, bash(command))?.kind).toBe('parent-tree')
+      })
+    }
+
+    // 裁定的另一半是「**可读**」——只读形态必须继续放行，否则子 Agent 连自己所在仓库的
+    // 分支列表、配置都读不到（本仓自己的 brief 纪律就要它们读这些）。
+    const reads = [
+      'git worktree list',
+      `git -C ${MAIN} worktree list`,
+      'git branch --list',
+      `git -C ${MAIN} branch -a`,
+      'git branch',
+      'git config --get user.name',
+      'git config -l',
+      `git -C ${MAIN} remote -v`,
+      'git tag -l',
+      'git submodule status',
+      'git notes show',
+      'git reflog show',
+      'git symbolic-ref HEAD',
+      `git -C ${MAIN} symbolic-ref HEAD`,
+      'git bisect log',
+      // 自查到的**误伤面**（2026-09-27）：这些无 flag 的读法在只读门禁下极常用
+      // （指挥模式主 Agent 的只读 shell / 研究子会话），把它们当写会白烧往返。
+      'git config user.email',
+      'git config --global user.email',
+      `git -C ${MAIN} config user.email`,
+      'git worktree',
+      'git submodule',
+      'git replace -l',
+      'git bisect',
+      'git branch --show-current',
+      `git -C ${MAIN} remote show origin`,
+    ]
+    for (const command of reads) {
+      it(`放行只读：${command}`, () => {
+        expect(guard(bash(command))).toBeUndefined()
+      })
+    }
+
+    it('detectBashWrite 同步认这些仓库级写（只读门禁也共用同一份判定）', () => {
+      expect(detectBashWrite('git worktree remove --force x')).toBeDefined()
+      expect(detectBashWrite('git branch -D x')).toBeDefined()
+      expect(detectBashWrite('git -C /repo branch --list')).toBeUndefined()
+      expect(detectBashWrite('git config --get user.name')).toBeUndefined()
+    })
+  })
+
+  describe('T5 配套：worktree 内的**独立仓**不被当主仓写（用户裁定它是独立产物）', () => {
+    it('在原位建嵌套仓放行（相对路径落在自己 worktree 内）', () => {
+      expect(guard(bash('git init Corum-Harness-Project'))).toBeUndefined()
+      expect(guard(bash('git init && git add -A && git commit -m skeleton'))).toBeUndefined()
+    })
+
+    it('★ `cd` 进 worktree 的子孙目录后操作那个仓的 config 不判主仓', () => {
+      // 实测形态：子会话在自己的 worktree 里建闭源仓并设 git 身份。
+      expect(guard(bash('cd Corum-Harness-Project && git config user.name "kukucaiCndy" && git add -A && git commit -m x'))).toBeUndefined()
+    })
+
+    it('但 `git config` 不 cd 就仍按主仓硬线处理（它打的是共享 .git/config）', () => {
+      expect(guard(bash('git config user.name x'))).toBeDefined()
+    })
+  })
+
+  describe('多目标命令按**最严**判定（否则 `cp 仓外 主仓` 会变成可提权）', () => {
+    it('★ 同时含仓外与主仓目标 ⇒ parent-tree', () => {
+      const command = `cp /Users/kukucai/elsewhere/x.ts ${MAIN}/packages/x.ts`
+      expect(guard(bash(command))).toBeDefined()
+      expect(confinementViolation({ worktreeRoot: WORKTREE, parentTreeRoot: MAIN }, bash(command))?.kind).toBe('parent-tree')
+    })
+
+    it('全部是仓外目标 ⇒ outside（不被最严规则误伤）', () => {
+      const command = 'cp /Users/kukucai/a/x.ts /Users/kukucai/b/x.ts'
+      expect(guard(bash(command))).toBeUndefined()
+      expect(confinementViolation({ worktreeRoot: WORKTREE, parentTreeRoot: MAIN }, bash(command))?.kind).toBe('outside')
     })
   })
 })

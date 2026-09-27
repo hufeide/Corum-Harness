@@ -110,3 +110,33 @@ describe('compilePreset — fork #10 双实例行', () => {
     expect(worker).not.toContain('denyDirectFs')
   })
 })
+
+/**
+ * fork（corum）2026-09-27：**workflow 引擎行必须挂**（用户拍板：「指挥模式就是希望用
+ * orchestrate 才设计的，一定要挂」）。
+ *
+ * 由来：Phase 5 把官方 workflow 全家退役，注释写的理由是「方案甲用 orchestrate 取代官方
+ * 通用脚本引擎」——但该理由**对 orchestrate 本身不成立**：orchestrate 的 script 模式正是
+ * 构建在这个引擎上。`corum-tool-subagent` 里 `runtimeCtx.get('workflowEngine', false)`
+ * 取不到就抛 `orchestrate script mode requires the workflow engine; this preset does not
+ * mount @deepseek-ai/dsh-workflow-worker-thread`。只留 `isolate: { workflowEngine: true }`
+ * 的 realm 而不挂 provider ⇒ **工具在列、一调用即失败**（实测会话 `corum-task-56b7d485`：
+ * 主 Agent 按 orchestrate 做计划，第一次派发即抛错，只能退化成单发 subagent，整轮多烧
+ * 20 次派发）。本用例把「引擎行真的在编译产物里」钉死，防它被再次静默退役。
+ */
+describe('compilePreset — workflow 引擎行（orchestrate script 模式的机制前提）', () => {
+  it('★ delegation 组挂 workflow-worker-thread 且未 disabled（走 corum provider）', () => {
+    const yml = compilePreset(profile()).cordisYml
+    const row = yml.split(/\n {4}- id: /).find(r => r.startsWith('workflow-worker-thread\n'))
+    expect(row, 'workflow-worker-thread row missing').toBeDefined()
+    expect(row!).toContain('name: "@deepseek-ai/dsh-workflow-worker-thread"')
+    expect(row!).toContain('provider: "corum-spawn"')
+    expect(row!).not.toContain('disabled: true')
+  })
+
+  it('模型面的第二个自撰编排语言仍退役（tool-workflow 不进产物），ralph 同理', () => {
+    const yml = compilePreset(profile()).cordisYml
+    expect(yml).not.toContain('- id: tool-workflow')
+    expect(yml).not.toContain('- id: tool-ralph')
+  })
+})

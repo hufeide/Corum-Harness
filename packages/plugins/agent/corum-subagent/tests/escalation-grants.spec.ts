@@ -71,6 +71,11 @@ describe('applySessionGrant —— 授权只升级 ask-user，绝不改变 refus
     // 这条断言就是那个 bug 的哨兵。
     const v = applySessionGrant({ kind: 'refuse', reason: 'exceeds-hard-ceiling' }, true)
     expect(v).toEqual({ kind: 'refuse', reason: 'exceeds-hard-ceiling' })
+    // 2026-09-27 用户裁定：**主仓目标**的拒绝同样不可豁免（「总是允许」只是 ask-user 的
+    // 单侧升级）。这条不变式是「不可提权获得」的最后一道保险：即便用户点了「总是允许」，
+    // 后续打在主仓上的提权也不会被放行。
+    const repoRefusal = applySessionGrant({ kind: 'refuse', reason: 'parent-tree' }, true)
+    expect(repoRefusal).toEqual({ kind: 'refuse', reason: 'parent-tree' })
   })
 
   it('auto-approve 幂等（授权不改变已放行的结论）', () => {

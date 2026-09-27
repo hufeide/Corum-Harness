@@ -47,6 +47,10 @@ describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () 
     // + 装了 escalation-answerer），不是为了让测试变绿 —— 见下方「机制锚点」。
     expect(text).toContain('DELEGATED CHILD session')
     expect(text).toContain('the retry IS adjudicated')
+    // 2026-09-27：**主仓目标连卡都不出**（用户裁定「子 Agent 不能操作除自己 worktree 之外的
+    // 其它分支（可读）…这一类无法提权获得」）。措辞必须与机制一致，否则子 Agent 会一直等
+    // 一张永远不会出现的卡（实测代价：会话 corum-task-56b7d485 反复重试同一类命令）。
+    expect(text).toContain('refused without any prompt')
     expect(text).toContain('hard limit it can never widen')
     expect(text).toContain('report it as a conclusion')
     // 旧的（现已为假的）承诺必须消失。
@@ -212,6 +216,29 @@ const CLAIMS: ReadonlyArray<{
     mechanism: CHILD_AGENT_SRC,
     mechanismName: 'corum-subagent/src/child-agent.ts',
     mechanismAnchor: 'installEscalationAnswerer(childCtx, {',
+  },
+  // ④ 主仓目标的提权**连卡都不出**（2026-09-27 用户裁定「不可提权获得」；机制锚点 =
+  //    应答器复用隔离门禁的同一判定后直接判 refuse 的那一支）
+  {
+    claim: 'refused without any prompt',
+    source: corumSandboxEscalationLines().join('\n'),
+    sourceName: 'corumSandboxEscalationLines()',
+    mechanism: ESCALATION_ANSWERER_SRC,
+    mechanismName: 'corum-subagent/src/escalation-answerer.ts',
+    mechanismAnchor: "reason: 'parent-tree'",
+  },
+  // ⑤ orchestrate script 模式的**钩子签名**（2026-09-27 实机）：描述只写「hooks: agent,
+  //    parallel, pipeline…」而不写签名 ⇒ 模型猜成 `agent({prompt})`，引擎（官方
+  //    dsh-workflow-worker-thread，钩子是 `agent(prompt, opts)`、prompt 必须是第一个
+  //    位置参数）当场抛 `agent() requires a non-empty prompt string`，白烧一轮。
+  //    机制锚点用 corum 自己的工具描述文本（引擎在 node_modules，不在本仓）。
+  {
+    claim: 'agent(prompt, opts)',
+    source: SRC,
+    sourceName: 'corum-tool-subagent/src/index.ts (orchestrate 描述)',
+    mechanism: SRC,
+    mechanismName: 'corum-tool-subagent/src/index.ts',
+    mechanismAnchor: 'Calling `agent({ prompt })` with a single object is REJECTED',
   },
   // ② research 恒前台 / 拒绝后台（描述说「it is rejected」，机制锚点是 index.ts 的 throw）
   {

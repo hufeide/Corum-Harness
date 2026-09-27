@@ -121,6 +121,15 @@ export type EscalationVerdict =
    * 「这条路还通」的错觉。
    */
   | { readonly kind: 'refuse'; readonly reason: 'exceeds-hard-ceiling' }
+  /**
+   * fork（corum）2026-09-27：**请求打在当前仓库（主仓）上** ⇒ 直接拒绝，连问都不问。
+   *
+   * 用户裁定：「子 Agent 不能操作除自己 worktree 之外的其它分支（可读）」，且这一类越界
+   * **无法提权获得**。与硬天花板同列在 `refuse` 是因为语义完全一致——问题本身不该问，
+   * 而且**会话级授权（「总是允许」）永不豁免它**（`applySessionGrant` 只把 `ask-user`
+   * 升成放行，`refuse` 原样返回）。
+   */
+  | { readonly kind: 'refuse'; readonly reason: 'parent-tree' }
 
 /**
  * **提权判定的唯一事实源**（纯函数，安全关键）。

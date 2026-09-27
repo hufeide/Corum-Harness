@@ -256,11 +256,28 @@ function standardRows(): CordisRow[] {
           disabled: true,
           config: { provider: 'claude-code', toolName: 'subagent_claude_code', backgroundMode: 'one-shot', maxDepth: 'provider-managed' },
         },
-        // fork（corum）：Phase 5 退役——官方 workflow 全家（workflow-worker-thread +
-        // tool-workflow + tool-ralph）已移除。方案甲用 orchestrate 工具（任务清单
-        // 结构化编排，非 JS 脚本）取代官方 workflow 的通用脚本引擎；ralph 与
-        // orchestrate 功能重叠，一并退役。workflowEngine realm 保留（isolate 声明
-        // 不依赖具体 provider 行，移除 provider 后 realm 空置无害）。
+        // fork（corum）：**引擎行恢复挂载**（2026-09-27 用户拍板：「指挥模式就是希望用
+        // orchestrate 才设计的，一定要挂」）。
+        //
+        // Phase 5 曾把官方 workflow 全家（workflow-worker-thread + tool-workflow +
+        // tool-ralph）退役，理由是「方案甲用 orchestrate 取代官方通用脚本引擎」。该理由
+        // **对 orchestrate 本身不成立**：orchestrate 的 script 模式正是构建在这个引擎之上
+        // ——`corum-tool-subagent` 里 `runtimeCtx.get('workflowEngine', false)` 取不到就抛
+        // `orchestrate script mode requires the workflow engine; this preset does not mount
+        // @deepseek-ai/dsh-workflow-worker-thread`。只留 `isolate: { workflowEngine: true }`
+        // 的 realm 而不挂 provider ⇒ **工具在列、一调用即失败**（实测 2026-09-27，指挥模式
+        // 会话 `corum-task-56b7d485`：主 Agent 按 orchestrate 做计划，第一次派发即报错，
+        // 只能退化成单发 subagent，整轮多烧 20 次派发）。
+        //
+        // 恢复范围刻意最小：**只恢复引擎行**。`tool-workflow`（模型面的第二个自撰编排
+        // 语言）与 `tool-ralph` 的退役理由（与 orchestrate 功能重叠）不受影响，继续不挂。
+        // 引擎的 provider 只是默认值——orchestrate 起引擎时显式传 `corum-isolated`，
+        // 脚本派出的子 Agent 仍走 corum 隔离 + 台账 + settlement notice（见该工具的注释）。
+        {
+          id: 'workflow-worker-thread',
+          name: '@deepseek-ai/dsh-workflow-worker-thread',
+          config: { provider: 'corum-spawn' },
+        },
       ],
     },
 
