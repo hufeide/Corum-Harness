@@ -1,13 +1,14 @@
 /**
- * Settings sections — 聚合入口（重构 2：19 个 section 全拆独立文件后，本文件瘦身
+ * Settings sections — 聚合入口（重构 2：section 全拆独立文件后，本文件瘦身
  * 为共享面 re-export + SECTION_DEFS 聚合注册）。
  *
  * - 共享面（CorumRpcContext / CorumSettingsContext / useCorumSettings /
  *   SectionNavContext / useSectionNav / GlassButton / InfoCard）已抽到
  *   `./shared.tsx`，本文件 re-export 保持既有 import 路径（index.tsx /
  *   SettingsShell.tsx / SettingsGeneralSection.tsx 零破坏）。
- * - 19 个 section 组件各自住在 `./sections/Settings*Section.tsx`。
- * - `SECTION_DEFS` 聚合 import 19 个 section + 按 SectionDef.navGroup 自声明分组
+ * - section 组件各自住在 `./sections/Settings*Section.tsx`（原 19 个，PR6 迁出
+ *   mcp / skills 两个到 @corum/corum-ide-integrations-pages-ui 后为 17 个）。
+ * - `SECTION_DEFS` 聚合 import 各 section + 按 SectionDef.navGroup 自声明分组
  *   （归属分组由 section 自己声明；缺省归 'extensions'）。
  */
 import type { ReactNode } from 'react'
@@ -23,8 +24,6 @@ import { DataSection } from './sections/SettingsDataSection.tsx'
 import { HooksSection } from './sections/SettingsHooksSection.tsx'
 import { AgentPresetsSection } from './sections/SettingsAgentPresetsSection.tsx'
 import { AccountSection } from './sections/SettingsAccountSection.tsx'
-import { McpSection } from './sections/SettingsMcpSection.tsx'
-import { SkillsSection } from './sections/SettingsSkillsSection.tsx'
 import { PolishSection } from './sections/SettingsPolishSection.tsx'
 import { AdvancedSection } from './sections/SettingsAdvancedSection.tsx'
 import { ExtensionsSection } from './sections/SettingsExtensionsSection.tsx'
@@ -93,8 +92,11 @@ export interface SectionDef {
 /**
  * 所有 section 定义（用于 index.tsx 批量注册）。
  * 归属分组由 section 自声明 `navGroup`，缺省归 'extensions'。
- * 「子 Agent」迁归 AGENT；「MCP/技能/插件管理」归扩展；「插件」独立入口已去掉
+ * 「子 Agent」迁归 AGENT；「插件管理」归扩展；「插件」独立入口已去掉
  * （ExtensionsSection「插件管理」承接）。
+ *
+ * ⚠️ PR6 起本表**不再含 mcp / skills**：两条分区已迁出为集成中心的内容页
+ * （见下方 SECTION_DEFS 里的 ➖ 注释）。
  */
 export const SECTION_DEFS: SectionDef[] = [
   // ⚠️ appearance（外观）不在此表：它需声明 settings.general.item 子槽承接应用级
@@ -129,8 +131,12 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'account', order: 120, label: 'nav.account', navGroup: 'data', Component: AccountSection },
   { id: 'privacy', order: 130, label: 'nav.privacy', navGroup: 'data', Component: PrivacySection },
   { id: 'data', order: 140, label: 'nav.data', navGroup: 'data', Component: DataSection },
-  { id: 'mcp', order: 150, label: 'nav.mcp', navGroup: 'extensions', Component: McpSection },
-  { id: 'skills', order: 160, label: 'nav.skills', navGroup: 'extensions', Component: SkillsSection },
+  // ➖ mcp（MCP 与集成，order 150）/ skills（技能，order 160）两条分区已**迁出设置中心**
+  //   （2026-09-27，PR6：信息架构调整——二者成为**集成中心的内容页**）。
+  //   实现移入 @corum/corum-ide-integrations-pages-ui 的 McpPage / SkillsPage，
+  //   占槽 corum.integrations.mcp / corum.integrations.skills（声明权归 PR4 的集成中心骨架）。
+  //   ⚠️ 不要恢复本两行：设置中心不再持有这两个分区，恢复会造出第二份入口与第二份 RPC 面。
+  //   （AI 润色 ai-polish 是设置域能力，留在本文件原位不动。）
   // fork（corum）：AI 润色配置（2026-09-09 重建；导航 id 沿用历史值 ai-polish）。
   { id: 'ai-polish', order: 165, label: 'nav.aiPolish', navGroup: 'extensions', Component: PolishSection },
   { id: 'advanced', order: 170, label: 'nav.advanced', navGroup: 'advanced', Component: AdvancedSection },
@@ -140,7 +146,8 @@ export const SECTION_DEFS: SectionDef[] = [
   //   记录的 2026-09-15 写坏故障同源风险）被否决。
   //   ⚠️ 不要恢复：本地 Profile 与云端账号是两套互斥方向，恢复会造成概念与实现双轨。
   //   （档案 ≠ Agent 预设：预设 = 单 Agent 配置集合，与本次移除无关，仍保留。）
-  // 扩展组次序按设计稿：插件管理 → MCP 与集成 → 技能 → AI 润色 → Ollama(195) → 本地文生图(197)。
+  // 扩展组次序按设计稿：插件管理 → AI 润色 → Ollama(195) → 本地文生图(197)。
+  // （「MCP 与集成 / 技能」原在本组，PR6 起归集成中心，见上方 ➖ 注释。）
   { id: 'extensions', order: 145, label: 'nav.extensions', navGroup: 'extensions', Component: ExtensionsSection },
 ]
 
@@ -148,7 +155,7 @@ export const SECTION_DEFS: SectionDef[] = [
  * section id → 归属分组（SettingsShell 分组投影的数据源；重构 2 决策 4：
  * 归属由 section 自声明，缺省归 'extensions'）。
  *
- * - 19 个壳自有 section：从 SECTION_DEFS 的 navGroup 自声明派生。
+ * - 壳自有 section：从 SECTION_DEFS 的 navGroup 自声明派生。
  * - `models`：跨 bundle section（@corum/corum-ui-settings-models 注册），
  *   按 PLAN 映射表固定归 'agent'（现状同）。
  * - 其余跨 bundle section（artgen / ollama 等）未在此表 → 缺省归 'extensions'。

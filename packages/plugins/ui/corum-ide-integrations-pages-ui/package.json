@@ -1,0 +1,47 @@
+{
+  "name": "@corum/corum-ide-integrations-pages-ui",
+  "version": "0.1.0",
+  "description": "集成中心内容页（PR6）：McpPage（服务器列表/详情/添加三视图，数据面 mcpManager RPC）+ SkillsPage（技能列表/详情/版本与导入，数据面 skillManager RPC）。自设置中心的 SettingsMcpSection / SettingsSkillsSection 迁出，占 corum.integrations.mcp / corum.integrations.skills 两个槽（声明权归 PR4 的集成中心骨架）。",
+  "private": true,
+  "type": "module",
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [],
+      "immediately": false
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown && node scripts/inline-css.mjs",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@corum/corum-rpc-client": "workspace:^",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.3-alpha.1",
+    "lucide-react": "^0.460.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@tsdown/css": "^0.22.14",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3"
+  }
+}

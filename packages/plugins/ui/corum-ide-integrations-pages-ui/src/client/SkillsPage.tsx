@@ -1,16 +1,27 @@
 /**
- * SettingsSkillsSection — 从 SettingsSections.tsx 拆出的独立 section 文件（重构 2）。
+ * SkillsPage — 集成中心 · 技能页（PR6：自设置中心 SettingsSkillsSection 迁出）。
+ *
+ * 数据链路：skillManager/listAll|getSkillContent|getSkillHistory|pinVersion|
+ * commitVersion|deleteSkill|importFromFile|importFromText|scanDirectory|
+ * importDirectory|importBuiltinSkills + corumAgent/listProfiles（绑定数）。
+ * 视图结构：技能卡列表（名称/描述/来源/启停）+ 详情（基本信息 / SKILL.md 内容 /
+ * 版本历史 / 绑定关系）。
+ *
+ * 迁出改动仅三处：① 组件名 SkillsSection → SkillsPage；② RPC 来源
+ * useCorumRpc（设置壳 CorumRpcContext）→ useIntegrationsRpc（本包注入面，
+ * 同形同义）；③ SettingGroup/ConfirmDialog/GlassButton/CSS module 换成本包
+ * 自持副本。各 RPC 方法名与参数逐字未动。
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, ChevronDown, Star, Trash2, X } from 'lucide-react'
-import { SettingGroup } from '../SettingGroup.tsx'
-import { ConfirmDialog } from '../ConfirmDialog.tsx'
-import { GlassButton, useCorumRpc } from '../shared.tsx'
-import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentBind, BuiltinSkillImportResult } from '../types.ts'
+import { SettingGroup } from './SettingGroup.tsx'
+import { ConfirmDialog } from './ConfirmDialog.tsx'
+import { GlassButton, useIntegrationsRpc } from './face.tsx'
+import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentBind, BuiltinSkillImportResult } from './types.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
-import css from '../SettingsSections.module.css'
+import css from './IntegrationsPages.module.css'
 
 /* ── 技能 ──────────────────────────────────────────────────────────── */
 
@@ -30,8 +41,8 @@ function formatBuiltinSummary(r: BuiltinSkillImportResult): string {
   return parts.join('；')
 }
 
-export function SkillsSection() {
-  const rpc = useCorumRpc()
+export function SkillsPage() {
+  const rpc = useIntegrationsRpc()
   const [view, setView] = useState<SkillsView>({ kind: 'list' })
   const [skills, setSkills] = useState<SkillInfo[] | null>(null)
   const [profiles, setProfiles] = useState<ProfileSummary[]>([])

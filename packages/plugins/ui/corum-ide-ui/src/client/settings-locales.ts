@@ -36,8 +36,9 @@ export const zh = {
   'nav.account': '账户与用量',
   'nav.privacy': '隐私',
   'nav.data': '数据管理',
-  'nav.mcp': 'MCP 与集成',
-  'nav.skills': '技能',
+  // ✂️ 'nav.mcp' / 'nav.skills' 已随两个分区迁出删除（PR6：MCP 与技能成为集成中心
+  //    的内容页，文案由 @corum/corum-ide-integrations-pages-ui 自持）。
+  //    ⚠️ 不要加回：本字典只服务设置中心剩下的 section，留着是死键。
   'nav.aiPolish': 'AI 润色',
   'nav.advanced': '高级',
   'nav.extensions': '插件管理',
@@ -73,8 +74,6 @@ export const en = {
   'nav.account': 'Account & Usage',
   'nav.privacy': 'Privacy',
   'nav.data': 'Data Management',
-  'nav.mcp': 'MCP & Integrations',
-  'nav.skills': 'Skills',
   'nav.aiPolish': 'AI Polish',
   'nav.advanced': 'Advanced',
   'nav.extensions': 'Plugins',

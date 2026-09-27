@@ -12,7 +12,11 @@
     "@corum/corum-fs-local": "workspace:*",
     "@corum/corum-git-core": "workspace:*",
     "@corum/corum-ide-explorer-ui": "workspace:*",
+<<<<<<< HEAD
     "@corum/corum-ide-integrations-ui": "workspace:*",
+=======
+    "@corum/corum-ide-integrations-pages-ui": "workspace:*",
+>>>>>>> wt/wt-d5b621
     "@corum/corum-ide-panel-bottom-ui": "workspace:*",
     "@corum/corum-ide-plugin-manager-ui": "workspace:*",
     "@corum/corum-ide-sidebar-ui": "workspace:*",
