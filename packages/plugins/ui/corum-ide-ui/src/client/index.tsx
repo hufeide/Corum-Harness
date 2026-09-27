@@ -39,6 +39,9 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GridActions, PanelActions, SidebarMode } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
+// 集成中心（PR4）：面板本体 + 三个内容子槽的 owner 面类型（真源在组件文件，
+// 本文件只消费——SlotMap 登记与 root children 两处都引用同一个类型，不各写一份）。
+import type { IntegrationsPageOwnerProps } from './IntegrationsFrame.tsx'
 import {
   SessionStatusPill, SessionTrajectoryButton, FloatingCloseButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
   type RevealOutcome,
@@ -83,6 +86,13 @@ export type { SlotMeta } from '@corum/corum-ui-base/client'
 // 编译期保障锚点；feature 插件不需要它——经 registerSlot() 动态注册进网格）。
 export { IDE_GRID_SLOTS } from './ide-layout.ts'
 export type { IdeGridSlot } from './ide-layout.ts'
+// 集成中心（PR4）：三个内容子槽的键域 + owner 面。内容包用 type-only 消费
+// （`import type {} from '@corum/corum-ide-ui/client'`）拉入 SlotMap 键；
+// 需要按名解构 `INTEGRATIONS_SECTION_SLOTS` 的组合可直接 value-import 本出口。
+export { INTEGRATIONS_SECTION_SLOTS } from './IntegrationsFrame.tsx'
+export type {
+  IntegrationsPageOwnerProps, IntegrationsSection, IntegrationsSectionSlot,
+} from './IntegrationsFrame.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -163,6 +173,25 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'corum.sidebar.sessions': { kind: 'single'; scope: 'root' }
     /** 侧栏 · 项目模式内容（项目空态/详情/创建向导）。付费版才有 occupant；空洞时骨架不显示「项目」tab。 */
     'corum.sidebar.project': { kind: 'single'; scope: 'root' }
+    // ── 集成中心内容子槽（PR4；**声明权在本壳** —— 声明 = 排他渲染权）──
+    /**
+     * 集成中心 ·「插件」页（occupant = corum-ide-integrations-ui 的 PluginsPage）。
+     *
+     * 键名此前只以「占位」形式活在 PR5 包（`INTEGRATIONS_PLUGINS_SLOT`）与 PR6 包
+     * （`INTEGRATIONS_PAGE_SLOTS`）里，**两个内容包刻意都不 declare SlotMap**——
+     * 各自的注释写明了原因：SlotMap 是合并接口，同一键在两处声明而 `owner` 不同
+     * 即编译错（TS2717），抢先登记会让骨架合入时撞键。故三个键由本壳一行登记。
+     *
+     * ⚠️ 三件事缺一不可（AGENTS.md / 壳注释的纪律）：
+     *   ① **此处登记 SlotMap 键名**（否则 `children` 与注册方都会被类型系统拒掉）；
+     *   ② root 条目 `children` 表里声明（见下方 ctx.slots.register —— 声明 = 排他渲染权）；
+     *   ③ 注册方（两个内容包的 client apply）的 `name` 与之一致。
+     */
+    'corum.integrations.plugins': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
+    /** 集成中心 · MCP 页（occupant = corum-ide-integrations-pages-ui 的 McpPage）。 */
+    'corum.integrations.mcp': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
+    /** 集成中心 · 技能页（occupant = corum-ide-integrations-pages-ui 的 SkillsPage）。 */
+    'corum.integrations.skills': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
   }
 }
 
@@ -276,6 +305,13 @@ export function apply(ctx: ClientContext): void {
         'corum.tabStrip': { kind: 'list', scope: 'root' },
         'corum.panel': { kind: 'single', scope: 'root' },
         'corum.floating': { kind: 'single', scope: 'root' },
+        // 集成中心三个内容子槽（PR4）：声明在此 = 本壳是它们的排他渲染者
+        // （IntegrationsFrame 按子导航选中项 renderSlot 其中一个）。occupant 由
+        // corum-ide-integrations-ui / corum-ide-integrations-pages-ui 经
+        // ctx.slots.inject 注册（inject 保证「声明先于注册」的时序）。
+        'corum.integrations.plugins': { kind: 'single', scope: 'root' },
+        'corum.integrations.mcp': { kind: 'single', scope: 'root' },
+        'corum.integrations.skills': { kind: 'single', scope: 'root' },
       },
       store: createLayoutStore,
       inject: (actions: PanelActions) => {

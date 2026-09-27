@@ -6,11 +6,13 @@
  * `SettingsMcpSection` / `SettingsSkillsSection`，PR6 按信息架构调整「移出设置中心、
  * 成为集成中心的内容页」。
  *
- * ## 挂载（**等 PR4**，当前注释）
+ * ## 挂载（PR4 已落地 ⇒ live 代码）
  *
- * 集成中心的**骨架（子导航壳）是 PR4 的事**：槽位声明权归骨架，本包只作 occupant。
- * 骨架落地后把下面两行登记为 live 代码即可（`ctx.slots.inject` 保证「声明先于注册」
- * 的时序，槽未声明时本包不会误注册）：
+ * 集成中心的**骨架（面板头 + 子导航 + 三个内容子槽的声明）由
+ * `@corum/corum-ide-ui` 持**：槽位声明权归骨架，本包只作 occupant。
+ * 下面 `apply` 里的两段 `ctx.slots.inject` 从模块头注释转正（`inject` 保证
+ * 「声明先于注册」的时序；骨架被裁掉的发行版里槽不存在 ⇒ 本包什么都不做，
+ * 不会误注册）。两段的形状相同，此处只摘录 MCP 那段：
  *
  * ```tsx
  * const connection = ctx.get('connection') as ConnectionHandle
@@ -19,15 +21,12 @@
  *   { name: 'corum.integrations.mcp', id: 'integrations-mcp' },
  *   () => <IntegrationsRpcContext.Provider value={rpc}><McpPage /></IntegrationsRpcContext.Provider>,
  * )), 'ide-integrations: MCP 页')
- * ctx.effect(() => ctx.slots.inject('corum.integrations.skills', () => ctx.slots.register(
- *   { name: 'corum.integrations.skills', id: 'integrations-skills' },
- *   () => <IntegrationsRpcContext.Provider value={rpc}><SkillsPage /></IntegrationsRpcContext.Provider>,
- * )), 'ide-integrations: 技能页')
  * ```
  *
- * 槽名常量见 `./slots.ts` 的 `INTEGRATIONS_PAGE_SLOTS`（PR4 骨架据此声明子槽）。
+ * 槽名常量见 `./slots.ts` 的 `INTEGRATIONS_PAGE_SLOTS`（与骨架声明的键同域，
+ * `satisfies keyof SlotMap` 锚定）。
  * 登记位置：`packages/desktop/cordis.ide.patch.yml` 的 insert 段 + `packages/desktop/package.json`
- * 的 dependencies（**加载不挂载**：本包在组合里加载、apply 不注册任何东西）。
+ * 与 `packages/desktop/desktop-host/package.json` 的 dependencies（打包闭包按后者补齐）。
  *
  * ## 与设置中心的关系（PR6 收口）
  *
@@ -38,7 +37,14 @@
  *
  * @module corum-ide-integrations-pages-ui/client
  */
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { type Context as ClientContext } from '@deepseek-ai/cordis'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
+import { McpPage } from './McpPage.tsx'
+import { SkillsPage } from './SkillsPage.tsx'
+import { IntegrationsRpcContext } from './face.tsx'
+import { INTEGRATIONS_PAGE_SLOTS } from './slots.ts'
 
 export { McpPage } from './McpPage.tsx'
 export { SkillsPage } from './SkillsPage.tsx'
@@ -47,26 +53,37 @@ export { INTEGRATIONS_PAGE_SLOTS } from './slots.ts'
 export type { IntegrationsPageOwnerProps } from './slots.ts'
 
 /**
- * Required services：PR6 阶段为空。
- *
- * 骨架（PR4）落地、本包开始注册两个内容页后，这里要加 `'slots'` 与
- * `'connection'`——`slots` 给 `ctx.slots.inject/register`，`connection` 给
- * `makeCorumRpcCall(connection)` 构造页面用的 RPC 调用函数。现在不加：声明即硬依赖，
- * 空 apply 没有任何服务需求。
+ * Required services：`slots` 给 `ctx.slots.inject/register`，`connection` 给
+ * `makeCorumRpcCall(connection)` 构造两个页面用的 RPC 调用函数（声明即硬依赖）。
  */
-export const inject: string[] = []
+export const inject = ['slots', 'connection']
 
 /**
- * Client plugin body —— PR6 阶段**有意为空**。
+ * Client plugin body：把两个内容页挂进集成中心骨架声明的槽。
  *
- * 为什么不在这里兜底注册：`corum.integrations.*` 两个槽的**声明者是 PR4 的集成中心
- * 骨架**（声明 = 排他渲染权）。本包若抢先声明，PR4 骨架落地时会撞「already declared」；
- * 而 `ctx.slots.inject` 只在槽已声明时才注册，骨架未落地时**什么都不做**正是期望形态。
- * 故本阶段唯一的交付是「包可加载 + 页面组件可被骨架消费」，注册代码见模块头注释。
+ * 页面组件本身不接 cordis——RPC 面经 `IntegrationsRpcContext` 下发（与它们
+ * 迁出前经设置壳 `CorumRpcContext` 取值的形态同构）。
  *
- * @param ctx - client root context（本阶段不使用）。
+ * @param ctx - client root context.
  */
-export function apply(_ctx: ClientContext): void {
-  // 集成中心骨架（PR4）落地后，把模块头注释里的两行注册搬到这里。
-  // 不要在这里声明 `corum.integrations.*`：声明权归骨架。
+export function apply(ctx: ClientContext): void {
+  const connection = ctx.get('connection') as ConnectionHandle
+  const rpc = makeCorumRpcCall(connection)
+  // 两段各自包 ctx.effect ⇒ 插件卸载时 occupant 自动摘除。
+  ctx.effect(() => ctx.slots.inject(INTEGRATIONS_PAGE_SLOTS.mcp, () => ctx.slots.register(
+    { name: INTEGRATIONS_PAGE_SLOTS.mcp },
+    () => (
+      <IntegrationsRpcContext.Provider value={rpc}>
+        <McpPage />
+      </IntegrationsRpcContext.Provider>
+    ),
+  )), 'ide-integrations: 集成中心 MCP 页')
+  ctx.effect(() => ctx.slots.inject(INTEGRATIONS_PAGE_SLOTS.skills, () => ctx.slots.register(
+    { name: INTEGRATIONS_PAGE_SLOTS.skills },
+    () => (
+      <IntegrationsRpcContext.Provider value={rpc}>
+        <SkillsPage />
+      </IntegrationsRpcContext.Provider>
+    ),
+  )), 'ide-integrations: 集成中心技能页')
 }
