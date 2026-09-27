@@ -331,3 +331,23 @@ describe('effectiveExecutionTools — baseMode conductor 继承指挥语义', ()
     expect(conductorModeOf('conductor-lead', false, effectiveExecutionTools(profile))).toBe('profile')
   })
 })
+
+/**
+ * fork（corum）2026-09-27（用户实机反馈「指挥模式中并未发挥出非隔离子 Agent 的能力」）：
+ * 指挥者人格段原先硬写「A worker runs in an isolated worktree and cannot build or install」
+ * ⇒ conductor 认为 worker **恒隔离**，于是把「推送两个仓」派给了默认隔离子 Agent，而它被
+ * 隔离守卫硬拒（提权也拒、不出卡），用户点了「同意」却什么都没发生。
+ * 本用例把「人格段必须告诉指挥者 main 路由」钉死。
+ */
+describe('★ 指挥者人格段：必须说明 isolation: "main" 这条路由（2026-09-27）', () => {
+  it('提到 isolation: "main" 及其适用场景（push / build / 另一仓）', () => {
+    expect(CONDUCTOR_PERSONA).toContain('isolation: "main"')
+    expect(CONDUCTOR_PERSONA).toContain('git push')
+    expect(CONDUCTOR_PERSONA).toContain('main working tree')
+  })
+
+  it('不再声称 worker 恒在隔离 worktree（旧口径已过时）', () => {
+    expect(CONDUCTOR_PERSONA).not.toContain('runs in an isolated worktree and **cannot build or install**')
+    expect(CONDUCTOR_PERSONA).toContain('ISOLATED by default')
+  })
+})

@@ -1297,6 +1297,48 @@ export type CorumIsolationValue = 'worktree' | 'main' | 'always' | 'write-tasks'
  * @returns `{ mode, placement, integrator }`。
  * @throws 取值不在词汇表内，或与 `integrate: true` 结构性矛盾时。
  */
+/**
+ * fork（corum）2026-09-27（实机教训）：从 brief 里识别**只有主树/非隔离会话才能做**的意图。
+ *
+ * ## 由来（用户实机反馈）
+ *
+ * 用户「同意」推送两个仓之后，指挥者把 brief 交给**默认隔离**的 worker：`git push` 属仓库级
+ * 写、被隔离守卫**硬拒**（连提权重试也拒，**不出审批卡**）⇒ 一个子会话只换来一句
+ * 「this is a manual step or a non-isolated session」，推送根本没发生。参数面
+ * （`isolation: "main"`）当时已存在，病根是**模型不会主动用它** ⇒ 除了改提示词，再在
+ * 派发处加一道窄判据把这类组合拦下来。
+ *
+ * ## 判据刻意**窄**
+ *
+ * 只认「明确要执行某个只有在主树/非隔离会话里才合法的 git 动作」的写法，并**排除否定语境**
+ * （`do NOT push` / `never push` / `without pushing`）——宁可漏判（交回提示词与模型判断），
+ * 也不误伤正常委派：误伤会让主 Agent 白烧一轮去改参数。
+ *
+ * @param prompt - 子 Agent brief 原文。
+ * @returns 命中的能力（进错误文本）；无需主树时 `undefined`。
+ */
+export function corumMainTreeIntentOf(prompt: string): string | undefined {
+  // ⚠️ 必须吃掉 `git` 与动词之间的**全局选项**：用户真实 brief 写的是
+  // `git -C /Users/kukucai/work/kkc-desktop push origin main`，首版只认裸 `git push`
+  // ⇒ 漏判（被自己的用例逮到）。
+  const git = '\\bgit\\s+(?:-C\\s+\\S+\\s+|-c\\s+\\S+\\s+|--git-dir(?:=\\S+|\\s+\\S+)\\s+|--work-tree(?:=\\S+|\\s+\\S+)\\s+)*'
+  const triggers: readonly (readonly [RegExp, string])[] = [
+    [new RegExp(`${git}push\\b`, 'g'), 'run `git push`'],
+    [new RegExp(`${git}(?:pull|fetch)\\b`, 'g'), 'run `git pull` / `git fetch`'],
+    [new RegExp(`${git}worktree\\s+(?:add|remove|move|prune|repair)\\b`, 'g'), 'change git worktrees'],
+    [new RegExp(`${git}branch\\s+(?:-d|-D|-m|-M|-c|-C|--delete|--move|--copy)\\b`, 'g'), 'write a branch ref'],
+  ]
+  const negated = /(?:not|never|don't|do not|cannot|can't|without)\s+$/i
+  for (const [pattern, label] of triggers) {
+    for (const match of prompt.matchAll(pattern)) {
+      const before = prompt.slice(Math.max(0, (match.index ?? 0) - 16), match.index ?? 0)
+      if (negated.test(before)) continue
+      return label
+    }
+  }
+  return undefined
+}
+
 export function corumResolveIsolationRequest(request: {
   readonly integrate?: boolean
   readonly isolation?: unknown
@@ -2114,6 +2156,19 @@ export function apply(ctx: Context, config: Config): void {
         ...args.integrate !== undefined ? { integrate: args.integrate } : {},
         ...args.isolation !== undefined ? { isolation: args.isolation } : {},
       })
+      // fork（corum）2026-09-27（实机教训）：**默认隔离 + 「只有主树能做」的意图** ⇒ 派发前拦下。
+      // 这种组合以前会白跑一个子 Agent（被守卫硬拒、且拿不到审批卡），代价是用户点了「同意」
+      // 却什么都没发生。这里 fail loud，并把该用的参数直接写进错误文本。
+      if (corumIsolationRequest.placement === 'worktree' && corumIsolationRequest.integrator !== true) {
+        const mainTreeOnly = corumMainTreeIntentOf(args.prompt)
+        if (mainTreeOnly !== undefined) {
+          throw new Error(
+            `this brief asks the child to ${mainTreeOnly}, which a DEFAULT ISOLATED worker is hard-denied `
+            + '(its worktree is write-denied to your tree, and no approval card will appear for it). '
+            + 'Pass isolation: "main" to run the child directly in your main working tree, or do it yourself.',
+          )
+        }
+      }
       // 任务级覆盖（orchestrate 的 tasks[i].isolation/research）优先于实例固定终值
       // （2026-09-21 裁定：隔离机制恒定生效，实例侧不再是可配置项，故字面固化常量）。
       // `effReadonlyResearch` 已在上方 request 构造处解析（供只读沙箱钉使用）。
@@ -2730,7 +2785,7 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：描述头追加隔离语义（英文，接在官方 wording 前）。
         // 2026-09-16 不变式⑤：凡**写**委派恒隔离（前台/后台/可继续一视同仁，无逃生口）；
         // 只读研究委派不隔离（它不落盘）。
-        description: 'Every write-capable delegation runs in its own isolated git worktree + branch — there is no opt-out, so its edits reach your tree only through integration (`subagent { integrate: true }` or an `orchestrate` `merge` declaration). A read-only research delegation is not isolated (it writes nothing). The result tells you which of the two happened, so you never have to guess whether a branch carries the work. '
+        description: 'A write-capable delegation is ISOLATED by default: it gets its own git worktree + branch, so its edits reach your tree only through integration (`subagent { integrate: true }` or an `orchestrate` `merge` declaration). Pass `isolation: "main"` when the child must work in your REAL tree instead — builds/installs, `git push`, merging, another repository, or any path outside this one: a default (isolated) child is hard-denied those and no approval card will appear. A read-only research delegation is not isolated (it writes nothing). The result tells you which route ran, so you never have to guess whether a branch carries the work. '
           + wording.description + corumSchedulingDescription({ backgroundEnabled, continuable, readonlyResearch: corumReadonlyResearch })
           // fork（corum）：决策点分工（2026-09-14 委派正确性轮）——工具描述是模型
           // 选工具时唯一**贴着选择点**读到的文本，因此分工必须写在这里，而不是只
@@ -2879,7 +2934,7 @@ export function apply(ctx: Context, config: Config): void {
               'Orchestrate several subagents in ONE call. Two modes, same isolation and merge machinery:',
               '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `schema` (structured output) and `background`.',
               '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await). Hook signatures — `agent(prompt, opts)`: the PROMPT IS THE FIRST ARGUMENT and must be a non-empty string (`opts` is optional: `{ label, phase }`); `parallel(thunks)`, `pipeline(items, ...stages)`, `phase(title)`, `log(message)`. End with `return <json-value>`. Calling `agent({ prompt })` with a single object is REJECTED by the engine (`agent() requires a non-empty prompt string`) — always pass the prompt first. Use script mode when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
-              'ISOLATION: every write task is ISOLATED in its own git worktree + branch — declarative tasks and scripted children alike, foreground or background, with no opt-out. Isolated children branch off HEAD, and the mechanism commits the parent tree right before creating the worktree, so an isolated child always sees the parent\'s latest committed work. Read-only research tasks are not isolated (they write nothing).',
+              'ISOLATION: a write task is ISOLATED by default in its own git worktree + branch — declarative tasks and scripted children alike, foreground or background. Isolated children branch off HEAD, and the mechanism commits the parent tree right before creating the worktree, so an isolated child always sees the parent\'s latest committed work. A task that must work in your REAL tree instead (builds/installs, `git push`, merging, another repository, a path outside this one) declares `isolation: "main"` — it then runs directly in your main working tree with no branch and nothing to merge, and it is the only route that can do those things. Read-only research tasks are not isolated (they write nothing).',
               'FINISH: declare `merge.verify` (how to build/run/verify this repo) — declaring `merge` is what makes the mechanism merge + verify + commit the isolated branches once every task is done. Omit `merge` only when you intend to finish it yourself with `subagent { integrate: true }`; the call reports pending branches and raises a pending-integration notice either way, because branches you never merge are work nobody can see.',
             ].join('\n'),
             parameters: {
@@ -2930,7 +2985,7 @@ export function apply(ctx: Context, config: Config): void {
               merge: {
                 type: 'object',
                 additionalProperties: false,
-                description: 'Declaring this object makes the mechanism finish the pipeline: after every task settles it merges the isolated branches into the main tree, runs `verify`, and commits. There is no opt-out flag — omitting `merge` is how you keep the branches for yourself, and then finishing them is the explicit action `subagent { integrate: true }` (an unmerged branch is invisible work, so a pending-integration notice is raised).',
+                description: 'Declaring this object makes the mechanism finish the pipeline: after every task settles it merges the isolated branches into the main tree, runs `verify`, and commits. Omitting `merge` is how you keep the branches for yourself, and then finishing them is the explicit action `subagent { integrate: true }` (an unmerged branch is invisible work, so a pending-integration notice is raised).',
                 properties: {
                   verify: { type: 'string', description: 'How to build, run, and verify this repository after merging (e.g. "cd studio && npm test"). Declare it: you know this repo — the mechanism injects your declaration verbatim and enforces it. Omit to fall back to detected checks (minimal format bar).' },
 
@@ -3483,7 +3538,7 @@ export function apply(ctx: Context, config: Config): void {
               '- SEVERAL INDEPENDENT pieces of work that can run in parallel (e.g. "split this into modules A/B/C", "do these 4 migrations", "research these 3 alternatives at once") → call `orchestrate` with a task list. This fans out concurrently and collects every result in one call — far better than several sequential `subagent` calls.',
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- EVERY write-capable delegation gets its OWN isolated git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running — there is no opt-out. Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`. Never assume a delegated write has landed — read the result, which states where the work is. Read-only research delegations are not isolated (they write nothing). Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
+              '- A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running. Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`. Never assume a delegated write has landed — read the result, which states where the work is. Read-only research delegations are not isolated (they write nothing). Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
               '- Isolation is a property of CHANGE, not of delegation: it exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
               '- Child model routing is NOT yours to choose: neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed). The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route. Never ask the user to pick a model; never try to route a child elsewhere. If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and then acts on that answer; you must not try to change any model or route yourself. Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
               '- For `orchestrate`, declare `merge.verify`: how to build/run/verify THIS repo after merging (you know this repo best). Declaring `merge` at all means the mechanism finishes the job — it merges + commits the isolated branches once every task is done. Omitting `merge` keeps the branches for you; then finish them yourself with the explicit action `subagent { integrate: true }`, because an unmerged branch is invisible work.',

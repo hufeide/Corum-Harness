@@ -119,7 +119,7 @@ const GIT_READ_ONLY_FORMS: Readonly<Record<string, (segment: string) => boolean>
   worktree: segment => /(^|\s)list(\s|$)/.test(segment),
   branch: segment => /(^|\s)(--list|-l|-a|-r|-v|-vv|--show-current|--contains|--no-contains|--merged|--no-merged|--points-at|--format|--sort|--column)(\s|$)/.test(segment)
     || /^git\s+branch\s*$/.test(segment),
-  tag: segment => /(^|\s)(-l|--list|--contains|--merged|--points-at|--format|--sort|--column)(\s|$)/.test(segment)
+  tag: segment => /(^|\s)(-l|--list|-n\d*|--contains|--merged|--points-at|--format|--sort|--column)(\s|$)/.test(segment)
     || /^git\s+tag\s*$/.test(segment),
   config: segment => /(^|\s)(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--show-origin|--show-scope)(\s|$)/.test(segment),
   remote: segment => /(^|\s)(-v|--verbose|show|get-url)(\s|$)/.test(segment) || /^git\s+remote\s*$/.test(segment),
@@ -142,10 +142,51 @@ const GIT_READ_ONLY_FORMS: Readonly<Record<string, (segment: string) => boolean>
  * `filter-branch` / `filter-repo` / `update-ref`：它们**裸跑就是写**（`git gc` 不传参数
  * 照样回收对象，`git push` 会把当前分支推上去）。
  */
+/**
+ * 各仓库级子命令的**写开关**（合并短开关展开后逐个比对）。
+ *
+ * 为什么必须有它（2026-09-27 自查）：`expandShortFlags` 把 `-dav` 展成 `-d -a -v`，
+ * 而 `branch` 的只读正则只要见到 `-a` 就判读 ⇒ **`git branch -dav`（删分支 + 列表）被误放行**。
+ * 「含读字母」不等于「只是读」：只要出现任一写开关，整条就是写形态。
+ */
+const GIT_WRITE_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  // 只登记「会与读字母**合并**成同一个 token、从而被只读正则误读」的写开关：
+  //   · `-dav` / `-Davv` / `-mv` —— `-d`/`-D`/`-m`/`-M` + 读字母。
+  //   · `-c` / `-C` **刻意排除**：`-C <dir>` 是 git 的**全局**选项（`git -C /repo branch -a`），
+  //     与 `git branch -C`（复制分支）同名；它们本来也不是读 flag，交回只读正则判即可
+  //     （没有读 flag ⇒ 判写）。首版把 `-C` 放进本表，实测把 `git -C /repo branch -a`
+  //     误判成写（自己的用例逮到）。
+  branch: ['-d', '-D', '-m', '-M'],
+  // tag 的 `-a`/`-s`/`-m`/`-f` 都不是 git 全局选项，可安全登记（`-n` 是读）。
+  tag: ['-d', '-a', '-s', '-f', '-m'],
+}
+
 const GIT_BARE_IS_READ = new Set([
   'branch', 'tag', 'worktree', 'remote', 'notes', 'reflog', 'submodule',
   'replace', 'sparse-checkout', 'bisect', 'symbolic-ref', 'config',
 ])
+
+/**
+ * 把 **合并短开关**（`-avv`、`-ra`、`-vv`）展开成 `-a -v -v`，供只读形态正则匹配。
+ *
+ * ## 为什么必须展开（2026-09-27 实机误伤）
+ *
+ * 隔离子会话按 brief 跑了 `git branch -avv`（纯读：列全部分支 + 两个 v 的详情）却被硬拒——
+ * 因为只读正则是按**整 token** 匹配 `-a` / `-vv` 的，`-avv` 两个都不是。git 的短开关可以
+ * 合并，凡「读 + 读」的组合（`-avv` / `-rv` / `-vvv` / `-al`…）都该是读。
+ *
+ * 只展开「2 个及以上字母」的 token：`-C`（带取值的全局选项）与 `-m`、`-d` 这类单字母写开关
+ * 原样保留，不会因此变成读。
+ *
+ * @param segment - 单个 shell 段。
+ * @returns 展开后的段（仅用于只读形态判定，不改命令本身）。
+ */
+function expandShortFlags(segment: string): string {
+  return segment
+    .split(/\s+/)
+    .map(token => /^-[a-zA-Z]{2,}$/.test(token) ? token.slice(1).split('').map(char => `-${char}`).join(' ') : token)
+    .join(' ')
+}
 
 /**
  * 该段里的仓库级子命令是否只是**只读形态**。
@@ -155,6 +196,12 @@ const GIT_BARE_IS_READ = new Set([
 function isGitReadOnlyForm(sub: string, segment: string): boolean {
   // 位置参数自子命令起算（第 1 个元素就是子命令本身），已跳过选项取值。
   const positionals = positionalsFromSubcommand(segment)
+  const expanded = expandShortFlags(segment)
+  // ⚠️ 写开关必须**先于**「裸形态=读」判定：`git branch -dav` 没有任何**位置参数**，
+  // 会被裸形态规则当成「打印用法」而放行，可它含 `-d`（删分支）。首版顺序写反，实测被
+  // 自己的用例逮到（`-dav` / `-Davv` 两条红）。
+  const writeFlags = GIT_WRITE_FLAGS[sub]
+  if (writeFlags !== undefined && writeFlags.some(flag => expanded.split(/\s+/).includes(flag))) return false
   // 裸形态（除子命令外没有位置参数）= 打印列表/用法 ⇒ 只读。
   if (GIT_BARE_IS_READ.has(sub) && positionals.length <= 1) return true
   if (sub === 'symbolic-ref') {
@@ -166,11 +213,11 @@ function isGitReadOnlyForm(sub: string, segment: string): boolean {
   // `git config <key>` 是读（打印值），`git config <key> <value>` 才写：与 symbolic-ref
   // 同款的位置参数判据。带显式读 flag 的一律读。
   if (sub === 'config') {
-    return /(^|\s)(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--show-origin|--show-scope)(\s|$)/.test(segment)
+    return /(^|\s)(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--show-origin|--show-scope)(\s|$)/.test(expanded)
       || positionals.length <= 2
   }
   const reader = GIT_READ_ONLY_FORMS[sub]
-  return reader !== undefined && reader(segment)
+  return reader !== undefined && reader(expanded)
 }
 
 /**

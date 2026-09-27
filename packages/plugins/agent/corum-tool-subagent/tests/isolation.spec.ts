@@ -9,6 +9,7 @@
  * git 命令面；execute 编排由 CDP 实机验证（PLAN §5 第 10 步）。
  */
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,6 +24,7 @@ import {
   corumIsGitRepo,
   corumIsolationBoundaryNotice,
   corumIsWriteTask,
+  corumMainTreeIntentOf,
   corumResolveIsolationRequest,
   corumMarkSettled,
   corumNarrowDenyFilter,
@@ -854,3 +856,63 @@ describe('corumIsolationBoundaryNotice — 父 Agent 可见的隔离边界', () 
     }
   })
 })
+
+/**
+ * fork（corum）2026-09-27（用户实机反馈）：「同意推送两个仓」之后，指挥者把 brief 交给
+ * **默认隔离**的 worker ⇒ `git push` 被守卫硬拒（提权重试也拒、**不出卡**）⇒ 一个子会话
+ * 只换来「this is a manual step or a non-isolated session」，推送没发生。
+ *
+ * 修法两层：① 提示词/persona 明说「需要真工作区就传 `isolation: \"main\"`」；
+ * ② 本判据在**派发前**把这类组合拦下来（窄判据 + 否定语境豁免，宁可漏判不误伤）。
+ */
+describe('corumMainTreeIntentOf — 只有主树/非隔离会话才能做的意图（窄判据）', () => {
+  it('★ 命中 push / pull / worktree 写 / branch 写', () => {
+    expect(corumMainTreeIntentOf('Push both repos: run `git push origin main`')).toContain('git push')
+    expect(corumMainTreeIntentOf('then run git push')).toContain('git push')
+    expect(corumMainTreeIntentOf('git -C /repo push origin main')).toContain('git push')
+    expect(corumMainTreeIntentOf('run git pull --rebase first')).toContain('git pull')
+    expect(corumMainTreeIntentOf('run git worktree remove --force .corum-worktrees/wt-x')).toContain('git worktrees')
+    expect(corumMainTreeIntentOf('run git branch -D wt/old')).toContain('branch ref')
+  })
+
+  it('★ 否定语境不误伤（"do NOT push" 是常见纪律句）', () => {
+    for (const prompt of [
+      'Do NOT push anything — just commit on your branch.',
+      'never push; the integrator handles it',
+      'you cannot push from this worktree, so report instead',
+      'finish without pushing: commit only',
+      'report whether a push is needed',
+    ]) {
+      expect(corumMainTreeIntentOf(prompt), prompt).toBeUndefined()
+    }
+  })
+
+  it('普通实现类 brief 不触发（避免误伤正常委派）', () => {
+    for (const prompt of [
+      'Implement the parser in src/parse.ts and commit on your branch.',
+      'Read the config, then edit src/a.ts so the flag defaults to true.',
+      'Add a unit test for the new helper; do not touch other files.',
+    ]) {
+      expect(corumMainTreeIntentOf(prompt), prompt).toBeUndefined()
+    }
+  })
+})
+
+/**
+ * 2026-09-27：**钉住「worker 恒隔离」这类过时声明不再回来**，并钉住新能力被写进模型可见文本。
+ *
+ * 上一轮我加了 `isolation` 参数，却漏改两处模型可见文本（subagent 工具描述与 orchestrate
+ * 说明仍写「there is no opt-out」）⇒ 模型根本不会去用它，于是「推送分支」被派给隔离子 Agent。
+ * 本用例把「描述必须提 main 路由」与「不得再声称没有 opt-out」同时钉死。
+ */
+describe('★ 提示词不得再声称「没有 opt-out / worker 恒隔离」（2026-09-27 实机）', () => {
+  const src = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+  it('subagent 工具描述提到 isolation 的 main 路由，且不再有 no opt-out', () => {
+    expect(src).toContain('Pass `isolation: \"main\"` when the child must work in your REAL tree')
+    expect(src).not.toMatch(/no opt-out/i)
+  })
+  it('orchestrate 说明提到 task 级 isolation: \"main\"', () => {
+    expect(src).toContain('declares `isolation: \"main\"`')
+  })
+})
+

@@ -325,6 +325,9 @@ describe('★ 两轴口径（2026-09-27 用户裁定）：主仓硬线 vs 仓外
       'git gc --prune=now',
       'git config --global user.name x',
       'git replace -d abc123',
+      // 合并短开关里**含写**的组合仍然是写（别把 `-avv` 的豁免搞成对所有 `-xxx` 放行）。
+      'git branch -dav',
+      'git branch -Davv',
     ]
     for (const command of repoGlobal) {
       it(`拒：${command}`, () => {
@@ -362,6 +365,13 @@ describe('★ 两轴口径（2026-09-27 用户裁定）：主仓硬线 vs 仓外
       'git bisect',
       'git branch --show-current',
       `git -C ${MAIN} remote show origin`,
+      // 2026-09-27 实机误伤：隔离子会话按 brief 跑 `git branch -avv` 被硬拒——只读正则按整
+      // token 匹配 `-a`/`-vv`，而 git 的短开关**可以合并**。凡「读+读」组合都该放行。
+      'git branch -avv',
+      `git -C ${MAIN} branch -avv`,
+      'git branch -rv',
+      'git branch -vvv',
+      'git tag -l -n5',
     ]
     for (const command of reads) {
       it(`放行只读：${command}`, () => {
