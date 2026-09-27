@@ -144,6 +144,14 @@ interface Waiter {
   readonly timer: NodeJS.Timeout
   readonly grant: () => void
   readonly fail: (error: unknown) => void
+  /** 摘掉 abort 监听（授予/超时/中止/关停四条路径都要摘，否则监听器泄漏）。 */
+  readonly detach: () => void
+}
+
+/** 调用方撤销（`exec.signal` 中止 / turn 结束）时用的错误。 */
+function abortedError(serverName: string, reason: unknown): Error {
+  const detail = reason instanceof Error ? reason.message : String(reason ?? 'aborted')
+  return new Error(`MCP call on "${serverName}" was aborted by its caller (${detail})`)
 }
 
 /** 一个服务名对应的连接（池的最小单元：**一份 client + 一份独占租约**）。 */
@@ -204,12 +212,22 @@ class PooledServer {
    * @param owner - 归属（日志/拒绝文本用）。
    * @returns MCP 原始结果（工具级 `isError` 原样透传，不做语义解释）。
    */
-  async callTool(tool: string, args: unknown, owner: McpLeaseOwner): Promise<unknown> {
-    const release = await this.acquire(owner)
+  async callTool(
+    tool: string,
+    args: unknown,
+    owner: McpLeaseOwner,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const release = await this.acquire(owner, options)
     try {
       const client = await this.ensureConnected()
       this.options.log('info', `MCP pool: ${describeOwner(owner)} → ${this.serverName}.${tool}`)
-      return await client.callTool({ name: tool, arguments: (args ?? {}) as Record<string, unknown> })
+      return await client.callTool(
+        { name: tool, arguments: (args ?? {}) as Record<string, unknown> },
+        undefined,
+        // 调用方撤销要能真的传到协议层（否则中止后 server 仍在跑，租约已还、下一个调用会重叠）。
+        ...(options.signal !== undefined ? [{ signal: options.signal }] : [{} as { signal?: AbortSignal }]),
+      )
     } finally {
       release()
     }
@@ -220,23 +238,35 @@ class PooledServer {
    * @param owner - 归属。
    * @returns 释放函数（幂等；TTL 回收后调用它是空操作）。
    */
-  async acquire(owner: McpLeaseOwner): Promise<() => void> {
+  async acquire(owner: McpLeaseOwner, options: { readonly signal?: AbortSignal } = {}): Promise<() => void> {
     this.reclaimIfStale()
+    if (options.signal?.aborted === true) throw abortedError(this.serverName, options.signal.reason)
     if (this.holder === undefined) return this.grant(owner)
     const timeoutMs = this.options.leaseTimeoutMs
     const holder = this.holder.owner
     return new Promise<() => void>((resolve, reject) => {
       const token = Symbol('mcp-lease')
+      /** 出队（授予/超时/中止/关停前先摘监听，幂等）。 */
+      const drop = (): void => {
+        const index = this.queue.findIndex(candidate => candidate.token === token)
+        if (index >= 0) this.queue.splice(index, 1)
+        clearTimeout(waiter.timer)
+        waiter.detach()
+      }
+      const onAbort = (): void => {
+        drop()
+        reject(abortedError(this.serverName, options.signal?.reason))
+      }
       const waiter: Waiter = {
         owner,
         token,
         enqueuedAt: Date.now(),
         grant: () => { resolve(() => { this.releaseToken(token) }) },
         fail: reject,
+        detach: () => { options.signal?.removeEventListener('abort', onAbort) },
         timer: setTimeout(() => {
-          const index = this.queue.findIndex(candidate => candidate.token === token)
-          if (index < 0) return
-          this.queue.splice(index, 1)
+          if (!this.queue.some(candidate => candidate.token === token)) return
+          drop()
           const error = new McpLeaseTimeoutError({
             serverName: this.serverName,
             holder: this.holder?.owner,
@@ -247,6 +277,7 @@ class PooledServer {
           reject(error)
         }, timeoutMs),
       }
+      options.signal?.addEventListener('abort', onAbort, { once: true })
       this.queue.push(waiter)
       this.options.log(
         'info',
@@ -281,6 +312,7 @@ class PooledServer {
     this.holder = undefined
     for (const waiter of this.queue.splice(0)) {
       clearTimeout(waiter.timer)
+      waiter.detach()
       waiter.fail(new Error(`MCP server "${this.serverName}" was stopped before this call could run`))
     }
     if (client !== undefined) await client.close().catch(() => {})
@@ -305,6 +337,7 @@ class PooledServer {
     const next = this.queue.shift()
     if (next === undefined) return
     clearTimeout(next.timer)
+    next.detach()
     this.holder = { owner: next.owner, token: next.token, since: Date.now() }
     next.grant()
   }
@@ -453,13 +486,19 @@ export class McpPool {
   }
 
   /** 独占调用（忙则排队 + 超时）。 */
-  async callTool(serverName: string, tool: string, args: unknown, owner: McpLeaseOwner): Promise<unknown> {
-    return await this.serverFor(serverName).callTool(tool, args, owner)
+  async callTool(
+    serverName: string,
+    tool: string,
+    args: unknown,
+    owner: McpLeaseOwner,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    return await this.serverFor(serverName).callTool(tool, args, owner, options)
   }
 
   /** 取租约（代理层在需要跨多次调用持有时用；`callTool` 内部已自带）。 */
-  async acquire(serverName: string, owner: McpLeaseOwner): Promise<() => void> {
-    return await this.serverFor(serverName).acquire(owner)
+  async acquire(serverName: string, owner: McpLeaseOwner, options: { readonly signal?: AbortSignal } = {}): Promise<() => void> {
+    return await this.serverFor(serverName).acquire(owner, options)
   }
 
   /** 观测投影（UI/验收）。 */

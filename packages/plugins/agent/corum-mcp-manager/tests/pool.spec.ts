@@ -113,6 +113,65 @@ describe('MCP 池：一个服务名一个进程，多 Agent 共用（2026-09-27 
     }
   })
 
+  it('★ 排队中被中止（turn 结束/用户打断）⇒ 立刻让出排队位，且不占租约', async () => {
+    const { pool } = makePool()
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const running = pool.callTool('fake', 'slow', { delayMs: 250 }, ownerA)
+      const controller = new AbortController()
+      const queued = pool.callTool('fake', 'echo', { text: 'x' }, ownerB, { signal: controller.signal })
+      await tick(30)
+      expect(pool.snapshot()[0]?.queueLength).toBe(1)
+      controller.abort(new Error('turn ended'))
+      await expect(queued).rejects.toThrow(/aborted by its caller/)
+      // 排队位立刻让出（不是等超时才清）
+      expect(pool.snapshot()[0]?.queueLength).toBe(0)
+      await running
+      expect(pool.snapshot()[0]?.holder).toBeUndefined()
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
+  it('★ TTL 兜底：持有者崩死（永不释放）⇒ 租约被回收并点名原持有者', async () => {
+    const warns: string[] = []
+    const definitions = new Map<string, McpServerConfig>([
+      ['fake', { name: 'fake', transport: 'stdio', command: process.execPath, args: [FIXTURE] }],
+    ])
+    const pool = new McpPool({
+      resolve: name => definitions.get(name),
+      leaseTimeoutMs: 5_000,
+      leaseTtlMs: 60,
+      log: (level, message) => { if (level === 'warn') warns.push(message) },
+    })
+    const release = pool.retain('fake')
+    try {
+      // 模拟"某个 Agent 拿了租约就再也没还"（崩死/被 kill）
+      const deadLease = await pool.acquire('fake', { agentId: 'dead-agent', sessionId: 's-dead' })
+      expect(pool.snapshot()[0]?.holder?.agentId).toBe('dead-agent')
+      await tick(90)
+      // 下一个调用者能拿到（TTL 已回收），warn 点名原持有者
+      const liveLease = await pool.acquire('fake', ownerB)
+      expect(pool.snapshot()[0]?.holder?.agentId).toBe('agent-B')
+      expect(warns.join(' ')).toContain('dead-agent')
+      expect(warns.join(' ')).toContain('reclaiming')
+      // ⚠️ 真正的危险在这里：崩死者的**迟到释放**绝不能把别人的租约偷走（token 已经不是它了）
+      deadLease()
+      expect(pool.snapshot()[0]?.holder?.agentId).toBe('agent-B')
+      // B 正常归还之后再发起调用（⚠️ 首版我把调用写在归还之前 ⇒ 它排队等满 leaseTimeout 超时，
+      // 测试自己造了个 5 秒死锁；顺序错在测试，不在实现）
+      liveLease()
+      expect(pool.snapshot()[0]?.holder).toBeUndefined()
+      const result = payloadOf(await pool.callTool('fake', 'echo', { text: 'next' }, ownerA))
+      expect(result.text).toBe('next')
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
   it('describeOwner：归属文本带 session/lane（拒绝与日志共用一处措辞）', () => {
     expect(describeOwner(undefined)).toBe('nobody')
     expect(describeOwner({ agentId: 'a1' })).toBe('agent a1')

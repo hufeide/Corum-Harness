@@ -9,7 +9,11 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./proxy": {
+      "types": "./lib/types/proxy.d.ts",
+      "default": "./lib/proxy.js"
+    }
   },
   "scripts": {
     "build": "tsc -b && tsdown",
