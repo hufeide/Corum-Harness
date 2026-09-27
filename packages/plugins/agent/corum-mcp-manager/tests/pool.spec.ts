@@ -510,3 +510,43 @@ describe('并行档 + 访问上限（用户 2026-09-27：非独占则可同时�
     }
   })
 })
+
+describe('TTL 是最后手段、不是调用时长上限（2026-09-27 实机教训）', () => {
+  it('★ 合法长调用不得被 TTL 抢走槽位：同资源竞争者必须超时，而不是"接管"', async () => {
+    // 复刻实机：排队超时很短（80ms），但持有者的调用会跑 400ms。
+    // 旧实现 TTL = 80×2 = 160ms ⇒ 会在 160ms 时把槽位回收给竞争者（同资源并发 ✗）。
+    const { pool } = makePool({ leaseTimeoutMs: 80 })
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const holding = pool.callTool('fake', 'echo', { text: 'doc-a', delayMs: 400 }, ownerA, { resource: 'doc-a' })
+      await tick(30)
+      // 竞争者等 300ms：若槽位被 TTL 抢走，它会在 ~160ms 成功；正确行为是 80ms 超时被拒。
+      const outcome = await pool
+        .callTool('fake', 'echo', { text: 'doc-a', delayMs: 1 }, ownerB, { resource: 'doc-a' })
+        .then(() => 'acquired' as const, () => 'timed-out' as const)
+      expect(outcome).toBe('timed-out')
+      await holding
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+
+  it('显式把 TTL 设小 ⇒ 仍然会回收（保留为可配置的兜底手段）', async () => {
+    const { pool } = makePool({ leaseTimeoutMs: 5_000, leaseTtlMs: 60 })
+    const release = pool.retain('fake')
+    try {
+      await pool.listTools('fake')
+      const lease = await pool.acquire('fake', { agentId: 'dead' }, { resource: 'doc-a' })
+      await tick(90)
+      const next = await pool.acquire('fake', ownerB, { resource: 'doc-a' })
+      expect(pool.snapshot()[0]?.holders[0]?.agentId).toBe('agent-B')
+      next()
+      lease() // 迟到的释放：空操作
+    } finally {
+      release()
+      await pool.disposeAll()
+    }
+  })
+})

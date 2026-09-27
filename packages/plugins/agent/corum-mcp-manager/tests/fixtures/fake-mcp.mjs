@@ -43,7 +43,7 @@ const server = new Server({ name: 'fake-mcp', version: '1.0.0' }, { capabilities
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
-    { name: 'echo', description: 'echo back', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } },
+    { name: 'echo', description: 'echo back (optionally after a delay)', inputSchema: { type: 'object', properties: { text: { type: 'string' }, delayMs: { type: 'number' } } } },
     { name: 'slow', description: 'sleep', inputSchema: { type: 'object', properties: { delayMs: { type: 'number' } } } },
     { name: 'stats', description: 'server stats', inputSchema: { type: 'object' } },
     { name: 'crash', description: 'die after replying', inputSchema: { type: 'object' } },

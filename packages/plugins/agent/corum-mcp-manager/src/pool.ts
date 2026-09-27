@@ -137,6 +137,21 @@ export function describeOwner(owner: McpLeaseOwner | undefined): string {
 const DEFAULT_LEASE_TIMEOUT_MS = 60_000
 
 /**
+ * 租约 TTL 的默认值（**最后手段**，不是"调用时长上限"）。
+ *
+ * ## 2026-09-27 实机教训（这条默认值原先写错了）
+ *
+ * 原实现是 `leaseTimeoutMs * 2`（默认 120s，实机把排队超时调到 8s 后就变成 16s）。实机场景：
+ * 一个**合法**跑 40s 的调用持有 `doc-a`，16s 后池认为它"死了" ⇒ **回收槽位** ⇒ 另一个 Agent
+ * 立刻拿到同一个 `doc-a` 并**同时改** —— 租约存在的意义（同资源串行）当场失效。
+ *
+ * 正确语义：正常路径下槽位由 `callTool` 的 `finally` 精确释放，**不需要 TTL**；TTL 只负责
+ * 「调用体永不 settle（SDK 挂死）」这种最后手段。故默认给足 10 分钟，并可用
+ * `CORUM_MCP_LEASE_TTL_MS` 覆盖。
+ */
+const DEFAULT_LEASE_TTL_MS = 10 * 60_000
+
+/**
  * 引用计数归零后**延迟这么久**才真的停进程（缺省 3s；`CORUM_MCP_STOP_GRACE_MS` 可覆盖）。
  *
  * ## 为什么必须有（2026-09-27 实机预判 + 用户要求）
@@ -611,7 +626,8 @@ export class McpPool {
     const leaseTimeoutMs = options.leaseTimeoutMs ?? fromEnv.leaseTimeoutMs
     this.options = {
       leaseTimeoutMs,
-      leaseTtlMs: options.leaseTtlMs ?? fromEnv.leaseTtlMs ?? leaseTimeoutMs * 2,
+      // ⚠️ 不要用 `leaseTimeoutMs * N` 推导 TTL（见 DEFAULT_LEASE_TTL_MS 的实机教训）。
+      leaseTtlMs: options.leaseTtlMs ?? fromEnv.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS,
       stopGraceMs: options.stopGraceMs ?? fromEnv.stopGraceMs,
       log: options.log ?? (() => {}),
     }
