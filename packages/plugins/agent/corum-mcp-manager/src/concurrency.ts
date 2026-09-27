@@ -69,20 +69,40 @@ function propertiesOf(schema: unknown): string[] {
 }
 
 /**
- * 工具面是否**一致地**用某个参数寻址资源。
+ * 工具面是否**按某个参数寻址资源**（2026-09-27 修正：原规则过严，误杀 Pencil）。
  *
- * 口径：**每一个带参数的工具有它**（不带参数的工具如 `get_app_state`/`list_pages` 不算违反）。
- * 只要有一个带参数的工具有属性却缺这个键，就不认为"按该资源寻址"（避免半套）。
+ * ## 为什么不能用"所有带参工具都必须有它"（实机教训）
+ *
+ * Pencil 的真实工具面：`execute{filePath,…}` ✓、`browser{filePath,…}` ✓ 是资源型，但
+ * `get_style{name,params}`、`read_skill{path}` **不是**（纯元数据/自带 skill）。
+ * 原规则要求 *每一个* 带参工具都有该键 ⇒ Pencil 被判成 `exclusive` ✗（实机必然踩）。
+ *
+ * ## 现规则：覆盖度
+ *
+ * 对每个候选键算「有多少个带参工具包含它」，取覆盖最多的那个；要求
+ *   · 覆盖 ≥ **2** 个工具（只有一个工具带它，说明不了这是该 server 的寻址方式）；
+ *   · 覆盖 ≥ **50%** 的带参工具（多数资源型即可，元数据工具允许不带）；
+ * 名次并列时按 {@link MCP_RESOURCE_ARG_CANDIDATES} 的优先级定（`filePath` > `pageId` > …）。
+ *
  * @param tools - 工具面（含 schema）。
- * @returns 命中的候选键（按 {@link MCP_RESOURCE_ARG_CANDIDATES} 顺序），推不出为 undefined。
+ * @returns 命中的候选键，推不出为 undefined。
  */
 export function sharedResourceArgOf(tools: readonly McpToolSchemaView[]): string | undefined {
   const withProps = tools.map(tool => propertiesOf(tool.inputSchema)).filter(names => names.length > 0)
   if (withProps.length === 0) return undefined
-  for (const candidate of MCP_RESOURCE_ARG_CANDIDATES) {
-    if (withProps.every(names => names.includes(candidate))) return candidate
-  }
-  return undefined
+  const ranked = MCP_RESOURCE_ARG_CANDIDATES
+    .map((candidate, priority) => ({
+      candidate,
+      priority,
+      count: withProps.filter(names => names.includes(candidate)).length,
+    }))
+    .filter(entry => entry.count > 0)
+    .sort((a, b) => b.count - a.count || a.priority - b.priority)
+  const best = ranked[0]
+  if (best === undefined) return undefined
+  if (best.count < 2) return undefined
+  if (best.count * 2 < withProps.length) return undefined
+  return best.candidate
 }
 
 /**
@@ -113,7 +133,8 @@ export function deriveConcurrencyPolicy(input: {
   }
   const shared = input.tools !== undefined ? sharedResourceArgOf(input.tools) : undefined
   if (shared !== undefined) {
-    return { mode: 'per-resource', resourceArg: shared, reason: `every tool addresses "${shared}"` }
+    // 措辞要与**覆盖度**规则一致（原写 "every tool addresses…"，在元数据工具混排时是不准确的）。
+    return { mode: 'per-resource', resourceArg: shared, reason: `resource argument "${shared}" covers the tool calls` }
   }
   return { mode: 'exclusive', reason: 'no per-call resource argument found' }
 }

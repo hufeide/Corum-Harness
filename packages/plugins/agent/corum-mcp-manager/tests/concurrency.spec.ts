@@ -59,9 +59,10 @@ describe('策略推导：配置时定死 ⇒ 独占；调用时传入 ⇒ 可复
     const generic = deriveConcurrencyPolicy({ config: { name: 'p', transport: 'streamable-http', url: 'https://x/mcp' } })
     expect(generic.mode).toBe('exclusive')
     expect(generic.reason).toContain('no per-call resource')
+    // ≥2 个资源型工具才足以推断（单工具属"证据不足 ⇒ 保守默认"，另有专门用例钉住）
     const withTools = deriveConcurrencyPolicy({
       config: { name: 'p', transport: 'streamable-http', url: 'https://x/mcp' },
-      tools: [tool('execute', { filePath: {} })],
+      tools: [tool('execute', { filePath: {} }), tool('browser', { filePath: {}, action: {} })],
     })
     expect(withTools).toMatchObject({ mode: 'per-resource', resourceArg: 'filePath' })
   })
@@ -76,13 +77,37 @@ describe('策略推导：配置时定死 ⇒ 独占；调用时传入 ⇒ 可复
     expect(decision.reason).toContain('filePath')
   })
 
-  it('★ 半套（只有部分带参工具有该键）⇒ 不按资源寻址 ⇒ 保守默认独占', () => {
+  it('★ Pencil 真实形态：资源型工具 + 元数据工具混排 ⇒ 仍判 per-resource(filePath)', () => {
+    // 实机教训：原规则要求「每个带参工具都必须有该键」⇒ Pencil 被判 exclusive（错）。
+    const decision = deriveConcurrencyPolicy({
+      config: stdio('/Applications/Pen.app/…/mcp-server-darwin-arm64', ['--app', 'desktop', '--agent', 'corum']),
+      tools: [
+        tool('execute', { filePath: {}, input: {}, editId: {}, edits: {} }),
+        tool('browser', { filePath: {}, action: {}, nodeId: {}, querySelector: {}, target: {}, url: {} }),
+        tool('get_style', { name: {}, params: {} }),   // 元数据
+        tool('read_skill', { path: {} }),               // 自带 skill
+        tool('get_app_state'),                          // 无参
+      ],
+    })
+    expect(decision.mode).toBe('per-resource')
+    expect(decision.resourceArg).toBe('filePath')
+  })
+
+  it('★ 只有一个工具带该键（覆盖 <2）⇒ 说明不了寻址方式 ⇒ 保守默认', () => {
     const decision = deriveConcurrencyPolicy({
       config: stdio('/bin/other-mcp'),
-      tools: [tool('a', { filePath: {} }), tool('b', { query: {} })],
+      tools: [tool('a', { filePath: {} }), tool('b', { query: {} }), tool('c', { q: {} })],
     })
     expect(decision.mode).toBe('exclusive')
     expect(decision.reason).toContain('no per-call resource')
+  })
+
+  it('覆盖不足一半（3 个带参工具里只有 1 个有 filePath、1 个有 pageId…）⇒ 保守默认', () => {
+    const decision = deriveConcurrencyPolicy({
+      config: stdio('/bin/mixed-mcp'),
+      tools: [tool('a', { filePath: {} }), tool('b', { q: {} }), tool('c', {}), tool('d', {})],
+    })
+    expect(decision.mode).toBe('exclusive')
   })
 
   it('★ 显式配置优先：exclusive 覆盖推导；shared 也只在显式时出现', () => {
