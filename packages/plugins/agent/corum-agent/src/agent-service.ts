@@ -27,6 +27,8 @@ import { childRunInterruptOf, foldProgressAll } from './child-progress.ts'
 import { resolveTaskSession, type ResolvedTaskSession } from './task-lane.ts'
 // fork（corum）2026-09-21：Agent 存活登记册按关注点抽出（六张状态表 + 语义方法）。
 import { AgentRegistry } from './agent-registry.ts'
+// fork（corum）2026-09-27：在跑的 Agent 就地重挂 preset 组合（用户需求：会话中改 MCP 即生效）。
+import { reloadAgentPreset } from './preset-reload.ts'
 // fork（corum）2026-09-21：终态改动摘要按关注点抽出（两个 host 来源 + 降级路径）。
 import { buildChangeSummary as buildChangeSummaryOf, emitChangeSummary as emitChangeSummaryOf } from './change-summary.ts'
 // fork（corum）2026-09-21：子 Agent 进度按关注点抽出（四张状态表 + 事件接线归它持有）。
@@ -756,6 +758,34 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * fork（corum）2026-09-27：把**正在跑的**该 profile 会话就地重挂到最新组合。
+   *
+   * 为什么不能只靠 `forgetProfileAgent`：那只清 corum 自己缓存的 root Agent，**task 泳道的
+   * agent 由会话持有**、不经过那张表；而官方 `agentPresets.select` 对「已开始」的会话抛
+   * `agent-preset/locked`（实测：`session "…" has already started; its agent preset is fixed`）。
+   * 于是用户在会话中给 profile 加 MCP 时，那个会话既拿不到新行、也切不动 preset ⇒ 只能重启软件。
+   *
+   * 重挂走官方**同款原语** `recompose`（能力接口 + 特性检测，见 `preset-reload.ts`）：它按组合
+   * 文件指纹判断常驻挂载是否过期（过期即按新 yml 重挂 ⇒ 新 `mcp-*` 行生效），再
+   * `emit('tools/change')` 通知工具面变化 ⇒ **下一轮请求**带上新工具。人格与写权限不变
+   * （同一个 preset id），只有组合里新增/删除的行变化。
+   *
+   * 失败不抛（保存 profile 是用户操作）：进 warn，会话保持原工具面，下次重建仍会拿到新组合。
+   * 能力不可用（老宿主）⇒ 静默保持既有行为，绝不假装成功。
+   *
+   * ⚠️ 代价：每次保存都会重挂这些会话的组合 ⇒ 其 MCP server 进程随之重启一次。与
+   * {@link noteAgentTeardown} 记的「循环保存会放出进程风暴」同源，故仅在**确有活会话**时才动手。
+   * @param profileId - 刚保存的 profile id。
+   */
+  private recomposeLiveSessionsOf(profileId: string): void {
+    const live = this.registry.liveAgentsOfProfile(profileId)
+    if (live.length === 0) return
+    for (const agent of live) {
+      void reloadAgentPreset(this.ctx, agent.ctx, profileId, message => this.ctx.logger.warn(message))
+    }
+  }
+
+  /**
    * 记录一次 agent 销毁（三处销毁点都会调）。
    *
    * 销毁本身是合法的（保存/删除 profile、重启自检），但**每次销毁都会让下一次使用重建整套
@@ -1164,6 +1194,12 @@ export class CorumAgentService extends TypertRemoteService {
     // 清掉旧 Agent 使下次重建
     this.noteAgentTeardown(input.id, 'saveProfile')
     this.registry.forgetProfileAgent(input.id)
+    // fork（corum）2026-09-27（用户需求：「MCP 配置保存后实时生效，不要重启软件」）：
+    // 上面那两行只让**下次**使用重建（root/profile 侧），**正在跑的 task 泳道会话**不在其中
+    // —— 它们的 agent 被会话持有，官方 `agentPresets.select` 又对已开始的会话抛
+    // `agent-preset/locked` ⇒ 用户在会话中加的 MCP 行**永远**到不了那个会话（实测复现：
+    // 父无 MCP、子会话挂父的 live preset 也无）。这里补上「对在跑的会话就地重挂」。
+    this.recomposeLiveSessionsOf(input.id)
     const saved = loadProfile(input.id)!
     return {
       profile: {

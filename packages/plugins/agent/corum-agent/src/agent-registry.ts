@@ -138,6 +138,30 @@ export class AgentRegistry {
     return [...this.byProfile.keys()]
   }
 
+  /**
+   * fork（corum）2026-09-27：该 profile 的**全部活 Agent**（root + task 泳道）。
+   *
+   * 用途：profile 保存后对「正在跑、且用这个 profile」的会话做**实时重挂**（见
+   * `preset-reload.ts` 与 `agent-service.ts` 的 `recomposeLiveSessionsOf`）——用户需求是
+   * 「会话中改了 MCP 就实时生效，不该重启软件」，而重挂必须点名每一个活 Agent。
+   *
+   * 只收**两张带 `profileId` 的表**：root Agent（`byProfile`）与 task 泳道（`tasks`）。
+   * 项目制泳道的键是 `projectId+profileId+laneKey` 拼接串（无分隔符、无法反解），且那些会话
+   * 每次进入泳道都会重新解析 ⇒ 不在此列（如实标注，不假装覆盖）。
+   *
+   * @param profileId - profile id。
+   * @returns 去重后的活 Agent（同一 Agent 只出现一次；无匹配时空数组）。
+   */
+  liveAgentsOfProfile(profileId: string): Agent[] {
+    const found = new Set<Agent>()
+    const root = this.byProfile.get(profileId)
+    if (root !== undefined) found.add(root)
+    for (const entry of this.tasks.values()) {
+      if (entry.profileId === profileId) found.add(entry.agent)
+    }
+    return [...found]
+  }
+
   /* ───────────── 泳道会话 ───────────── */
 
   /** 泳道路由键（`projectId` + `profileId` + `laneKey` 直接拼接——**无分隔符**，与旧实现逐字一致）。 */
