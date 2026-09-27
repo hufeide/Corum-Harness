@@ -446,6 +446,14 @@ export function registerIpc(
     return { path: picked.filePaths[0] }
   })
 
+  // ── 应用信息 ──────────────────────────────────────────────────────────
+  //
+  // 版本号由主进程给（`app.getVersion()`：打包态是 bundle 的版本，dev 态回落
+  // 到应用的 package.json），renderer 不猜、也不自己去读文件。preload 侧暴露
+  // 成 `getAppVersion()`（invoke 而非 sendSync：同步 IPC 会卡住 renderer 的
+  // 启动路径，而版本号只在品牌行挂载时拉一次，异步完全够）。
+  ipcMain.handle('corum:app-version', () => app.getVersion())
+
   // ── 壳层 combo 管理（纯壳页面使用；进程级切换，废弃旧的进程内 comboLoad）──
 
   // 读取所有已配置且可用的 combo（内置 + 用户自定义，壳层文件）。

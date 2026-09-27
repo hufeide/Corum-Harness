@@ -4,11 +4,12 @@
  * 开源版组合 = 骨架 + 任务模式内容：
  * - 骨架（SidebarSkeleton）占壳的 `corum.sidebar` 槽，同一次 register 声明
  *   `corum.sidebar.sessions` / `corum.sidebar.project` 两个子槽（declaration = 占坑），
- *   自身只做品牌区 + 「项目/任务」模式切换 + 子槽渲染。
+ *   自身只做品牌行（品牌卡 + 版本小字 + 档位徽标）+ 子槽渲染；PR1 起不再有
+ *   「项目/任务」模式切换 UI（改由活动栏承担）。
  * - 任务模式内容（SessionsPane）由本包注册进 `corum.sidebar.sessions`，数据来自
  *   运行时对象层（`ctx.sessions` / `ctx.workspaces`），不经 RPC。
  * - 项目模式内容（付费版）由独立插件占 `corum.sidebar.project`；槽空时骨架经
- *   `hooks.projectOccupied` 源探测到无 occupant，不显示「项目」tab。
+ *   `hooks.projectOccupied` 源探测到无 occupant，不显示项目面板、档位徽标显示「社区版」。
  *
  * The slot declarations belong to @corum/corum-ide-ui (type-only import pulls
  * the SlotMap rows).
@@ -34,7 +35,7 @@ import type { SessionsPaneInjected } from './SessionsPane.tsx'
  * 任务/项目内容的数据分别由两个子槽 occupant 各自的 inject 提供。
  */
 export interface SidebarSkeletonInjected {
-  /** 项目槽占用查询源（uSES）：付费版项目插件占用后骨架显示「项目」tab。 */
+  /** 项目槽占用查询源（uSES）：付费版项目插件占用后骨架渲染项目面板、档位徽标显示 PRO。 */
   hooks: {
     projectOccupied: {
       getSnapshot: () => boolean
