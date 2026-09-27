@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsc -b && tsdown",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
