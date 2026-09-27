@@ -52,7 +52,10 @@ describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () 
     // 其它分支（可读）…这一类无法提权获得」）。措辞必须与机制一致，否则子 Agent 会一直等
     // 一张永远不会出现的卡（实测代价：会话 corum-task-56b7d485 反复重试同一类命令）。
     expect(text).toContain('refused without any prompt')
-    expect(text).toContain('hard limit it can never widen')
+    // 2026-09-27（审查员 C 4.1 + A 的 F2(ii)）：旧句 'a read-only or isolated scope stays as-is' 与机制不符
+    // —— 隔离**不是**档位天花板（hardCeilingFor 仅 pinReadOnly 收窄）；不变的是**按路径**的写边界。
+    expect(text).toContain('a READ-ONLY scope can never widen')
+    expect(text).toContain('its write boundary is by PATH')
     expect(text).toContain('report it as a conclusion')
     // 旧的（现已为假的）承诺必须消失。
     expect(text).not.toContain('pinned to `never`')

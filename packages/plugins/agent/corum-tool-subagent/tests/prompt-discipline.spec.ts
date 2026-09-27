@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   corumEfficiencyDisciplineLines,
+  corumExecutionDisciplineText,
   corumSandboxEscalationLines,
 } from '@corum/corum-orchestration'
 
@@ -85,27 +86,37 @@ describe('决策点分工 — 只读调研不走写能力子 Agent（源码扫�
 describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督调试框架 / 项目特例', () => {
   const lines = [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()]
 
-  it('两个导出块是唯一事实源，且**两处注入点**都用它们（2026-09-27 投送重构后）', () => {
-    // 架构：builder 定义在 `@corum/corum-orchestration` 的 execution-discipline.ts（唯一定义处）；
-    // 注入点两处、各调一次：
-    //   · corum-agent/src/agent-service.ts —— **root scope** 段（所有 corum 会话 + 子会话继承）
-    //   · corum-agent/src/compile.ts —— minimal 是 `complete`（只渲染 persona）⇒ 追加进人格段
+  it('纪律文本唯一事实源 + 能力自适应（2026-09-27 审查员 C 4.3 后）', () => {
+    // 句子定义在 corum-orchestration/src/execution-discipline.ts；组装两档：
+    //   · corumExecutionDisciplineText({hasWriteTools, ptcPrefix}) —— root scope 段，按 scope 工具面自适应
+    //   · corumMinimalDisciplineLines() —— minimal 的 complete persona（只保留它真有的工具）
+    //   · compile.ts 用后者，agent-service.ts 用前者。
     const definitions = readFileSync(
       join(import.meta.dirname, '../../corum-orchestration/src/execution-discipline.ts'), 'utf8')
-    expect((definitions.match(/export function corumEfficiencyDisciplineLines\(\)/g) ?? []).length).toBe(1)
-    expect((definitions.match(/export function corumSandboxEscalationLines\(\)/g) ?? []).length).toBe(1)
-    const service = readFileSync(join(import.meta.dirname, '../../corum-agent/src/agent-service.ts'), 'utf8')
-    const compileSrc = readFileSync(join(import.meta.dirname, '../../corum-agent/src/compile.ts'), 'utf8')
-    for (const src of [service, compileSrc]) {
-      expect((src.match(/corumEfficiencyDisciplineLines\(\)/g) ?? []).length).toBe(1)
-      expect((src.match(/corumSandboxEscalationLines\(\)/g) ?? []).length).toBe(1)
+    for (const fn of ['corumEfficiencyDisciplineLines', 'corumSandboxEscalationLines',
+      'corumExecutionDisciplineText', 'corumMinimalDisciplineLines']) {
+      expect((definitions.match(new RegExp(`export function ${fn}\\(`, 'g')) ?? []).length, fn).toBe(1)
     }
-    // 段不再由 tool-subagent 注册（旧的连坐清空位置不得回潮）。
+    const service = readFileSync(join(import.meta.dirname, '../../corum-agent/src/agent-service.ts'), 'utf8')
+    expect(service).toContain('corumExecutionDisciplineText({')
+    expect(service).toContain("ctx.tools.get('write', context.scope)")
+    expect(service).toContain("ctx.tools.get('write', context.scope)")
+    const compileSrc = readFileSync(join(import.meta.dirname, '../../corum-agent/src/compile.ts'), 'utf8')
+    expect(compileSrc).toContain('corumMinimalDisciplineLines()')
     expect(SRC).not.toContain("name: 'corum:execution-discipline'")
-    expect(SRC).not.toContain('corumEfficiencyDisciplineLines()')
-    // 段内不得再内联字面量。
-    expect(SRC).not.toContain("'EFFICIENCY DISCIPLINE (measured on real delegations")
-    expect(SRC).not.toContain('one delegation made 111 bash calls')
+    // 出现 2 次 = import + 注册（注册只有一处；旧的每实例注册已删除，同层重名会硬抛）。
+    expect((service.match(/CORUM_EXECUTION_DISCIPLINE_SECTION,/g) ?? []).length).toBe(2)
+    expect((service.match(/name: CORUM_EXECUTION_DISCIPLINE_SECTION,/g) ?? []).length).toBe(1)
+  })
+
+  it('★ 能力自适应：无写工具的读者不得收到 write/edit 指引（审查员 C 4.3-9/10）', () => {
+    const withWrite = corumExecutionDisciplineText({ hasWriteTools: true, ptcPrefix: '' })
+    const withoutWrite = corumExecutionDisciplineText({ hasWriteTools: false, ptcPrefix: '' })
+    expect(withWrite).toContain('Create and edit files with the `write`/`edit` tools')
+    expect(withoutWrite).not.toContain('Create and edit files with the `write`/`edit` tools')
+    expect(withoutWrite).toContain('KNOW YOUR SHELL')
+    expect(withoutWrite).toContain('SANDBOX DENIALS AND ESCALATION')
+    expect(corumExecutionDisciplineText({ hasWriteTools: true, ptcPrefix: 'PTC: ' })).toMatch(/^PTC: /)
   })
 
   it('★ 跨块一致性：读文件口径唯一（不得一边禁 `sed -n`/`head`/`cat`、一边推荐它们读代码）', () => {

@@ -145,13 +145,17 @@ describe('投送：执行纪律段的两条注入路径', () => {
   const SERVICE = readFileSync(join(import.meta.dirname, '../../corum-agent/src/agent-service.ts'), 'utf8')
   const COMPILE = readFileSync(join(import.meta.dirname, '../../corum-agent/src/compile.ts'), 'utf8')
 
-  it('① root scope 段：text 为常量、不依赖任何工具可见性', () => {
+  it('① root scope 段：不因缺委派工具而清空，但按工具面自适应（2026-09-27 审查员 C 4.3 后）', () => {
     const i = SERVICE.indexOf('name: CORUM_EXECUTION_DISCIPLINE_SECTION,')
     expect(i).toBeGreaterThan(-1)
-    const body = SERVICE.slice(i, SERVICE.indexOf('})', i))
-    expect(body).not.toContain('tools.get')
-    expect(body).toContain('corumEfficiencyDisciplineLines()')
-    expect(body).toContain('corumSandboxEscalationLines()')
+    const body = SERVICE.slice(i, SERVICE.indexOf('}),', i))
+    // 2026-09-27（审查员 C 4.3）：该段**允许**按工具面自适应（写工具/PTC），
+    // 但**不得**因为缺少**委派**工具就整段清空 —— 那正是子会话读不到纪律的老病。
+    expect(body).not.toContain('return \'\'')
+    expect(body).not.toContain('mounted ===')
+    expect(body).toContain("ctx.tools.get('write', context.scope)")
+    expect(body).toContain("ctx.tools.get('run_code', context.scope)")
+    expect(body).toContain('corumExecutionDisciplineText({')
     // 段的注册范围是 root：写在 corum-agent 的服务里（tool-policy / host-identity 同处）。
     expect(SERVICE).toContain('ctx.systemPrompt.section({')
   })

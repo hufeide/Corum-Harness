@@ -40,6 +40,31 @@ export const CORUM_EXECUTION_DISCIPLINE_SECTION = 'corum:execution-discipline'
  * 做法：沙箱块**整段复用**（工具无关）；效率块按**工具面**挑句，共享句子逐字复用，
  * 只有「读文件」那条需要一版不提 `grep`/`glob` 的改写。
  */
+/** 「KNOW YOUR SHELL」句里那句写给 `write`/`edit` 的话（无写工具时必须去掉）。 */
+const SHELL_WRITE_TOOLS_CLAUSE
+  = ' Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.'
+
+/**
+ * fork（corum）2026-09-27（对抗审查员 C 报 4.3-9/10/11）：**纪律段按读者能力自适应**。
+ *
+ * 通用两块里有两处假定读者有全套工具：
+ *   · 「Create and edit files with the `write`/`edit` tools」—— 指挥者（写工具被裁、`tool:write`/
+ *     `tool:edit` 段在同一轮 apply 里被清空）与只读 researcher（write/edit 被 deny）都没有它们；
+ *   · 裸工具名 —— PTC 读者的工具只能从 `run_code` 里调，需要与编排段同源的前缀。
+ *
+ * 做成纯函数（可单测）由注册处按 `context.scope` 的实际工具面求值 —— 不按模式硬编码。
+ *
+ * @param options.hasWriteTools - 该 scope 是否有 `write`/`edit`。
+ * @param options.ptcPrefix - 与编排段同源的 PTC 前缀（无 `run_code` 时为空串）。
+ * @returns 该读者该读到的完整纪律文本。
+ */
+export function corumExecutionDisciplineText(options: { readonly hasWriteTools: boolean; readonly ptcPrefix: string }): string {
+  const efficiency = corumEfficiencyDisciplineLines().map(line => line.startsWith('- KNOW YOUR SHELL') && !options.hasWriteTools
+    ? line.replace(SHELL_WRITE_TOOLS_CLAUSE, '')
+    : line)
+  return options.ptcPrefix + [...efficiency, ...corumSandboxEscalationLines()].join('\n')
+}
+
 export function corumMinimalDisciplineLines(): string[] {
   const keep = (line: string): boolean =>
     line === 'EFFICIENCY DISCIPLINE:'

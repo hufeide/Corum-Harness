@@ -139,9 +139,8 @@ import type { ConductorMode } from './conductor.ts'
 // （docs/LESSONS.md §6.18：机制生成的名字必须按运行时注册面收敛）。
 import {
   CORUM_EXECUTION_DISCIPLINE_SECTION,
-  corumEfficiencyDisciplineLines,
+  corumExecutionDisciplineText,
   corumNarrowDenyFilter,
-  corumSandboxEscalationLines,
   corumVisibleToolNames,
 } from '@corum/corum-orchestration'
 
@@ -584,7 +583,14 @@ export class CorumAgentService extends TypertRemoteService {
     ctx.systemPrompt.section({
       name: CORUM_EXECUTION_DISCIPLINE_SECTION,
       order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') + 1,
-      text: () => [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()].join('\n'),
+      // 按**该 scope 的实际工具面**求值（对抗审查员 C 4.3-9/10/11）：指挥者与只读子会话没有
+      // write/edit（指挥者那两段还在同一轮 apply 里被清空），PTC 读者的工具只能从 run_code 里调。
+      text: (context) => corumExecutionDisciplineText({
+        hasWriteTools: ctx.tools.get('write', context.scope) !== undefined || ctx.tools.get('edit', context.scope) !== undefined,
+        ptcPrefix: ctx.tools.get('run_code', context.scope) === undefined
+          ? ''
+          : 'This agent runs in PTC mode: every tool below is called from inside `run_code` (e.g. `await tools.bash({...})`), not as a direct tool call. ',
+      }),
     })
     /**
      * 宿主身份段（root scope，所有 corum 会话继承）：把「本会话跑在哪个实例 / home /
