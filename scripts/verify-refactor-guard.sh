@@ -347,6 +347,19 @@ if [ -f "$REVIEW_SRC" ]; then
   else
     fail "snapshot 路径没有把缓存传进 filesOf —— 缓存未接线，实机会退回逐文件子进程"
   fi
+  # D2b：批量路径（把「每文件 4–5 个子进程」压成整轮常数次）。删掉它行为不变、只是变慢 ⇒ 必须钉住。
+  for needle in 'preimageTextBatch(' 'hashObjectBatch(' "'cat-file', '--batch'" "'hash-object', '-w', '--stdin-paths'"; do
+    if grep -qF "$needle" "$REVIEW_SRC"; then
+      pass "批量路径在位：$needle"
+    else
+      fail "批量路径缺失：$needle（冷快照会退回逐文件子进程）"
+    fi
+  done
+  if grep -qF 'await this.preimageTextBatch(repo, pres, cache)' "$REVIEW_SRC" && grep -qF 'await this.hashObjectBatch(repo, afterContents, cache)' "$REVIEW_SRC"; then
+    pass "filesOf 已调用两条批量路径（否则批量为死代码）"
+  else
+    fail "filesOf 没有调用批量路径 —— 批量为死代码"
+  fi
 else
   fail "找不到审查 host 源码：$REVIEW_SRC"
 fi
