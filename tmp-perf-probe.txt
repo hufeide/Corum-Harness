@@ -1,2 +1,1 @@
-perf probe — created by the main Agent at the user's request to manufacture one working-tree file change.
-Safe to delete.
+perf probe

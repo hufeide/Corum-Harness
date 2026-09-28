@@ -320,6 +320,37 @@ for m in permission-policy polish-service conductor-runtime profile-compiler lan
   fi
 done
 
+# ── ⑦ 改动审查快照：内容寻址缓存必须**接线**（D2，2026-09-28）───────────────
+# 为什么值得钉：`filesOf` 原先对每个改动文件跑 4–5 个 git 子进程，一次 `corumReview/snapshot`
+# 1.1–2.0 s；内容寻址缓存把 224 次调用里的 219 次压到 < 50 ms（p50 3 ms，见 PENDING §2.17）。
+# 而它是**纯加速**：被删掉或漏传时行为完全不变、单测不会红 —— 只有实机变慢，最难发现的那类退化。
+group "⑦ 改动审查快照：内容寻址缓存接线（D2）"
+REVIEW_SRC="$REPO_ROOT/packages/desktop/src/host/corum-review.ts"
+if [ -f "$REVIEW_SRC" ]; then
+  pass "审查 host 源码存在"
+  for needle in 'interface ReviewComputeCache' 'preimageText: Map<string, string>' 'diffStats: Map<string, { added: number; removed: number }>' 'blobHashes: Map<string, string>'; do
+    if grep -qF "$needle" "$REVIEW_SRC"; then
+      pass "缓存结构在位：${needle}"
+    else
+      fail "缓存结构缺失：${needle}"
+    fi
+  done
+  for needle in 'preimageText(repo: RepoState, pre: Preimage, cache?: ReviewComputeCache)' 'hashObject(repo: RepoState, content: string, cache?: ReviewComputeCache)'; do
+    if grep -qF "$needle" "$REVIEW_SRC"; then
+      pass "重活入口接受缓存：${needle%%(*}"
+    else
+      fail "重活入口未接缓存：${needle%%(*}"
+    fi
+  done
+  if grep -qF 'this.filesOf(round.workspace, round.touched, this.computeCacheFor(sessionId))' "$REVIEW_SRC"; then
+    pass "snapshot 路径已把缓存传进 filesOf（否则缓存形同虚设）"
+  else
+    fail "snapshot 路径没有把缓存传进 filesOf —— 缓存未接线，实机会退回逐文件子进程"
+  fi
+else
+  fail "找不到审查 host 源码：$REVIEW_SRC"
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────────────────────
 # ── ⑥ 断言计数器自检（防「判据跑了但计数被 subshell 吞掉」） ────────────────
 # 这条不是洁癖：本脚本第一版把状态表循环写成 `printf … | while read`，循环体在**子 shell**
