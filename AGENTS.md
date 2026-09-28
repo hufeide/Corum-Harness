@@ -86,6 +86,12 @@
   (2026-09), but its **§C3a still carries an uncorrected superseded
   "precondition not met" conclusion** — `NEXT-PHASE-DEFERRED.md` wins.
   (Tracked: ledger `docs.audit.c3a-contradiction`.)
+- **`corum-official-upgrade` 技能** — 官方基座升级的可执行投影（源：`skills/corum-official-upgrade/SKILL.md`）：
+  目标版本**整套装齐**的判据（0.1.7-rc.2 实测缺 5 个包 ⇒ 不可用；0.1.5 系列 189/189 ✓）、
+  逐包循环（包声明 + 根 override **必须同时改**）、fork 合并手法（官方为底 + 贴回 corum 增量）、
+  fork 顶替名的 override 分档规则、命令级/环境级陷阱（`--filter` 裁剪、macOS 无 `timeout`、
+  **本机 `diff` 是 HarmonyOS SDK 的会静默漏报**、`DSH_BASELINE_TAG`）。
+  本次升级的逐步实录在 `docs/UPGRADE-0.1.7-rc2.md`。
 - `docs/fork-delta.md` — diff ledger of the fork packages (now 13, incl. the
   sandbox fork) + official-upgrade runbook (required reading before touching
   fork packages).
