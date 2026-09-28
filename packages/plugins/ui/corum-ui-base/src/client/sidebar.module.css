@@ -543,6 +543,13 @@
   padding: calc(1px * var(--corum-density-scale, 1)) 0;
 }
 
+/* 2026-09-27 多轮/多会话卡顿（PENDING-ui-lag-multiround 的 H5）：57+ 会话行时，
+   屏外行不参与布局与绘制；`auto` 记住实测高度，滚动条长度稳定。 */
+.sessionList > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
+
 /* 状态点（7px；brand/success/warn/idle）。 */
 .dot {
   flex: none;
