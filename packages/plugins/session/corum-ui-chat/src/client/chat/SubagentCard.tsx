@@ -16,7 +16,7 @@
 // 跨 bundle 句柄（当前会话 id + RPC connection + 跳子会话桥）经 chatRuntime
 // cordis 服务消费（统一事件中心二期 window 全局迁移；同 bundle 模块级
 // chatRuntimeRef 拿服务实例，见 ../chat-runtime.ts）。
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ArrowRight, Ban, Bot, Check, ChevronDown, ChevronUp, Cpu, FileText, GitBranch, GitFork, Loader, Search, Wrench, X } from 'lucide-react'
 import { subagentProgressStateOf, subagentStateChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentChangeSummary, SubagentDelegationRole, SubagentStopReason, SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
@@ -142,6 +142,24 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
 }
 
 /** 推送通道宽限期（ms）：$on 订阅建立后这么久仍零推送帧 → 判定推送未生效（旧 host 不 emit），回退轮询。 */
+/**
+ * 是否还需要降级轮询。
+ *
+ * 为什么需要这条判据（2026-09-28 实测，`docs/PENDING-ui-lag-multiround.md` §2.12）：
+ * 推送只在**进度变化**时发帧，而**已结束**的子会话不会再变 ⇒ 重启后（或晚开的卡片）宽限期内
+ * 永远零帧 ⇒ 每张卡都无条件回退 2s 轮询，实测一轮动作打 **132 次** `getChildSessionProgress`，
+ * 主机被逐卡轮询占满——这是卡顿的主要量级来源。终态是稳定事实，不需要再轮询。
+ *
+ * @param progress - 已知的最新进度快照（未拉到时为 `undefined`）。
+ * @returns 是否应当进入/继续降级轮询。
+ */
+export function shouldFallbackPoll(progress: SubagentProgressSnapshot | undefined): boolean {
+  if (progress === undefined) return true // 还没拿到基线：值得再拉一次
+  if (progress.done) return false // 终态：稳定事实，再拉也不变
+  if (progress.stopReason !== undefined) return false
+  return true // 仍在跑：轮询到它结束
+}
+
 const PROGRESS_PUSH_GRACE_MS = 2500
 /** 降级兜底轮询周期（ms）：推送未生效时的拉取节奏（与迁移前一致）。 */
 const PROGRESS_FALLBACK_POLL_MS = 2000
@@ -161,6 +179,12 @@ const PROGRESS_FALLBACK_POLL_MS = 2000
  */
 export function useChildProgress(childSessionId: string | undefined): SubagentProgressSnapshot | undefined {
   const [progress, setProgress] = useState<SubagentProgressSnapshot | undefined>(undefined)
+  /** 最新快照的同步副本（降级轮询要用它判「是否已终态」；effect 闭包里的 state 是旧值）。 */
+  const latestRef = useRef<SubagentProgressSnapshot | undefined>(undefined)
+  const apply = (next: SubagentProgressSnapshot): void => {
+    latestRef.current = next
+    setProgress(next)
+  }
   useEffect(() => {
     if (childSessionId === undefined) return undefined
     let cancelled = false
@@ -181,7 +205,7 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
           if (value.progress !== undefined) {
             const p = value.progress
             const sr = normalizeStopReason(p.stopReason)
-            setProgress({
+            apply({
               turn: p.turn,
               step: p.step,
               ...p.currentAction === undefined ? {} : { currentAction: p.currentAction },
@@ -207,7 +231,7 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
     const sub = subagentProgressSubscribe((frame) => {
       if (cancelled || frame.sessionId !== childSessionId) return
       const sr = normalizeStopReason(frame.stopReason as string | undefined)
-      setProgress({
+      apply({
         turn: frame.turn,
         step: frame.step,
         ...frame.currentAction === undefined ? {} : { currentAction: frame.currentAction },
@@ -223,9 +247,13 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
     graceTimer = setTimeout(() => {
       graceTimer = undefined
       if (cancelled || sub.framesSeen() > 0) return
+      // 终态不再轮询（见 shouldFallbackPoll 的说明）。
+      if (!shouldFallbackPoll(latestRef.current)) return
       const poll = async () => {
         await fetchOnce()
-        if (!cancelled) pollTimer = setTimeout(() => { void poll() }, PROGRESS_FALLBACK_POLL_MS)
+        // 拉到终态就停：既省 RPC，也让「已结束」的卡片彻底安静下来。
+        if (cancelled || !shouldFallbackPoll(latestRef.current)) return
+        pollTimer = setTimeout(() => { void poll() }, PROGRESS_FALLBACK_POLL_MS)
       }
       void poll()
     }, PROGRESS_PUSH_GRACE_MS)
