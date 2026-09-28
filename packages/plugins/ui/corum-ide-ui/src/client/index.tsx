@@ -47,6 +47,7 @@ import {
   type RevealOutcome,
 } from './session-bar.tsx'
 import type { RemoteEventFace } from './session-bar.tsx'
+import type { ReadChildProgress } from './session-bar.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { ThemePresenter } from '@corum/corum-ui-base/client'
@@ -407,6 +408,23 @@ export function apply(ctx: ClientContext): void {
       return (childSessionId: string) => (fn as (id: string) => Promise<RevealOutcome>).call(service, childSessionId)
     }
 
+    /**
+     * 从 cordis 取 `chatRuntime` 的「子会话进度」能力并窄化（红线 3/4，与上同源）。
+     *
+     * 为什么要它（2026-09-28 实测）：本包 session-bar 的种子会为每个已结束子会话拉一次进度，
+     * 而视图每次激活都重新挂载 ⇒ 一轮动作 ~30 次 `getChildSessionProgress`（~270 ms/次）。
+     * 走 bundle B 的共享缓存（终态结果整页只拉一次）即可省掉这些重复劳动。
+     * 服务未装配 / 未实现 ⇒ 返回 undefined，组件回落直连 RPC（行为不变）。
+     */
+    const chatChildProgressCapable = (): ReadChildProgress | undefined => {
+      const service = (ctx as unknown as { get?: (name: string) => unknown }).get?.('chatRuntime') as
+        | { childProgress?: unknown }
+        | undefined
+      const fn = service?.childProgress
+      if (typeof fn !== 'function') return undefined
+      return (sessionId: string) => (fn as (id: string) => Promise<never>).call(service, sessionId) as never
+    }
+
     const statusInjected = () => ({
       remote,
       openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
@@ -420,6 +438,8 @@ export function apply(ctx: ClientContext): void {
        * 服务未装配/未实现时返回 undefined 方法 ⇒ 组件的跳转按钮走退化路径（进子会话）。
        */
       revealCard: chatRevealCapable(),
+      /** 子会话进度共享读取（见 `chatChildProgressCapable` 的说明）。 */
+      readChildProgress: chatChildProgressCapable(),
       connection: ctx.get('connection') as ConnectionHandle | undefined,
       /**
        * 子 Agent 花名册的 durable 基线源（官方直接子会话目录）。

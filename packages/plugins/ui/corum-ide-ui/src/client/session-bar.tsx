@@ -613,12 +613,30 @@ interface ChildFrame {
  * ③ 目录的**新鲜度**靠 `setCatalogOpen(parent, true)`：官方在成员变更帧到达时防抖重拉
  *    该父的目录，本组件常驻会话顶栏，所以整个会话生命周期内都订阅（见下方 effect）。
  */
+/**
+ * 共享进度能力（bundle B `chatRuntime.childProgress` 的窄化面；同 bundle 内共享类型）。
+ *
+ * 为什么要它（2026-09-28 实测，`docs/PENDING-ui-lag-multiround.md` §2.13）：本 hook 的种子为每个
+ * 已结束子会话拉一次进度，而视图每次激活都重新挂载 ⇒ 一轮动作实测 ~30 次 `getChildSessionProgress`
+ * （~270 ms/次）。走共享缓存后终态结果整页只拉一次；取不到能力（bundle B 未挂载）⇒ 回落直连 RPC，
+ * 行为与今天一致。
+ */
+export type ReadChildProgress = (sessionId: string) => Promise<
+  | {
+      role?: 'worker' | 'research' | 'fork'
+      isolated?: boolean
+      progress?: { stopReason?: string; interrupted?: boolean }
+    }
+  | undefined
+>
+
 function useSubagentRoster(
   remote: RemoteEventFace | undefined,
   sessionId: string | undefined,
   useSessions: UseSessionsHook,
   catalog: SubagentCatalogFace | undefined,
   connection: RpcFace | undefined,
+  readChildProgress?: ReadChildProgress,
 ): readonly SubagentRosterEntry[] {
   const rows = useSessions((state: SessionListState) => {
     return sessionId === undefined ? undefined : state.subagentsByParent?.[sessionId]?.entries
@@ -699,11 +717,13 @@ function useSubagentRoster(
       seededRef.current.add(id)
       void (async () => {
         try {
-          const result = await connection.rpc.call('/api', 'corumAgent/getChildSessionProgress', {
-            args: { sessionId: id },
-          })
-          if (cancelled || !result.ok || result.value === undefined) return
-          const value = result.value as {
+          // 优先走共享缓存（终态结果整页只拉一次）；能力不可用时回落直连 RPC。
+          const resolved = readChildProgress === undefined
+            ? await connection.rpc.call('/api', 'corumAgent/getChildSessionProgress', { args: { sessionId: id } })
+              .then(result => (result.ok && result.value !== undefined ? result.value : undefined))
+            : await readChildProgress(id)
+          if (cancelled || resolved === undefined) return
+          const value = resolved as {
             role?: 'worker' | 'research' | 'fork'
             isolated?: boolean
             progress?: { stopReason?: string; interrupted?: boolean }
@@ -1517,6 +1537,8 @@ export interface SessionStatusInjected {
    * 缺省时花名册退化为「仅推送帧」——旧行为，不会报错。
    */
   readonly catalog?: SubagentCatalogFace | undefined
+  /** 共享进度能力（由 index.tsx 从 bundle B 的 `chatRuntime` 服务窄化后注入）。 */
+  readonly readChildProgress?: ReadChildProgress | undefined
 }
 
 /** `ctx.get('connection')` 的窄化面（只用到一元 RPC 调用）。 */
@@ -1558,7 +1580,7 @@ export interface TrajectoryCapableProps {
  * @param props - 槽运行时 share（sessionId/useSessions/useTrajectory）+ 业务注入面。
  * @returns 状态胶囊与其展开的统计详情卡。
  */
-export function SessionStatusPill({ sessionId, useSessions, remote, openSession, revealCard, useTrajectory, connection, catalog }: SessionStatusPillProps) {
+export function SessionStatusPill({ sessionId, useSessions, remote, openSession, revealCard, useTrajectory, connection, catalog, readChildProgress }: SessionStatusPillProps) {
   const wrapRef = useRef<HTMLSpanElement | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [anchor, setAnchor] = useState({ left: 0, width: 0 })
@@ -1568,7 +1590,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
   })
   const title = useSessions((s: SessionListState) => s.byId[sessionId]?.displayTitle) ?? '会话'
   // 子 Agent 花名册（2026-09-10 用户定调：胶囊与状态展示合并到同一 pill）。
-  const roster = rankRoster(useSubagentRoster(remote, sessionId, useSessions, catalog, connection))
+  const roster = rankRoster(useSubagentRoster(remote, sessionId, useSessions, catalog, connection, readChildProgress))
   // 终态分组（四档全部走同一个 subagentStateOf；见 subagentStateOf 的优先级注释）。
   const running = roster.filter(e => subagentStateOf(e) === 'running')
   const completed = roster.filter(e => subagentStateOf(e) === 'completed')
