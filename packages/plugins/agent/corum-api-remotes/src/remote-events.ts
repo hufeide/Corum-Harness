@@ -36,6 +36,7 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'llm/adapters-updated', mode: 'emit' },
   { event: 'settings/document-updated', mode: 'emit' },
   { event: 'user-questions/request', mode: 'waterfall' },
+  { event: 'goal/activation-changed', mode: 'emit' },
   // ── fork（corum）：统一事件中心一期——corum 领域事件并入转发（官方 17 行零改动）──
   { event: 'corum/task/assigned', mode: 'emit' },
   { event: 'corum/task/started', mode: 'emit' },

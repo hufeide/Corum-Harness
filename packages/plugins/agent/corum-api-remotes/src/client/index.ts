@@ -9,11 +9,13 @@ import llmRemote from '@deepseek-ai/dsh-llm/remote'
 import dynamicRemote from '@deepseek-ai/dsh-cordis-host-runner/remote'
 import pluginInventoryRemote from '@deepseek-ai/dsh-host-plugin-inventory/remote'
 import messageFeedbackRemote from '@deepseek-ai/dsh-message-feedback/remote'
+import sessionFeedbackRemote from '@deepseek-ai/dsh-command-feedback/remote'
 import fileUploadsRemote from '@deepseek-ai/dsh-client-file-upload/remote'
 import sessionReferencesRemote from '@deepseek-ai/dsh-session-reference/remote'
 import subagentsRemote from '@deepseek-ai/dsh-subagent/remote'
 import sessionRemote from '@deepseek-ai/dsh-api-session-controller/remote'
 import workspaceRemote from '@deepseek-ai/dsh-api-workspace-controller/remote'
+import workspaceFilesRemote from '@deepseek-ai/dsh-api-workspace-files/remote'
 import type { ClientRemote } from '@deepseek-ai/dsh-api-gateway/client'
 
 export type { ClientRemote } from '@deepseek-ai/dsh-api-gateway/client'
@@ -25,6 +27,7 @@ export type {} from '@deepseek-ai/dsh-goal/remote'
 export type {} from '@deepseek-ai/dsh-llm/remote'
 export type {} from '@deepseek-ai/dsh-host-plugin-inventory/remote'
 export type {} from '@deepseek-ai/dsh-message-feedback/remote'
+export type {} from '@deepseek-ai/dsh-command-feedback/remote'
 export type {} from '@deepseek-ai/dsh-client-file-upload/remote'
 export type {} from '@deepseek-ai/dsh-session-reference/remote'
 export type {} from '@deepseek-ai/dsh-subagent/remote'
@@ -33,13 +36,12 @@ export type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 export type * from '@deepseek-ai/dsh-api-session-controller/types'
 export type {} from '@deepseek-ai/dsh-api-workspace-controller/remote'
 export type * from '@deepseek-ai/dsh-api-workspace-controller/types'
+export type {} from '@deepseek-ai/dsh-api-workspace-files/remote'
+export type * from '@deepseek-ai/dsh-api-workspace-files/types'
 export type { SessionJob as JobView } from '@deepseek-ai/dsh-api-session-controller/types'
 // The forwarded-event allowlist's selection seat: without it in the consumer's
 // compilation face `TypertRemoteEvent` is `never` and every `$on` call fails.
 export type { ApiRemoteForwardedEvent } from '../types.ts'
-// fork（corum）：corum 领域事件的 cordis Events 声明 + TypertRemoteEventSelection
-// 合并——renderer 消费方经本面拿到 `$on('corum/...', cb)` 的 key 面与 listener 签名。
-export type {} from '../corum-events.ts'
 // The owner packages' client-safe `./types` exports supply the `Events`
 // signatures `$on` hands to a listener, so a consumer reads the very
 // declaration the Host emits rather than a flattened restatement of it.
@@ -121,17 +123,18 @@ export type {
 export type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
 export type { SessionReferenceMentionCandidate } from '@deepseek-ai/dsh-session-reference/types'
 
-// fork（corum）：官方 alpha.2 此处 re-export「收敛后的 Remote 失败词汇」
-// （RemoteErrorCode/RemoteErrorDetailsMap/RemoteFailure/RemoteResult 自
-// dsh-typert-protocol，RemoteHostFacts 自 dsh-api-gateway/client）——但那批类型
-// 是官方 804b1ffbfc「converge the Remote failure vocabulary」在 alpha.2 引入的，
-// corum 运行时锁定的 alpha.1 基线没有它们。与全部 7 个 corum fork 同一纪律
-// （源码对照 alpha.2、依赖锁 alpha.1，见 docs/fork-delta.md §3.4）：本段按
-// alpha.1 对齐——失败词汇由各 owner 包 `/types`（AgentPresetError/SessionError/
-// CredentialError/SettingsError/LlmModelDiscoveryError/SubagentControlError/
-// WorkspaceError + connection 的 RpcError）就地导出，本装配面不再聚合 re-export
-// （alpha.1 的 ClientFailure/ClientResult 聚合类型 corum 全仓无一处消费，不
-// 恢复死面）。官方升级 runbook：升 alpha.2 时把本段回退为官方 4 行 re-export。
+// The Remote failure vocabulary, re-exported so business packages keep naming
+// this assembly alone. Types only: a value export would make spec imports load
+// this module's owner /remote artifacts; specs take RemoteError from
+// dsh-client-test-runtime instead.
+export type {
+  RemoteErrorCode, RemoteErrorDetailsMap, RemoteFailure, RemoteResult,
+} from '@deepseek-ai/dsh-typert-protocol'
+export type { RemoteHostFacts } from '@deepseek-ai/dsh-api-gateway/client'
+// fork（corum）：corum 领域事件的 cordis Events 声明 + TypertRemoteEventSelection
+// 合并——renderer 消费方经本面拿到 `$on('corum/...', cb)` 的 key 面与 listener 签名。
+export type {} from '../corum-events.ts'
+
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -143,6 +146,11 @@ declare module '@deepseek-ai/cordis' {
 /** Required service: the typed Client Remote contribution mount. */
 export const inject = ['remote']
 
+/**
+ * Mount the Host capabilities explicitly selected for this Client assembly.
+ * @param ctx - Client Cordis root carrying the typed API service.
+ * @returns disposer after every selected Remote namespace is ready.
+ */
 // ── fork（corum）三-1：事件可观测性计数面 ────────────────────────────────
 // renderer 端此前零调试面，排查「事件没到」只能重新埋探针。本段在 $mount 全部
 // 完成后包一层 ctx.remote.$on：每事件名维护 { frames, lastAt, listeners }
@@ -200,18 +208,13 @@ function installCorumEventStats(ctx: Context): void {
   })
 }
 
-/**
- * Mount the Host capabilities explicitly selected for this Client assembly.
- * @param ctx - Client Cordis root carrying the typed API service.
- * @returns disposer after every selected Remote namespace is ready.
- */
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
   const disposers: Array<() => Promise<void>> = []
   try {
     for (const contribution of [
       agentPresetsRemote, commandsRemote, settingsControllerRemote, goalsRemote, llmRemote, dynamicRemote,
-      pluginInventoryRemote, messageFeedbackRemote, fileUploadsRemote, sessionReferencesRemote,
-      subagentsRemote, sessionRemote, workspaceRemote,
+      pluginInventoryRemote, messageFeedbackRemote, sessionFeedbackRemote, fileUploadsRemote, sessionReferencesRemote,
+      subagentsRemote, sessionRemote, workspaceRemote, workspaceFilesRemote,
     ]) {
       disposers.push(await ctx.remote.$mount(contribution))
     }
@@ -222,6 +225,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   // fork（corum）三-1：$mount 就绪后装事件计数面（immediately:true 装配 →
   // 后续所有插件的 $on 订阅都走统计包装）。
   installCorumEventStats(ctx)
+
   // Unwound in reverse mount order, so a namespace never outlives one mounted
   // after it.
   return async () => {
