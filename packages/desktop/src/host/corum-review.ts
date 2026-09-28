@@ -60,8 +60,9 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { appendFile, readFile, rename, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
@@ -149,6 +150,17 @@ interface ReviewComputeCache {
 
 /** 缓存条目上限（按表各自计）；超出直接清空——它只是加速，不是事实源。 */
 const REVIEW_COMPUTE_CACHE_CAP = 20_000
+
+/**
+ * 正文的 **git blob 对象 id**（进程内计算：`sha1("blob <len>\\0" + content)`）。
+ *
+ * 为什么要在进程内算（D2b）：原先每个文件都要 spawn 一次 `git hash-object -w --stdin`；
+ * 算出来之后可以**批量**判断哪些对象已存在、只把缺的写一次。
+ */
+function gitBlobId(content: string): string {
+  const body = Buffer.from(content, 'utf8')
+  return createHash('sha1').update(`blob ${body.length}\0`).update(body).digest('hex')
+}
 
 /** 正文的内容指纹（只用于**缓存寻址**，不需要是 git 的对象 id）。 */
 function contentFingerprint(text: string | null): string {
@@ -641,6 +653,100 @@ export class CorumReviewService extends TypertRemoteService {
    * @param touched - 该轮的「路径 → 改前状态」。
    * @returns 改动条目；影子仓库不可用时返回 `null`（调用方按各自口径降级，绝不抛给 RPC）。
    */
+  /**
+   * **批量**读改前正文（`git cat-file --batch`）：把「每文件一次子进程」压成整轮一次（D2b）。
+   *
+   * 只对缓存里没有的 blob 发问；解析失败或 git 报错时**逐文件回退**到 {@link preimageText}，
+   * 保证结论与旧路径等价（批量只是加速，不是新语义）。
+   *
+   * @param repo - 影子仓库。
+   * @param pres - 本轮全部 preimage。
+   * @param cache - 计算缓存（命中的直接跳过）。
+   */
+  private async preimageTextBatch(
+    repo: RepoState,
+    pres: readonly Preimage[],
+    cache: ReviewComputeCache | undefined,
+  ): Promise<void> {
+    if (cache === undefined) return
+    const missing: string[] = []
+    for (const pre of pres) {
+      if (pre.kind !== 'blob') continue
+      if (cache.preimageText.has(pre.hash)) continue
+      if (!missing.includes(pre.hash)) missing.push(pre.hash)
+    }
+    if (missing.length === 0) return
+    const result = await runGit(repo.gitDir, ['cat-file', '--batch'], { input: `${missing.join('\n')}\n` })
+    if (result.code !== 0) return // 让调用方逐文件回退
+    // 协议：`<oid> blob <size>\n<size 字节正文>\n`，按请求顺序返回。
+    const out = Buffer.from(result.stdout, 'utf8')
+    let cursor = 0
+    let index = 0
+    while (index < missing.length && cursor < out.length) {
+      const nl = out.indexOf(0x0a, cursor)
+      if (nl < 0) break
+      const header = out.subarray(cursor, nl).toString('utf8')
+      const parts = header.split(' ')
+      const size = Number(parts[2])
+      if (parts.length < 3 || !Number.isFinite(size)) break
+      const text = out.subarray(nl + 1, nl + 1 + size).toString('utf8')
+      this.remember(cache.preimageText, missing[index]!, text)
+      cursor = nl + 1 + size + 1 // 跳过正文后的换行
+      index += 1
+    }
+  }
+
+  /**
+   * **批量**把正文写进影子仓库（D2b）：进程内算 blob id ⇒ 一次 `--batch-check` 找出缺的 ⇒
+   * 用临时目录 + 一次 `hash-object -w --stdin-paths` 写齐。
+   *
+   * 为什么用临时目录而不是把内存正文喂给 `--stdin`：后者一次只收一份，仍要每文件一次子进程。
+   * 任何一步失败都**静默回退**（调用方随后走逐文件 {@link hashObject}），结论不受影响。
+   */
+  private async hashObjectBatch(
+    repo: RepoState,
+    contents: readonly string[],
+    cache: ReviewComputeCache | undefined,
+  ): Promise<void> {
+    if (cache === undefined) return
+    const wanted = new Map<string, string>() // blobId → 正文
+    for (const content of contents) {
+      const id = gitBlobId(content)
+      if (!cache.blobHashes.has(id) && !wanted.has(id)) wanted.set(id, content)
+    }
+    if (wanted.size === 0) return
+    const ids = [...wanted.keys()]
+    const check = await runGit(repo.gitDir, ['cat-file', '--batch-check'], { input: `${ids.join('\n')}\n` })
+    if (check.code !== 0) return
+    const lines = check.stdout.trim() === '' ? [] : check.stdout.trim().split('\n')
+    const missing: string[] = []
+    lines.forEach((line, i) => {
+      const id = ids[i]
+      if (id === undefined) return
+      if (/\bmissing\b/.test(line)) missing.push(id)
+      else this.remember(cache.blobHashes, id, id) // 已存在：直接用它的 id
+    })
+    if (missing.length === 0) return
+    const dir = mkdtempSync(join(tmpdir(), 'corum-review-blobs-'))
+    try {
+      const paths: string[] = []
+      missing.forEach((id, i) => {
+        const file = join(dir, `b${i}`)
+        writeFileSync(file, wanted.get(id) ?? '')
+        paths.push(file)
+      })
+      const written = await runGit(repo.gitDir, ['hash-object', '-w', '--stdin-paths'], { input: `${paths.join('\n')}\n` })
+      if (written.code !== 0) return
+      const out = written.stdout.trim() === '' ? [] : written.stdout.trim().split('\n')
+      out.forEach((hash, i) => {
+        const id = missing[i]
+        if (id !== undefined && hash !== '') this.remember(cache.blobHashes, id, hash.trim())
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
   /** 取（必要时新建）某会话的计算缓存。 */
   private computeCacheFor(sessionId: string): ReviewComputeCache {
     const existing = this.computeCaches.get(sessionId)
@@ -665,6 +771,15 @@ export class CorumReviewService extends TypertRemoteService {
       this.ctx.logger.warn(`corum-review snapshot: ensureRepo failed: ${String(error)}`)
       return null
     }
+    // D2b：先把「改前正文」与「改后对象」批量准备好，逐文件循环便可全走缓存。
+    const pres = [...touched.values()]
+    await this.preimageTextBatch(repo, pres, cache)
+    const afterContents: string[] = []
+    for (const path of touched.keys()) {
+      const current = this.readCurrent(resolve(workspace, path))
+      if (current.kind === 'content') afterContents.push(current.text)
+    }
+    await this.hashObjectBatch(repo, afterContents, cache)
     const files: ReviewFileEntry[] = []
     for (const [path, pre] of touched) {
       const after = this.readCurrent(resolve(workspace, path))
@@ -1125,7 +1240,9 @@ export class CorumReviewService extends TypertRemoteService {
   /** 内容 → blob 哈希（入库，自动去重）。 */
   private async hashObject(repo: RepoState, content: string, cache?: ReviewComputeCache): Promise<string> {
     // 同一份正文在一次快照里会被要两次（diffStat 与文件条目）⇒ 内容寻址缓存直接命中，省一次子进程。
-    const key = contentFingerprint(content)
+    // 键用 **git blob id**（不是 contentFingerprint）：这样 hashObjectBatch 预热过的条目也能命中，
+    // 否则批量写与逐文件查各用一套键 ⇒ 批量白做（2026-09-28 自查发现并修正）。
+    const key = gitBlobId(content)
     const cached = cache?.blobHashes.get(key)
     if (cached !== undefined) return cached
     const result = await runGit(repo.gitDir, ['hash-object', '-w', '--stdin'], { input: content })
