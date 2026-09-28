@@ -351,6 +351,28 @@ else
   fail "找不到审查 host 源码：$REVIEW_SRC"
 fi
 
+# ── ⑧ 子会话进度共享缓存必须接线（C3/C3b，2026-09-28）─────────────────────
+# 为什么值得钉：卡片与花名册原本**各自**拉进度（花名册视图每次激活都重挂 ⇒ 每子会话又拉一次），
+# 实测一轮动作 132 次 `getChildSessionProgress`；接上 chatRuntime 的共享缓存后降到 0（热态）。
+# 这条同样是「纯加速」：漏传/删掉时行为不变、测试不红 —— 只有实机变慢。
+group "⑧ 子会话进度共享缓存接线（C3 / C3b）"
+CHAT_RT="$REPO_ROOT/packages/plugins/session/corum-ui-chat/src/client/chat-runtime.ts"
+SESSION_BAR="$REPO_ROOT/packages/plugins/ui/corum-ide-ui/src/client/session-bar.tsx"
+IDE_INDEX="$REPO_ROOT/packages/plugins/ui/corum-ide-ui/src/client/index.tsx"
+for pair in "$CHAT_RT:childProgress(sessionId: string): Promise<CorumChildProgressValue | undefined>" \
+            "$CHAT_RT:CHILD_PROGRESS_TERMINAL_TTL_MS" \
+            "$SESSION_BAR:readChildProgress?: ReadChildProgress" \
+            "$SESSION_BAR:readChildProgress === undefined" \
+            "$IDE_INDEX:chatChildProgressCapable" \
+            "$IDE_INDEX:readChildProgress: chatChildProgressCapable()"; do
+  file="${pair%%:*}"; needle="${pair#*:}"
+  if [ -f "$file" ] && grep -qF "$needle" "$file"; then
+    pass "共享进度缓存接线在位：$(basename "${file}") · ${needle:0:38}"
+  else
+    fail "共享进度缓存接线缺失：$(basename "${file}") · ${needle:0:38}"
+  fi
+done
+
 # ── 汇总 ────────────────────────────────────────────────────────────────────
 # ── ⑥ 断言计数器自检（防「判据跑了但计数被 subshell 吞掉」） ────────────────
 # 这条不是洁癖：本脚本第一版把状态表循环写成 `printf … | while read`，循环体在**子 shell**
