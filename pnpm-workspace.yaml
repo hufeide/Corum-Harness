@@ -58,7 +58,7 @@ overrides:
   '@deepseek-ai/dsh-bash-local': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-bash-sandbox': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-brand': '0.1.3-alpha.1'
-  '@deepseek-ai/dsh-client-connection': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-client-connection': '0.1.7-rc.2'
   '@deepseek-ai/dsh-client-file-upload': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-client-hmr': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-client-locale': '0.1.3-alpha.1'
