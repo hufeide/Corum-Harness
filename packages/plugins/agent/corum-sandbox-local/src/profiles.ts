@@ -1,17 +1,17 @@
 /**
  * Internal platform-profile builders for the local sandbox provider.
  *
+ * @module @corum/corum-sandbox-local/profiles
+ *
  * fork（corum）：与官方逐行一致，唯一增量 = 三个 builder 的可写根并集
  * {@link corumGitWriteRoots}（workspace 的 git 元数据目录，见 git-write-roots.ts）。
  * 增量只在这一处，`index.ts` 与官方逐字节一致（verify-fork-drift.sh §15 守护）。
- *
- * @module @deepseek-ai/dsh-sandbox-local/profiles
  */
 
-import { grantArgs as landlockGrantArgs } from '@deepseek-ai/node-addon-landlock-run'
-import { existsSync } from 'node:fs'
+import { grantArgs as landlockGrantArgs } from '@deepseek-ai/node-addon-system/landlock-run'
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
+import { existsSync } from 'node:fs'
 import { corumGitWriteRoots } from './git-write-roots.ts'
 
 /**

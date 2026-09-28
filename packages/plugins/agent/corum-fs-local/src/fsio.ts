@@ -12,9 +12,9 @@ import type { BigIntStats, Dirent, Stats } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
+import { copyFileDaclWin32, replaceFileWin32 } from './win32.ts'
 // fork（corum）：literal edit 失败文案的定位提示（纯函数，见该模块头部说明）。
 import { editNotFoundHint, matchLineNumbers } from './edit-candidates.ts'
-import { copyFileDaclWin32, replaceFileWin32 } from './win32.ts'
 
 const BINARY_SAMPLE_BYTES = 8192
 // Bound one non-abortable FileHandle.read so cancellation is observed between chunks.
@@ -429,6 +429,44 @@ export async function readWholeBytes(
 }
 
 /**
+ * Read the bytes at `[offset, offset + length)` of a regular file with no
+ * decoding or binary rejection. The window is the bound: the stream opens at
+ * `offset` and closes after `length` bytes, so no more than the window is ever
+ * buffered whatever the file's size; a window at or past the end is empty.
+ * @param target - the resolved file to read.
+ * @param range - `offset`, the 0-based first byte, and `length`, the largest byte count.
+ * @param signal - aborts the read (`FS_ABORTED`).
+ * @returns the window's bytes, at most `length` long.
+ */
+export async function readByteWindow(
+  target: LocalTarget,
+  range: { offset: number; length: number },
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  await statRegularFile(target, 'read', signal)
+  if (range.length === 0) return new Uint8Array(0)
+  const stream = createReadStream(target.targetKey, {
+    start: range.offset,
+    end: range.offset + range.length - 1,
+    ...signal ? { signal } : {},
+  })
+  const chunks: Buffer[] = []
+  let bytes = 0
+  try {
+    for await (const chunk of stream as AsyncIterable<Buffer>) {
+      chunks.push(chunk)
+      bytes += chunk.length
+    }
+  } catch (error: unknown) {
+    /* v8 ignore next 2 -- a mid-stream abort needs cancellation racing an active read; pre-abort is deterministic. */
+    if (isAbortError(error)) throw new FsError('read aborted', 'FS_ABORTED')
+    /* v8 ignore next -- any other stream failure needs an I/O fault after a successful stat. */
+    throw error
+  }
+  return Buffer.concat(chunks, bytes)
+}
+
+/**
  * Stream a whole regular UTF-8 text file as decoded text chunks. Same text
  * semantics as {@link readWholeText} (regular-file check, binary/NUL rejection,
  * cross-chunk UTF-8 decoding), but never holds the whole file in memory.
@@ -750,11 +788,6 @@ export async function readTextForDiff(
 /**
  * Apply a literal replacement to LF-normalized content. Empty or missing search text throws
  * `FS_EDIT_NOT_FOUND`; multiple matches throw `FS_AMBIGUOUS_EDIT` unless `replaceAll` is true.
- *
- * fork（corum）增量（唯一 diff）：两条失败文案附带定位信息——未命中时给出「最相近的
- * 几处 + 行号」（{@link editNotFoundHint}），多处命中时给出「命中在哪几行」
- * （{@link matchLineNumbers}）。动机：官方只回一句 `old_string was not found`，模型拿不到
- * 差在哪，于是原地重试同一条锚点（BUG-28）。**只提示、不改写**：不替模型模糊应用。
  * @param content - the current file content, already LF-normalized.
  * @param oldString - literal text to find; CRLF inside it is normalized to LF before
  *   matching.
@@ -787,7 +820,7 @@ export function applyLiteralEdit(
     // fork（corum）：附命中行号，让模型直接挑一处加长锚点（不必猜「哪几处」）。
     const lines = matchLineNumbers(content, oldNorm)
     throw new FsError(
-      `old_string matched ${replacements} times in "${displayPath}"${lines.length === 0 ? '' : ` at lines ${lines.join(', ')}`}; provide a more specific old_string or set replace_all to true`,
+      `old_string matched ${replacements} times in "${displayPath}"${lines.length === 0 ? '' : ` at lines ${lines.join(', ')}`}`,
       'FS_AMBIGUOUS_EDIT',
     )
   }

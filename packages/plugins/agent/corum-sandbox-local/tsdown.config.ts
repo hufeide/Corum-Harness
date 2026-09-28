@@ -16,7 +16,7 @@ export default defineConfig(() => [
       '@deepseek-ai/dsh-sandbox',
       '@deepseek-ai/dsh-sandbox-windows-acl',
       '@deepseek-ai/dsh-util-values',
-      '@deepseek-ai/node-addon-landlock-run',
+      '@deepseek-ai/node-addon-system',
       '@deepseek-ai/schemastery',
     ],
   },
