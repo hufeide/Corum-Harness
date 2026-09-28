@@ -154,9 +154,9 @@ overrides:
   '@deepseek-ai/dsh-message-feedback': '0.1.5-rc.3'
   '@deepseek-ai/dsh-native-command': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-output-retention': '0.1.3-alpha.1'
-  '@deepseek-ai/dsh-permission-presets': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-permission-presets': '0.1.5-rc.3'
   '@deepseek-ai/dsh-persona': '0.1.3-alpha.1'
-  '@deepseek-ai/dsh-plan-mode': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-plan-mode': '0.1.5-rc.3'
   '@deepseek-ai/dsh-plugin-package-inventory-deepseek': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-pwsh-local': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-pwsh-sandbox': '0.1.3-alpha.1'
@@ -231,7 +231,7 @@ overrides:
   '@deepseek-ai/dsh-tool-str-replace-editor': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-tool-subagent': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-tool-subagent-control': '0.1.3-alpha.1'
-  '@deepseek-ai/dsh-tool-todo': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-tool-todo': '0.1.5-rc.3'
   '@deepseek-ai/dsh-tool-web': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-tool-workflow': '0.1.3-alpha.1'
   # fork #16（@corum/corum-tools）：官方 dsh-tools 的 corum 版。这里**不是**版本钉，
@@ -246,7 +246,7 @@ overrides:
   '@deepseek-ai/dsh-typert-registry': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-user-approval': '0.1.5-rc.3'
   '@deepseek-ai/dsh-user-questions': '0.1.5-rc.3'
-  '@deepseek-ai/dsh-util-crypto': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-util-crypto': '0.1.5-rc.3'
   '@deepseek-ai/dsh-util-time': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-util-values': '0.1.5-rc.3'
   '@deepseek-ai/dsh-util-workspace-path': '0.1.5-rc.3'
@@ -258,7 +258,7 @@ overrides:
   '@deepseek-ai/dsh-win32-process': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-workflow': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-workflow-worker-thread': '0.1.3-alpha.1'
-  '@deepseek-ai/dsh-workspace': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-workspace': '0.1.5-rc.3'
   # 打包闭包必须与工作区同版本：pnpm deploy --legacy 会忽略 lockfile 重新解析，
   # ^0.1.3-alpha.1 会漂到 registry 上的 alpha.2（2026-09-09 实测：闭包里 131 个
   # dsh 包是 alpha.2、session 核心是 alpha.1 → 读历史日志 events is not iterable）。
