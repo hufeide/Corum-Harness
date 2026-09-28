@@ -176,3 +176,29 @@ describe('review-source — keepAll / keepFile 内容哈希判定', () => {
     expect(aAgain.hash).toBe('aaa-new')
   })
 })
+
+describe('review-source — 事件节流（2026-09-28 卡顿修复）', () => {
+  it('★ 连续 50 次事件 ⇒ 最多「立即 1 次 + 尾沿 1 次」，而不是 50 次 RPC', async () => {
+    vi.useFakeTimers()
+    try {
+      const file = { path: 'src/a.ts', added: 1, removed: 0, hash: 'h1' }
+      const conn = makeMockConnection([{ workspace: '/ws', roundIndex: 1, files: [file] }])
+      const eventSrc = makeMockEventSource()
+      createReviewSource('session-1', conn, eventSrc)
+      await vi.advanceTimersByTimeAsync(0)
+      const baseline = conn.rpc.call.mock.calls.length
+
+      // 一个忙回合里事件会成百上千次到达（未节流时每次都刷新 ⇒ 实测 599 次 snapshot）。
+      for (let i = 0; i < 50; i += 1) for (const listener of eventSrc.listeners) listener()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(conn.rpc.call.mock.calls.length - baseline).toBeLessThanOrEqual(1)
+
+      // 尾沿：窗口结束后仍会拉到最后一次变更（不丢尾）。
+      await vi.advanceTimersByTimeAsync(700)
+      expect(conn.rpc.call.mock.calls.length - baseline).toBeLessThanOrEqual(2)
+      expect(conn.rpc.call.mock.calls.length).toBeGreaterThan(baseline)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

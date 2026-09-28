@@ -51,6 +51,12 @@ export interface ReconstructResult {
   message?: string | undefined
 }
 
+/**
+ * 审阅快照刷新的最小间隔（ms）：事件频率远高于「人眼能看出变化」的频率，而每次刷新是父 + 每个子会话
+ * 各一次 RPC ⇒ 必须节流（实测未节流时一个回合 599 次、最慢 2.7 s）。
+ */
+const REVIEW_REFRESH_THROTTLE_MS = 500
+
 /** host `corumReview/snapshot` 的响应。 */
 interface SnapshotValue {
   workspace: string | null
@@ -208,7 +214,29 @@ export function createReviewSource(
 
   // 事件窗每次发布都重拉（写入会推进 seq）。这里刻意**不做节流窗口**：写入频率
   // 受 inFlight+again 合并（并发去重 + 尾随一次），足够挡住密集写入。
-  eventSource.subscribe(() => { void refresh() })
+  /**
+   * 刷新节流（2026-09-28 实测，`docs/PENDING-ui-lag-multiround.md` §2.16）：事件在一次回合里会成百上千次
+   * 到达，而每次 `refresh` 都是**重活**——父会话 1 次 + **每个子会话各 1 次** `corumReview/snapshot`
+   * （子会话并发 3 个时＝4 次）。实测一个带 3 个子会话的回合打了 **599 次** snapshot（最慢 2.7 s），
+   * 主机与主线程被它占满。尾沿节流把频率压到 ≤2 次/秒，且保证最后一次变更仍会被拉到（不会丢尾）。
+   */
+  let lastRefreshAt = 0
+  let throttled: ReturnType<typeof setTimeout> | undefined
+  const scheduleRefresh = (): void => {
+    const wait = REVIEW_REFRESH_THROTTLE_MS - (Date.now() - lastRefreshAt)
+    if (wait <= 0) {
+      lastRefreshAt = Date.now()
+      void refresh()
+      return
+    }
+    if (throttled !== undefined) return
+    throttled = setTimeout(() => {
+      throttled = undefined
+      lastRefreshAt = Date.now()
+      void refresh()
+    }, wait)
+  }
+  eventSource.subscribe(scheduleRefresh)
   // 问题 2：子 Agent spawn 帧到达即记账并补拉一次（子会话首帧可能早于任何写入，
   // 而它的改动要等终态才进影子仓库——帧驱动刷新保证卡片能及时聚合）。
   subagentChildSubscribe((frame) => {
