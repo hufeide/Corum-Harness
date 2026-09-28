@@ -40,10 +40,6 @@ export const CORUM_EXECUTION_DISCIPLINE_SECTION = 'corum:execution-discipline'
  * 做法：沙箱块**整段复用**（工具无关）；效率块按**工具面**挑句，共享句子逐字复用，
  * 只有「读文件」那条需要一版不提 `grep`/`glob` 的改写。
  */
-/** 「KNOW YOUR SHELL」句里那句写给 `write`/`edit` 的话（无写工具时必须去掉）。 */
-const SHELL_WRITE_TOOLS_CLAUSE
-  = ' Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.'
-
 /**
  * fork（corum）2026-09-27（对抗审查员 C 报 4.3-9/10/11）：**纪律段按读者能力自适应**。
  *
@@ -58,11 +54,11 @@ const SHELL_WRITE_TOOLS_CLAUSE
  * @param options.ptcPrefix - 与编排段同源的 PTC 前缀（无 `run_code` 时为空串）。
  * @returns 该读者该读到的完整纪律文本。
  */
-export function corumExecutionDisciplineText(options: { readonly hasWriteTools: boolean; readonly ptcPrefix: string }): string {
-  const efficiency = corumEfficiencyDisciplineLines().map(line => line.startsWith('- KNOW YOUR SHELL') && !options.hasWriteTools
-    ? line.replace(SHELL_WRITE_TOOLS_CLAUSE, '')
-    : line)
-  return options.ptcPrefix + [...efficiency, ...corumSandboxEscalationLines()].join('\n')
+export function corumExecutionDisciplineText(options: { readonly ptcPrefix: string }): string {
+  // 2026-09-27：改为**文本层条件句**（不再读 ctx.tools）——运行时读工具面会在未声明 inject 的
+  // 插件上下文里抛 `cannot get property "tools" without inject`（实机抓到过一次，红线 #4）。
+  // 条件句达到同样目的：没有 write/edit 的读者（指挥者、只读 researcher）不会被要求用不存在的工具。
+  return options.ptcPrefix + [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()].join('\n')
 }
 
 export function corumMinimalDisciplineLines(): string[] {
@@ -94,7 +90,7 @@ export function corumEfficiencyDisciplineLines(): string[] {
     // 2026-09-27 P9 去重：读法规则（read vs shell）**唯一家 = corum:tool-policy**（root scope），
     // 此处不再复述；指挥者会清空那一层，故它的**人格段**自带同口径（见 conductor.ts）；
     // minimal 是 complete（读不到 tool-policy），故其变体保留自己那条（见 corumMinimalDisciplineLines）。
-    '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 60s by default; pass `timeoutMs` (up to 600000) for longer runs. Create and edit files with the `write`/`edit` tools rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
+    '- KNOW YOUR SHELL. The bash tool runs one command per call, non-interactively with stdin ignored, so a bare `grep foo` returns immediately instead of waiting for input. Commands are time-boxed — 60s by default; pass `timeoutMs` (up to 600000) for longer runs. If this session has the `write`/`edit` tools, create and edit files with them rather than shell redirection or in-place editors: they keep quoting under control and land in the change-review trail.',
     '- KEEP EACH COMMAND ON ONE LINE, statements joined with `;` or `&&`, so that a loosely delimited fragment cannot do something other than what you intended.',
     '- EVERY CALL GETS A FRESH SHELL. No cwd, variable or function persists between calls, so never rely on a `cd` from an earlier call: chain `cd <dir> && <cmd>` inside one call, or pass `workdir`.',
     '- PUT LONG-RUNNING OR NOT-YET-NEEDED COMMANDS IN THE BACKGROUND. A server, a watcher, a long build or a long test suite belongs behind `run_in_background: true`, so the call returns a handle at once and the conversation is not blocked; read or stop that handle with the job tools. Never replace that handle with "wait a moment, then look again". Do not background a command whose result you need before the next step; do not background an operation that would stop or restart the runtime this session depends on; do not start a background process whose output cannot be retrieved.',

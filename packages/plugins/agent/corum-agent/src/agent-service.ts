@@ -481,10 +481,7 @@ export type { AgentLaneDescriptor } from './agent-registry.ts'
 import type { AgentLaneDescriptor } from './agent-registry.ts'
 
 export class CorumAgentService extends TypertRemoteService {
-  // `tools` 是 2026-09-27 加进来的：执行纪律段要按**该 scope 的实际工具面**自适应
-  // （指挥者/只读子会话没有 write/edit、PTC 读者的工具只能从 run_code 调）。
-  // ⚠️ 不声明就会抛 `cannot get property "tools" without inject`——实机验证抓到过一次（红线 #4）。
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore', 'tools']
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore']
 
   /**
    * **Agent 存活登记册**（六张按 id 索引的表：root Agent / 泳道会话 / 泳道归属索引 /
@@ -586,14 +583,10 @@ export class CorumAgentService extends TypertRemoteService {
     ctx.systemPrompt.section({
       name: CORUM_EXECUTION_DISCIPLINE_SECTION,
       order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') + 1,
-      // 按**该 scope 的实际工具面**求值（对抗审查员 C 4.3-9/10/11）：指挥者与只读子会话没有
-      // write/edit（指挥者那两段还在同一轮 apply 里被清空），PTC 读者的工具只能从 run_code 里调。
-      text: (context) => corumExecutionDisciplineText({
-        hasWriteTools: ctx.tools.get('write', context.scope) !== undefined || ctx.tools.get('edit', context.scope) !== undefined,
-        ptcPrefix: ctx.tools.get('run_code', context.scope) === undefined
-          ? ''
-          : 'This agent runs in PTC mode: every tool below is called from inside `run_code` (e.g. `await tools.bash({...})`), not as a direct tool call. ',
-      }),
+      // 2026-09-27：**不再读 ctx.tools**（未声明 inject 的上下文会抛 cannot get property "tools"
+      // without inject，实机抓到过一次）；「无写工具的读者不该被要求用 write/edit」改由文本层条件句承担，
+      // PTC 前缀由编排段（工具插件内、本来就持有 tools）负责。
+      text: () => corumExecutionDisciplineText({ ptcPrefix: '' }),
     })
     /**
      * 宿主身份段（root scope，所有 corum 会话继承）：把「本会话跑在哪个实例 / home /

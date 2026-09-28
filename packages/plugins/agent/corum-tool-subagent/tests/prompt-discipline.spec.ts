@@ -88,7 +88,7 @@ describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督
 
   it('纪律文本唯一事实源 + 能力自适应（2026-09-27 审查员 C 4.3 后）', () => {
     // 句子定义在 corum-orchestration/src/execution-discipline.ts；组装两档：
-    //   · corumExecutionDisciplineText({hasWriteTools, ptcPrefix}) —— root scope 段，按 scope 工具面自适应
+    //   · corumExecutionDisciplineText({ptcPrefix}) —— root scope 段（写工具指引是文本条件句）
     //   · corumMinimalDisciplineLines() —— minimal 的 complete persona（只保留它真有的工具）
     //   · compile.ts 用后者，agent-service.ts 用前者。
     const definitions = readFileSync(
@@ -99,8 +99,10 @@ describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督
     }
     const service = readFileSync(join(import.meta.dirname, '../../corum-agent/src/agent-service.ts'), 'utf8')
     expect(service).toContain('corumExecutionDisciplineText({')
-    expect(service).toContain("ctx.tools.get('write', context.scope)")
-    expect(service).toContain("ctx.tools.get('write', context.scope)")
+    // ★ 防回归：这里**不得**读 ctx.tools —— agent-service 的 inject 里没有 tools，实机抛过
+    // `cannot get property "tools" without inject`（红线 #4）；工具面差异改由文本条件句承担。
+    // 断言**该段注册处**是静态文本（agent-service 别处有既存的 ctx.tools 用法，不能全局否定）。
+    expect(service).toContain("text: () => corumExecutionDisciplineText({ ptcPrefix: '' })")
     const compileSrc = readFileSync(join(import.meta.dirname, '../../corum-agent/src/compile.ts'), 'utf8')
     expect(compileSrc).toContain('corumMinimalDisciplineLines()')
     expect(SRC).not.toContain("name: 'corum:execution-discipline'")
@@ -109,14 +111,14 @@ describe('H 写作纪律 — 机制段提示词不得夹带实测数字 / 监督
     expect((service.match(/name: CORUM_EXECUTION_DISCIPLINE_SECTION,/g) ?? []).length).toBe(1)
   })
 
-  it('★ 能力自适应：无写工具的读者不得收到 write/edit 指引（审查员 C 4.3-9/10）', () => {
-    const withWrite = corumExecutionDisciplineText({ hasWriteTools: true, ptcPrefix: '' })
-    const withoutWrite = corumExecutionDisciplineText({ hasWriteTools: false, ptcPrefix: '' })
-    expect(withWrite).toContain('Create and edit files with the `write`/`edit` tools')
-    expect(withoutWrite).not.toContain('Create and edit files with the `write`/`edit` tools')
-    expect(withoutWrite).toContain('KNOW YOUR SHELL')
-    expect(withoutWrite).toContain('SANDBOX DENIALS AND ESCALATION')
-    expect(corumExecutionDisciplineText({ hasWriteTools: true, ptcPrefix: 'PTC: ' })).toMatch(/^PTC: /)
+  it('★ 写工具指引是**条件句**（无写工具的读者不会被要求用不存在的工具；审查员 C 4.3-9/10）', () => {
+    // 2026-09-27：从「运行时读工具面自适应」改为**文本层条件句** —— 前者会在未声明 inject 的
+    // 上下文里抛 cannot get property "tools" without inject（实机抓到过），后者同样达到目的。
+    const text = corumExecutionDisciplineText({ ptcPrefix: '' })
+    expect(text).toContain('If this session has the `write`/`edit` tools, create and edit files with them')
+    expect(text).toContain('KNOW YOUR SHELL')
+    expect(text).toContain('SANDBOX DENIALS AND ESCALATION')
+    expect(corumExecutionDisciplineText({ ptcPrefix: 'PTC: ' })).toMatch(/^PTC: /)
   })
 
   it('★ 跨块一致性：读文件口径唯一（唯一家 = tool-policy；两条盲区各自覆盖）', () => {
