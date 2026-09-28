@@ -13,6 +13,9 @@
 # 用法：
 #   scripts/verify-fork-drift.sh                        # 全量（验收只用这一种跑法）
 #   DSH_CHECKOUT=/path/to/dsh scripts/verify-fork-drift.sh
+#   DSH_CHECKOUT=/path/to/dsh DSH_BASELINE_TAG=dsh-v0.1.5-rc.3 scripts/verify-fork-drift.sh
+#       ↑ 指定官方**基线标签**（升级期间必修：检出 HEAD 可能已前进到 0.1.7，
+#         而我们当前目标是 0.1.5-rc.3 ⇒ 不设这个变量会拿 HEAD 当基线、长期假红）
 #   scripts/verify-fork-drift.sh --help                 # 用法 + 分区清单 + 快速通道警告
 #   scripts/verify-fork-drift.sh --only 8 --only 15b    # 快速通道：只跑指定分区（可重复）
 #   scripts/verify-fork-drift.sh --fast                 # 快速通道：只跑最快、最要命的若干分区
@@ -45,6 +48,22 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 官方检出根。**不预置机器专属路径**：未设置时留空，所有「逐字节一致」类断言会因文件
 # 不存在走 skip 分支；事件一致性断言不依赖检出，仍然执行（见文件头说明）。
 DSH_CHECKOUT="${DSH_CHECKOUT:-}"
+DSH_BASELINE_TAG="${DSH_BASELINE_TAG:-}"
+
+# ── 基线标签支持（升级期必修）─────────────────────────────────────────────
+# 为什么需要：守卫读的是 `$DSH_CHECKOUT/<路径>` 的**工作区文件**，而检出 HEAD 会随官���推进而前进
+# （实测：HEAD=0.1.7-rc.2，而 corum 当前目标是 0.1.5-rc.3 ⇒ 逐字节断言会拿错基线、长期假红且无法区分
+# 「我们落后」与「我们改错了」）。设 DSH_BASELINE_TAG 后改为 `git archive <tag>` 取官方基线。
+if [ -n "$DSH_BASELINE_TAG" ] && [ -d "$DSH_CHECKOUT/.git" ]; then
+  BASELINE_DIR="$(mktemp -d)"
+  if git -C "$DSH_CHECKOUT" archive "$DSH_BASELINE_TAG" packages 2>/dev/null | tar -x -C "$BASELINE_DIR" 2>/dev/null; then
+    printf '[baseline] 官方基线 = %s（%s）\n' "$DSH_BASELINE_TAG" "$(git -C "$DSH_CHECKOUT" rev-parse --short "$DSH_BASELINE_TAG" 2>/dev/null)"
+    trap 'rm -rf "$BASELINE_DIR"' EXIT
+    DSH_CHECKOUT="$BASELINE_DIR"
+  else
+    printf '[baseline] ⚠️ 无法导出 %s ⇒ 回落到检出工作区 %s\n' "$DSH_BASELINE_TAG" "$DSH_CHECKOUT"
+  fi
+fi
 FORK_API_REMOTES="$REPO_ROOT/packages/plugins/agent/corum-api-remotes"
 OFFICIAL_API_REMOTES="$DSH_CHECKOUT/packages/api/remotes"
 AGENT_EVENTS="$REPO_ROOT/packages/plugins/agent/corum-agent/src/events.ts"
