@@ -83,7 +83,14 @@ export interface CorumAgentDirectory {
 /**
  * Agent 目录快照的缓存时长（ms）：profile 与会话归属在一次交互里不变，10 s 足够覆盖一轮挂载风暴。
  */
-export const AGENT_DIRECTORY_TTL_MS = 10_000
+/**
+ * Agent 目录快照的缓存时长（ms）。
+ *
+ * 取值依据（2026-09-28 实验）：一度用 10 分钟做「E1 是否生效」的判定实验 —— 结论是**页面里没跑这份代码**
+ * （TTL 长短都不影响那 5+5 次调用），详见 `docs/PENDING-ui-lag-multiround.md` §2.23/§2.24。
+ * 60 s：足够覆盖一轮挂载风暴，又不至于让 profile 改动长时间不被看到。
+ */
+export const AGENT_DIRECTORY_TTL_MS = 60_000
 
 export interface CorumSessionListRow {
   readonly sessionId?: string
