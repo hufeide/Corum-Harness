@@ -38,6 +38,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SubagentProgressEvent, SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import { foldProgressEvent, type ProgressState } from './child-progress.ts'
+import {
+  readSubagentProgressStore,
+  subagentProgressStorePath,
+  writeSubagentProgressStore,
+  type DurableProgress,
+} from './subagent-progress-store.ts'
 
 /** 委派角色（来自父侧 `tool/call` 的工具名，见 `corum/subagent/child` 帧）。 */
 export type SubagentRole = 'worker' | 'research' | 'fork'
@@ -87,6 +93,12 @@ export const SUBAGENT_PROGRESS_CAP = 200
 export const SUBAGENT_PROGRESS_TRUST_MS = 15_000
 
 /**
+ * 运行中会话的**落盘节流**（ms）：折叠每来一条事件都会变，逐条写盘等于拿磁盘换垃圾。
+ * 终态（`done === true`）不受节流限制——那是最值得留住的一条。
+ */
+const DURABLE_WRITE_THROTTLE_MS = 2_000
+
+/**
  * 跟踪器持有的状态表**视图**（供测试台注入/检视，**是本模块与 harness 的契约点**）。
  *
  * 为什么要有它：测试台（`tests/harness.ts`）需要把状态表换成自己可观测的实例。
@@ -130,10 +142,28 @@ export class SubagentProgressTracker {
   /** 「本进程最后一次写这条折叠态」的时刻（信任窗口判据；`fold`/`remember` 写入）。 */
   private readonly foldedAt = new Map<string, number>()
 
+  /** 落盘条目（构造时读一次；`remember`/`fold`/`clear` 写回）。 */
+  private durable: Record<string, DurableProgress>
+  /** 每个会话「上次落盘」的时刻（运行中的写盘节流依据）。 */
+  private readonly durableWrittenAt = new Map<string, number>()
+
   constructor(
     private readonly ctx: Context,
     private readonly host: ProgressHost,
-  ) {}
+    private readonly storePath: string = subagentProgressStorePath(),
+  ) {
+    this.durable = readSubagentProgressStore(this.storePath)
+  }
+
+  /**
+   * 落盘条目（**冷启动的 O(1) 入口**）：内存快照不可信时才用它，省掉重扫日志。
+   *
+   * @param sessionId - 子会话 id。
+   * @returns 上次落盘的折叠态；没有则 `undefined`（调用方回落读盘折叠）。
+   */
+  durableOf(sessionId: string): DurableProgress | undefined {
+    return this.durable[sessionId]
+  }
 
   /**
    * 三张「按会话索引的记账表」的**活视图**（不是快照拷贝——改它就改了跟踪器）。
@@ -167,6 +197,33 @@ export class SubagentProgressTracker {
     this.progressBySession.set(sessionId, state)
     this.lastActiveBySession.set(sessionId, lastActive)
     this.foldedAt.set(sessionId, Date.now())
+    // A2：读盘折出来的结果立刻落盘 ⇒ 下次冷启动不必再扫日志。
+    this.noteDurable(sessionId, state, lastActive, true)
+  }
+
+  /**
+   * 写一条落盘条目（节流；`immediate` 用于终态与读盘结果）。
+   *
+   * @param sessionId - 子会话 id。
+   * @param state - 折叠态。
+   * @param lastActive - 最近活动时刻。
+   * @param immediate - 是否绕过节流立即写。
+   */
+  private noteDurable(sessionId: string, state: ProgressState, lastActive: number, immediate: boolean): void {
+    const previous = this.durable[sessionId]
+    const next: DurableProgress = { ...state, lastActive }
+    if (previous !== undefined && previous.turn === next.turn && previous.step === next.step
+      && previous.done === next.done && previous.stopReason === next.stopReason
+      && previous.lastActive === next.lastActive) return
+    this.durable[sessionId] = next
+    const now = Date.now()
+    if (!immediate && now - (this.durableWrittenAt.get(sessionId) ?? 0) < DURABLE_WRITE_THROTTLE_MS) return
+    this.durableWrittenAt.set(sessionId, now)
+    try {
+      writeSubagentProgressStore(this.durable, this.storePath)
+    } catch {
+      // 落盘失败只该让加速失效，绝不该影响会话（下次变化再试）。
+    }
   }
 
   /**
@@ -250,6 +307,8 @@ export class SubagentProgressTracker {
     // 读路径快照用：最近活动时刻 + 本进程写入时刻。
     this.lastActiveBySession.set(sessionId, event.time)
     this.foldedAt.set(sessionId, Date.now())
+    // A2：终态立即落盘，运行中受节流（否则等于逐条事件写盘）。
+    this.noteDurable(sessionId, next, event.time, next.done)
     return {
       sessionId,
       turn: next.turn,
@@ -324,6 +383,16 @@ export class SubagentProgressTracker {
     this.progressBySession.delete(sessionId)
     this.lastActiveBySession.delete(sessionId)
     this.foldedAt.delete(sessionId)
+    // 会话已销毁 ⇒ 落盘条目也没有意义了（不删就是磁盘泄漏）。
+    if (this.durable[sessionId] !== undefined) {
+      delete this.durable[sessionId]
+      this.durableWrittenAt.delete(sessionId)
+      try {
+        writeSubagentProgressStore(this.durable, this.storePath)
+      } catch {
+        // 同 noteDurable：清理失败不影响会话。
+      }
+    }
   }
 
   /**

@@ -2230,6 +2230,45 @@ export class CorumAgentService extends TypertRemoteService {
         },
       }
     }
+    /**
+     * 第二层快路径（A2）：**落盘条目**。
+     *
+     * 冷启动（刷新/重启）后内存表是空的，而重扫一个 4.8 万条事件的子会话要 1.35 s；
+     * 落盘条目让我们直接拿到上次折出来的进度 ⇒ 首次也是 O(1)。拿到后顺便 `remember`
+     * 进内存表，后续调用走第一层。
+     */
+    const durable = this.progress.durableOf(sessionId)
+    if (durable !== undefined) {
+      const { turn, step, done, currentAction, stopReason, todos, lastActive } = durable
+      this.progress.remember(sessionId, {
+        turn,
+        step,
+        done,
+        ...currentAction === undefined ? {} : { currentAction },
+        ...stopReason === undefined ? {} : { stopReason },
+        ...todos === undefined ? {} : { todos },
+      }, lastActive)
+      const interruptedByDurable = childRunInterruptOf({
+        done,
+        stopReason,
+        agentRunning: () => this.agentRunning(sessionId),
+        lastActive,
+        bootAt: Date.now() - process.uptime() * 1000,
+      })
+      return {
+        ...identity,
+        progress: {
+          turn,
+          step,
+          ...currentAction === undefined ? {} : { currentAction },
+          done: done || interruptedByDurable !== undefined,
+          ...stopReason === undefined ? {} : { stopReason },
+          ...interruptedByDurable === undefined ? {} : { interrupted: true },
+          lastActive,
+          ...todos === undefined ? {} : { todos },
+        },
+      }
+    }
     let stored: readonly SessionEvent[]
     try {
       const events = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)

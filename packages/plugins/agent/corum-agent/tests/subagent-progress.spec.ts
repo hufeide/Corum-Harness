@@ -11,11 +11,16 @@
  *   ③ **终态**（`done === true`）是稳定事实 ⇒ 窗口过期后仍可用；
  *   ④ `clear` 与容量淘汰必须**连伴随表一起清**，否则等于内存泄漏。
  */
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { SubagentProgressTracker, SUBAGENT_PROGRESS_CAP, SUBAGENT_PROGRESS_TRUST_MS } from '../src/subagent-progress.ts'
 
 const makeService = () => new SubagentProgressTracker({} as Context, {} as never)
+/** 用**指定落盘文件**造实例（模拟冷启动：新实例 + 同一文件）。 */
+const makeServiceWithStore = (storePath: string) => new SubagentProgressTracker({} as Context, {} as never, storePath)
 
 describe('SubagentProgressTracker 读路径快照', () => {
   it('① remember ⇒ snapshotOf 原样返回态与 lastActive', () => {
@@ -64,5 +69,27 @@ describe('SubagentProgressTracker 读路径快照', () => {
     // oldest 已被淘汰：既读不到，也不该留下 lastActive/foldedAt 残条。
     expect(service.snapshotOf('oldest')).toBeUndefined()
     expect(service.size).toBeLessThanOrEqual(SUBAGENT_PROGRESS_CAP)
+  })
+})
+
+describe('A2 落盘快照：冷启动首次读不再扫日志', () => {
+  it('remember 会落盘 ⇒ **新实例**能直接读到（= 进程重启后的首次读）', () => {
+    const storePath = join(mkdtempSync(join(tmpdir(), 'corum-progress-cold-')), 'subagent-progress.json')
+    const before = makeServiceWithStore(storePath)
+    before.remember('child-cold', { turn: 4, step: 11, done: true, stopReason: 'completed' }, 1700000000000)
+
+    // 冷启动：全新的实例（内存表空），只带同一个落盘文件。
+    const after = makeServiceWithStore(storePath)
+    expect(after.snapshotOf('child-cold')).toBeUndefined()
+    expect(after.durableOf('child-cold')).toEqual({ turn: 4, step: 11, done: true, stopReason: 'completed', lastActive: 1700000000000 })
+  })
+
+  it('clear ⇒ 落盘条目一并删除（不删就是磁盘泄漏）', () => {
+    const storePath = join(mkdtempSync(join(tmpdir(), 'corum-progress-clear-')), 'subagent-progress.json')
+    const service = makeServiceWithStore(storePath)
+    service.remember('child-x', { turn: 1, step: 1, done: true, stopReason: 'completed' }, 1)
+    expect(service.durableOf('child-x')).toBeDefined()
+    service.clear('child-x')
+    expect(makeServiceWithStore(storePath).durableOf('child-x')).toBeUndefined()
   })
 })
