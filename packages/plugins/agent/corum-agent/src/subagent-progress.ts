@@ -78,6 +78,15 @@ export interface ProgressHost {
 export const SUBAGENT_PROGRESS_CAP = 200
 
 /**
+ * 折叠态作为**读路径快照**的信任窗口（ms）。
+ *
+ * 背景（2026-09-27 实测）：`getChildSessionProgressRemote` 原先**每次调用**都重扫子会话的持久化日志
+ * 再折叠——一个 4.8 万条事件的子会话要 **1.35 s**；而花名册/卡片会**成批**拉（几十张卡片 ⇒ 几十秒卡顿）。
+ * 事件追加点就在本进程 ⇒ 本进程在窗口内 `fold` 过的会话，表必然是最新的，可直接当快照用。
+ */
+export const SUBAGENT_PROGRESS_TRUST_MS = 15_000
+
+/**
  * 跟踪器持有的状态表**视图**（供测试台注入/检视，**是本模块与 harness 的契约点**）。
  *
  * 为什么要有它：测试台（`tests/harness.ts`）需要把状态表换成自己可观测的实例。
@@ -115,6 +124,12 @@ export class SubagentProgressTracker {
    */
   private readonly notified = new Set<string>()
 
+  /** 折叠态对应的最近活动时刻（`fold`/`remember` 写入；读路径快照要用它做中断判定）。 */
+  private readonly lastActiveBySession = new Map<string, number>()
+
+  /** 「本进程最后一次写这条折叠态」的时刻（信任窗口判据；`fold`/`remember` 写入）。 */
+  private readonly foldedAt = new Map<string, number>()
+
   constructor(
     private readonly ctx: Context,
     private readonly host: ProgressHost,
@@ -134,6 +149,48 @@ export class SubagentProgressTracker {
   /** 当前折叠表条目数（容量守卫的可观测面；测试与诊断用）。 */
   get size(): number {
     return this.progressBySession.size
+  }
+
+  /**
+   * 读路径的**生产**入口：把「刚从持久化日志折出来的态」记进表。
+   *
+   * 为什么要它：冷启动（刷新/重启）后表是空的，第一次拉取必须读盘；把它记下来，
+   * 后续调用（同一批卡片、或花名册）就走 {@link snapshotOf} 的快照，不再重扫日志。
+   *
+   * @param sessionId - 子会话 id。
+   * @param state - 折出来的折叠态。
+   * @param lastActive - 日志里最后一条事件的时间。
+   */
+  remember(sessionId: string, state: ProgressState, lastActive: number): void {
+    this.evictIfNeeded(sessionId)
+    this.progressBySession.delete(sessionId)
+    this.progressBySession.set(sessionId, state)
+    this.lastActiveBySession.set(sessionId, lastActive)
+    this.foldedAt.set(sessionId, Date.now())
+  }
+
+  /**
+   * 读路径可复用的折叠快照（避免每次调用重扫几万条事件）。
+   *
+   * 信任口径（满足其一）：
+   *   1. **终态**（`done === true`）——终态是稳定事实；子会话若再跑会产生新事件，被 `fold` 更新；
+   *   2. **本进程在 {@link SUBAGENT_PROGRESS_TRUST_MS} 窗口内写过这条态**——事件追加点就在本进程，
+   *      表必然最新。
+   *
+   * 否则返回 `undefined`，调用方回落到「读持久化日志 + 折叠」的原路径（进程外子会话、已过期条目）。
+   *
+   * @param sessionId - 子会话 id。
+   * @returns 折叠态 + 最近活动时刻；不可信时 `undefined`。
+   */
+  snapshotOf(sessionId: string): { readonly state: ProgressState; readonly lastActive: number } | undefined {
+    const state = this.progressBySession.get(sessionId)
+    if (state === undefined) return undefined
+    const lastActive = this.lastActiveBySession.get(sessionId)
+    if (lastActive === undefined) return undefined
+    const writtenAt = this.foldedAt.get(sessionId)
+    const fresh = writtenAt !== undefined && Date.now() - writtenAt < SUBAGENT_PROGRESS_TRUST_MS
+    if (!state.done && !fresh) return undefined
+    return { state, lastActive }
   }
 
   /**
@@ -190,6 +247,9 @@ export class SubagentProgressTracker {
     // 置顶为最近活动（容量淘汰的 LRU 依据）。
     this.progressBySession.delete(sessionId)
     this.progressBySession.set(sessionId, next)
+    // 读路径快照用：最近活动时刻 + 本进程写入时刻。
+    this.lastActiveBySession.set(sessionId, event.time)
+    this.foldedAt.set(sessionId, Date.now())
     return {
       sessionId,
       turn: next.turn,
@@ -262,6 +322,8 @@ export class SubagentProgressTracker {
   /** 会话 dispose → 清表（`session/disposed`）。 */
   clear(sessionId: string): void {
     this.progressBySession.delete(sessionId)
+    this.lastActiveBySession.delete(sessionId)
+    this.foldedAt.delete(sessionId)
   }
 
   /**
@@ -324,6 +386,11 @@ export class SubagentProgressTracker {
     if (this.progressBySession.has(incoming)) return
     if (this.progressBySession.size < SUBAGENT_PROGRESS_CAP) return
     const oldest = this.progressBySession.keys().next().value
-    if (oldest !== undefined) this.progressBySession.delete(oldest)
+    if (oldest !== undefined) {
+      this.progressBySession.delete(oldest)
+      // 伴随表必须一起淘汰，否则它们会随委派次数无上限增长（等于内存泄漏）。
+      this.lastActiveBySession.delete(oldest)
+      this.foldedAt.delete(oldest)
+    }
   }
 }

@@ -121,14 +121,13 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
     if (childSessionId === undefined) { setLabel(undefined); return undefined }
     let cancelled = false
     const read = async () => {
-      const conn = chatRuntimeRef.current?.connection
-      if (conn === undefined) return
+      const runtime = chatRuntimeRef.current
+      if (runtime === null) return
       try {
-        const result = await conn.rpc.call('/api', 'session/list', { args: { _request: { limit: 200 } } })
+        // 共享读取（并发去重 + TTL 缓存）：几十张卡片只打一次 session/list。
+        const rows = await runtime.sessionRows()
         if (cancelled) return
-        if (!result.ok || result.value === undefined) return
-        const value = result.value as { items?: ReadonlyArray<{ sessionId?: string; projections?: { values?: { modelSelection?: ModelSelectionProjection } } }> }
-        const row = (value.items ?? []).find(item => item.sessionId === childSessionId)
+        const row = (rows ?? []).find(item => item.sessionId === childSessionId)
         setLabel(modelLabel(row?.projections?.values?.modelSelection))
       } catch {
         // 单次失败留空（模型行缺省不显示）。

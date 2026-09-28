@@ -35,6 +35,31 @@ import type { ClientRemote } from '@corum/corum-api-remotes/client'
 import type { CorumWorktreeLedgerFrameEvent, SubagentChildEvent, SubagentProgressEvent } from '@corum/corum-api-remotes/corum-events'
 
 /** uSES 源契约（getSnapshot 稳定引用 + subscribe）。 */
+/**
+ * 官方 `session/list` 行的**窄化形**（只承诺本仓消费的字段）。
+ *
+ * 单一事实源：卡片不再各自声明一份（原先 `SubagentCard` / `OrchestrateCard` 各有一份同形窄化）。
+ */
+export interface CorumSessionListRow {
+  readonly sessionId?: string
+  readonly projections?: { readonly values?: { readonly modelSelection?: CorumModelSelectionProjection } }
+}
+
+/** `projections.values.modelSelection` 的窄化形。 */
+export interface CorumModelSelectionProjection {
+  readonly lastUsed?: { readonly provider?: string; readonly model?: string; readonly reasoningEffort?: string }
+}
+
+/**
+ * 共享会话行的缓存时长（ms）。
+ *
+ * 为什么要缓存（2026-09-27 打包态实测）：卡片原先**各自**在挂载时调一次 `session/list`
+ * （`limit: 200` ⇒ 实测 **651 KB / 1.3 s**）⇒ 47 轮会话 30+ 张卡片 = 同一份列表被拉几十次，
+ * 主线程被大 payload 解析占满（`docs/PENDING-ui-lag-multiround.md` §2.10）。模型选择在会话
+ * 生命周期内基本不变，故短 TTL 足够。
+ */
+export const SESSION_ROWS_TTL_MS = 15_000
+
 export interface SessionIdSource {
   getSnapshot: () => string | undefined
   subscribe: (listener: () => void) => () => void
@@ -48,6 +73,12 @@ export interface ChatRuntimeService {
   onSessionIdChange(listener: () => void): () => void
   /** RPC connection 只读引用（子会话进度基线/兜底拉取的数据源；可能尚未挂载）。 */
   readonly connection: ConnectionHandle | undefined
+  /**
+   * 官方 `session/list` 的**共享**读取：并发去重 + {@link SESSION_ROWS_TTL_MS} 缓存。
+   *
+   * @returns 行数组；无连接 / 调用失败时 `undefined`。
+   */
+  sessionRows(): Promise<readonly CorumSessionListRow[] | undefined>
   /** Remote 事件面只读引用（'corum/subagent/progress' 推送订阅入口）。 */
   readonly remote: ClientRemote | undefined
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
@@ -117,10 +148,37 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   #openSessionFn: (id: string) => void = () => {}
   #revealSubagentCardFn: ((childSessionId: string) => Promise<RevealSubagentCardResult>) | undefined
   readonly #listeners = new Set<() => void>()
+  /** 共享会话行缓存（并发去重用的 in-flight promise 与它配对）。 */
+  #sessionRowsCache: { readonly at: number; readonly rows: readonly CorumSessionListRow[] } | undefined
+  #sessionRowsInFlight: Promise<readonly CorumSessionListRow[] | undefined> | undefined
   /** uSES 源对象（稳定引用——getSnapshot/subscribe 闭包绑定本实例，值经 #sessionId 读）。 */
   readonly #source: SessionIdSource = {
     getSnapshot: () => this.#sessionId,
     subscribe: (fn) => this.onSessionIdChange(fn),
+  }
+
+  async sessionRows(): Promise<readonly CorumSessionListRow[] | undefined> {
+    const cached = this.#sessionRowsCache
+    if (cached !== undefined && Date.now() - cached.at < SESSION_ROWS_TTL_MS) return cached.rows
+    const inFlight = this.#sessionRowsInFlight
+    if (inFlight !== undefined) return inFlight
+    const conn = this.#connection
+    if (conn === undefined) return undefined
+    const promise = (async () => {
+      try {
+        const result = await conn.rpc.call('/api', 'session/list', { args: { _request: { limit: 200 } } })
+        if (!result.ok || result.value === undefined) return undefined
+        const rows = (result.value as { items?: readonly CorumSessionListRow[] }).items ?? []
+        this.#sessionRowsCache = { at: Date.now(), rows }
+        return rows
+      } catch {
+        return undefined
+      } finally {
+        this.#sessionRowsInFlight = undefined
+      }
+    })()
+    this.#sessionRowsInFlight = promise
+    return promise
   }
 
   sessionIdSnapshot(): SessionIdSource {

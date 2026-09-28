@@ -2199,6 +2199,37 @@ export class CorumAgentService extends TypertRemoteService {
       ...role === undefined ? {} : { role },
       ...isolated === undefined ? {} : { isolated },
     }
+    /**
+     * 快路径（2026-09-27 性能修复）：折叠表里已有**可信**快照就直接用。
+     *
+     * 实测背景：本方法原先每次调用都重扫子会话的持久化日志再折叠，一个 4.8 万条事件的子会话要
+     * **1.35 s**；而卡片/花名册会**成批**拉（47 轮会话 30+ 张卡）⇒ 几十秒卡顿（`docs/PENDING-ui-lag-multiround.md` §2.10）。
+     * 信任口径见 `SubagentProgressService.snapshotOf`；未命中/不可信时才走下面的读盘路径。
+     */
+    const snapshot = this.progress.snapshotOf(sessionId)
+    if (snapshot !== undefined) {
+      const { turn, step, done, currentAction, stopReason, todos } = snapshot.state
+      const interruptedBySnapshot = childRunInterruptOf({
+        done,
+        stopReason,
+        agentRunning: () => this.agentRunning(sessionId),
+        lastActive: snapshot.lastActive,
+        bootAt: Date.now() - process.uptime() * 1000,
+      })
+      return {
+        ...identity,
+        progress: {
+          turn,
+          step,
+          ...currentAction === undefined ? {} : { currentAction },
+          done: done || interruptedBySnapshot !== undefined,
+          ...stopReason === undefined ? {} : { stopReason },
+          ...interruptedBySnapshot === undefined ? {} : { interrupted: true },
+          lastActive: snapshot.lastActive,
+          ...todos === undefined ? {} : { todos },
+        },
+      }
+    }
     let stored: readonly SessionEvent[]
     try {
       const events = await readPersistedEvents(this.ctx.sessionPersistence, SessionId(sessionId), 0)
@@ -2219,6 +2250,8 @@ export class CorumAgentService extends TypertRemoteService {
     const folded = foldProgressAll(stored)
     const { turn, step, done, currentAction, stopReason, todos } = folded
     const lastActive = stored[stored.length - 1].time
+    // 记进折叠表 ⇒ 同一批卡片/花名册的后续调用走快路径（不再重扫日志）。
+    this.progress.remember(sessionId, folded, lastActive)
     /**
      * 被进程退出杀掉 / 中途失去运行的子会话：log 里有 `turn/start` 却没有 `turn/end`，
      * 事件投影推不出终态 → 卡片永远停在 Running（2026-09-12 用户实测「search agent
