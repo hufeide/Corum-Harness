@@ -168,7 +168,7 @@ declare module '@deepseek-ai/cordis' {
     /**
      * Allow a listener to replace content in the DURABLE LOG COPY of one
      * `run_code` sub-dispatch outcome before the bridge appends its
-     * `tool/code-dispatch` event. `next()` keeps the
+     * `tool/ptc-dispatch` event. `next()` keeps the
      * content unchanged; a listener may return replacement blocks (e.g. the
      * spill policy's preview + locator for an oversized text result). Only the
      * logged copy is affected — the program already received the complete
@@ -345,14 +345,14 @@ export type ToolExecutionMode =
  * copy a listener may reshape. `content` is the RENDERED result projection
  * (what a native `tool/result` would carry) — the program itself received
  * the structured `value` (or just the error message on failure); only the
- * `tool/code-dispatch` event's copy changes.
+ * `tool/ptc-dispatch` event's copy changes.
  */
 export interface PtcDispatchLog {
   /** The outer `run_code` execution. */
   readonly exec: ToolExecution
   /** The calling agent (the scope routing key and the spill owner), when the outer call has one. */
   readonly agent?: Agent
-  /** Deterministic sub-call id (`<parent>:code:<n>`). */
+  /** Opaque sub-call id; new calls use `<parent>:ptc:<n>`. */
   readonly subCallId: ToolCallId
   /** The dispatched sub-tool name. */
   readonly name: string
@@ -600,11 +600,6 @@ export type PostToolDecision =
  */
 function errorMessage(error: unknown): string {
   try {
-    if (error instanceof Error) return error.message
-    if (typeof error === 'object' && error !== null
-      && 'message' in error && typeof error.message === 'string') {
-      return error.message
-    }
     // fork（corum）：无 string `message` 字段的普通对象（如 `{code:'RATE_LIMIT',detail:'quota'}`）
     // 官方走 `String(error)` 退化成 `[object Object]`（2026-09-09 用户主 Agent 提交失败时撞到，
     // todo.error.opaque-object-stringification）——改走 JSON.stringify，让结构化错误可读；
@@ -618,6 +613,11 @@ function errorMessage(error: unknown): string {
       } catch {
         // 循环引用等不可序列化：回落 String()。
       }
+    }
+    if (error instanceof Error) return error.message
+    if (typeof error === 'object' && error !== null
+      && 'message' in error && typeof error.message === 'string') {
+      return error.message
     }
     return String(error)
   } catch {
@@ -1018,8 +1018,7 @@ export class ToolRuntime extends Service {
    * reads return the same flavor — but a reload that swapped in a second
    * language between them would hand a program written against one SDK to the
    * other. Binding it is deferred until a second backend ships (the first
-   * point it is testable); rationale in the
-   * [language-dispatch note](../../../../.agents/notes/implemented/feature/2026-07-31-ptc-language-dispatch.md).
+   * point it is testable).
    */
   private requireCodeRuntime(mode: ToolPresentationMode): CodeRuntime {
     const runtime = this.ctx.get('codeRuntime')
@@ -1291,7 +1290,7 @@ export class ToolRuntime extends Service {
 
   /**
    * Run the `tools/ptc-dispatch-log` waterfall over one settled sub-dispatch
-   * and return the content the bridge should log on `tool/code-dispatch`.
+   * and return the content the bridge should log on `tool/ptc-dispatch`.
    * Contained: when a listener throws, the method logs the original settled
    * content; that failure must not fail the dispatch or omit the settle event. Private:
    * the ONE consumer is the `run_code` bridge this registry constructs, which
