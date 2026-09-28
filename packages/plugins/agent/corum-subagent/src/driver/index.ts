@@ -18,7 +18,9 @@ import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId, SessionLogOffset as SessionLogOffsetType, TurnEndReason } from '@deepseek-ai/dsh-session'
-import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { boundContextSummary, createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { corumRoutingIgnoredNoticeText, corumStripRoutingOptions } from '../routing-guard.ts'
+import { parentAgentOptionsForDelegation } from '../child-agent.ts'
 import {
   appendDelegatedPolicyOverrides,
   applyChildComposition,
@@ -139,12 +141,38 @@ export async function startInProcessRun(
     attachDescriptorAppend(childCtx, request.descriptor)
   }
 
+  // 2026-09-27 P1（用户裁定方案 A「剥离 + 告知」）：**脚本模式的路由选项在这里被剥离**。
+  //
+  // 机制拥有子 Agent 路由（用户 2026-09-18「orchestrate 也不能豁免」）。依据（运行时产物）：
+  // 引擎的 `SUPPORTED_AGENT_OPTIONS` 含 `provider`/`model`
+  // （`@deepseek-ai/dsh-base@0.1.3-alpha.1` 的 `dsh-workflow-worker-thread/lib/worker.cjs`），
+  // 而 `resolveChildAgentOptions` 的 `...requested` 在最后 ⇒ 不剥离就会覆盖父路由。
+  // 设计稿：docs/PLAN-2026-09-27-script-mode-model-routing.md。
+  const routing = corumStripRoutingOptions(request.agentOptions)
+  if (routing.ignored !== undefined) {
+    // 告知（方案 A 的第二半）：一条机制通知，含**实际生效的路由**，让模型学到口径。
+    try {
+      const text = corumRoutingIgnoredNoticeText(routing.ignored, parentAgentOptionsForDelegation(parent))
+      parent.inject(createUserMessage({
+        content: [{ type: 'text' as const, text }],
+        source: {
+          kind: 'mechanism-notice',
+          form: 'notice',
+          summary: boundContextSummary(text),
+          senderSessionId: childId,
+        },
+      }))
+    } catch {
+      // 通知失败不影响派发：剥离本身已经保证机制拥有路由。
+    }
+  }
+
   const handle = await parent.ctx.agents.create({
     sessionId: childId,
     meta: childSessionMeta(parent, childDepth, seed !== undefined, request.cwd),
     ...seed !== undefined ? { seed } : {},
     ...seed === undefined ? {} : { inheritedEventCount: activationBoundary },
-    agentOptions: resolveChildAgentOptions(parent, request.agentOptions, childDepth),
+    agentOptions: resolveChildAgentOptions(parent, routing.options, childDepth),
     signal: request.signal,
     setup,
   })
