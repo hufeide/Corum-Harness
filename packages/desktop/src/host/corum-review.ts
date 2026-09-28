@@ -129,6 +129,33 @@ const MAX_UNION_PATHS = 200
 /** 轮末并集里未跟踪目录展开的最大深度。 */
 const UNION_DIR_MAX_DEPTH = 3
 
+/**
+ * 快照计算的**内容寻址**缓存（2026-09-28 性能修复 D2）。
+ *
+ * 为什么需要（打包态实测，`docs/PENDING-ui-lag-multiround.md` §2.16）：`filesOf` 对**每个**改动文件要跑
+ * 4–5 个 git 子进程（`cat-file blob` / `hash-object -w` ×2 / `diff --numstat`），一次
+ * `corumReview/snapshot` 实测 **1.1–1.6 s**；而卡片按节流后的频率反复拉，其中绝大多数文件内容根本没变。
+ *
+ * 三个表全部按**内容**（或 preimage ref）寻址 ⇒ 命中即结论等价，不依赖 mtime ⇒ **没有陈旧风险**。
+ */
+interface ReviewComputeCache {
+  /** `blob:<hash>` → 改前正文（`content` 形态不走表，直接用内存里的）。 */
+  readonly preimageText: Map<string, string>
+  /** `改前 sha|改后 sha` → 行级增删。 */
+  readonly diffStats: Map<string, { added: number; removed: number }>
+  /** 正文 sha → 影子仓库 blob 号（写过一次就不必再 `hash-object -w`）。 */
+  readonly blobHashes: Map<string, string>
+}
+
+/** 缓存条目上限（按表各自计）；超出直接清空——它只是加速，不是事实源。 */
+const REVIEW_COMPUTE_CACHE_CAP = 20_000
+
+/** 正文的内容指纹（只用于**缓存寻址**，不需要是 git 的对象 id）。 */
+function contentFingerprint(text: string | null): string {
+  if (text === null) return 'absent'
+  return createHash('sha1').update(text).digest('hex')
+}
+
 /** `git status` / `git rev-parse` 的超时（工作区可能很大；超时只放弃本轮兜底）。 */
 const WORKTREE_GIT_TIMEOUT_MS = 20000
 
@@ -385,6 +412,8 @@ function runGitIn(cwd: string, args: string[]): Promise<{ stdout: string; stderr
 }
 
 export class CorumReviewService extends TypertRemoteService {
+  /** 每个会话一份计算缓存（按内容寻址 ⇒ 不需要随轮次失效；上限见 REVIEW_COMPUTE_CACHE_CAP）。 */
+  private readonly computeCaches = new Map<string, ReviewComputeCache>()
   private readonly repos = new Map<string, RepoState>()
   private readonly rounds = new Map<string, LiveRound>()
   /**
@@ -612,9 +641,19 @@ export class CorumReviewService extends TypertRemoteService {
    * @param touched - 该轮的「路径 → 改前状态」。
    * @returns 改动条目；影子仓库不可用时返回 `null`（调用方按各自口径降级，绝不抛给 RPC）。
    */
+  /** 取（必要时新建）某会话的计算缓存。 */
+  private computeCacheFor(sessionId: string): ReviewComputeCache {
+    const existing = this.computeCaches.get(sessionId)
+    if (existing !== undefined) return existing
+    const created: ReviewComputeCache = { preimageText: new Map(), diffStats: new Map(), blobHashes: new Map() }
+    this.computeCaches.set(sessionId, created)
+    return created
+  }
+
   private async filesOf(
     workspace: string,
     touched: ReadonlyMap<string, Preimage>,
+    cache?: ReviewComputeCache,
   ): Promise<ReviewFileEntry[] | null> {
     let repo: RepoState
     try {
@@ -630,13 +669,13 @@ export class CorumReviewService extends TypertRemoteService {
     for (const [path, pre] of touched) {
       const after = this.readCurrent(resolve(workspace, path))
       // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
-      const beforeText = await this.preimageText(repo, pre)
+      const beforeText = await this.preimageText(repo, pre, cache)
       const afterText = after.kind === 'content' ? after.text : null
       // eslint-disable-next-line no-await-in-loop -- 量级 = 本轮改动文件数
-      const stats = await this.diffStat(repo, beforeText, afterText)
+      const stats = await this.diffStat(repo, beforeText, afterText, cache)
       if (stats.added === 0 && stats.removed === 0) continue // 净变化 0：不算「更改」
       // eslint-disable-next-line no-await-in-loop -- 同上
-      const hash = await this.hashObject(repo, afterText ?? '')
+      const hash = await this.hashObject(repo, afterText ?? '', cache)
       // 问题 1-④⑤ 收口：把改前状态带上——unavailable 的行由调用方置灰（不可点、
       // 不可撤销）；blob 形态取不回正文时同样如实报 unavailable。
       const status: ReviewPreimageStatus =
@@ -667,7 +706,7 @@ export class CorumReviewService extends TypertRemoteService {
   ): Promise<void> {
     if (touched.size === 0) return
     try {
-      const files = await this.filesOf(workspace, touched)
+      const files = await this.filesOf(workspace, touched, this.computeCacheFor(sessionId))
       if (files === null) return
       const at = Date.now()
       this.frozen.set(sessionId, {
@@ -1004,11 +1043,15 @@ export class CorumReviewService extends TypertRemoteService {
   }
 
   /** 取 pre-image 的正文（内存里的直接用；blob 形态走 git cat-file）。 */
-  private async preimageText(repo: RepoState, pre: Preimage): Promise<string | null> {
+  private async preimageText(repo: RepoState, pre: Preimage, cache?: ReviewComputeCache): Promise<string | null> {
     if (pre.kind === 'content') return pre.text
     if (pre.kind !== 'blob') return null
+    const cached = cache?.preimageText.get(pre.hash)
+    if (cached !== undefined) return cached
     const result = await runGit(repo.gitDir, ['cat-file', 'blob', pre.hash])
-    return result.code === 0 ? result.stdout : null
+    if (result.code !== 0) return null
+    this.remember(cache?.preimageText, pre.hash, result.stdout)
+    return result.stdout
   }
 
   /** 文件在工作区内的相对（git 形态）路径；不在工作区内返回 null。 */
@@ -1080,10 +1123,23 @@ export class CorumReviewService extends TypertRemoteService {
   }
 
   /** 内容 → blob 哈希（入库，自动去重）。 */
-  private async hashObject(repo: RepoState, content: string): Promise<string> {
+  private async hashObject(repo: RepoState, content: string, cache?: ReviewComputeCache): Promise<string> {
+    // 同一份正文在一次快照里会被要两次（diffStat 与文件条目）⇒ 内容寻址缓存直接命中，省一次子进程。
+    const key = contentFingerprint(content)
+    const cached = cache?.blobHashes.get(key)
+    if (cached !== undefined) return cached
     const result = await runGit(repo.gitDir, ['hash-object', '-w', '--stdin'], { input: content })
     if (result.code !== 0) throw new Error(`hash-object failed: ${result.stderr || result.code}`)
-    return result.stdout.trim()
+    const hash = result.stdout.trim()
+    this.remember(cache?.blobHashes, key, hash)
+    return hash
+  }
+
+  /** 写一条缓存（受上限保护：它只是加速，满了就整体丢弃，绝不因此报错）。 */
+  private remember<T>(table: Map<string, T> | undefined, key: string, value: T): void {
+    if (table === undefined) return
+    if (table.size >= REVIEW_COMPUTE_CACHE_CAP) table.clear()
+    table.set(key, value)
   }
 
   /**
@@ -1499,7 +1555,7 @@ export class CorumReviewService extends TypertRemoteService {
       // 真的看得见（见 scheduleUnionScan）。不 await：卡片拿手头数据先渲染。
       this.scheduleUnionScan(round)
       if (round.touched.size === 0) return { workspace: round.workspace, roundIndex: round.index, files: [] }
-      const files = await this.filesOf(round.workspace, round.touched)
+      const files = await this.filesOf(round.workspace, round.touched, this.computeCacheFor(sessionId))
       if (files === null) return { workspace: round.workspace, roundIndex: round.index, files: [] }
       // 顺手刷新冻结态：这是「工作区健在时算出的真相」，工作区一被回收就再也算不出来。
       // 只更新这份引用，不额外复制 pre-image 正文（`new Map` 复制的是对象引用）。
@@ -1527,11 +1583,20 @@ export class CorumReviewService extends TypertRemoteService {
   }
 
   /** 两段内容之间的行级增删，交给 git diff。 */
-  private async diffStat(repo: RepoState, before: string | null, after: string | null): Promise<{ added: number; removed: number }> {
+  private async diffStat(
+    repo: RepoState,
+    before: string | null,
+    after: string | null,
+    cache?: ReviewComputeCache,
+  ): Promise<{ added: number; removed: number }> {
     if (before === null && after === null) return { added: 0, removed: 0 }
     if (before === after) return { added: 0, removed: 0 }
-    const blobA = await this.hashObject(repo, before ?? '')
-    const blobB = await this.hashObject(repo, after ?? '')
+    // 同一对内容算过一次就够（卡片会反复拉同一个未变文件）。
+    const key = `${contentFingerprint(before)}|${contentFingerprint(after)}`
+    const cached = cache?.diffStats.get(key)
+    if (cached !== undefined) return cached
+    const blobA = await this.hashObject(repo, before ?? '', cache)
+    const blobB = await this.hashObject(repo, after ?? '', cache)
     if (blobA === blobB) return { added: 0, removed: 0 }
     const result = await runGit(repo.gitDir, ['diff', '--numstat', blobA, blobB])
     if (result.code !== 0) return { added: 0, removed: 0 }
@@ -1540,6 +1605,7 @@ export class CorumReviewService extends TypertRemoteService {
     const [addRaw, delRaw] = line.split('\t')
     const added = Number(addRaw)
     const removed = Number(delRaw)
+    this.remember(cache?.diffStats, key, { added, removed })
     return {
       added: Number.isFinite(added) ? added : 0,
       removed: Number.isFinite(removed) ? removed : 0,
