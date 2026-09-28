@@ -184,6 +184,10 @@ describe('投送：执行纪律段的两条注入路径', () => {
     } as never))
     expect(text).toContain('EFFICIENCY DISCIPLINE')
     expect(text).toContain('SANDBOX DENIALS AND ESCALATION')
+    // 2026-09-27 P10：minimal 是 complete ⇒ 输出语言段也进不来，已追加进人格段（占位符须已插值）。
+    expect(text).toContain('OUTPUT LANGUAGE')
+    expect(text).toContain('final answer to the user must be in the language the user writes in')
+    // 占位符在**编译产物里**本就是字面量（插值发生在组装时）⇒ 不断言它不存在。
     // 2026-09-27（审查员 C 报）：minimal 被裁到 persona/tool-bash/filesystem/tool-fs
     // ⇒ 提示词里**不得**点名它没有的工具（指令与能力矛盾）。
     for (const absent of ['`grep`', '`glob`', '`job_output`', '`job_kill`', 'subagent', 'orchestrate']) {

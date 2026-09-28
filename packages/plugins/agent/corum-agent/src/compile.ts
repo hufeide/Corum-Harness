@@ -25,6 +25,7 @@
  */
 
 import { corumMinimalDisciplineLines } from '@corum/corum-orchestration'
+import { outputLanguageSectionText } from './output-language.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
@@ -495,8 +496,13 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   // 连 root scope 的 `corum:execution-discipline` 也进不来；而 minimal 的 preset 里有 shell
   // （persistent-shell / pty / terminal-bash）⇒ 它同样需要效率与沙箱纪律。
   // 故在**人格段**里追加同一对 builder（单一事实源 = @corum/corum-orchestration）。
+  // 2026-09-27 P10：极简模式是 `complete` ⇒ `corum:execution-discipline` 与 `corum:output-language`
+  // 两段都进不来。前者由 corumMinimalDisciplineLines() 补齐；后者（含 `{{output_language}}` 占位符，
+  // 该模块的文件头本就写明「任何 profile 的 persona 都能写它」）在这里追加。
+  // ⚠️ 未覆盖：`corum:host-identity`（宿主实例/home/CDP 端口）是**运行时**事实，无法编进静态 preset，
+  // 除非改 `complete` 语义 —— 已记入 docs/PENDING-prompt-consistency-followups.md 的 P10 待裁定。
   const personaTextWithDiscipline = isComplete
-    ? [personaText, corumMinimalDisciplineLines().join('\n')].join('\n')
+    ? [personaText, corumMinimalDisciplineLines().join('\n'), outputLanguageSectionText()].join('\n')
     : personaText
 
   const rows: CordisRow[] = [

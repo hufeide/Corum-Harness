@@ -105,8 +105,13 @@ export function languageNameOf(localeId: string): string {
  */
 export function outputLanguageSectionText(): string {
   return [
-    `OUTPUT LANGUAGE: {{${OUTPUT_LANGUAGE_VARIABLE}}}`,
-    `- Write your final answer to the user in the language stated above.`,
+    'OUTPUT LANGUAGE',
+    // 2026-09-27 修（用户报障：要求母语输出但多数仍英文）：原文本第一条依赖**变量值**，
+    // 而变量的语言偏好存在客户端（主机读不到 settings.locale）⇒ 回退成软条件 ⇒ 模型照英文走。
+    // 现在把「匹配用户语言」提升为**正文第一条规则**（自足、不依赖偏好是否存在）；
+    // 偏好只在**指名了语言**时覆盖它。措辞仍保持静态（不出现具体语言名，守卫会检查）。
+    '- **Your final answer to the user must be in the language the user writes in**: match the language of their latest message.',
+    `- Configured preference (overrides the line above when it names a language): {{${OUTPUT_LANGUAGE_VARIABLE}}}`,
     `- When you surface a summary or narration of your reasoning to the user, write that in the same language as well — the user must be able to read what you did without translating.`,
     `- Your internal reasoning (thinking), your prompts, and tool arguments are NOT constrained: think in whatever language gives you the best results (English is often stronger for some models). Only the text the user reads must follow the language above.`,
     `- Do not translate code, identifiers, commands, file paths, or error output — keep them verbatim; only the natural-language prose around them follows that language.`,
@@ -126,7 +131,7 @@ export function outputLanguageSectionText(): string {
  */
 export function outputLanguageVariableValue(localeId: string | undefined): string {
   if (localeId === undefined || localeId.trim() === '') {
-    return "not specified — if the user's messages are in a particular language, reply in that language"
+    return "not specified — follow the rule above: if the user's messages are in a particular language, reply in that language"
   }
   return `the user's language is ${languageNameOf(localeId)}`
 }
