@@ -29,7 +29,7 @@ overrides:
   '@deepseek-ai/dsh-client-connection': 0.1.7-rc.2
   '@deepseek-ai/dsh-client-file-upload': 0.1.3-alpha.1
   '@deepseek-ai/dsh-client-hmr': 0.1.3-alpha.1
-  '@deepseek-ai/dsh-client-locale': 0.1.3-alpha.1
+  '@deepseek-ai/dsh-client-locale': 0.1.7-rc.2
   '@deepseek-ai/dsh-client-modules': 0.1.3-alpha.1
   '@deepseek-ai/dsh-client-store': 0.1.3-alpha.1
   '@deepseek-ai/dsh-client-ui-agent-preset': 0.1.3-alpha.1
@@ -362,8 +362,8 @@ importers:
         specifier: 0.1.7-rc.2
         version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-modules':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
@@ -1832,8 +1832,8 @@ importers:
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -1924,8 +1924,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(edfc9b41f5b94bf2115653c134a56e43)
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-primitives':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
@@ -1997,8 +1997,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-brand@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -2154,8 +2154,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -2281,8 +2281,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(edfc9b41f5b94bf2115653c134a56e43)
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-primitives':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
@@ -2351,8 +2351,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(edfc9b41f5b94bf2115653c134a56e43)
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -2418,8 +2418,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(edfc9b41f5b94bf2115653c134a56e43)
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -2494,8 +2494,8 @@ importers:
         specifier: 0.1.7-rc.2
         version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -2543,8 +2543,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -2600,8 +2600,8 @@ importers:
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-brand@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -3103,8 +3103,8 @@ importers:
         specifier: 0.1.7-rc.2
         version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-locale':
-        specifier: 0.1.3-alpha.1
-        version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+        specifier: 0.1.7-rc.2
+        version: 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-store':
         specifier: 0.1.3-alpha.1
         version: 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@types/react@18.3.31)(react@18.2.0)
@@ -3641,8 +3641,8 @@ packages:
     peerDependencies:
       '@deepseek-ai/cordis': 4.0.2
 
-  '@deepseek-ai/dsh-client-locale@0.1.3-alpha.1':
-    resolution: {integrity: sha512-TL0tw2juxq8Ze4OQ+qWDtxduQMnpPqcTKB575+2+ImdDTVAJHu0r2Kah8GHPXJyBBl+z0uFoH4cjtxVEgN6izA==}
+  '@deepseek-ai/dsh-client-locale@0.1.7-rc.2':
+    resolution: {integrity: sha512-zkRt/JrBvS7w1TPi/dOo0QCqjkcAApq7nNoeIL2lX0VlzwHD86Hrg/n/YJJlg1i0nvOEtZDibR9FGwa/X2wpvA==}
     peerDependencies:
       '@deepseek-ai/cordis': 4.0.2
 
@@ -10168,7 +10168,7 @@ snapshots:
       '@deepseek-ai/cordis': 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
       '@deepseek-ai/schemastery': 3.18.2
 
-  '@deepseek-ai/dsh-client-locale@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)':
+  '@deepseek-ai/dsh-client-locale@0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)':
     dependencies:
       '@deepseek-ai/cordis': 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
       '@deepseek-ai/schemastery': 3.18.2
@@ -11964,7 +11964,7 @@ snapshots:
       '@deepseek-ai/dsh-client-connection': 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-file-upload': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-hmr': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
-      '@deepseek-ai/dsh-client-locale': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+      '@deepseek-ai/dsh-client-locale': 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-modules': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-agent-preset': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-approval': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
@@ -12088,7 +12088,7 @@ snapshots:
       '@deepseek-ai/dsh-client-connection': 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-file-upload': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-scope@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-client-hmr': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
-      '@deepseek-ai/dsh-client-locale': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
+      '@deepseek-ai/dsh-client-locale': 0.1.7-rc.2(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-modules': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-agent-preset': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-client-ui-approval': 0.1.3-alpha.1(@deepseek-ai/cordis@4.0.2)
