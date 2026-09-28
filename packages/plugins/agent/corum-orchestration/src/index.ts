@@ -89,6 +89,7 @@ export {
   corumMergeBase,
   corumIntegratorPersona,
   corumDirectWriteNotice,
+  type CorumDirectWriteReason,
   corumIsGitRepo,
   corumIsolationBoundaryNotice,
   corumIsolationNotice,

@@ -112,7 +112,8 @@ describe('prepareTrackedChild — ralph 的「不隔离但计数」内核（2026
     // 只注入直连纪律，不注入隔离通知。
     const text = tracked.request.prompt.map(block => block.type === 'text' ? block.text : '').join('')
     expect(text).toContain('[corum orchestration]')
-    expect(text).toContain('do NOT run git add / commit')
+    // 2026-09-27 P2：按原因参数化后命令带反引号；意图不变（不许碰版本控制）。
+    expect(text).toContain('do NOT run `git add` / `commit`')
     expect(text).not.toContain('[corum isolation]')
     expect(text.endsWith('do the thing')).toBe(true)
   })

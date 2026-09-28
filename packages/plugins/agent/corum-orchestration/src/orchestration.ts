@@ -1847,8 +1847,16 @@ export function corumIsolationNotice(entry: Pick<CorumWorktreeChild, 'branch'>):
  * 文案因此不再声称「没有并发写任务」（那已不是本通知的语义，见旧文本），只陈述纪律本身。
  * @returns 注入到子 Agent prompt 最前面的通知文本（含尾随空行）。
  */
-export function corumDirectWriteNotice(): string {
-  return '[corum orchestration] This delegation works DIRECTLY in the delegating agent\'s working tree (no isolated worktree): either the workspace is not a git repository, or it runs in a sequential-iteration mode that must see the previous round\'s changes. Edit files in place and leave version control to the delegating agent: do NOT run git add / commit / checkout / stash / reset, and do not create branches.\n\n'
+export type CorumDirectWriteReason = 'caller-requested-main' | 'skipped-non-git' | 'sequential-iteration'
+
+export function corumDirectWriteNotice(reason: CorumDirectWriteReason = 'skipped-non-git'): string {
+  const cause = reason === 'caller-requested-main' ? 'the delegating agent explicitly asked for the main tree (`isolation: "main"`) because the work needs it' : reason === 'skipped-non-git' ? 'this workspace is not a git repository, so isolation was skipped' : 'this run is a sequential-iteration mode that must see the previous round\'s changes'
+  const gitRule = reason === 'caller-requested-main' ? 'Version control IS available to you here: when the brief asks for a commit, a merge or a `git push`, do it.' : 'Leave version control to the delegating agent: do NOT run `git add` / `commit` / `checkout` / `stash` / `reset`, and do not create branches.'
+  return '[corum orchestration] This delegation works DIRECTLY in the delegating agent\'s working tree (no isolated worktree), because ' + cause + '.\n\n'
+    + 'Consequences:\n'
+    + '- Dependencies may already be installed, and a build or an install the brief asks for IS part of your work: the isolated-worktree premises ("no dependencies", "do not build") do NOT apply to you.\n'
+    + '- Edit files in place; there is no branch and nothing to merge.\n'
+    + '- ' + gitRule + '\n\n'
 }
 
 export class CorumOrchestration extends Service {

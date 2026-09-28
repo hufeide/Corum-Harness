@@ -189,7 +189,7 @@ export function prepareTrackedChild(
   return {
     request: {
       ...request,
-      prompt: [{ type: 'text', text: corumDirectWriteNotice() + promptText(request.prompt) }],
+      prompt: [{ type: 'text', text: corumDirectWriteNotice('sequential-iteration') + promptText(request.prompt) }],
     },
     release: () => {
       if (released) return

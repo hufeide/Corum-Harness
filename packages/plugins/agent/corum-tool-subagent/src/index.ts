@@ -2409,10 +2409,9 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）：不隔离的写任务（单发前台，无并发）直接在主工作区改——必须明确
         // 告诉它「不要碰版本控制」（文本见 corumDirectWriteNotice 的单一事实源）。
         // 非 git 工作区导致隔离被跳过时追加一句，避免模型误以为自己在隔离环境里。
-        const skipped = corumIsolationSkipped
-          ? 'NOTE: this workspace is not a git repository, so isolation was skipped for this delegation.\n\n'
-          : ''
-        request.prompt = [{ type: 'text', text: skipped + corumDirectWriteNotice() + args.prompt }] as ContentBlock[]
+        // 2026-09-27 P2：按**原因**传参（三个原因的前提与权限不同，不能一刀切）。
+        const corumMainTreeReason = corumIsolationBoundary === 'main-requested' ? 'caller-requested-main' : 'skipped-non-git'
+        request.prompt = [{ type: 'text', text: corumDirectWriteNotice(corumMainTreeReason) + args.prompt }] as ContentBlock[]
       }
       /** fork（corum）：把 run/child id 绑定到本次 spawn 的台账条目（无隔离时 no-op）。 */
       const corumBindRun = (runId: string): void => {

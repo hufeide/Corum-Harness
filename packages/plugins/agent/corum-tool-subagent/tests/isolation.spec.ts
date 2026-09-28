@@ -596,7 +596,14 @@ describe('非 git 降级：强制隔离被跳过时告知子 Agent（2026-09-10 
   it('工具层：跳过隔离时 prompt 追加说明（降级而非报错）', async () => {
     const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8'))
     expect(src).toContain('corumIsolationSkipped')
-    expect(src).toContain('this workspace is not a git repository, so isolation was skipped for this delegation')
+    // 2026-09-27 P2：说明文本移进通知的单一事实源（按原因参数化），工具层只传原因 ⇒
+    // 这里断言「工具层把该情形映射成 skipped-non-git」，文本本身在 orchestration 包内断言
+    //（见 corum-orchestration/tests/direct-write-notice.spec.ts）。
+    expect(src).toContain("corumDirectWriteNotice(corumMainTreeReason)")
+    expect(src).toContain("corumIsolationBoundary === 'main-requested'")
+    const noticeSrc = await import('node:fs').then(fs => fs.readFileSync(
+      new URL('../../corum-orchestration/src/orchestration.ts', import.meta.url), 'utf8'))
+    expect(noticeSrc).toContain('this workspace is not a git repository, so isolation was skipped')
     // 措辞与实现一致：降级而非报错（不变式⑤后机制段改述，但这条语义未变）。
     expect(src).toContain('Isolation needs a git repository')
     expect(src).not.toContain('on an orchestrate task fails loud')
@@ -631,11 +638,11 @@ describe('isolation notice — fork（corum）prompt 前缀', () => {
     expect(orchestrationSrc).toContain('export function corumIsolationNotice')
     const toolSrc = fs.readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
     expect(toolSrc).toContain('corumIsolationNotice(child)')
-    expect(toolSrc).toContain('corumDirectWriteNotice()')
+    expect(toolSrc).toContain('corumDirectWriteNotice(corumMainTreeReason)')
     const providerSrc = fs.readFileSync(new URL('../../corum-subagent/src/isolated/index.ts', import.meta.url), 'utf8')
     // 2026-09-10：provider 直接引用编排包的 helper（不再自持副本）。
     expect(providerSrc).toContain('corumIsolationNotice(child)')
-    expect(providerSrc).toContain('corumDirectWriteNotice()')
+    expect(providerSrc).toContain("corumDirectWriteNotice('sequential-iteration')")
   })
 })
 
