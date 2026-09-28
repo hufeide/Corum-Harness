@@ -163,7 +163,7 @@ else
   info "冻结: $FROZEN_SORTED"
   info "实测: $ACTUAL_RPC"
   info "差集（实测多出/缺失）:"
-  diff <(printf '%s\n' $FROZEN_SORTED | tr ' ' '\n') <(printf '%s\n' $ACTUAL_RPC | tr ' ' '\n') | sed 's/^/      /'
+  /usr/bin/diff <(printf '%s\n' $FROZEN_SORTED | tr ' ' '\n') <(printf '%s\n' $ACTUAL_RPC | tr ' ' '\n') | sed 's/^/      /'
 fi
 
 # ① -b 已迁到闭源仓的端点：本仓**不得**再出现（出现即代表剥离回退）。
@@ -193,7 +193,7 @@ if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/d
       pass "与 HEAD 的 @Remote 集合一致（差别仅为有意迁出的 project-lane 三端点）"
     else
       fail "与 HEAD 的 @Remote 集合不同（除 project-lane 三端点外还动了 RPC 面）"
-      diff <(printf '%s\n' $HEAD_EXPECTED | tr ' ' '\n') <(printf '%s\n' $ACTUAL_RPC | tr ' ' '\n') | sed 's/^/      /'
+      /usr/bin/diff <(printf '%s\n' $HEAD_EXPECTED | tr ' ' '\n') <(printf '%s\n' $ACTUAL_RPC | tr ' ' '\n') | sed 's/^/      /'
     fi
   else
     info "跳过 HEAD 对照（读不到 HEAD 版本的文件）"

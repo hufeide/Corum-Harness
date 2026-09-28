@@ -73,6 +73,48 @@
 
 ---
 
+## 2.5 多 Agent 多轮核查（2026-09-28，34 个子 Agent；**范围：6 个会话域包 + 抽样 16 包**）
+
+### 2.5.1 怎么核查的（可复现）
+
+派了 34 个子 Agent 分四轮（模型：`glm-5.3-flash` 建账/收口，`glm-5.2` 对抗证伪与交叉重算）：
+
+1. **侦察**：确定待核查包、官方对照、基线 tag；
+2. **一轮建账**（22 包各一个）：按 `scripts/recheck-fork-delta.sh` 口径独立重算；
+3. **二轮对抗证伪**（6 包）：专门找漏算/误判/口径不一致/映射错误/危险漏报，每条要给可复现命令；
+4. **三轮交叉重算**（4 包，换模型）：三方比对。
+
+**结果**：`corum-ui-chat` **三轮逐格零差异**（123/86 · 30/23/31/39/2）；
+`corum-ui-conversation`(71/65 · 41/0/24/6/0)、`corum-ui-approval`(7/7 · 3/0/4/0/0)、
+`corum-ui-settings-models`(35/24 · 8/0/15/12/1) 与 §1 表**一致** ⇒ §1 的 2026-09-28 数字**经交叉验证**。
+
+### 2.5.2 高危清单（升级前必读）
+
+**(a) 官方有、corum 删 —— 升级时会静默丢功能**：
+
+| 包 | 被删文件 | 证据 |
+|---|---|---|
+| corum-ui-chat | `src/client/chat/TurnUsagePanel.tsx`（官方 235 行） | corum 侧全仓 grep 零引用；官方该文件**同时**导出 `TurnUsagePanel`（:99）与 `TurnTimePanel`（:185）、并含 `useStatDialog`（:63/100/186）⇒ 功能面被 corum 自研的 `TurnUsageDisclosure.tsx` 取代 |
+| corum-ui-chat | `src/client/chat/TurnUsagePanel.module.css`（官方 166 行） | 同上；官方测试 `tests/turn-usage-panel.client.spec.tsx`、`tests/chat-font-axis-styles.client.spec.ts` **直接引用这两个被删文件** |
+| corum-ui-chat | `tests/`（官方 29 → corum 15，**交集 0**）| git 历史确认 corum 从未有过 `*.client.spec.*` |
+| corum-ui-chat | `README.md` / `README.zh.md` / `README.i18n.yaml` | corum 三份皆无（实测 0 个）|
+
+> ⚠️ **注意 `tests/`、`docs/` 不在 §1 的 `src/` scope 内** ⇒ 一/二轮都没看见这块；是三轮交叉才补上的 ✗。
+> 升级 rebase 时**不能只看 `src/`**。
+
+**(b) 覆盖缺口（本轮如实标注）**：`§4` 逐包明细的**文件名清单**只在会话域 6 包 + `corum-tools`、`corum-subagent`、
+`corum-agent` 上有部分数据；其余 16 包的**实质修改文件名**未枚举（标 `未核查`）。
+`corum-ui-approval` 只有单轮证据（对抗轮未覆盖）⇒ 置信度低于其它三个。
+
+### 2.5.3 方法学结论（本轮暴露的口径陷阱）
+
+1. **本机 `diff` 不可信** ⇒ 判差异一律 `cmp -s`，人读差异用 `/usr/bin/diff`（详见 `LESSONS.md` §4.39）；
+2. **`sort`/`comm` 必须同一 locale**（否则同一路径会同时出现在两个"独有"列表）；
+3. **scope 必须写死**（`src` vs `src/client` 数字不同）；
+4. **基线 tag 必须显式传**（脚本默认不是 `dsh-v0.1.3-alpha.1`；且不能用 dsh 检出工作区 —— 它已到 0.1.7-rc.2）；
+5. 官方包**随 npm 只发 `lib/`** ⇒ 基线只能 `git archive <tag>`；
+6. **删除 vs 改名按路径判定**（`TurnUsagePanel` → `TurnUsageDisclosure` 计删除，不计改名）。
+
 ## 3. 跨包共性结论
 
 ### 3.1 会话域对 conversation 是 type-only 契约消费，与官方逐行对齐（不做抽包）

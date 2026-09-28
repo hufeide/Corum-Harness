@@ -28,6 +28,10 @@
 #   ./scripts/recheck-fork-delta.sh --tag dsh-v0.1.3-alpha.1
 #   ./scripts/recheck-fork-delta.sh --explain          # 附每包的差异文件清单（前 20 个）
 #
+# ⚠️ **本机 PATH 上的 `diff` 是 HarmonyOS SDK 的**（`/Users/kukucai/harmonyos-sdk/.../toolchains/diff`）：
+#    对内容不同的文件**输出 0 行、退出 0** ⇒ 任何用 `diff` 判差异的脚本都会**静默漏报**。
+#    本脚本全程用 `cmp`；需要人读差异时用 `/usr/bin/diff`。
+#
 # ⚠️ 官方包**随 npm 只发 `lib/`**（没有 `src/`）⇒ 基线只能取自 dsh 检出的标签，不能用
 #    `node_modules/.pnpm`。检出路径可用 `--dsh <路径>` 覆盖（缺省 /Users/kukucai/dsh）。
 
@@ -79,8 +83,10 @@ normalize() {
 classify() {
   local corum_dir="$1" official_dir="$2" scope="$3"
   local ident=0 rename=0 subst=0 f
-  ( cd "$corum_dir/src/$scope" 2>/dev/null && find . -type f | sed 's|^\./||' | sort ) > "$WORK/c.list"
-  ( cd "$official_dir/$scope" 2>/dev/null && find . -type f | sed 's|^\./||' | sort ) > "$WORK/o.list"
+  # ⚠️ **两侧必须同一 collation**：若一侧 `LC_ALL=C`、另一侧默认 locale，`comm` 的合并假设被破坏，
+  # 同一路径会**同时出现在两个独有列表**里（子 Agent 交叉复核实测踩到）。统一钉 C。
+  ( cd "$corum_dir/src/$scope" 2>/dev/null && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) > "$WORK/c.list"
+  ( cd "$official_dir/$scope" 2>/dev/null && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) > "$WORK/o.list"
   while read -r f; do
     [ -n "$f" ] || continue
     if cmp -s "$corum_dir/src/$scope/$f" "$official_dir/$scope/$f"; then ident=$((ident + 1)); continue; fi
@@ -92,13 +98,13 @@ classify() {
       subst=$((subst + 1))
       [ "$EXPLAIN" = 1 ] && printf '      实质[%s]：%s\n' "${scope:-src}" "$f"
     fi
-  done < <(comm -12 "$WORK/c.list" "$WORK/o.list")
+  done < <(LC_ALL=C comm -12 "$WORK/c.list" "$WORK/o.list")
   local new del
-  new="$(comm -23 "$WORK/c.list" "$WORK/o.list" | grep -c .)"
-  del="$(comm -13 "$WORK/c.list" "$WORK/o.list" | grep -c .)"
+  new="$(LC_ALL=C comm -23 "$WORK/c.list" "$WORK/o.list" | grep -c .)"
+  del="$(LC_ALL=C comm -13 "$WORK/c.list" "$WORK/o.list" | grep -c .)"
   if [ "$EXPLAIN" = 1 ]; then
-    printf '      独有[%s] corum：%s\n' "${scope:-src}" "$(comm -23 "$WORK/c.list" "$WORK/o.list" | tr '\n' ' ')"
-    printf '      独有[%s] 官方：%s\n' "${scope:-src}" "$(comm -13 "$WORK/c.list" "$WORK/o.list" | tr '\n' ' ')"
+    printf '      独有[%s] corum：%s\n' "${scope:-src}" "$(LC_ALL=C comm -23 "$WORK/c.list" "$WORK/o.list" | tr '\n' ' ')"
+    printf '      独有[%s] 官方：%s\n' "${scope:-src}" "$(LC_ALL=C comm -13 "$WORK/c.list" "$WORK/o.list" | tr '\n' ' ')"
   fi
   printf '%s %s %s %s %s' "$(grep -c . "$WORK/c.list")" "$(grep -c . "$WORK/o.list")" "$ident" "$rename" "$subst"
   printf ' %s %s' "$new" "$del"
