@@ -412,29 +412,21 @@ export function apply(ctx: Context): void {
           },
           // Agent 头昵称（2026-08-31 用户定调：对话区 Agent 头显示 nickname 而非
           // 通用「Corum Agent」）：task 泳道经 listTaskAgents 定位 profileId，普通
-          // 会话用会话 agentPreset；再经 listProfiles 映射 nickname/title/id。
+          // 会话用会话 agentPreset；显示名走 chatRuntime 的**共享目录快照**。
+          //
+          // 为什么不再在这里直连 RPC（2026-09-28 打包态实测）：本回调每被消费一次就发
+          // `listTaskAgents` + `listProfiles` 两个 RPC；一次「打开重会话」实测各打 6 次（≈2.1 s 主机工作），
+          // 而这两份数据在一次交互里根本不变。共享快照（并发去重 + 10 s TTL）把它们收成各 ≤1 次。
           getAgentName: async () => {
             try {
-              // 官方 connection.rpc.call（同 makeCorumRpcCall 通道，不引 corum-rpc-client
-              // 包依赖）：call('/api', '<ns>/<method>', { args }) → result.value。
-              const connection = ctx.get('connection') as ConnectionHandle
-              const rpc = async <T>(method: string): Promise<T> => {
-                const result = await connection.rpc.call('/api', `corumAgent/${method}`, { args: {} })
-                if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-                return result.value as T
-              }
               const sid = String(sessionId)
-              let profileId: string | undefined
-              if (sid.startsWith('corum-task-')) {
-                const tasks = await rpc<{ tasks: readonly { sessionId: string; profileId: string }[] }>('listTaskAgents')
-                profileId = (tasks.tasks ?? []).find((x) => x.sessionId === sid)?.profileId
-              }
+              if (!sid.startsWith('corum-task-')) return undefined
+              const directory = await chatRuntime.agentDirectory()
+              const profileId = directory.taskProfiles.get(sid)
               // 普通官方会话（非 task 泳道）的 profileId 暂无可直接读取的快照字段，
               // 回退「Corum Agent」。
               if (profileId === undefined) return undefined
-              const profiles = await rpc<{ profiles: readonly { id: string; nickname?: string; title?: string }[] }>('listProfiles')
-              const profile = (profiles.profiles ?? []).find((p) => p.id === profileId)
-              return profile === undefined ? undefined : (profile.nickname ?? profile.title ?? profile.id)
+              return directory.profileNames.get(profileId)
             } catch {
               return undefined
             }

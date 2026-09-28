@@ -66,6 +66,25 @@ export interface CorumChildProgressValue {
  */
 export const CHILD_PROGRESS_TERMINAL_TTL_MS = 5 * 60_000
 
+/**
+ * Agent 目录快照（task 会话 → profileId、profileId → 显示名）。
+ *
+ * 为什么要合并成一次（2026-09-28 打包态实测，`docs/PENDING-ui-lag-multiround.md` §2.23）：
+ * `apply.ts` 的 `getAgentName` 回调每被消费一次就发 `listTaskAgents` + `listProfiles` **两个** RPC；
+ * 一次「打开重会话」实测各打 **6 次**（合计 ≈2.1 s 的主机工作）。这两份数据在一次交互里根本不变。
+ */
+export interface CorumAgentDirectory {
+  /** task 会话 id → profileId。 */
+  readonly taskProfiles: ReadonlyMap<string, string>
+  /** profileId → 显示名（nickname 优先，其次 title）。 */
+  readonly profileNames: ReadonlyMap<string, string>
+}
+
+/**
+ * Agent 目录快照的缓存时长（ms）：profile 与会话归属在一次交互里不变，10 s 足够覆盖一轮挂载风暴。
+ */
+export const AGENT_DIRECTORY_TTL_MS = 10_000
+
 export interface CorumSessionListRow {
   readonly sessionId?: string
   readonly projections?: { readonly values?: { readonly modelSelection?: CorumModelSelectionProjection } }
@@ -112,6 +131,12 @@ export interface ChatRuntimeService {
    * @returns 进度值；失败/无连接时 `undefined`。
    */
   childProgress(sessionId: string): Promise<CorumChildProgressValue | undefined>
+  /**
+   * Agent 目录快照（**并发去重 + TTL**）：一次交互里 `getAgentName` 会被消费多次，不能每次两个 RPC。
+   *
+   * @returns task 归属与 profile 显示名；无连接 / 失败时给空表（调用方按“未记录”降级）。
+   */
+  agentDirectory(): Promise<CorumAgentDirectory>
   /** Remote 事件面只读引用（'corum/subagent/progress' 推送订阅入口）。 */
   readonly remote: ClientRemote | undefined
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
@@ -187,6 +212,9 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   /** 终态进度缓存（sessionId → 值 + 写入时刻）。运行中的结果**不**进这里。 */
   readonly #terminalProgress = new Map<string, { readonly at: number; readonly value: CorumChildProgressValue }>()
   readonly #progressInFlight = new Map<string, Promise<CorumChildProgressValue | undefined>>()
+  /** Agent 目录缓存（含 in-flight 复用）。 */
+  #agentDirectory: { readonly at: number; readonly value: CorumAgentDirectory } | undefined
+  #agentDirectoryInFlight: Promise<CorumAgentDirectory> | undefined
   /** uSES 源对象（稳定引用——getSnapshot/subscribe 闭包绑定本实例，值经 #sessionId 读）。 */
   readonly #source: SessionIdSource = {
     getSnapshot: () => this.#sessionId,
@@ -244,6 +272,43 @@ class ChatRuntimeImpl implements ChatRuntimeService {
       }
     })()
     this.#progressInFlight.set(sessionId, promise)
+    return promise
+  }
+
+  async agentDirectory(): Promise<CorumAgentDirectory> {
+    const cached = this.#agentDirectory
+    if (cached !== undefined && Date.now() - cached.at < AGENT_DIRECTORY_TTL_MS) return cached.value
+    const inFlight = this.#agentDirectoryInFlight
+    if (inFlight !== undefined) return inFlight
+    const conn = this.#connection
+    const empty: CorumAgentDirectory = { taskProfiles: new Map(), profileNames: new Map() }
+    if (conn === undefined) return empty
+    const promise = (async () => {
+      try {
+        const taskProfiles = new Map<string, string>()
+        const profileNames = new Map<string, string>()
+        const tasks = await conn.rpc.call('/api', 'corumAgent/listTaskAgents', { args: {} })
+        if (tasks.ok && tasks.value !== undefined) {
+          for (const task of (tasks.value as { tasks?: readonly { sessionId?: string; profileId?: string }[] }).tasks ?? []) {
+            if (task.sessionId !== undefined && task.profileId !== undefined) taskProfiles.set(task.sessionId, task.profileId)
+          }
+        }
+        const profiles = await conn.rpc.call('/api', 'corumAgent/listProfiles', { args: {} })
+        if (profiles.ok && profiles.value !== undefined) {
+          for (const profile of (profiles.value as { profiles?: readonly { id?: string; nickname?: string; title?: string }[] }).profiles ?? []) {
+            if (profile.id !== undefined) profileNames.set(profile.id, profile.nickname ?? profile.title ?? profile.id)
+          }
+        }
+        const value: CorumAgentDirectory = { taskProfiles, profileNames }
+        this.#agentDirectory = { at: Date.now(), value }
+        return value
+      } catch {
+        return empty
+      } finally {
+        this.#agentDirectoryInFlight = undefined
+      }
+    })()
+    this.#agentDirectoryInFlight = promise
     return promise
   }
 
