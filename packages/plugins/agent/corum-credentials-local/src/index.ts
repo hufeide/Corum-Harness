@@ -33,14 +33,12 @@
  * layer would shadow non-secret entries behind its precedence, making them
  * silently unreachable.
  *
- * fork（corum）：本文件 fork 自官方 `@deepseek-ai/dsh-credentials-local`
- * 0.1.2-alpha.2（该版本与 corum 运行时锁定的 0.1.2-alpha.1 在本文件上
- * 逐字节等价，见 `docs/fork-delta.md`）。唯一实质差异：落盘的 ref 值与
- * api-key record 的 key/env 值经 AES-256-GCM 加密（`enc:v1:` 前缀，存量
- * 明文条目双读兼容），主密钥由 Electron main 经 safeStorage 封装后注入
- * （`CORUM_CREDENTIALS_MASTER_KEY`）。加密机制集中在
- * `./value-crypto.ts`；本文件仅在 durable 边界（parse/render/resolve/
- * readRecord/write/modifyRecord）挂接加解密，其余逐行与官方一致。
+ * fork（corum）：本文件 fork 自官方 `@deepseek-ai/dsh-credentials-local`。唯一实质差异：
+ * 落盘的 ref 值与 api-key record 的 key/env 值经 AES-256-GCM 加密（`enc:v1:` 前缀，
+ * 存量明文条目双读兼容），主密钥由 Electron main 经 safeStorage 封装后注入
+ * （`CORUM_CREDENTIALS_MASTER_KEY`）。加密机制集中在 `./value-crypto.ts`；本文件仅在
+ * durable 边界挂接加解密（parseRefs/parseRecord/parseRecordEnv/renderRef/renderRecord/
+ * encryptRecordSecrets），其余逐行与官方一致。
  * @module @corum/corum-credentials-local
  */
 
@@ -54,7 +52,6 @@ import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { canonicalizeWatchPath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { CredentialProvider, credentialRef, parseCredentialKey } from '@deepseek-ai/dsh-credentials'
-import { decryptValue, encryptValue } from './value-crypto.ts'
 import type {
   ApiKeyRecord,
   CredentialInfo,
@@ -66,6 +63,7 @@ import type {
   ResolvedCredential,
 } from '@deepseek-ai/dsh-credentials'
 import type { LaunchEnvironmentEntry } from '@deepseek-ai/dsh-launch-environment'
+import { decryptValue, encryptValue } from './value-crypto.ts'
 
 /** Basename of the credentials document inside the harness home. */
 export const CREDENTIALS_FILENAME = '.credentials.yaml'
@@ -291,10 +289,8 @@ function parseRefs(section: unknown, filename: string): Map<string, string> {
     if (value.length === 0) {
       throw new Error(`credentials-local: the value for "${key}" in ${filename} is empty; remove the key instead`)
     }
-    // fork（corum）：密文条目（enc:v1: 前缀）在此解密为内存快照；存量明文
-    // 条目按明文读（双读兼容，不回写）。解密失败（密钥不可用/篡改）向上抛，
-    // 由调用方按官方既有策略分流（loadInitial/write 失败 loud、refresh 警告
-    // 并保留上一份良好快照）。
+    // fork（corum）：密文条目（enc:v1: 前缀）在此解密为内存快照；存量明文条目按明文读
+    // （双读兼容，不回写）。解密失败（密钥不可用/篡改）向上抛，由调用方按官方既有策略分流。
     entries.set(key, decryptValue(value))
   }
   return entries
@@ -353,11 +349,9 @@ function parseRecord(key: string, value: unknown, filename: string): CredentialR
       throw new TypeError(`credentials-local: record "${key}" in ${filename} has a non-string or empty key`)
     }
     const env = parseRecordEnv(key, fields['env'], filename)
-    // fork（corum）：api-key record 的 key/env 值同为秘密值，与 ref 值同规则
-    // 解密（密文解密、明文双读）。grant record 的 payload 保持明文（未承诺
-    // 机密性，结构校验 assertJsonValue 逐行保留）。
     return {
       kind: 'api-key',
+      // fork（corum）：api-key record 的 key 值同为秘密值，与 ref 值同规则解密。
       ...apiKey === undefined ? {} : { key: decryptValue(apiKey) },
       ...env === undefined ? {} : { env },
     }
@@ -397,7 +391,7 @@ function parseRecordEnv(key: string, env: unknown, filename: string): Record<str
         `credentials-local: record "${key}" env "${name}" in ${filename} must be a non-empty string`,
       )
     }
-    // fork（corum）：env 值与 api-key 同规则解密（见 parseRecord 挂点注释）。
+    // fork（corum）：env 值与 api-key 同规则解密。
     parsed[name] = decryptValue(value)
   }
   return parsed
@@ -461,8 +455,8 @@ function mutableDocument(text: string | undefined): Document {
 function renderRef(text: string | undefined, ref: CredentialRef, value: string | undefined): string {
   const document = mutableDocument(text)
   if (value === undefined) deleteSectionEntry(document, 'refs', ref)
-  // fork（corum）：写入一律密文（encryptValue 在密钥不可用时拒绝，不静默
-  // 退回明文）；删除路径不加密。
+  // fork（corum）：写入一律密文（encryptValue 在密钥不可用时拒绝，不静默退回明文）；
+  // 删除路径不加密。
   else document.setIn(['refs', ref], encryptValue(value))
   return document.toString()
 }
@@ -479,17 +473,19 @@ function renderRef(text: string | undefined, ref: CredentialRef, value: string |
 function renderRecord(text: string | undefined, key: CredentialKey, record: CredentialRecord | undefined): string {
   const document = mutableDocument(text)
   if (record === undefined) deleteSectionEntry(document, 'records', key)
-  // fork（corum）：api-key record 的 key/env 值加密落盘；grant payload 保持
-  // 明文。record 节点整体替换（官方既有语义），加密后的新 record 作为值写入。
   else document.setIn(['records', key], encryptRecordSecrets(record))
   return document.toString()
 }
 
 /**
- * fork（corum）：把 api-key record 的秘密字段加密为可落盘形态；grant
- * record 原样返回。纯函数（不触碰 this），对齐 renderRecord 的无状态语义。
- * @param record - 内存态 record（明文）。
- * @returns 落盘态 record（api-key 的 key/env 值为密文）。
+ * Remove one entry from a section, taking its annotation with it. A comment
+ * block written above a section's first entry annotates that entry, but the
+ * parser attaches it to the section's map rather than to the pair — leaving it
+ * behind would move it onto whichever entry became first, which reads as an
+ * annotation of a credential nobody wrote it for.
+ * @param document - the mutable tree being edited.
+ * @param section - the section holding the entry.
+ * @param key - the entry to remove.
  */
 function encryptRecordSecrets(record: CredentialRecord): CredentialRecord {
   if (record.kind !== 'api-key') return record
@@ -508,16 +504,6 @@ function encryptRecordSecrets(record: CredentialRecord): CredentialRecord {
   }
 }
 
-/**
- * Remove one entry from a section, taking its annotation with it. A comment
- * block written above a section's first entry annotates that entry, but the
- * parser attaches it to the section's map rather than to the pair — leaving it
- * behind would move it onto whichever entry became first, which reads as an
- * annotation of a credential nobody wrote it for.
- * @param document - the mutable tree being edited.
- * @param section - the section holding the entry.
- * @param key - the entry to remove.
- */
 function deleteSectionEntry(document: Document, section: 'refs' | 'records', key: string): void {
   const map: unknown = document.get(section, true)
   /* v8 ignore next -- both callers render a delete only for an entry they just
