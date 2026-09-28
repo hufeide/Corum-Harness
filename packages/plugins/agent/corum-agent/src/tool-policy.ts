@@ -51,7 +51,7 @@ export const TOOL_POLICY_SECTION = 'corum:tool-policy'
  */
 export const TOOL_POLICY_TEXT = [
   'File operations go through the dedicated tools, not the shell:',
-  '- Read files with `read` — not `cat` / `head` / `tail` / `sed -n` / `less`.',
+  '- Read files with `read` — not `cat` / `head` / `tail` / `sed -n` / `less`. This includes logs and PID files; keep the shell for a live stream you must follow (`tail -f`) or for text you pipe.',
   '- Change an existing file with `edit` — not `sed -i` / `awk` / `perl -i` / inline `python3 -`.',
   '- Create or fully rewrite a file with `write` — not `cat > f <<\'EOF\'`, `echo >`, or `printf >`.',
   'Reserve `bash` for real shell work: builds, tests, package managers, git, processes, and pipelines over command output.',
