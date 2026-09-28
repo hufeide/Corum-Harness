@@ -180,6 +180,35 @@ DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=<tag> ./scripts/verify-fork-dri
 > **该方法已被反向验证**：拿 `corum-api-remotes` **修复前**的状态跑 `check-fork-increments.sh`，
 > 精确报出 **11 行官方缺失**（正是当时漏掉的那批）⇒ 脚本确实能拦住"子 Agent 漏合"。
 
+### 4.0.2 **UI 类 fork：不合并，只升依赖**（用户口径，2026-09-28，优先级最高）
+
+> 用户原话：「如果是 UI 我需要指明，我们不能直接合并升级，后续**界面属于单独维护**，**只看依赖包升级**。
+> 至于官方更新了什么，我们只需要**了解并决策是否是好的产品设计**，如果是我们就**吸纳并按照我们自己的
+> 视觉风格进行设计和融合**，即**借鉴而不是合并**。」
+
+**规则（UI 类 fork 一律照此）**：
+
+1. **界面 = 单独维护** ⇒ UI 包升级**只有一件事**：把 `@deepseek-ai/dsh-*` 依赖升到目标版；
+   **官方 `src/client/**` 的代码一概不合并**（不"官方为底 + 贴回"）。
+2. **官方 UI 改动 = 产品设计素材**，不是待合并的代码：读懂它 → 判断**是否是好设计** → 若好，
+   **按我们自己的视觉风格重新设计并融合**（借鉴），**不照搬代码**。
+3. ⇒ UI 包的升级**不需要** `check-fork-increments.sh` 的「官方行零缺失」验收（那条只适用于**逻辑类**）。
+   UI 包验收 = `typecheck` + 全仓 `typecheck` +（依赖 API 有变时）适配编译错误 + 实机确认界面未回归。
+4. **边界（重要）**：UI fork 里**非视觉面**仍按逻辑面处理 —— `src/index.ts`（node 半 / host 装配）
+   与纯类型文件（`css-modules.d.ts` 等）**可以**跟官方对齐；**`src/client/**` 的视觉与交互代码不合并**。
+
+**18 个 fork 的分类（升级方式由此决定）**：
+
+| 类别 | 包 | 升级方式 |
+|---|---|---|
+| **UI 类（8）** | `corum-ui-conversation` / `corum-ui-chat` / `corum-ui-approval` / `corum-ui-questions` / `corum-ui-model-selection` / `corum-ui-settings-models` / `corum-ui-settings-plugins` / `corum-ui-trajectory` | **只升依赖**；官方 UI 改动进「借鉴清单」（产品设计决策）|
+| **逻辑类（10）** | `corum-agent` / `corum-api-remotes` / `corum-credentials-local` / `corum-fs-local` / `corum-goal-round-driver` / `corum-sandbox-local` / `corum-subagent` / `corum-tool-subagent` / `corum-tools` / `corum-session-queue-revert` | 按 §4.0 业务判断 → 借鉴 / 必要时合并 |
+
+> **推论（省掉大量工作）**：剩余 fork 里的 6 个 UI 大包（`ui-chat` 2589 / `ui-settings-models` 2582 /
+> `ui-conversation` 4647 / `ui-approval` 516 / `ui-model-selection` 538 / `ui-trajectory` 935 行差异）
+> **不再需要逐 hunk 合并** ⇒ 升级动作退化为「改依赖版本 + 编译」✓。
+> 「官方 UI 更好」的项进**借鉴清单**，由用户决定是否按我们风格重做（不阻塞升级）。
+
 ### 4.1 手法（本场定型）：官方为底 + 贴回 corum 增量
 
 不要"在 corum 文件上补官方改动"（容易漏官方新功能）；要**以官方目标版文件为底**，
