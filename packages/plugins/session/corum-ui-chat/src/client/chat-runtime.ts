@@ -1,3 +1,4 @@
+import type { SubagentTodoItem } from '@corum/corum-api-remotes/corum-events'
 /**
  * fork（corum）：子 Agent 卡的「当前会话 id + RPC connection + 跳子会话桥」
  * 运行时服务（统一事件中心二期 window 全局迁移）。
@@ -40,6 +41,31 @@ import type { CorumWorktreeLedgerFrameEvent, SubagentChildEvent, SubagentProgres
  *
  * 单一事实源：卡片不再各自声明一份（原先 `SubagentCard` / `OrchestrateCard` 各有一份同形窄化）。
  */
+/**
+ * `corumAgent/getChildSessionProgress` 返回值的窄化形（只承诺卡片消费的字段）。
+ */
+export interface CorumChildProgressValue {
+  readonly progress?: {
+    readonly turn: number
+    readonly step: number
+    readonly currentAction?: string
+    readonly done: boolean
+    readonly stopReason?: string
+    readonly interrupted?: boolean
+    readonly todos?: readonly SubagentTodoItem[]
+  }
+}
+
+/**
+ * 子会话进度**终态**结果的缓存时长（ms）。
+ *
+ * 为什么要缓存（2026-09-28 实测，`docs/PENDING-ui-lag-multiround.md` §2.13）：卡片每次挂载（切会话、
+ * 跳轮次、重渲染）都会拉一次基线，一轮动作实测 **128 次** `getChildSessionProgress`（~270 ms/次）。
+ * 而**终态是稳定事实**（`done`）——同一批已结束的子会话会被反复拉，纯属重复劳动。
+ * 只缓存终态：运行中的进度必须实时（推送帧 + 基线），缓存它会显示过期状态。
+ */
+export const CHILD_PROGRESS_TERMINAL_TTL_MS = 5 * 60_000
+
 export interface CorumSessionListRow {
   readonly sessionId?: string
   readonly projections?: { readonly values?: { readonly modelSelection?: CorumModelSelectionProjection } }
@@ -79,6 +105,13 @@ export interface ChatRuntimeService {
    * @returns 行数组；无连接 / 调用失败时 `undefined`。
    */
   sessionRows(): Promise<readonly CorumSessionListRow[] | undefined>
+  /**
+   * 子会话进度基线（**终态结果共享缓存** + 并发去重）。
+   *
+   * @param sessionId - 子会话 id。
+   * @returns 进度值；失败/无连接时 `undefined`。
+   */
+  childProgress(sessionId: string): Promise<CorumChildProgressValue | undefined>
   /** Remote 事件面只读引用（'corum/subagent/progress' 推送订阅入口）。 */
   readonly remote: ClientRemote | undefined
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
@@ -151,6 +184,9 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   /** 共享会话行缓存（并发去重用的 in-flight promise 与它配对）。 */
   #sessionRowsCache: { readonly at: number; readonly rows: readonly CorumSessionListRow[] } | undefined
   #sessionRowsInFlight: Promise<readonly CorumSessionListRow[] | undefined> | undefined
+  /** 终态进度缓存（sessionId → 值 + 写入时刻）。运行中的结果**不**进这里。 */
+  readonly #terminalProgress = new Map<string, { readonly at: number; readonly value: CorumChildProgressValue }>()
+  readonly #progressInFlight = new Map<string, Promise<CorumChildProgressValue | undefined>>()
   /** uSES 源对象（稳定引用——getSnapshot/subscribe 闭包绑定本实例，值经 #sessionId 读）。 */
   readonly #source: SessionIdSource = {
     getSnapshot: () => this.#sessionId,
@@ -178,6 +214,36 @@ class ChatRuntimeImpl implements ChatRuntimeService {
       }
     })()
     this.#sessionRowsInFlight = promise
+    return promise
+  }
+
+  async childProgress(sessionId: string): Promise<CorumChildProgressValue | undefined> {
+    const cached = this.#terminalProgress.get(sessionId)
+    if (cached !== undefined) {
+      if (Date.now() - cached.at < CHILD_PROGRESS_TERMINAL_TTL_MS) return cached.value
+      this.#terminalProgress.delete(sessionId)
+    }
+    const inFlight = this.#progressInFlight.get(sessionId)
+    if (inFlight !== undefined) return inFlight
+    const conn = this.#connection
+    if (conn === undefined) return undefined
+    const promise = (async () => {
+      try {
+        const result = await conn.rpc.call('/api', 'corumAgent/getChildSessionProgress', { args: { sessionId } })
+        if (!result.ok || result.value === undefined) return undefined
+        const value = result.value as CorumChildProgressValue
+        // 只缓存**终态**：稳定事实，重复拉纯属浪费；运行中的进度必须实时。
+        if (value.progress?.done === true || value.progress?.stopReason !== undefined) {
+          this.#terminalProgress.set(sessionId, { at: Date.now(), value })
+        }
+        return value
+      } catch {
+        return undefined
+      } finally {
+        this.#progressInFlight.delete(sessionId)
+      }
+    })()
+    this.#progressInFlight.set(sessionId, promise)
     return promise
   }
 

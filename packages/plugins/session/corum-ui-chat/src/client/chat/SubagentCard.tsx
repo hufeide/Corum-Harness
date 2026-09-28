@@ -191,17 +191,14 @@ export function useChildProgress(childSessionId: string | undefined): SubagentPr
     let pollTimer: ReturnType<typeof setTimeout> | undefined
     let graceTimer: ReturnType<typeof setTimeout> | undefined
 
-    /** RPC 拉一次基线/兜底进度（host getChildSessionProgress 全量折叠）。 */
+    /** 拉一次基线/兜底进度（经 chatRuntime 共享缓存：终态结果不重复拉）。 */
     const fetchOnce = async () => {
-      const conn = chatRuntimeRef.current?.connection
-      if (conn === undefined) return
+      const runtime = chatRuntimeRef.current
+      if (runtime === null) return
       try {
-        const result = await conn.rpc.call('/api', 'corumAgent/getChildSessionProgress', {
-          args: { sessionId: childSessionId },
-        })
+        const value = await runtime.childProgress(childSessionId)
         if (cancelled) return
-        if (result.ok && result.value !== undefined) {
-          const value = result.value as ChildProgressValue
+        if (value !== undefined) {
           if (value.progress !== undefined) {
             const p = value.progress
             const sr = normalizeStopReason(p.stopReason)
