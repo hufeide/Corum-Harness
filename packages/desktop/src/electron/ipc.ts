@@ -9,6 +9,7 @@
  * @module corum-desktop/electron/ipc
  */
 
+import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -448,11 +449,17 @@ export function registerIpc(
 
   // ── 应用信息 ──────────────────────────────────────────────────────────
   //
-  // 版本号由主进程给（`app.getVersion()`：打包态是 bundle 的版本，dev 态回落
-  // 到应用的 package.json），renderer 不猜、也不自己去读文件。preload 侧暴露
-  // 成 `getAppVersion()`（invoke 而非 sendSync：同步 IPC 会卡住 renderer 的
-  // 启动路径，而版本号只在品牌行挂载时拉一次，异步完全够）。
-  ipcMain.handle('corum:app-version', () => app.getVersion())
+  // 版本号读本包的 package.json，不用 `app.getVersion()`：dev 态主进程由
+  // `spawn(electronPath, [main.js])` 拉起（入口是 .js 文件而非 app 目录），
+  // Electron 没有 app 包可读，`app.getVersion()` 会回落成 **Electron 自身的
+  // bundle 版本**（实测 dev 显示 v43.4.1 而非 v0.1.0）。打包态两者一致，但
+  // 统一读 package.json 更稳。preload 侧暴露成 `getAppVersion()`（invoke 而非
+  // sendSync：同步 IPC 会卡住 renderer 的启动路径，版本号只在品牌行挂载时
+  // 拉一次，异步完全够）。
+  const appVersion: string = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../package.json'), 'utf8'),
+  ).version as string
+  ipcMain.handle('corum:app-version', () => appVersion)
 
   // ── 壳层 combo 管理（纯壳页面使用；进程级切换，废弃旧的进程内 comboLoad）──
 
