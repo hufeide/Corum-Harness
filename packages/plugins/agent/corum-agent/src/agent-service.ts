@@ -481,7 +481,10 @@ export type { AgentLaneDescriptor } from './agent-registry.ts'
 import type { AgentLaneDescriptor } from './agent-registry.ts'
 
 export class CorumAgentService extends TypertRemoteService {
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore']
+  // `tools` 是 2026-09-27 加进来的：执行纪律段要按**该 scope 的实际工具面**自适应
+  // （指挥者/只读子会话没有 write/edit、PTC 读者的工具只能从 run_code 调）。
+  // ⚠️ 不声明就会抛 `cannot get property "tools" without inject`——实机验证抓到过一次（红线 #4）。
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore', 'tools']
 
   /**
    * **Agent 存活登记册**（六张按 id 索引的表：root Agent / 泳道会话 / 泳道归属索引 /
