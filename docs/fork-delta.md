@@ -31,20 +31,33 @@
 
 ## 1. 总览表
 
-> 统计口径：对每包 `src/` 与官方 `src/` 做 `diff -r` 后逐文件分类。「仅改名」= diff 行全部是把 `@deepseek-ai/dsh-client-ui-*` 改成 `@corum/corum-ui-*` 的 import 路径替换；「实质修改」= 存在任何其它 diff 行（含 CSS、locale、逻辑）。`invariant.ts` 在各包均属「实质修改」（包名+插件名改名），不重复列入下表明细。
+> **2026-09-28 复核（task 4）**：本表由 `scripts/recheck-fork-delta.sh` 重算，**scope = 整包 `src/`**、
+> 基线 = dsh 检出标签 **`dsh-v0.1.3-alpha.1`**（= 当前工作区实际安装的基座版本）。
+> 历史数字（2026-09-09）用的是 `0.1.2-alpha.2` + 部分包只算 `src/client` ⇒ **两者不可直接比**：
+> 旧合计为「相同 103 / 改名 26 / 实质 65 / 新增 19 / 删除 11」，新合计见下表末行。
+> 复核时还修掉了两个会静默失真的坑：①「仅改名」判定必须用 `cmp`（含 `\0`/超长行的源码会被 `diff`
+> 当二进制、一行都不输出）；②官方包**随 npm 只发 `lib/`**，基线只能取 dsh 检出的标签。
+>
+> 统计口径：对每包 `src/` 与官方 `src/` 逐文件分类。「仅改名」= diff 行全部是把 `@deepseek-ai/dsh-client-ui-*` 改成 `@corum/corum-ui-*` 的 import 路径替换；「实质修改」= 存在任何其它 diff 行（含 CSS、locale、逻辑）。`invariant.ts` 在各包均属「实质修改」（包名+插件名改名），不重复列入下表明细。
 
 | fork 包 | 官方对照包 | 官方基线 | 文件数(corum/官方) | 逐字节相同 | 仅改名 | 实质修改 | corum 新增 | 官方有但 corum 删 | rebase 风险 |
 |---|---|---|---|---|---|---|---|---|---|
-| corum-ui-conversation | ui-conversation | 0.1.2-alpha.2 | 67 / 65 | 45 | 0 | 20 | 2 | 0 | **高**（apply.ts 空态操作卡、ConversationRoot/EmptyHero/InputBar 重设计） |
-| corum-ui-chat | ui-chat | 0.1.2-alpha.2 | 96 / 85 | 39 | 25 | 19 | 13 | 2 | **高**（ChatNodeSeat foldable、corum-reskin.css、TurnTail 重构、Review/Subagent 新增） |
-| corum-ui-approval | ui-approval | 0.1.2-alpha.2 | 8 / 8 | 4 | 1 | 3 | 0 | 0 | **中**（ApprovalPanel 重设计 + lucide 依赖） |
-| corum-ui-questions | ui-user-questions | 0.1.2-alpha.2 | 7 / 11 | 0 | 0 | 3 | 4 | 8 | **高**（渲染层整体重写，文件名全不同——按「新包替换」对待） |
-| corum-ui-model-selection | ui-model-selection | 0.1.2-alpha.2 | 11 / 11 | 4 | 0 | 7 | 0 | 0 | **低**（教科书式最小 fork，仅 model-unavailable 语义 + 触发器文案） |
-| corum-ui-settings-models | ui-settings-models | 0.1.2-alpha.2 | 24 / 25 | 10 | 0 | 10 | 12 | 1 | **中**（operations.ts 删除改直持 wire face；corum 自研模型页 12 个新文件，官方加回 operations 即冲突） |
+| corum-ui-conversation | ui-conversation | dsh-v0.1.3-alpha.1 | 71 / 65 | 41 | 0 | 24 | 6 | 0 | **高**（apply.ts 空态操作卡、ConversationRoot/EmptyHero/InputBar 重设计） |
+| corum-ui-chat | ui-chat | dsh-v0.1.3-alpha.1 | 123 / 86 | 30 | 23 | 31 | 39 | 2 | **高**（ChatNodeSeat foldable、corum-reskin.css、TurnTail 重构、Review/Subagent 新增） |
+| corum-ui-approval | ui-approval | dsh-v0.1.3-alpha.1 | 7 / 7 | 3 | 0 | 4 | 0 | 0 | **中**（ApprovalPanel 重设计 + lucide 依赖） |
+| corum-ui-questions | ui-user-questions | dsh-v0.1.3-alpha.1 | 9 / 10 | 0 | 0 | 3 | 6 | 7 | **高**（渲染层整体重写，文件名全不同——按「新包替换」对待） |
+| corum-ui-model-selection | ui-model-selection | dsh-v0.1.3-alpha.1 | 10 / 10 | 2 | 0 | 8 | 0 | 0 | **低**（教科书式最小 fork，仅 model-unavailable 语义 + 触发器文案） |
+| corum-ui-settings-models | ui-settings-models | dsh-v0.1.3-alpha.1 | 35 / 24 | 8 | 0 | 15 | 12 | 1 | **中**（operations.ts 删除改直持 wire face；corum 自研模型页 12 个新文件，官方加回 operations 即冲突） |
 
-合计：相同 103、仅改名 26、实质修改 65、新增 19、删除 11（`src/` 内文件；各包根 `index.ts`/`invariant.ts`/`css-modules.d.ts` 计入实质修改）。
+合计（2026-09-28 复核，scope = `src/`，基线 `dsh-v0.1.3-alpha.1`）：**相同 84、仅改名 23、实质修改 85、新增 63、删除 10**（各包根 `index.ts`/`invariant.ts`/`css-modules.d.ts` 计入实质修改）。
 
-**rebase 成本集中点**：实质修改的 65 个文件中，真正需要「三方合并」的高危文件约 20 个（见 §4 逐包详录的 🔴 标注）；其余是 locale 键增删、CSS 换肤变量替换这类机械合并。
+- 只看消费面 `src/client/`：相同 73、仅改名 23、实质修改 81、新增 63、删除 10；
+- 「仅改名」23 个**全部集中在 `corum-ui-chat`**（其余包为 0）⇒ 该包的 rebase 面主要是实质修改；
+- 复核口径与命令：`./scripts/recheck-fork-delta.sh --tag dsh-v0.1.3-alpha.1 [--explain]`（可复跑）。
+
+**rebase 成本集中点**：旧口径（实质 65）下真正需要「三方合并」的高危文件约 20 个（见 §4 逐包详录的 🔴
+标注）。⚠️ 2026-09-28 复核后实质修改为 **85**（见上）⇒ 高危数**需按新口径逐包重数**（本轮只重算了
+计数与文件集，**没有**逐包重写 §4 的清单与风险标注）。其余多为 locale 键增删、CSS 换肤变量替换这类机械合并。
 
 ---
 
@@ -98,6 +111,12 @@ conversation 的 `service.ts:318`、`input/hub.ts:204`、`InputBar.tsx:95-97`、
 ---
 
 ## 4. 逐包差异详录
+
+> ⚠️ **口径声明（2026-09-28 补）**：本节各包开头的计数是 **2026-09-09**、基线 `0.1.2-alpha.2`、
+> 部分包只算 `src/client` 的**旧口径**，与 §1 的 2026-09-28 复核数字**不一致**（例：§4.1 写「相同 45 /
+> 实质 20」，§1 新口径是「相同 41 / 实质 24」）。**引用计数请以 §1 或直接跑
+> `scripts/recheck-fork-delta.sh` 为准**；本节的价值在**逐文件清单、修改原因与 🔴 风险标注**，
+> 那部分未复核、仍按原样保留。逐包计数待下一次「逐包重写」（见 §4.6 那种做法）。
 
 > 每文件给「分类 + 差异点 + 原因 + rebase 风险」。🔴 = rebase 官方时必冲突或已确认的死代码/全局污染，需逐处人工三方合并；🟡 = 机械合并（locale 键、CSS 变量）；🟢 = 低危。
 
