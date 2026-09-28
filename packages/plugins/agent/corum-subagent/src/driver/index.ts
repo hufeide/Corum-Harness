@@ -148,7 +148,11 @@ export async function startInProcessRun(
   // （`@deepseek-ai/dsh-base@0.1.3-alpha.1` 的 `dsh-workflow-worker-thread/lib/worker.cjs`），
   // 而 `resolveChildAgentOptions` 的 `...requested` 在最后 ⇒ 不剥离就会覆盖父路由。
   // 设计稿：docs/PLAN-2026-09-27-script-mode-model-routing.md。
-  const routing = corumStripRoutingOptions(request.agentOptions)
+  // P1：**只剥脚本传的路由偏好**。`agentOptionsOwnedByMechanism` 为真时（fork 角色锁 / 续接恢复），
+  // 那是机制自己的路由，剥了就会让子会话跑错模型（2026-09-27 复查抓到的反例）。
+  const routing = request.agentOptionsOwnedByMechanism === true
+    ? { options: request.agentOptions, ignored: undefined }
+    : corumStripRoutingOptions(request.agentOptions)
   if (routing.ignored !== undefined) {
     // 告知（方案 A 的第二半）：一条机制通知，含**实际生效的路由**，让模型学到口径。
     try {

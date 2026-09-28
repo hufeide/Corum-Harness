@@ -1991,7 +1991,8 @@ export function apply(ctx: Context, config: Config): void {
         label: args.label,
         prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
         parent,
-        ...corumLockedOptions !== undefined ? { agentOptions: corumLockedOptions } : {},
+        // P1：锁定路由是**机制所有**的 ⇒ 打标记，免得被脚本路由的剥离误伤。
+        ...corumLockedOptions !== undefined ? { agentOptions: corumLockedOptions, agentOptionsOwnedByMechanism: true } : {},
         kind: childKind,
         // fork（corum）2026-09-20：主 Agent 注入的叠加层人格——**截断到上限**（用户定调
         // 2000 字符）。超限不静默丢弃：截断后显式标注，让子 Agent 与主 Agent 都知道被截了。

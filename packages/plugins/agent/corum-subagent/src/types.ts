@@ -147,6 +147,14 @@ export interface SubagentStartRequest {
    */
   readonly agentOptions?: AgentOptions
   /**
+   * 该 `agentOptions` 由**机制**拥有（预设角色锁 / 续接恢复的路由），不是脚本传进来的路由偏好。
+   *
+   * `driver` 的 P1 剥离（脚本模式的 provider/model）**只对未标记的选项生效** —— 否则会把机制自己的
+   * 路由一起削掉。反例是 2026-09-27 动设备前复查抓到的：`corum-tool-subagent` 的
+   * `corumLockedOptions`（fork/角色锁模型）与 `continuation.ts` 的 `resumedRoute` 都走这个字段。
+   */
+  readonly agentOptionsOwnedByMechanism?: boolean
+  /**
    * Object-rooted JSON Schema within `assertObjectJsonSchema`'s enforced subset. Start rejects
    * unsupported schemas or providers without the capability. Data must be plain host-realm JSON;
    * a successful child returns the matching value as {@link SubagentResult.structured}.
