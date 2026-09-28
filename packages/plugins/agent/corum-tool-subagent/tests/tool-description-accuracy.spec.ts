@@ -198,3 +198,45 @@ describe('投送：执行纪律段的两条注入路径', () => {
     expect(childSrc).toContain("'agentPresets')?.composeFrom(childCtx, parent.ctx)")
   })
 })
+
+/**
+ * P3–P8 防回潮门禁（2026-09-27 「按住未整改」清单 B 组落地）。
+ *
+ * 来源 = 对抗审查员 B 的主张对照表；每条都给了机制/实现依据，改的是模型可见文本。
+ * 登记册：`docs/PENDING-prompt-consistency-followups.md`。
+ */
+describe('B 组文本级修正（P3–P8）', () => {
+  const POLICY = readFileSync(join(import.meta.dirname, '../../corum-agent/src/tool-policy.ts'), 'utf8')
+
+  it('P3：不得再声称 orchestrate 有「更宽的并发上限」（实际上限同为 4，第 5 个并发 fatal）', () => {
+    expect(SRC).not.toContain('wider limit')
+    expect(SRC).toContain('a single call; every result collected in one place')
+  })
+
+  it('P4：bash 改动「不进审查卡」的说法必须消失（corum-review 会解析命令串 + 轮末并集兜底）', () => {
+    expect(POLICY).not.toContain('never appear in the change-review card')
+    expect(POLICY).not.toContain('bypasses the file-observation policy and the change-review capture')
+    expect(POLICY).toContain('Shell writes are still reviewed')
+    // 依据锚点：真正负责捕获的实现（防有人删了实现却留着新文案）。
+    const review = readFileSync(join(import.meta.dirname, '../../../../desktop/src/host/corum-review.ts'), 'utf8')
+    expect(review).toContain('SHELL_TOOL_NAMES')
+    expect(review).toContain('porcelain')
+  })
+
+  it('P5：orchestrate 的 per-task background 必须写明当前不支持（否则模型会用它换来一次失败）', () => {
+    expect(SRC).toContain('NOT SUPPORTED in `orchestrate` yet')
+  })
+
+  it('P6：script 模式的 opts 必须列出 schema（引擎支持结构化输出）', () => {
+    expect(SRC).toContain('{ label, phase, schema }')
+  })
+
+  it('P7：research 实例无 MCP 工具必须写进描述（否则主 Agent 白跑一轮）', () => {
+    expect(SRC).toContain('**It also has no MCP tools**')
+  })
+
+  it('P8：隔离边界标记只随前台结果回来，措辞不得再无条件承诺', () => {
+    expect(SRC).toContain('A FOREGROUND result tells you which route ran')
+    expect(SRC).not.toContain("The result tells you which route ran, so you never have to guess")
+  })
+})

@@ -21,10 +21,15 @@
  * 本段补的就是我们缺的那一层（官方 `tool:read`/`tool:write`/`tool:edit` 段只讲各自怎么用，
  * 没有任何一段讲「别用 bash 干这个」，`tool:bash` 段更是只有一句 exit-code 提示）。
  *
- * **代价必须写清楚**（这也是给模型的理由，不只是命令）：走 bash 的改动绕过
- * `@corum/corum-desktop` 的改动审查捕获（`FILE_WRITE_TOOL_NAMES` 只认
- * edit/write/str_replace_editor，且 `touched.size === 0` 就不留提交）——那些改动在审查卡里
- * **完全不出现、也回滚不了**。
+ * **代价必须写清楚**（这也是给模型的理由，不只是命令）：走 bash 的改动**仍被** `corum-review` 捕获
+ * —— 它把 `bash`/`pwsh` 与文件工具并列处理（`SHELL_TOOL_NAMES`），从命令串解析确定的写目标
+ * （`packages/desktop/src/host/corum-bash-writes.ts`：重定向、`tee`、`sed -i`、解释器 heredoc），
+ * 并在轮末用 `git status --porcelain` 求并集兜底；`FILE_WRITE_TOOL_NAMES` 只认 edit/write/
+ * str_replace_editor 是**归属**问题，不是「看不见」。
+ *
+ * ⚠️ 2026-09-27 更正（对抗审查员 B 报）：旧注释与旧正文说 bash 改动「在审查卡里完全不出现、也回滚
+ * 不了」——与实现相反。真实边界是：命令串解析不出确定写目标、或 pre-image 超出内存上限被放弃时，
+ * 才标记为「不可逐文件回滚」。
  *
  * ## 注册位置与作用域
  *
@@ -51,8 +56,8 @@ export const TOOL_POLICY_TEXT = [
   '- Create or fully rewrite a file with `write` — not `cat > f <<\'EOF\'`, `echo >`, or `printf >`.',
   'Reserve `bash` for real shell work: builds, tests, package managers, git, processes, and pipelines over command output.',
   '',
-  'Why this matters here (not just style): the shell bypasses the file-observation policy and the change-review capture.',
-  'Edits made through `bash` never appear in the change-review card and cannot be reverted file by file.',
+  'Why this matters here (not just style): the shell bypasses the file-observation policy, and its edits reach the change review as command-attributed changes rather than as first-class file-tool writes.',
+  'Shell writes are still reviewed (their write targets are parsed out of the command, with the round-end working-tree state as a fallback), but a per-file revert is only available when that parse was definite and the pre-image was kept.',
   'When a dedicated tool rejects a call — "file has not been read" or "old_string was not found" — fix the call',
   '(read the file first, then retry with a more precise old_string) instead of switching to the shell.',
   '',

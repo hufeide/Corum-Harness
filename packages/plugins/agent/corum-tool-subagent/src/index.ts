@@ -2729,8 +2729,8 @@ export function apply(ctx: Context, config: Config): void {
         // `isolation`/`integrate`/`verify` 参数（见下方条件块），照搬写向文案等于
         // 「教模型用一个不存在的参数」——指令与能力矛盾，本仓明令禁止。
         description: (corumReadonlyResearch
-          ? 'This tool delegates a READ-ONLY research task: the child can read files, search, and run read-only shell commands, but it cannot write — there is no worktree, no branch, and nothing to merge. It returns what it found, not where a change landed. '
-          : 'A write-capable delegation is ISOLATED by default: it gets its own git worktree + branch, so its edits reach your tree only through integration (`subagent { integrate: true }` or an `orchestrate` `merge` declaration). Pass `isolation: "main"` when the child must work in your REAL tree instead — builds/installs, `git push`, merging, another repository, or any path outside this one: a default (isolated) child is hard-denied those and no approval card will appear. A read-only research delegation is not isolated (it writes nothing). The result tells you which route ran, so you never have to guess whether a branch carries the work. ')
+          ? 'This tool delegates a READ-ONLY research task: the child can read files, search, and run read-only shell commands, but it cannot write — there is no worktree, no branch, and nothing to merge. **It also has no MCP tools**: never route MCP work through it (the call would fail in the child). It returns what it found, not where a change landed. '
+          : 'A write-capable delegation is ISOLATED by default: it gets its own git worktree + branch, so its edits reach your tree only through integration (`subagent { integrate: true }` or an `orchestrate` `merge` declaration). Pass `isolation: "main"` when the child must work in your REAL tree instead — builds/installs, `git push`, merging, another repository, or any path outside this one: a default (isolated) child is hard-denied those and no approval card will appear. A read-only research delegation is not isolated (it writes nothing). A FOREGROUND result tells you which route ran, so you never have to guess whether a branch carries the work; a backgrounded run reports through its settlement notice instead, so do not expect the boundary marker there. ')
           + wording.description + corumSchedulingDescription({ backgroundEnabled, continuable, readonlyResearch: corumReadonlyResearch })
           // fork（corum）：决策点分工（2026-09-14 委派正确性轮）——工具描述是模型
           // 选工具时唯一**贴着选择点**读到的文本，因此分工必须写在这里，而不是只
@@ -2881,7 +2881,7 @@ export function apply(ctx: Context, config: Config): void {
             description: [
               'Orchestrate several subagents in ONE call. Two modes, same isolation and merge machinery:',
               '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `schema` (structured output) and `background`.',
-              '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await). Hook signatures — `agent(prompt, opts)`: the PROMPT IS THE FIRST ARGUMENT and must be a non-empty string (`opts` is optional: `{ label, phase }`); `parallel(thunks)`, `pipeline(items, ...stages)`, `phase(title)`, `log(message)`. End with `return <json-value>`. Calling `agent({ prompt })` with a single object is REJECTED by the engine (`agent() requires a non-empty prompt string`) — always pass the prompt first. Use script mode when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
+              '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await). Hook signatures — `agent(prompt, opts)`: the PROMPT IS THE FIRST ARGUMENT and must be a non-empty string (`opts` is optional: `{ label, phase, schema }` — pass `schema` when that child must return a schema-valid structured result); `parallel(thunks)`, `pipeline(items, ...stages)`, `phase(title)`, `log(message)`. End with `return <json-value>`. Calling `agent({ prompt })` with a single object is REJECTED by the engine (`agent() requires a non-empty prompt string`) — always pass the prompt first. Use script mode when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
               'ISOLATION: a write task is ISOLATED by default in its own git worktree + branch — declarative tasks and scripted children alike, foreground or background. Isolated children branch off HEAD, and the mechanism commits the parent tree right before creating the worktree, so an isolated child always sees the parent\'s latest committed work. A task that must work in your REAL tree instead (builds/installs, `git push`, merging, another repository, a path outside this one) declares `isolation: "main"` — it then runs directly in your main working tree with no branch and nothing to merge, and it is the only route that can do those things. Read-only research tasks are not isolated (they write nothing).',
               'FINISH: declare `merge.verify` (how to build/run/verify this repo) — declaring `merge` is what makes the mechanism merge + verify + commit the isolated branches once every task is done. Omit `merge` only when you intend to finish it yourself with `subagent { integrate: true }`; the call reports pending branches and raises a pending-integration notice either way, because branches you never merge are work nobody can see.',
             ].join('\n'),
@@ -2921,7 +2921,9 @@ export function apply(ctx: Context, config: Config): void {
                     // 用户配置决定（预设锁 → 跟随主 Agent）。`subagent` 工具早在
                     // 1765 行就做了同样的事（"LLM 物理上无法表达模型偏好"），
                     // orchestrate 是当时漏掉的那一处。
-                    background: { type: 'boolean', description: 'Run in the background (continuable, steered via send_message). Defaults to foreground one-shot.' },
+                    // 2026-09-27 修 P5（审查员 B 报）：后台任务不能进 fan-in，会被汇合判为失败（orchestrate currently requires
+                    // foreground tasks），而子会话确实起了 ⇒ 描述不得再承诺它。
+                    background: { type: 'boolean', description: 'NOT SUPPORTED in `orchestrate` yet: a backgrounded task cannot join the fan-in and is reported as a failed task even though its child does start. Leave it unset — every task runs in the foreground and the call returns when they all settle.' },
                     schema: {
                       type: 'object',
                       additionalProperties: true,
@@ -3495,7 +3497,10 @@ export function apply(ctx: Context, config: Config): void {
             lines.push(
               '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls.',
               '  - Cost of N separate delegations: N tool calls; N settlement notices landing in your context; one session isolation slot each, and exceeding it FAILS the call; plus a manual `integrate` afterwards when they are writes.',
-              '  - Cost of ONE `orchestrate`: engine fan-out (wider limit); every result in one place; `merge.verify` merges, verifies and commits for you.',
+              // 2026-09-27 修 P3（审查员 B 报；我写的错）：原句声称 orchestrate 有「更宽的并发上限」——不成立。
+              // 声明式任务同样受 maxParallelChildren（默认 4）约束；脚本模式引擎虽允许 min(16,cpus-2)，
+              // 但隔离 provider 上限仍是 4，第 5 个并发抛 AGENT_START（fatal）⇒ 整次 orchestrate 失败、其余结果全丢。
+              '  - Cost of ONE `orchestrate`: a single call; every result collected in one place; `merge.verify` merges, verifies and commits for you.',
               '  - Shortest path for: "split this into modules A/B/C"; "do these 4 migrations"; THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
               '- Keep N separate `subagent` calls ONLY when:',
               '  - the pieces are genuinely NOT independent (each needs the previous result);',
@@ -3507,7 +3512,7 @@ export function apply(ctx: Context, config: Config): void {
               '  - A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running.',
               '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
               '  - Its edits reach your tree ONLY through integration: `orchestrate` with a `merge` declaration does it for you, or you do it explicitly with `subagent { integrate: true }`.',
-              '  - Never assume a delegated write has landed — read the result, which states where the work is.',
+              '  - Never assume a delegated write has landed — a FOREGROUND result states where the work is; for a background run read its settlement notice, and check the branch/worktree state yourself when the notice does not say.',
               '  - Read-only research delegations are not isolated (they write nothing).',
               '  - **`isolation: "main"` is the non-isolated route** (an `orchestrate` task takes the same value): the child works directly in your REAL tree with your sandbox mode, so it CAN build, install, `git push` or merge — and its edits are already yours (nothing to integrate). Use it only when the work really needs that; the default isolated route is what keeps concurrent writers apart.',
               '  - Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
