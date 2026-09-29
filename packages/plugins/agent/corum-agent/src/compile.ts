@@ -24,8 +24,6 @@
  * @module @corum/corum-agent/compile
  */
 
-import { corumMinimalDisciplineLines } from '@corum/corum-orchestration'
-import { outputLanguageSectionText } from './output-language.ts'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
@@ -432,23 +430,25 @@ function resolvePersonaText(profile: AgentProfile): string | null {
   return parts.length > 0 ? parts.join(' ') : null
 }
 
-function composeStructuredPersona(profile: AgentProfile, coreIdentity: string | null): string {
+/**
+ * corum 自定义 persona 的 **prefix**（身份段）——官方 0.1.5 的 `dsh-persona` config
+ * 已从单字段 `text` 改为 `prefix`（身份，必填）+ `suffix`（附加内容，可选）。
+ *
+ * prefix 段 = 模式核心身份 + 岗位句 + 域边界条款 + 模型/工作目录占位行
+ * （即 persona 拼装中除「人格(`Your working style: …`)」与「职责(`Your responsibilities: …`)」
+ * 以外的所有段；这两段归 suffix，见 {@link composePersonaSuffix}）。
+ *
+ * @param profile - AgentProfile。
+ * @param coreIdentity - 模式核心身份文本（MODE_CORE_IDENTITY 值，null 则不拼该段）。
+ * @returns prefix 文本（恒非空：最末段为模型/目录占位行）。
+ */
+function composePersonaPrefix(profile: AgentProfile, coreIdentity: string | null): string {
   const segments: string[] = []
   // 模式核心身份（如 cordis harness 自述 / minimal 通用助手自述）。
   if (coreIdentity !== null && coreIdentity !== '') segments.push(coreIdentity)
   // 身份句：岗位（领域限定帮助模型路由到合适专家）。
   const title = typeof profile.title === 'string' ? profile.title.trim() : ''
   if (title !== '') segments.push(`You are a ${title}.`)
-  // 人格（做事风格）：预设走英文映射，custom 或补充走 persona 原文（可含汉字）。
-  const personaText = resolvePersonaText(profile)
-  if (personaText !== null) {
-    segments.push(`Your working style: ${personaText}.`)
-  }
-  // TODO(memory): 「你有丰富的工作经验：{{memory摘要}}」段——待 memory 机制后接入，当前不组装。
-  // 工作职责（用户自定义提示词）。
-  if (profile.prompt.trim() !== '') {
-    segments.push(`Your responsibilities: ${profile.prompt.trim()}`)
-  }
   // 域边界条款（L1 运行时自判域）：对「有专业定位」的 Agent 注入。判定 = title
   // 非空——用户创建 Agent 时填了岗位，即视为专用 Agent，接到明显越界任务时
   // 「声明越界 + 建议切通用/对应 Agent」而非硬拦（用户决策，见 DESIGN §2）。
@@ -470,47 +470,73 @@ function composeStructuredPersona(profile: AgentProfile, coreIdentity: string | 
   return segments.join('\n\n')
 }
 
+/**
+ * corum 自定义 persona 的 **suffix**（附加内容段）= 人格（做事风格）+ 工作职责。
+ *
+ * 对应 persona 拼装中 `Your working style: …` 与 `Your responsibilities: …`
+ * 两段（与 {@link composePersonaPrefix} 互补：prefix 拼身份，suffix 拼风格与职责）。
+ * 无内容时返回空串（`complete: true` 会抑制 suffix）。
+ *
+ * @param profile - AgentProfile。
+ * @returns suffix 文本；无人格且无提示词时为空串。
+ */
+function composePersonaSuffix(profile: AgentProfile): string {
+  const segments: string[] = []
+  // 人格（做事风格）：预设走英文映射，custom 或补充走 persona 原文（可含汉字）。
+  const personaText = resolvePersonaText(profile)
+  if (personaText !== null) {
+    segments.push(`Your working style: ${personaText}.`)
+  }
+  // TODO(memory): 「你有丰富的工作经验：{{memory摘要}}」段——待 memory 机制后接入，当前不组装。
+  // 工作职责（用户自定义提示词）。
+  if (profile.prompt.trim() !== '') {
+    segments.push(`Your responsibilities: ${profile.prompt.trim()}`)
+  }
+  return segments.join('\n\n')
+}
+
 export function compilePreset(profile: AgentProfile): CompiledPreset {
-  // persona 统一走 corum 结构化组装（composeStructuredPersona），四种模式均可继承。
+  // persona 走官方 0.1.5 的 prefix/suffix 字段（`dsh-persona` config 已从单字段
+  // `text` 改为 `prefix`(身份,必填) + `suffix`(附加内容,可选)）。
   // 模式核心身份（MODE_CORE_IDENTITY）与用户身份段解耦：
   // - standard/ptc：核心身份为空，纯用户身份段（standard 即用户自建覆盖官方模板）。
-  // - minimal：核心身份=通用软件工程助手自述，与领域限定叠加；complete 独占 system prompt
-  //   仍可套结构化身份段（{{model}}/{{cwd}} 变量不受 complete/suppress 影响，仍有值）。
   // - cordis：核心身份=harness 自述（不可丢），再接用户身份段。
+  // - conductor：核心身份=指挥者人格（不可丢），再接用户身份段。
+  // - minimal：见下方 minimal 分支——保持官方原汁原味。
   const basePersona = BASE_MODE_PERSONA[profile.baseMode] ?? BASE_MODE_PERSONA.standard
   const isComplete = BASE_MODE_COMPLETE.has(profile.baseMode)
   const coreIdentity = MODE_CORE_IDENTITY[profile.baseMode] ?? null
-  const composed = composeStructuredPersona(profile, coreIdentity)
-  // 无实质内容（无核心身份且 title/persona/prompt 全空）时回退 basePersona，
-  // 避免 persona 只剩模型/目录占位行。有核心身份（minimal/cordis）时始终用 composed。
-  // personaPreset 非空也算实质内容（预设会注入英文人格段）。
-  const hasSubstance =
-    (coreIdentity !== null && coreIdentity !== '') ||
-    (typeof profile.title === 'string' && profile.title.trim() !== '') ||
-    (profile.personaPreset !== undefined && profile.personaPreset !== 'custom') ||
-    (typeof profile.persona === 'string' && profile.persona.trim() !== '') ||
-    profile.prompt.trim() !== ''
-  const personaText = hasSubstance ? composed : basePersona
-  // fork（corum）2026-09-27（用户要求「要注入」）：极简模式是 `complete`
-  // （`config.complete: true` + `includeRuntimeContext: false`）⇒ system-prompt **只渲染 persona 段**，
-  // 连 root scope 的 `corum:execution-discipline` 也进不来；而 minimal 的 preset 里有 shell
-  // （persistent-shell / pty / terminal-bash）⇒ 它同样需要效率与沙箱纪律。
-  // 故在**人格段**里追加同一对 builder（单一事实源 = @corum/corum-orchestration）。
-  // 2026-09-27 P10：极简模式是 `complete` ⇒ `corum:execution-discipline` 与 `corum:output-language`
-  // 两段都进不来。前者由 corumMinimalDisciplineLines() 补齐；后者（含 `{{output_language}}` 占位符，
-  // 该模块的文件头本就写明「任何 profile 的 persona 都能写它」）在这里追加。
-  // ⚠️ 未覆盖：`corum:host-identity`（宿主实例/home/CDP 端口）是**运行时**事实，无法编进静态 preset，
-  // 除非改 `complete` 语义 —— 已记入 docs/PENDING-prompt-consistency-followups.md 的 P10 待裁定。
-  const personaTextWithDiscipline = isComplete
-    ? [personaText, corumMinimalDisciplineLines().join('\n'), outputLanguageSectionText()].join('\n')
-    : personaText
+
+  let personaPrefix: string
+  let personaSuffix: string
+  if (isComplete) {
+    // ⚠️ 用户裁决（2026-09-29）：minimal 模式「保持官方原汁原味」。
+    // 官方 minimal preset 的 persona = 恰好一句 `You are a helpful software
+    // engineer assistant.`，不拼任何用户 persona / prompt / corum 纪律 / 输出语言
+    // 段（corumMinimalDisciplineLines() 与 outputLanguageSectionText() 在 minimal 下
+    // **不再注入**——这是用户裁决的必然结果）。suffix 给空串（`complete: true` 会
+    // 抑制 suffix，但显式传空串更清晰，也避免 dsh-persona schema 默认值兜底时行为漂移）。
+    personaPrefix = basePersona
+    personaSuffix = ''
+  } else {
+    // 非 minimal：prefix = 身份段（核心身份 + 岗位 + 域边界 + 模型/目录占位），
+    // suffix = 人格（working style）+ 工作职责（responsibilities）。
+    const hasIdentitySubstance =
+      (coreIdentity !== null && coreIdentity !== '') ||
+      (typeof profile.title === 'string' && profile.title.trim() !== '')
+    // 无核心身份且无岗位时回退 basePersona（保留 standard/ptc 的官方 coding-agent 身份句），
+    // 避免 prefix 只剩模型/目录占位行。
+    personaPrefix = hasIdentitySubstance ? composePersonaPrefix(profile, coreIdentity) : basePersona
+    personaSuffix = composePersonaSuffix(profile)
+  }
 
   const rows: CordisRow[] = [
     {
       id: 'persona',
       name: '@deepseek-ai/dsh-persona',
       config: {
-        text: personaTextWithDiscipline,
+        prefix: personaPrefix,
+        suffix: personaSuffix,
         ...(isComplete ? { complete: true, includeRuntimeContext: false } : {}),
       },
     },

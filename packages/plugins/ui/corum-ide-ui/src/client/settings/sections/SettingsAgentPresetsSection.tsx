@@ -666,7 +666,8 @@ const BASE_MODE_OPTIONS = [
   { id: 'standard', label: BASE_MODE_LABELS.standard },
   { id: 'conductor', label: BASE_MODE_LABELS.conductor },
   { id: 'ptc', label: BASE_MODE_LABELS.ptc },
-  { id: 'minimal', label: BASE_MODE_LABELS.minimal },
+  // fork（corum）2026-09-29（用户裁决）：minimal 保持官方原汁原味，自建预设不再允许
+  // 继承此模式 ⇒ 下拉不提供 minimal 选项（只内置「极简模式」(minimal-assistant) 用它）。
   { id: 'cordis', label: BASE_MODE_LABELS.cordis },
 ]
 
@@ -775,6 +776,10 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
   const sectionNav = useSectionNav()
   const developerMode = useDeveloperMode()
   const fileRef = useRef<HTMLInputElement | null>(null)
+  // fork（corum）2026-09-29（用户裁决）：minimal 保持官方原汁原味 ⇒ 内置「极简模式」
+  // (minimal-assistant) 的人格/提示词字段置灰、不可编辑（preset 编译时也会忽略它们）。
+  // 仅该内置预设的 baseMode === 'minimal'（下拉已不提供 minimal 选项，故只此一径）。
+  const isMinimalLocked = draft.baseMode === 'minimal'
 
   /**
    * 模型目录（`session/modelCatalog` 动态加载；失败用兜底静态目录）。
@@ -1105,7 +1110,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
         {developerMode && (
           <div className={css.formGroup} style={{ gap: 3 }}>
             <label className={css.fieldLabel}>继承自</label>
-            <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} variant="fill" />
+            <SelectField value={draft.baseMode} options={BASE_MODE_OPTIONS} onChange={v => set('baseMode', v)} variant="fill" disabled={isMinimalLocked} />
             <p className={css.fieldHint}>
               {draft.baseMode === 'standard'
                 ? '标准模式将覆盖官方身份模板，使用你的人格与提示词'
@@ -1139,6 +1144,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                 options={PERSONA_PRESET_OPTIONS}
                 onChange={v => set('personaPreset', v)}
                 variant="fill"
+                disabled={isMinimalLocked}
               />
             </div>
             <span className={css.personaCap}>
@@ -1153,6 +1159,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                   value={draft.personaCustom}
                   placeholder="例如：复盘驱动型"
                   maxLength={PERSONA_CUSTOM_MAX}
+                  disabled={isMinimalLocked}
                   onChange={e => set('personaCustom', e.target.value.slice(0, PERSONA_CUSTOM_MAX))}
                 />
                 <span className={css.personaCustomCount}>{draft.personaCustom.length} / {PERSONA_CUSTOM_MAX}</span>
@@ -1162,6 +1169,9 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                 <span className={css.personaCustomNote}>自定义人格名称，最多 {PERSONA_CUSTOM_MAX} 个字符，用于生成该 Agent 的行为描述</span>
               </div>
             </div>
+          )}
+          {isMinimalLocked && (
+            <p className={css.fieldHint}>极简模式保持官方原样，不支持设置人格与自定义提示词。</p>
           )}
         </div>
 
@@ -1173,12 +1183,12 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
           </div>
           <label className={css.fieldLabel}>自定义提示词（叠加在基础模式 persona 之上，非替代）</label>
           <div className={css.promptArea}>
-            <textarea className={css.promptTextarea} value={draft.prompt} onChange={e => set('prompt', e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} />
+            <textarea className={css.promptTextarea} value={draft.prompt} onChange={e => set('prompt', e.target.value)} placeholder="你是研发工程师。接到任务后简洁完成并调用 complete_task 上报。" rows={3} disabled={isMinimalLocked} />
             <div className={css.promptActionsRow}>
               <button
                 type="button"
                 className={css.btnPolish}
-                disabled={polishing || draft.prompt.trim() === ''}
+                disabled={isMinimalLocked || polishing || draft.prompt.trim() === ''}
                 title={draft.prompt.trim() === '' ? '先填写提示词' : '用润色模型改写这段提示词'}
                 onClick={() => {
                   void polish(draft.prompt).then(next => { if (next !== null) set('prompt', next) })
@@ -1191,7 +1201,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
               <button
                 type="button"
                 className={css.btnPolish}
-                disabled={translating || draft.prompt.trim() === ''}
+                disabled={isMinimalLocked || translating || draft.prompt.trim() === ''}
                 title={draft.prompt.trim() === '' ? '先填写提示词' : '中英互译这段提示词（自动判向）'}
                 onClick={() => {
                   void translate(draft.prompt).then(next => { if (next !== null) set('prompt', next) })
@@ -1201,6 +1211,9 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
               </button>
             </div>
           </div>
+          {isMinimalLocked && (
+            <p className={css.fieldHint}>极简模式保持官方原样，不支持设置人格与自定义提示词。</p>
+          )}
         </div>
 
         {/* 技能 + 工具（设计稿 GHBvv g-skill-mcp：双列各「2 卡网格 + 添加钮」，

@@ -185,3 +185,36 @@ export function isValidPersonaPreset(v: string): v is PersonaPreset {
   return v === 'rigorous-architect' || v === 'steady-coach' || v === 'efficient-executor'
     || v === 'innovative-explorer' || v === 'custom'
 }
+
+/**
+ * 内置「极简模式」预设 id——唯一允许 `baseMode: 'minimal'` 的预设（来源：
+ * `builtin-profiles.ts` 的 `BUILTIN_ROLES` 中 `minimal-assistant` spec，2026-09-13
+ * 用户定稿命名）。此处单独声明常量（不 import BUILTIN_ROLES，避免 profile.ts
+ * 反向依赖 builtin-profiles.ts 的内部表）。
+ */
+export const MINIMAL_BUILTIN_PROFILE_ID = 'minimal-assistant'
+
+/**
+ * 校验用户自建预设的 baseMode：**极简模式只允许内置「极简模式」预设继承**。
+ *
+ * 用户裁决（2026-09-29）：「minimal 保持官方原汁原味，我们的 Agent 预设不再允许
+ * 继承此模式。只内置一个继承此模式的极简助手即可。」故用户自建预设的 `baseMode`
+ * 不允许是 `'minimal'`——内置 `minimal-assistant`（`id === MINIMAL_BUILTIN_PROFILE_ID`
+ * 且 `trust === 'system'`）是唯一例外，它必须仍能编译。
+ *
+ * 判定方式（「内置 vs 用户自建」）：内置预设由 spec 幂等播种（`trust: 'system'`），
+ * 用户自建预设 `trust: 'user'`；再叠加 id 精确匹配内置 minimal spec，确保只有那个
+ * 内置预设本身能过——用户用同名 id 覆盖内置预设属既有边界，不在本校验职责内。
+ *
+ * 调用点：`saveProfileRemote`（UI 可编辑的保存路径）。内置预设的 spec 播种走
+ * `ensureBuiltinRoleProfiles` → `saveProfile`，不经本校验，故内置 minimal 仍可编译。
+ *
+ * @param input - 待保存预设的 id / baseMode / trust。
+ * @throws 当 `baseMode === 'minimal'` 但非内置 minimal-assistant 时。
+ */
+export function assertBaseModeAllowedForPreset(input: { id: string; baseMode: string; trust: string }): void {
+  if (input.baseMode === 'minimal'
+    && !(input.id === MINIMAL_BUILTIN_PROFILE_ID && input.trust === 'system')) {
+    throw new Error('极简模式不可作为自建预设的基础模式（仅内置「极简模式」可用）')
+  }
+}

@@ -120,10 +120,13 @@ export class ConductorRuntime {
     }
     // 基准模式（preset）追加指挥者角色段——部署人格（`deployment:persona`）保留；
     // orchestrator profile 的人格来自它自己的 preset（persona 行），不再追加（否则重复）。
+    // fork（corum）0.1.5 升级：`dsh-persona` 的 deployment persona 已从单 section 拆为
+    // prefix + suffix 两 section（`DEPLOYMENT_PERSONA_PREFIX` / `DEPLOYMENT_PERSONA_SUFFIX`），
+    // 旧的 `DEPLOYMENT_PERSONA` 已删。指挥者段排在 suffix 之后 ⇒ 稳稳落在整个 persona 块之后。
     if (mode === 'preset') {
       disposers.push(agentCtx.systemPrompt.section({
         name: CONDUCTOR_SECTION,
-        order: agentCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA') + 1,
+        order: agentCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
         text: CONDUCTOR_PERSONA,
       }))
     }

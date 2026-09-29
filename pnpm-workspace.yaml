@@ -156,7 +156,7 @@ overrides:
   '@deepseek-ai/dsh-native-command': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-output-retention': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-permission-presets': '0.1.5-rc.3'
-  '@deepseek-ai/dsh-persona': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-persona': '0.1.5-rc.3'
   '@deepseek-ai/dsh-plan-mode': '0.1.5-rc.3'
   '@deepseek-ai/dsh-plugin-package-inventory-deepseek': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-pwsh-local': '0.1.3-alpha.1'

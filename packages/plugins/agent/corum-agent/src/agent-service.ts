@@ -102,7 +102,7 @@ import {
   type TranslatePromptResult,
 } from './polish-service.ts'
 import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
-import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset } from './profile.ts'
+import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
 // fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
 // 调用失败」是两个概念）——事前校验 + 回落全局默认 + 显式告知。见该模块头注的分界表。
 import { deliverModelFallbackNotice, resolveUsableModel, type ModelFallback } from './model-availability.ts'
@@ -1183,6 +1183,10 @@ export class CorumAgentService extends TypertRemoteService {
     if (!isValidProfileId(input.id)) {
       throw new Error(`corum-agent: invalid profile id "${input.id}"`)
     }
+    // fork（corum）2026-09-29（用户裁决）：minimal 模式保持官方原汁原味，用户自建预设
+    // 不再允许继承此模式。只内置「极简模式」(minimal-assistant) 可用 baseMode:'minimal'。
+    // 详见 profile.ts 的 assertBaseModeAllowedForPreset。
+    assertBaseModeAllowedForPreset({ id: input.id, baseMode: input.baseMode, trust: input.trust })
     const profile: AgentProfile = {
       id: input.id,
       ...(input.nickname !== undefined && input.nickname.trim() !== '' ? { nickname: input.nickname.trim() } : {}),
