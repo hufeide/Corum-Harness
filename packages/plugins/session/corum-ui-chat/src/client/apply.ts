@@ -105,6 +105,35 @@ interface CorumNotifyBridge {
   __corumNotify?: (n: { tone: 'error'; title: string; message?: string | undefined }) => void
 }
 
+/**
+ * fork（corum, 0.1.5 适配）：ctx.layout 的 details 抽屉能力面。
+ *
+ * 官方 0.1.5 把 details 栏替换成 rightbar dock 体系（ctx.layout 改用
+ * openRightbar/closeRightbar），官方 ILayout **不再有 openDetails/closeDetails**。
+ * 但 **corum 壳（@corum/corum-ide-ui）保留了自己的 details 抽屉架构**——壳的
+ * LayoutController（service.ts）仍是 openDetails/closeDetails + 网格 details 列
+ * （AppFrame renderSlot('details') + stores 的 details 宽/开关），未采官方
+ * rightbar。本插件在 ChatView 选中 tool call 后调 ctx.layout.openDetails() 拉开
+ * details 抽屉、DetailsPanel 关闭按钮调 ctx.layout.closeDetails()——两者在 corum
+ * 运行时仍存在。
+ *
+ * 类型断点：本包 inject 声明 'layout'，ctx.layout 的类型来自官方
+ * @deepseek-ai/dsh-client-ui-layout/client 的 ILayout（窄面，无 openDetails）；
+ * corum 壳的 Context.layout 合并是反向依赖，本包自身类型闭包看不到。与
+ * corum-ui-conversation 的 SidebarModeCapableLayout 同型（dev-conventions §2.4/§3.5：
+ * 编译期类型保障、零运行时耦合、能力接口收窄而非 as any）。壳未提供时 no-op 兜底
+ * （理论上装配错误，但调用方（选中即拉抽屉）无可损失）。
+ */
+interface DetailsCapableLayout {
+  openDetails?: () => void
+  closeDetails?: () => void
+}
+
+/** 取 ctx.layout 的 details 抽屉能力面（cordis 服务单例；能力缺失时 no-op）。 */
+function detailsLayout(ctx: Context): DetailsCapableLayout {
+  return ctx.layout as unknown as DetailsCapableLayout
+}
+
 /** 用户可见失败反馈（失败路径统一走这里，避免各处重复拼 window 断言）。 */
 function notifyUser(title: string, message?: string | undefined): void {
   const notify = (window as unknown as CorumNotifyBridge).__corumNotify
@@ -372,7 +401,7 @@ export function apply(ctx: Context): void {
           },
           openDetails: (target) => {
             actions.select(target)
-            ctx.layout.openDetails()
+            detailsLayout(ctx).openDetails?.()
           },
           fileMentions: (owner: TurnTailOwnerProps) => ctx.get('chatFileMentions')?.forClosing(owner),
           openFile: async (path) => { await openFileAt(sessionId, path) },
@@ -488,6 +517,6 @@ export function apply(ctx: Context): void {
     locale: NS,
     children: { 'conversation.details.tool': { kind: 'single', scope: 'session' } },
     store: chatStore,
-    inject: (): DetailsInjected => ({ closeDetails: () => { ctx.layout.closeDetails() } }),
+    inject: (): DetailsInjected => ({ closeDetails: () => { detailsLayout(ctx).closeDetails?.() } }),
   }, DetailsPanel))
 }

@@ -8,14 +8,45 @@ export type {
   AssistantProvenanceView, AssistantRequestConfig,
 } from './records.ts'
 
-/** Complete model-visible request header in force for an ordinary generation. */
+/**
+ * Complete model-visible request state in force for an ordinary generation:
+ * the `request/header` config and tools plus the system prompt held by the
+ * current `system/message` surface node. The 0.1.5 session log removed
+ * `header.system`; the prompt now lives in an independent `system/message`
+ * surface event, interpreted by {@link inspectSystemPrompt} and read into
+ * `system` by the target-owned Definitions that own that surface node.
+ */
 export interface ConversationPromptSnapshot {
   /** Provider/model and sampling configuration from the effective request header. */
   config: AssistantRequestConfig
-  /** Rendered system prompt text; empty when the request had no system prompt. */
+  /**
+   * Rendered text of the `system/message` surface node in force for the
+   * request; empty when the surface has no system prompt or the node lies
+   * outside the loaded history window.
+   */
   system: string
   /** Complete tool catalog sent with the request, including tools that were never called. */
   tools: readonly ToolSchema[]
+}
+
+/** Effective prompt or introduced system node, anchored at the event that establishes it. */
+export interface SystemPromptNode {
+  /** Sequence of the system event or replacement that establishes this prompt. */
+  seq: number
+  /** Unix epoch ms of that event. */
+  time: number
+  /** Turn the loop committed the node in. */
+  turn: number
+  /** Step the loop committed the node in. */
+  step: number
+  /** Rendered system prompt text; empty records "no system prompt". */
+  text: string
+  /**
+   * True for a prompt appended after an earlier loaded system node: an
+   * in-history update the model reads at this position, presented where it
+   * was committed rather than by the next request header.
+   */
+  update: boolean
 }
 
 /** System/tool change introduced while preparing one ordinary request. */
@@ -42,39 +73,49 @@ export interface RequestPromptInspection {
  * The {@link inspectRequestPrompt} signature as a value seam: Chat and
  * Trajectory Definitions receive it from the uiConversation service because a
  * client bundle cannot value-import another plugin's module.
+ *
+ * The third argument carries the effective `system/message` surface node in
+ * force for the request (0.1.5 removed `header.system`); it is optional so a
+ * target that owns no system surface Definition (the Trajectory target) can
+ * still call with two arguments and simply read no system prompt.
  */
 export type RequestPromptInspector = (
   previous: ConversationPromptSnapshot | undefined,
   event: SessionEvent<'request/header'>,
+  system?: SystemPromptNode | undefined,
 ) => RequestPromptInspection
 
 /**
- * Canonicalize one request header and classify its model-visible prompt change.
+ * Canonicalize one request header against the system node in force and
+ * classify the model-visible prompt change.
  * @param previous - Prompt from the preceding loaded request header, when available.
  * @param event - Durable full request header to inspect.
+ * @param system - Effective nonempty system prompt after loaded surface replacements; empty when removed. An in-history update already presented its text at its own position, so the header reports no system change for it.
  * @returns The canonical prompt and an initial/system/tool change when it can be established.
  */
 export function inspectRequestPrompt(
   previous: ConversationPromptSnapshot | undefined,
   event: SessionEvent<'request/header'>,
+  system?: SystemPromptNode | undefined,
 ): RequestPromptInspection {
   const header = event.data.header
   const rawTools: unknown = header.tools
   const prompt: ConversationPromptSnapshot = {
     config: header.config,
-    system: header.system ?? '',
+    system: system?.text ?? '',
     tools: Array.isArray(rawTools) ? rawTools as readonly ToolSchema[] : [],
   }
   if (previous === undefined && event.data.reason !== 'initial') return { prompt }
-  const systemChanged = previous !== undefined && previous.system !== prompt.system
+  const systemChanged = previous !== undefined && previous.system !== prompt.system && system?.update !== true
   const toolsChanged = previous !== undefined
     && JSON.stringify(previous.tools) !== JSON.stringify(prompt.tools)
   if (previous !== undefined && !systemChanged && !toolsChanged) return { prompt }
+  const origin = system !== undefined && (previous === undefined || systemChanged) ? system : event
   return {
     prompt,
     change: {
-      seq: event.seq,
-      time: event.time,
+      seq: origin.seq,
+      time: origin.time,
       kind: previous === undefined
         ? 'initial'
         : systemChanged && toolsChanged

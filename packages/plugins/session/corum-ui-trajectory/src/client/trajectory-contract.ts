@@ -1,7 +1,7 @@
 import type {
   AssistantMessageNode, ConversationLocation, ConversationNode, ConversationPromptSnapshot,
   ConversationViewNode, MessageImagesOwnerProps, PartialAssistant, RequestPromptChange,
-  RequestView, RunningToolCall, ToolCallBlock,
+  RequestView, RunningToolCall, SystemPromptNode, ToolCallBlock,
 } from '@corum/corum-ui-conversation/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 
@@ -16,6 +16,7 @@ export interface TrajectoryRequestHeaderState {
 
 /** One independently assembled contribution to the legacy Trajectory ledger. */
 export type TrajectoryContribution =
+  | { readonly kind: 'system-prompt'; readonly prompt: SystemPromptNode }
   | {
     readonly kind: 'node'
     readonly node: ConversationNode

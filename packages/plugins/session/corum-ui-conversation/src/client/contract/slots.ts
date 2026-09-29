@@ -23,6 +23,15 @@ import type { ComposerSubmitGesture, InputSubmitMode } from './composer-submissi
 import type { ConversationSnapshot } from './snapshot.ts'
 import type { ViewTab } from './views.ts'
 
+/**
+ * fork（corum, 0.1.5 适配）：壳 @corum/corum-ide-ui 的 Conversation shell owner
+ * 面镜像（空 interface {}，与壳 ConvOwnerProps 同名同形）。本包不能 import 壳包
+ * （壳依赖本包，反向依赖成环），故本地镜像同名空接口，供下方 SlotMap
+ * 'conversation' 行 owner 字段与壳声明结构等价、声明合并不冲突（TS2717 要求
+ * 后续属性声明类型相同，空 interface 两两结构等价）。
+ */
+export interface ConvOwnerProps {}
+
 /** Browser-owned draft attachment that has not crossed the durable Host boundary. */
 export type ComposerAttachment = ComposerImageAttachment | ComposerFileAttachment
 
@@ -117,6 +126,21 @@ export type UseConversationViews = SnapshotSelectorHook<readonly ViewTab[]>
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /**
+     * Resident Conversation shell beneath its root-scoped grid cell.
+     *
+     * fork（corum, 0.1.5 适配）：本槽的运行时声明由壳 @corum/corum-ide-ui
+     * （AppFrame 网格 leaf + renderSlot('conversation')）持有——与官方 0.1.5 的
+     * `main.conversation`/`main`/ConversationPanel 层级体系**不同**：corum 壳保留
+     * 自己的网格布局，未采用官方的 rightbar/main 抽屉架构。壳是反向依赖
+     * （conversation 不依赖壳），故本包自身类型闭包看不到壳的 SlotMap 行，
+     * `PropsRuntime<'conversation'>` 会因 SlotMap 未声明而报 TS2344。此处照
+     * corum-ide-statusbar-ui/src/client/statusbar-slot.ts 的先例**只补类型闭合、
+     * 不改运行时**：重声明与壳一致的契约（single / session-maybe / owner 空
+     * 接口 ConvOwnerProps——与壳 @corum/corum-ide-ui 的 ConvOwnerProps{} 同名
+     * 空接口，结构等价）。运行时 owner 由壳 ConvOwnerProps{} 合并，零运行时耦合。
+     */
+    'conversation': { kind: 'single'; scope: 'session-maybe'; owner: ConvOwnerProps }
     /** Strict per-Session Conversation body. */
     'conversation.session': { kind: 'single'; scope: 'session' }
     /** Strict per-Session title, actions, and View navigation. */

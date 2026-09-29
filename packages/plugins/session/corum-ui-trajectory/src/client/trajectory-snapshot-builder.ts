@@ -218,6 +218,13 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
 
     for (const contribution of this.contributions) {
       const data = contribution.data
+      if (data.kind === 'system-prompt') {
+        // The `system/message` surface node contributes the effective prompt
+        // text read into `request-header` state via `reader.previous`; the
+        // prompt itself is not a stage-oriented record in this view, so it is
+        // admitted by the target-owned Definition but not materialized here.
+        continue
+      }
       if (data.kind === 'request-header') {
         previousHeader = data.header
         previousTools = indexTools(data.header.prompt.tools)

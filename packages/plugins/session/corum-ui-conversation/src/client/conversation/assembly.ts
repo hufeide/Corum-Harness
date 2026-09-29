@@ -13,8 +13,10 @@ import type {
   ConversationViewSnapshotStore,
 } from '../contract/conversation.ts'
 import type { ConversationSnapshot } from '../contract/snapshot.ts'
-import type { ConversationPromptSnapshot, RequestPromptInspection } from '../contract/request-inspection.ts'
+import type { ConversationPromptSnapshot, RequestPromptInspection, SystemPromptNode } from '../contract/request-inspection.ts'
+import type { SystemPromptState } from '../contract/system-prompt.ts'
 import { inspectRequestPrompt } from '../contract/request-inspection.ts'
+import { inspectSystemPrompt } from '../contract/system-prompt.ts'
 import { ConversationNodeAssembler } from './assembler.ts'
 import { ConversationEventRegistry } from './event-registry.ts'
 import { HistoricalImageCache } from './historical-images.ts'
@@ -270,20 +272,45 @@ export class UiConversation extends Service {
   }
 
   /**
-   * Canonicalize one `request/header` event against the previous prompt state.
+   * Canonicalize one `request/header` event against the previous prompt state
+   * and the effective `system/message` surface node.
    *
    * A pure interpretation shared by the Chat and Trajectory Definitions, exposed
    * as a service method because cross-plugin value imports are forbidden in
-   * client bundles.
+   * client bundles. The 0.1.5 session log carries the system prompt in an
+   * independent `system/message` surface event rather than `header.system`; the
+   * Chat Definition reads that node through {@link inspectSystemPrompt} and
+   * passes it here. A target that owns no system surface Definition (Trajectory)
+   * may omit it and read no system prompt.
    * @param previous - prompt recorded by the preceding loaded header, if any.
    * @param event - the `request/header` session event to interpret.
+   * @param system - effective nonempty system node after loaded surface replacements.
    * @returns the canonical prompt snapshot and any model-visible change.
    */
   inspectRequestPrompt(
     previous: ConversationPromptSnapshot | undefined,
     event: SessionEvent<'request/header'>,
+    system?: SystemPromptNode | undefined,
   ): RequestPromptInspection {
-    return inspectRequestPrompt(previous, event)
+    return inspectRequestPrompt(previous, event, system)
+  }
+
+  /**
+   * Apply one `system/message` event or positional surface replacement and
+   * derive the surviving system prompt facts for the loaded window.
+   *
+   * A pure interpretation shared by the Chat system-prompt Definition, exposed
+   * as a service method because cross-plugin value imports are forbidden in
+   * client bundles.
+   * @param previous - interpretation at the preceding relevant event, if any.
+   * @param event - the `system/message` or surface-replacement event.
+   * @returns immutable surviving system facts and the effective nonempty prompt.
+   */
+  inspectSystemPrompt(
+    previous: SystemPromptState | undefined,
+    event: SessionEvent,
+  ): SystemPromptState {
+    return inspectSystemPrompt(previous, event)
   }
 
   private drop(record: BindingRecord, releaseScope: boolean): void {

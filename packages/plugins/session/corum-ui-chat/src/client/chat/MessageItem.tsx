@@ -2,7 +2,7 @@ import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@corum/corum-ui-conversation/client'
-import { DocumentFileIcon, fileSizeText, IconQueueOutline14, JsonBlock, projectUserText, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { FileTypeIcon, fileSizeText, IconQueueOutline14, JsonBlock, projectUserText, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -222,7 +222,7 @@ function UserStyleBubble({
               )
               : (
                 <span key={`file:${index}`} className={css.fileCard} title={attachment.file.name}>
-                  <DocumentFileIcon className={css.fileIcon} />
+                  <FileTypeIcon path={attachment.file.name} className={css.fileIcon} />
                   <span className={css.fileContent}>
                     <span className={css.fileName}>{attachment.file.name}</span>
                     <span className={css.fileMeta}>

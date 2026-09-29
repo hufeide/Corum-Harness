@@ -197,6 +197,20 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
   interface SlotMap {
     /**
+     * fork（corum, 0.1.5 适配）：会话级 Tool-call details 抽屉面板槽。
+     *
+     * 运行时声明由壳 @corum/corum-ide-ui 持有（AppFrame renderSlot('details') +
+     * stores 的 details 抽屉宽/开关）。官方 0.1.5 把 details 栏替换成 rightbar
+     * dock 体系（root 作用域、RightbarOwnerProps 几何面），但 **corum 壳保留
+     * 自己的 session 级 details 抽屉**（未采官方 rightbar 架构）——故本槽名仍是
+     * 'details' 而非 'rightbar'。壳是反向依赖（chat 不依赖壳），本包自身类型闭包
+     * 看不到壳的 SlotMap 行，`PropsRuntime<'details'>` 会报 TS2344。此处照
+     * corum-ide-statusbar-ui/src/client/statusbar-slot.ts 的先例**只补类型闭合、
+     * 不改运行时**：重声明与壳一致的契约（single / session / 无 owner 注入面，
+     * owner 由壳 DetailsOwnerProps{} 合并）。
+     */
+    'details': { kind: 'single'; scope: 'session' }
+    /**
      * Final Chat node renderer, keyed by `ChatNodeKind`. The component receives
      * the typed node, shared Chat actions, and Turn-data hook. Reusing a key
      * replaces that node renderer; a kind with no occupant renders no row.
