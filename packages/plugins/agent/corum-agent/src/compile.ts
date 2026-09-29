@@ -285,6 +285,11 @@ function standardRows(): CordisRow[] {
     { id: 'tool-ask-user', name: '@deepseek-ai/dsh-tool-ask-user' },
     { id: 'tool-todo', name: '@deepseek-ai/dsh-tool-todo', config: { allowParallelInProgress: true } },
     { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { fetch: true, searchTimeoutMs: 60000 } },
+    // ── deliverables（present：声明已写文件为最终交付物，用户以文件卡片打开；
+    // 宿主工具，无自有客户端 UI；配套 ui-deliverables 已在 cordis.ide.patch.yml 启用。
+    // 官方 0.1.5 standard 新增，紧跟 tool-web 之后；与 corum 的 tool-presentation
+    // 不冲突——后者只在 ptc 模式挂载）──
+    { id: 'present', name: '@deepseek-ai/dsh-tool-present' },
   ]
 }
 
