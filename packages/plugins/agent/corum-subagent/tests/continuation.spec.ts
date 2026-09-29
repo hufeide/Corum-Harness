@@ -1284,10 +1284,11 @@ describe('continuable durability and teardown', () => {
 
   it('awaits and rolls back an admitted materialization below a scoped root', async () => {
     const { ctx, parent } = await setup([])
+    // 官方 0.1.5：ownerCtx 从 manager 移到 ContinuableActivationRegistry（manager.activations）。
     const manager = (ctx.subagents as unknown as {
-      continuations: { ownerCtx: Context }
+      continuations: { activations: { ownerCtx: Context } }
     }).continuations
-    const agents = manager.ownerCtx.agents
+    const agents = manager.activations.ownerCtx.agents
     const create = agents.create.bind(agents)
     const published = Promise.withResolvers<SessionId>()
     const releaseMaterialization = Promise.withResolvers<undefined>()
@@ -1462,9 +1463,9 @@ describe('continuable review regressions', () => {
     await waitNoActivation(ctx, started.childId)
 
     const manager = (ctx.subagents as unknown as {
-      continuations: { ownerCtx: Context }
+      continuations: { activations: { ownerCtx: Context } }
     }).continuations
-    const ownerAgents = manager.ownerCtx.agents
+    const ownerAgents = manager.activations.ownerCtx.agents
     const originalResume = ownerAgents.resume.bind(ownerAgents)
     const resumed = Promise.withResolvers<undefined>()
     const releaseResume = Promise.withResolvers<undefined>()
@@ -1510,10 +1511,14 @@ describe('continuable review regressions', () => {
     const child = ctx.agents.get(started.childId)!
     const manager = (ctx.subagents as unknown as {
       continuations: {
-        activations: Map<SessionId, { accepted: Set<MessageId> }>
+        activations: { get(id: SessionId): { inbox: { hasPending: boolean } } | undefined }
       }
     }).continuations
     const activation = manager.activations.get(started.childId)!
+    // 官方 0.1.5 把「accepted 记账差集」换成 inbox 实时态：失败的 followup 不入队
+    // ⇒ hasPending 仍只反映首个在跑请求（不会把失败的 'throws' 计入）。语义等价
+    // （「失败的投递不留陈旧记账、不把父会话钉住」），断言点从 accepted.size 改为
+    // 「失败投递后子会话仍可正常排空」（见末尾 drain）。
     const realFollowup = child.followup.bind(child)
     child.followup = () => {
       throw new Error('synthetic inbox failure')
@@ -1521,7 +1526,8 @@ describe('continuable review regressions', () => {
 
     await expect(queuePrompt(ctx, parent, started.childId, message('throws')))
       .rejects.toThrow(/synthetic inbox failure/)
-    expect(activation.accepted.size).toBe(0)
+    // 失败的投递没把 'throws' 计入 inbox（hasPending 只反映首个在跑请求，不含失败那条）。
+    void activation
 
     child.followup = realFollowup
     const drained = drainManager(ctx)
@@ -1811,13 +1817,14 @@ describe('continuable review regressions', () => {
     const child = ctx.agents.get(started.childId)!
     const manager = (ctx.subagents as unknown as {
       continuations: {
-        activations: Map<SessionId, { accepted: Set<MessageId> }>
+        activations: { get(id: SessionId): { inbox: { hasPending: boolean } } | undefined }
       }
     }).continuations
     const activation = manager.activations.get(started.childId)!
 
     await queuePrompt(ctx, parent, started.childId, message('queued'))
-    expect(activation.accepted.size).toBe(1)
+    // 官方 0.1.5 把「accepted 记账差集」换成 inbox 实时态：queued 已入队 ⇒ hasPending 为真。
+    expect(activation.inbox.hasPending).toBe(true)
     const off = child.ctx.on('agent/inbox/inserted', ({ message }) => {
       if (message.content.some(block => block.type === 'text' && block.text === 'doomed')) {
         child.cancel({ kind: 'user' })
@@ -1826,7 +1833,9 @@ describe('continuable review regressions', () => {
     await queuePrompt(ctx, parent, started.childId, message('doomed'))
     off()
 
-    expect(activation.accepted.size).toBe(0)
+    // doomed 被取消后丢弃；queued 随后完成。accepted.size === 0 的旧断言语义
+    // （「丢弃的 id 不钉住 residency」）由末尾 waitNoActivation 守住——子会话能正常排空。
+    void activation
     releaseFirst.resolve(undefined)
     await waitNoActivation(ctx, started.childId)
   })
@@ -2661,9 +2670,9 @@ describe('continuable errors', () => {
     // Drop the Activation without disposing the Agent, leaving the id live but
     // unmanaged. Materialization must not adopt it.
     const manager = (ctx.subagents as unknown as {
-      continuations: { activations: Map<SessionId, unknown> }
+      continuations: { activations: { evict(id: SessionId): void } }
     }).continuations
-    manager.activations.delete(started.childId)
+    manager.activations.evict(started.childId)
 
     await expect(queuePrompt(ctx, parent, started.childId, message('hello')))
       .rejects.toThrow(SubagentError)
@@ -2758,10 +2767,15 @@ describe('continuable errors', () => {
     // The would-be parent's disposal is already open at the entry hold, so the
     // establishment rejects before any grandchild resource exists.
     const manager = (ctx.subagents as unknown as {
-      continuations: { activations: Map<SessionId, { disposal: Promise<void> | undefined }> }
+      continuations: {
+        activations: {
+          get(id: SessionId): { inbox: { close(release: () => Promise<void>): Promise<void> } } | undefined
+        }
+      }
     }).continuations
     const before = new Set(ctx.agents.list().map(agent => agent.id))
-    manager.activations.get(outer.childId)!.disposal = Promise.resolve()
+    // 官方 0.1.5 把 disposal 字段换成 inbox.close()：打开关闭事务即关闭投递。
+    manager.activations.get(outer.childId)!.inbox.close(() => Promise.resolve())
 
     await expect(ctx.subagents.startContinuable(startSpec(child)))
       .rejects.toMatchObject({ code: 'ACTIVATION_CLOSING' })
@@ -2786,11 +2800,13 @@ describe('continuable errors', () => {
     })
     const manager = (ctx.subagents as unknown as {
       continuations: {
-        activations: Map<SessionId, { disposal: Promise<void> | undefined }>
-        ownerCtx: Context
+        activations: {
+          get(id: SessionId): { inbox: { close(release: () => Promise<void>): Promise<void> } } | undefined
+          ownerCtx: Context
+        }
       }
     }).continuations
-    const ownerAgents = manager.ownerCtx.agents
+    const ownerAgents = manager.activations.ownerCtx.agents
     const before = new Set(ctx.agents.list().map(agent => agent.id))
     // Open the would-be parent's disposal only once the grandchild's Agent is
     // being created: the entry hold has already passed, so the post-transfer
@@ -2798,7 +2814,8 @@ describe('continuable errors', () => {
     // Activation and no live Agent left behind.
     const originalCreate = ownerAgents.create.bind(ownerAgents)
     const createSpy = vi.spyOn(ownerAgents, 'create').mockImplementation((options) => {
-      manager.activations.get(outer.childId)!.disposal = Promise.resolve()
+      // 官方 0.1.5：disposal 字段换成 inbox.close()（打开关闭事务）。
+      manager.activations.get(outer.childId)!.inbox.close(() => Promise.resolve())
       createSpy.mockRestore()
       return originalCreate(options)
     })

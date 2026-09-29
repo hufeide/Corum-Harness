@@ -118,59 +118,55 @@ describe('narrowChildToolFilter（2026-09-12 事故回归）', () => {
  */
 describe('childPersonaOf — 子 Agent 角色人格选取', () => {
   const parent = parentAgent()
-  // childPersonaOf 目前不使用 childCtx（保留形参以备按 ctx 裁剪），传 undefined 即可。
+  // childPersonaOf 目前不使用 childCtx/parent（保留形参以备按 ctx 裁剪），传 undefined 即可。
   const ctx = undefined as never
 
   it('worker ⇒ 执行者契约（不继承父人格）', () => {
-    const text = childPersonaOf(ctx, parent, { kind: 'worker' }, undefined)
+    const text = childPersonaOf(ctx, parent, 'worker', undefined)
     expect(text).toContain('executor, not a planner')
     expect(text).toContain('Do NOT build')
   })
 
   it('researcher ⇒ 调查员契约（与 worker 相反的那一份）', () => {
-    const text = childPersonaOf(ctx, parent, { kind: 'researcher' }, undefined)
+    const text = childPersonaOf(ctx, parent, 'researcher', undefined)
     expect(text).toContain('thorough investigator')
     expect(text).not.toContain('Do NOT build')
   })
 
-  it('三类子 Agent 拿到的契约互不相同（防被写成同一段）', () => {
-    const worker = childPersonaOf(ctx, parent, { kind: 'worker' }, undefined)
-    const researcher = childPersonaOf(ctx, parent, { kind: 'researcher' }, undefined)
+  it('两类子 Agent 拿到的契约互不相同（防被写成同一段）', () => {
+    const worker = childPersonaOf(ctx, parent, 'worker', undefined)
+    const researcher = childPersonaOf(ctx, parent, 'researcher', undefined)
     expect(worker).not.toBe(researcher)
   })
 
-  it('kind 未声明且父非指挥模式 ⇒ undefined（不替换人格，维持既有继承行为）', () => {
-    expect(childPersonaOf(ctx, parent, {}, undefined)).toBeUndefined()
-    const notConductor = { isConductor: () => false }
-    expect(childPersonaOf(ctx, parent, {}, notConductor)).toBeUndefined()
-  })
-
-  it('kind 未声明但父是指挥模式 ⇒ 退化为执行者契约（兼容 2026-09-11 语义）', () => {
-    const conductor = { isConductor: () => true }
-    expect(childPersonaOf(ctx, parent, {}, conductor)).toContain('executor, not a planner')
+  it('kind 未声明（undefined）⇒ undefined（不替换人格，维持既有继承行为）', () => {
+    // fork（corum）2026-09-29：conductor 兜底已上移到 applyChildComposition，
+    // 本函数只看传入的 kind；undefined ⇒ 不替换。conductor 兜底的一致性由
+    // applyChildComposition 的 resolvedKind 保证（人格与 deny 共用同一个值）。
+    expect(childPersonaOf(ctx, parent, undefined, undefined)).toBeUndefined()
   })
 
   it('工作风格固定为「高效务实」，不再继承父的设置（用户 2026-09-20 定调）', () => {
     // 旧行为是继承父 profile 的 personaPreset，实测把 `steady-coach`（「经验丰富的团队导师……
     // 来自下属的不成熟方案先肯定再指出问题」）传给了一个没有下属、被禁止重新设计的执行者，
     // 风格与角色相冲。用户定调：子 Agent 一律「高效务实」，父选什么风格都不再影响它。
-    const text = childPersonaOf(ctx, parent, { kind: 'worker' }, undefined)
+    const text = childPersonaOf(ctx, parent, 'worker', undefined)
     expect(text).toContain('be efficient and pragmatic')
     // 固定风格对两类子 Agent 都生效。
-    expect(childPersonaOf(ctx, parent, { kind: 'researcher' }, undefined)).toContain('be efficient and pragmatic')
+    expect(childPersonaOf(ctx, parent, 'researcher', undefined)).toContain('be efficient and pragmatic')
     // 风格段必须在角色契约**之后**（顺序固定：角色 → 风格 → 注入）。
     expect(text!.indexOf('executor, not a planner')).toBeLessThan(text!.indexOf('be efficient and pragmatic'))
   })
 
   it('personaHint 追加在最后（叠加层不可覆盖机制层）', () => {
-    const text = childPersonaOf(ctx, parent, { kind: 'worker', personaHint: 'HINT-SENTINEL' }, undefined)
+    const text = childPersonaOf(ctx, parent, 'worker', 'HINT-SENTINEL')
     expect(text).toContain('HINT-SENTINEL')
     expect(text!.indexOf('executor, not a planner')).toBeLessThan(text!.indexOf('HINT-SENTINEL'))
   })
 
   it('空白 personaHint 不注入（不产生空段）', () => {
-    const text = childPersonaOf(ctx, parent, { kind: 'worker', personaHint: '   ' }, undefined)
-    expect(text).toBe(childPersonaOf(ctx, parent, { kind: 'worker' }, undefined))
+    const text = childPersonaOf(ctx, parent, 'worker', '   ')
+    expect(text).toBe(childPersonaOf(ctx, parent, 'worker', undefined))
   })
 })
 

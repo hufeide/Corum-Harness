@@ -302,7 +302,16 @@ export function applyChildComposition(
    */
   const conductor = childCtx.get('corumConductor') as ConductorFace | undefined
   const conductorParent = conductor !== undefined && conductor.isConductor(String(parent.session.id))
-  const persona = composition.persona ?? childPersonaOf(childCtx, parent, composition, conductor)
+  // fork（corum）2026-09-29：修复人格与工具面矛盾（用户已确认的 bug）。
+  // 旧实现：`childPersonaOf` 有一个 conductor 兜底（`kind` 未声明但父是指挥模式 ⇒
+  // 给 `CHILD_WORKER_ROLE`），而下面的 deny 判定只看 `composition.kind`、不看这个兜底
+  // ⇒ 同一子 Agent 可能人格=执行者契约、却没 deny 委派工具（人格与工具面矛盾）。
+  // 修法（方案「让 deny 看同一个兜底」）：在**唯一一处**解析 `resolvedKind`——
+  // `kind` 未声明但父是指挥模式时默认 `worker`——人格拼装与 deny 判定都读这个同一个值，
+  // 二者永远一致。`fork`/`isolated`/`spawn` 三个 provider（经 driver）恒透传 `request.kind`
+  // （仅 `undefined` 时省略），所以兜底只在工具层未传 `kind` 的指挥模式委派时生效。
+  const resolvedKind: ChildKind | undefined = composition.kind ?? (conductorParent ? 'worker' : undefined)
+  const persona = composition.persona ?? childPersonaOf(childCtx, parent, resolvedKind, composition.personaHint)
   if (persona !== undefined) {
     childCtx.systemPrompt.section({
       name: 'deployment:persona-prefix',
@@ -330,8 +339,8 @@ export function applyChildComposition(
    * `subagent` / `orchestrate` deny 掉——「只读的调查员只能派出只读的调查员」由工具面保证，
    * 不依赖模型自觉。只读性因此**沿委派链闭合**：任何 read-only 源头以下的整棵子树都只读。
    */
-  const delegationsDenied = conductorParent || composition.kind === 'worker'
-  const researchDeny = composition.kind === 'researcher'
+  const delegationsDenied = conductorParent || resolvedKind === 'worker'
+  const researchDeny = resolvedKind === 'researcher'
     ? writeCapableDelegationToolNames(childCtx)
     : []
   const raw = (delegationsDenied || researchDeny.length > 0)
@@ -406,7 +415,8 @@ export function applyChildComposition(
     hardCeiling: hardCeilingFor({
       // 2026-09-26 用户裁定：隔离**不是**档位天花板（两个轴：guard 守写边界、档位是权限面），
       // 故这里只看只读研究。理由见 hardCeilingFor 的头注。
-      ...composition.kind === 'researcher' ? { pinReadOnly: true } : {},
+      // fork（corum）2026-09-29：与人格/deny 共用 resolvedKind（含 conductor 兜底）。
+      ...resolvedKind === 'researcher' ? { pinReadOnly: true } : {},
     }),
     // 2026-09-27 用户裁定：**主仓目标不可提权**。只给隔离子 Agent —— 主 Agent 与派到 main
     // 上工作的集成者保留完整的 bash / 合并能力（T4 只约束隔离子 Agent）。给了它之后，
@@ -420,26 +430,26 @@ export function applyChildComposition(
  * 组装一个子 Agent 的角色人格（三段拼装，见 {@link applyChildComposition} 的注释）。
  *
  * 返回 `undefined` = 不替换人格（`kind` 未声明且父非指挥模式 ⇒ 维持既有继承行为）。
+ *
+ * fork（corum）2026-09-29：conductor 兜底**上移到** `applyChildComposition`（在那里解析
+ * `resolvedKind`，人格与 deny 共用同一个值）。本函数只看传入的 `kind`，不再自行查 conductor
+ * 服务——这消除了「人格看了兜底、deny 没看」的不一致（用户已确认的 bug）。
  * @param childCtx - 已 join 父 preset 的子 scope。
- * @param parent - 委派方（取它的会话 id 查工作风格人格）。
- * @param composition - 本次子 Agent 的组合声明。
- * @param conductor - `corumConductor` 服务（可选）。
+ * @param parent - 委派方（保留形参以便将来按 ctx/parent 裁剪）。
+ * @param kind - 已解析的子 Agent 种类（含 conductor 兜底后的值；`undefined` = 不替换人格）。
+ * @param personaHint - 主 Agent 注入的叠加层人格（可空）。
  * @returns 替换用的人格文本，或 `undefined`。
  */
 export function childPersonaOf(
   childCtx: Context,
   parent: Agent,
-  composition: ChildComposition,
-  conductor: ConductorFace | undefined,
+  kind: ChildKind | undefined,
+  personaHint: string | undefined,
 ): string | undefined {
-  const parentId = String(parent.session.id)
   const parts: string[] = []
-  if (composition.kind === 'researcher') parts.push(RESEARCHER_ROLE)
-  else if (composition.kind === 'worker') parts.push(CHILD_WORKER_ROLE)
-  else if (conductor !== undefined && conductor.isConductor(parentId)) {
-    // 兼容路径：`kind` 未声明但父是指挥模式 ⇒ 维持 2026-09-11 的执行者语义。
-    parts.push(CHILD_WORKER_ROLE)
-  } else {
+  if (kind === 'researcher') parts.push(RESEARCHER_ROLE)
+  else if (kind === 'worker') parts.push(CHILD_WORKER_ROLE)
+  else {
     return undefined
   }
   /**
@@ -452,11 +462,12 @@ export function childPersonaOf(
    * 都不再影响子 Agent（主 Agent 自身仍按设置走）。
    */
   parts.push(CHILD_WORK_STYLE)
-  if (composition.personaHint !== undefined && composition.personaHint.trim() !== '') {
-    parts.push(composition.personaHint.trim())
+  if (personaHint !== undefined && personaHint.trim() !== '') {
+    parts.push(personaHint.trim())
   }
-  // childCtx 目前未用于取片段（保留形参以便将来按 ctx 裁剪），显式消费避免 lint 报未用。
+  // childCtx / parent 目前未用于取片段（保留形参以便将来按 ctx 裁剪），显式消费避免 lint 报未用。
   void childCtx
+  void parent
   return parts.join('\n\n')
 }
 
