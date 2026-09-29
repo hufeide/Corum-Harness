@@ -3582,7 +3582,7 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error('tool-subagent: `modelSelectionSettings` requires an Agent or preset scope')
   }
 
-  const selectForAgent = (agent: NonNullable<Context['agent']>): ModelSelectionPolicy | undefined => {
+  const selectForAgent = (agent: Agent): ModelSelectionPolicy | undefined => {
     const freshSession = agent.session.firstLiveSeq === 0
       && agent.session.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
     let allowedModels = subagentModelSelectionPolicy(ctx.sessionProjections, agent.session)
@@ -3606,9 +3606,17 @@ export function apply(ctx: Context, config: Config): void {
     return allowedModels === undefined ? undefined : { routes: allowedModels }
   }
 
-  const agent = ctx.agent
-  if (agent !== undefined) {
-    install(ctx, selectForAgent(agent))
+  // 0.1.5 起 `ctx.agent` accessor 已删除（官方改为 `apply(ctx, config, session?)` 的 Session 轴）。
+  // corum 这块**恒不生效**（`compile.ts` 恒传 `modelSelectionSettings: false`，见该处注释与
+  // tests/model-policy.spec.ts 的断言）⇒ 这里按**等价语义**保留 Agent 轴：用当前 ctx 的 scope
+  // 在 Agent 注册表里找归属同一 scope 的存活 Agent（旧 accessor 的语义就是"本 ctx 绑定的 Agent"）。
+  const ownScope = scopeOf(ctx)
+  const registryForScope = ctx.get('agents')
+  const boundAgent = ownScope === undefined || registryForScope === undefined
+    ? undefined
+    : registryForScope.list().find(candidate => scopeOf(candidate.ctx) === ownScope)
+  if (boundAgent !== undefined) {
+    install(ctx, selectForAgent(boundAgent))
     return
   }
   const agents = ctx.get('agents')

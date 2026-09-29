@@ -94,7 +94,9 @@ describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () 
   it('机制锚点：提权应答器存在（ask 必须有应答者，否则等于把旧承诺换成新幻象）', () => {
     // 提示词说「重试会被裁决」⇒ 机制里必须真有裁决者。缺了它，ask 策略下子会话的
     // 请求会落到 fail-closed 的 unavailable，那句话就又变成假的。
-    expect(CHILD_AGENT_SRC).toContain('installEscalationAnswerer(childCtx, {')
+    // 2026-09-29：0.1.5 升级后 `installEscalationAnswerer` 增加 `childAgent` 形参
+    //（官方 0.1.5 删除 `ctx.agent` accessor，改由 setup 第二参传入）⇒ 锚点同步。
+    expect(CHILD_AGENT_SRC).toContain('installEscalationAnswerer(childCtx, childAgent, {')
     expect(ESCALATION_ANSWERER_SRC).toContain('decideEscalation({ requested: request.mode')
   })
 
@@ -219,7 +221,7 @@ const CLAIMS: ReadonlyArray<{
     sourceName: 'corumSandboxEscalationLines()',
     mechanism: CHILD_AGENT_SRC,
     mechanismName: 'corum-subagent/src/child-agent.ts',
-    mechanismAnchor: 'installEscalationAnswerer(childCtx, {',
+    mechanismAnchor: 'installEscalationAnswerer(childCtx, childAgent, {',
   },
   // ④ 主仓目标的提权**连卡都不出**（2026-09-27 用户裁定「不可提权获得」；机制锚点 =
   //    应答器复用隔离门禁的同一判定后直接判 refuse 的那一支）
