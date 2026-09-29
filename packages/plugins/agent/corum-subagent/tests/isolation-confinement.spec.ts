@@ -30,7 +30,6 @@ import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import { MockAdapter, textResponse } from './mock-adapter.ts'
@@ -57,7 +56,7 @@ async function setup(script: Script) {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
-  await ctx.plugin(SessionProjectionRegistry)
+  // The registry is mounted by mountAgentLoopTestDependencies since 0.1.5.
   const root = mkdtempSync(join(tmpdir(), 'corum-isolation-confinement-'))
   roots.push(root)
   await ctx.plugin(JsonlSessionPersistence, { root })

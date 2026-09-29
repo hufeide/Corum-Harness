@@ -12,6 +12,7 @@ import SessionStore, { SessionLogOffset, SessionSeq, SESSION_FORMAT_VERSION, Ses
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { SessionPersistenceCorruptionError } from '@deepseek-ai/dsh-session-persistence'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import SessionProjectionCache from '@deepseek-ai/dsh-session-projection-cache'
@@ -45,15 +46,17 @@ afterEach(() => {
 /** Boot the continuable stack with real JSONL session persistence. */
 async function setup(
   script: Script,
-  options: { sessionProjections?: boolean; projectionCache?: boolean } = {},
+  options: { projectionCache?: boolean } = {},
 ) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
+  // The projection registry is mounted by mountAgentLoopTestDependencies
+  // since 0.1.5 (AgentLoopTestDependenciesOptions exposes no skip flag), so
+  // both AgentLoop and SubagentRuntime consume the same registry service.
   const root = mkdtempSync(join(tmpdir(), 'dsh-subagent-list-'))
   roots.push(root)
   await ctx.plugin(JsonlSessionPersistence, { root })
   await ctx.plugin(AgentLoop, { agents: [] })
-  if (options.sessionProjections !== false) await ctx.plugin(SessionProjectionRegistry)
   if (options.projectionCache === true) {
     const root = mkdtempSync(join(tmpdir(), 'dsh-subagent-projcache-'))
     projCacheRoots.push(root)
@@ -158,6 +161,35 @@ function mutateStoredHeader(
   }
 }
 
+/**
+ * Serve one cold session's read handle so its `read()` rejects with a
+ * SessionPersistenceCorruptionError, exercising the listing's
+ * `SESSION_QUERY_CORRUPT_SESSION → corrupt` branch without a physically
+ * invalid artifact (the v3 codec now rejects malformed surface events at
+ * write time, so a corrupt body can no longer be seeded through the handle).
+ */
+function poisonStoredRead(ctx: Context, target: SessionId): void {
+  const originalOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
+  ctx.sessionPersistence.open = async (sessionId, access, options) => {
+    const handle = await originalOpen(sessionId, access, options)
+    if (sessionId !== target) return handle
+    return {
+      id: handle.id,
+      access: handle.access,
+      header: handle.header,
+      inheritedEventCount: handle.inheritedEventCount,
+      read: () => Promise.reject(new SessionPersistenceCorruptionError(
+        `session "${target}": stored log is corrupt: poisoned read for test`,
+        { cause: new Error('poisoned read for test') },
+      )),
+      append: (events, appendOptions) => handle.append(events, appendOptions),
+      flush: flushOptions => handle.flush(flushOptions),
+      close: () => handle.close(),
+      [Symbol.asyncDispose]: () => handle[Symbol.asyncDispose](),
+    }
+  }
+}
+
 /** Minimal complete-turn child log with one descriptor payload. */
 function childEvents(descriptor: unknown): SessionEvent[] {
   return [
@@ -243,8 +275,14 @@ describe('SubagentRuntime.listChildren', () => {
   })
 
   it('fails loud when the projection registry is not mounted, even with no children', async () => {
-    const { ctx, parent } = await setup([], { sessionProjections: false })
-    await expect(ctx.subagents.listChildren(parent.id)).rejects.toThrow(
+    // The testkit always mounts the registry since 0.1.5, so the
+    // "registry absent" guard is verified through a minimal hand-built
+    // context that mounts only SubagentRuntime (no projection registry,
+    // no session store, no query engine). prepareListing checks the
+    // projection registry first and throws before touching any corpus.
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    await expect(ctx.subagents.listChildren(SessionId('no-projections-parent'))).rejects.toThrow(
       expect.objectContaining({ code: 'SUBAGENT_CONTROL_PROJECTIONS_UNAVAILABLE' }) as Error,
     )
   })
@@ -650,21 +688,18 @@ describe('SubagentRuntime.listChildren', () => {
 
   it('maps a child rejected by persistence validation to corrupt', async () => {
     const { ctx, parent } = await setup([])
-    // The surface-eligible user/message lacks its required surfaceOp, so the
-    // first-party inspection rejects before any projection fold can run.
+    // The v3 codec now rejects a surface-eligible user/message without its
+    // surfaceOp marker at write time, so a corrupt body can no longer be
+    // seeded through the handle. The first-party inspection rejection is
+    // instead exercised by a durable child whose read path is poisoned: the
+    // observation throws SessionPersistenceCorruptionError, which the query
+    // surfaces as SESSION_QUERY_CORRUPT_SESSION, and resolveColdIdentity maps
+    // that to a stable `corrupt` diagnostic before any projection fold runs.
     const invalid = await authorChild(ctx, '00000000-0000-4000-8000-0000000000ee', {
       parentSession: parent.id,
       origin: 'subagent',
-    }, [
-      { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1, trigger: { kind: 'message', source: { kind: 'user' } } } },
-      {
-        type: 'user/message',
-        seq: SessionSeq(1),
-        time: 2,
-        data: createUserMessage({ content: [{ type: 'text', text: 'work' }], source: { kind: 'user' } }),
-      },
-      { type: 'subagent/descriptor', seq: SessionSeq(2), time: 3, data: descriptorPayload('broken surface') },
-    ] as SessionEvent[])
+    }, childEvents(descriptorPayload('broken surface')))
+    poisonStoredRead(ctx, invalid)
     const entries = await ctx.subagents.listChildren(parent.id)
     expect(entries).toEqual([{ kind: 'diagnostic', id: invalid, reason: 'corrupt' }])
   })
@@ -827,7 +862,7 @@ describe('SubagentRuntime.listChildren', () => {
         content: [{ type: 'text', text: 'summary of everything' }],
         source: { kind: 'plugin', plugin: 'compact' },
       }),
-      surfaceOp: { op: 'replace', start: SessionSeq(1), end: SessionSeq(1) },
+      surfaceOp: { op: 'replace', startSeq: SessionSeq(1), endSeq: SessionSeq(1) },
       sourceEventSeqs: [SessionSeq(1)],
     })
     const compacted = await authorChild(ctx, '00000000-0000-4000-8000-00000000c1de', {
@@ -1105,8 +1140,13 @@ describe('SubagentRuntime.listChildren', () => {
   })
 
   it('SubagentError from listChildren is typed with its stable code', async () => {
-    const { ctx, parent } = await setup([], { sessionProjections: false })
-    const caught: unknown = await ctx.subagents.listChildren(parent.id).catch((error: unknown) => error)
+    // The testkit always mounts the registry since 0.1.5, so the
+    // "registry absent" path is verified through a minimal hand-built
+    // context that mounts only SubagentRuntime. prepareListing checks the
+    // projection registry first and throws before touching any corpus.
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    const caught: unknown = await ctx.subagents.listChildren(SessionId('no-projections-parent')).catch((error: unknown) => error)
     expect(caught).toBeInstanceOf(SubagentError)
     expect((caught as SubagentError).code).toBe('SUBAGENT_CONTROL_PROJECTIONS_UNAVAILABLE')
   })
@@ -1341,8 +1381,13 @@ describe('SubagentRuntime.listDescendants', () => {
   })
 
   it('fails loud when the projection registry is not mounted', async () => {
-    const { ctx, parent } = await setup([], { sessionProjections: false })
-    await expect(ctx.subagents.listDescendants(parent.id)).rejects.toThrow(
+    // The testkit always mounts the registry since 0.1.5, so the
+    // "registry absent" guard is verified through a minimal hand-built
+    // context that mounts only SubagentRuntime. prepareListing checks the
+    // projection registry first and throws before touching any corpus.
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    await expect(ctx.subagents.listDescendants(SessionId('no-projections-root'))).rejects.toThrow(
       expect.objectContaining({ code: 'SUBAGENT_CONTROL_PROJECTIONS_UNAVAILABLE' }) as Error,
     )
   })

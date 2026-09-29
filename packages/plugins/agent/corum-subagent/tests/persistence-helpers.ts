@@ -10,7 +10,10 @@ export async function loadStoredSession(
 ): Promise<{ meta: SessionHeader; inheritedEventCount: SessionLogOffset; events: readonly SessionEvent[] }> {
   const handle = await persistence.open(id, 'read')
   try {
-    return { meta: handle.header, inheritedEventCount: handle.inheritedEventCount, events: await handle.read() }
+    // SessionHandle.read returns a SessionHandleReadResult ({ eventState, events })
+    // since 0.1.5; surface only the event slice so callers keep the array shape.
+    const { events } = await handle.read()
+    return { meta: handle.header, inheritedEventCount: handle.inheritedEventCount, events }
   } finally {
     await handle.close()
   }
