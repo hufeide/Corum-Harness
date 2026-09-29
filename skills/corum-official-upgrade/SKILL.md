@@ -7,7 +7,7 @@ description: Use when upgrading this repo (corum Agent OS / kkc-desktop) to a ne
 
 本技能是**升级**这件事的可执行投影。规则的家仍是 `docs/dev-conventions.md`，
 逐包台账是 `docs/fork-delta.md`（18 个 fork 包 + §5 runbook），
-**本次（0.1.3-alpha.1 → 0.1.5-rc.3）的逐步实录与全部坑**在 `docs/UPGRADE-0.1.7-rc2.md`（活文档，边做边追加）。
+**本次（0.1.3-alpha.1 → 0.1.5-rc.3）的逐步实录与全部坑**在 `docs/UPGRADE-0.1.5-rc3.md`（活文档，边做边追加）。
 两者冲突时以文档为准，并回来修本技能。
 
 ## 0. 一句话
@@ -193,7 +193,7 @@ pnpm --filter @corum/<pkg> run typecheck && pnpm -r typecheck
 DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=<tag> ./scripts/verify-fork-drift.sh
 ```
 
-之后：更新 `docs/UPGRADE-0.1.7-rc2.md` 与台账 + 提交。
+之后：更新 `docs/UPGRADE-0.1.5-rc3.md` 与台账 + 提交。
 
 > **该方法已被反向验证**：拿 `corum-api-remotes` **修复前**的状态跑 `check-fork-increments.sh`，
 > 精确报出 **11 行官方缺失**（正是当时漏掉的那批）⇒ 脚本确实能拦住"子 Agent 漏合"。
@@ -354,7 +354,7 @@ grep -rl '"@deepseek-ai/dsh-<名>"' packages --include=package.json | grep -vE '
 
 ## 8. 收尾纪律
 
-- 每完成一个包：**更新 `docs/UPGRADE-0.1.7-rc2.md`（活文档，追加本包结论）+ `docs/tasks/log.jsonl` 台账 + 提交**。
+- 每完成一个包：**更新 `docs/UPGRADE-0.1.5-rc3.md`（活文档，追加本包结论）+ `docs/tasks/log.jsonl` 台账 + 提交**。
 - **如实标注没做的事**（本场明确写了"只做版本对齐 + 编译，未跑测试/打包/实机"）。
 - 发现自己的判断错误要**写进文档**（本场三处：误把 `credentials-local` 当未 fork 包、
   误按"就地改写"做锚点、误改注释里的官方包名导致守卫判红）—— 这些比成功经验更值钱。
