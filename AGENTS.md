@@ -86,6 +86,19 @@
   (2026-09), but its **§C3a still carries an uncorrected superseded
   "precondition not met" conclusion** — `NEXT-PHASE-DEFERRED.md` wins.
   (Tracked: ledger `docs.audit.c3a-contradiction`.)
+- `docs/HANDOFF-2026-09-29-official-0.1.5-upgrade.md` — **最新交接**
+  （2026-09-29 官方基座升级场：**0.1.3-alpha.1 → 0.1.5-rc.3 全量升级已完成** ✓
+  三项守卫全绿：全仓 `--force` typecheck **0 错** / 测试 **1932 通过 0 失败** / fork-drift **通过** ✓。
+  **§2 = 三条必读方法论**：① `tsc -b` 是增量编译会藏住破坏点（**必须 `--force`** ✗ 否则 31 处报错看不见）；
+  ② 官方 npm 包有**系统性打包缺陷**（运行时依赖被放进 `devDependencies` ✓ 本场遇 2 处 ✓
+  **判定必须直接验证能否解析** ✗ 别信扫描脚本 ✓）；③ **实机验证不可替代**（本场抓出 2 个编译期发现不了的真 bug：
+  侧栏插件 `require("anser") missed the module table` + 历史会话 `lacks "senderSessionId"` ✓）。
+  **§3 = 交付**（基座切换 137 条 override ✓ / `corum-subagent` **1929→697** 贴官方四文件结构
+  且三块旗舰增量保留 ✓ / 一个真 bug 修复：`childPersonaOf` 兜底与 deny 不一致 ✓ / UI fork 4 包适配 ✓）。
+  **§4 = 未完成与注意**（一处可见性变化**已裁决收口** ✓ / 14 个无法迁移的 v2 会话**已按裁决清除并备份**在
+  `~/.corum/sessions-removed-20260929/` ✓ / `standardRows` 对账**已完成无需改动** ✓ / `pwsh-persistent` 记账未动 ✓）。
+  **§5 = 我本场犯的 5 个错**（增量编译被骗 / 夹具改错两次 / 扫描脚本误报两次 / 措辞夸大 / 造场景未验证生效就先解释 ✓）。
+  逐步实录在 `docs/UPGRADE-0.1.7-rc2.md`（**35 个步骤**）。**下个 session 从这里开始。**）
 - **`corum-official-upgrade` 技能** — 官方基座升级的可执行投影（源：`skills/corum-official-upgrade/SKILL.md`）：
   目标版本**整套装齐**的判据（0.1.7-rc.2 实测缺 5 个包 ⇒ 不可用；0.1.5 系列 189/189 ✓）、
   逐包循环（包声明 + 根 override **必须同时改**）、fork 合并手法（官方为底 + 贴回 corum 增量）、
