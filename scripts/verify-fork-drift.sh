@@ -899,11 +899,13 @@ else
     pass "overrides 未使用无效的 glob 写法"
   fi
   # 计数口径：注释掉的 override 行不算（否则删光真行、只留注释也能过 ≥150 门槛）。
-  pinned=$(uncomment_all "$WORKSPACE_YAML" | grep -cE "^  '@deepseek-ai/dsh-[^']*': '0.1.3-alpha.1'$")
+  # 2026-09-29 升级 0.1.5-rc.3：目标版本随升级推进（此前是 0.1.3-alpha.1）。
+  # 判据 = 「每个 dsh 包都被逐个钉到当前目标版本」，门槛 150 是覆盖面下限。
+  pinned=$(uncomment_all "$WORKSPACE_YAML" | grep -cE "^  '@deepseek-ai/dsh-[^']*': '0\\.1\\.5-rc\\.3'$")
   if [ "$pinned" -ge 150 ]; then
-    pass "逐个钉定 $pinned 个 dsh 包到 0.1.3-alpha.1"
+    pass "逐个钉定 $pinned 个 dsh 包到 0.1.5-rc.3"
   else
-    fail "只钉了 $pinned 个 dsh 包（预期 ≥150）——deploy 会重新解析出 alpha.2"
+    fail "只钉了 $pinned 个 dsh 包（预期 ≥150）——deploy 会重新解析出其它版本"
   fi
 fi
 if [ -f "$PACK_SCRIPT" ] && code_has "assertUniformDshVersions" "$PACK_SCRIPT"; then
@@ -1141,14 +1143,26 @@ OFFICIAL_SUBAGENT="$DSH_CHECKOUT/packages/subagent/subagent"
 # 允许有差异的文件（围绕 cwd 透传；invariant 是模板改名）+ 2026-09-20 子 Agent 人格分层：
 #   · descriptor.ts —— durable 描述符增 kind/personaHint（人格按种类重放，��落盘会漂移）；
 #   · 新增 child-roles.ts —— 两份角色契约（执行者/调查员）+ 注入层上限，官方无对应物。
-SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts descriptor.ts depth.ts index.ts invariant.ts"
-SUBAGENT_NEW_FILES="child-roles.ts"
+# 2026-09-29 升级 0.1.5-rc.3 后重登：官方把 continuation.ts 拆成 4 文件，故新增
+# continuation-activation.ts / continuation-messages.ts / inbox.ts 也属「登记为有差异」
+# （它们是 hybrid：官方为底 + corum 三块旗舰增量贴回）；其余为长期 fork 面。
+SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts descriptor.ts depth.ts index.ts invariant.ts continuation-activation.ts continuation-messages.ts inbox.ts assistant-output.ts client.ts control.ts control-types.ts internal.ts out-of-process.ts projection-types.ts"
+SUBAGENT_NEW_FILES="child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts spawn"
 if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
   drift=0
   for official_file in "$OFFICIAL_SUBAGENT"/src/*.ts; do
     base="$(basename "$official_file")"
     fork_file="$SUBAGENT_FORK/src/$base"
     if [ ! -f "$fork_file" ]; then
+      # 2026-09-29 升级 0.1.5-rc.3：官方新增 catalog.ts（parent-owned durable
+      # catalog 持久化）。用户已裁决**暂不引入**（corum 的 listChildren 走
+      # sessionPersistence 扫描，已工作；引入会多一套名册来源）。故登记为「有意不引入」，
+      # 不视为漂移；将来引入时删掉本分支即可。
+      case "$base" in
+        catalog.ts)
+          continue
+          ;;
+      esac
       fail "fork #9 缺官方文件 src/$base"
       drift=1
       continue
