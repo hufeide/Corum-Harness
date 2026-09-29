@@ -308,6 +308,26 @@ grep -rl '"@deepseek-ai/dsh-<名>"' packages --include=package.json | grep -vE '
 
 ## 6. 验证与验收
 
+### ⚠️⚠️ 第一铁律：`tsc -b` 是**增量**编译，会**藏住**依赖升级造成的破坏点
+
+**实测事故（2026-09-29）**：升级 `node_modules` 里的官方包（**源码没动**）后跑
+`pnpm -r typecheck` ⇒ **全绿** ✗；同一棵树用 `pnpm -r typecheck --force` ⇒ **5 个包 / 31 处报错** ✗✗。
+
+**原因**：`tsc -b` 只重编**源码变了**的文件；依赖的 `.d.ts` 变了但它**不认为需要重编** ⇒ 报 0 错 ✗。
+
+**纪律**：
+- **每个包升级后**，验收必须包含 **`--force` 的真全量**：
+  ```bash
+  pnpm --filter @corum/<pkg> run typecheck --force      # 单包真全量
+  pnpm -r --no-bail typecheck --force                   # 全仓真全量（--no-bail 一次看全）
+  ```
+- **`pnpm -r typecheck`（不带 --force）不能作为"依赖升级没破坏代码"的证据** ✗ —— 它只证明"上次编过的东西还编得过"。
+- ⚠️ 但 **UI 包（8 个）与逻辑包的 `--force` 结果要分开看**：升级官方 UI 包 API 后，我们 fork 的
+  `src/client/**` 用旧 API ⇒ **必然报错** ⇒ 这意味着「**UI 包只升依赖、不改 src**」这条口径
+  **在官方 API 有破坏性变更时不成立** ✗ —— 必须**适配 src**（机械适配 ≠ 合并官方 UI 设计）。
+
+
+
 - **每个包**：单包 `typecheck` + **全仓 `typecheck`**（每步都跑，别攒着）+ **提交**（粒度 = 一个包一个提交，可独立回滚）。
 - **必跑 `pnpm -r build`**：`tsc` 发现不了"缺导出"（`MISSING_EXPORT`）——
   实测 `dsh-client-ui-primitives@0.1.7` 需要 `dsh-util-workspace-path` 的 `pathPartsOf`，

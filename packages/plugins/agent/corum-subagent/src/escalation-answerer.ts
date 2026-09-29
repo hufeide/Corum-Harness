@@ -390,11 +390,11 @@ function isSessionGranted(deps: EscalationAnswererDeps): boolean {
  * @param deps - 依赖面（见 {@link EscalationAnswererDeps}）。
  * @returns 是否真的安装了（未安装时调用方**不得**把子会话策略改成 `ask`）。
  */
-export function installEscalationAnswerer(childCtx: Context, deps: EscalationAnswererDeps): boolean {
+export function installEscalationAnswerer(childCtx: Context, childAgent: Agent, deps: EscalationAnswererDeps): boolean {
   const approval = (deps.parent.ctx as unknown as { get: (name: string) => unknown })
     .get('approval') as ApprovalFace | undefined
   if (approval === undefined || typeof approval.request !== 'function') return false
-  const child = childCtx.agent as Agent | undefined
+  const child: Agent = childAgent
   childCtx.on('approval/request' as never, (async (
     request: { readonly agent?: Agent, readonly toolName?: string, readonly callId?: string, readonly signal?: AbortSignal },
     next: () => Promise<ApprovalOutcome>,

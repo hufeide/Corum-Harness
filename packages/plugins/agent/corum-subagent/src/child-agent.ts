@@ -259,6 +259,7 @@ export const SUBAGENT_DELEGATION_CONTEXT
  */
 export function applyChildComposition(
   childCtx: Context,
+  childAgent: Agent,
   parent: Agent,
   composition: ChildComposition,
 ): void {
@@ -304,8 +305,8 @@ export function applyChildComposition(
   const persona = composition.persona ?? childPersonaOf(childCtx, parent, composition, conductor)
   if (persona !== undefined) {
     childCtx.systemPrompt.section({
-      name: 'deployment:persona',
-      order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA'),
+      name: 'deployment:persona-prefix',
+      order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
       text: persona,
     })
   }
@@ -369,7 +370,7 @@ export function applyChildComposition(
   const confinementScope: ConfinementScope | undefined = composition.confined !== true
     ? undefined
     : ((): ConfinementScope | undefined => {
-        const root = childCtx.agent?.session.header.cwd
+        const root = childAgent.session.header.cwd
         if (root === undefined || root === '') return undefined
         const parentTree = parent.session.header.cwd
         return {
@@ -400,7 +401,7 @@ export function applyChildComposition(
    *
    * 未装成（该部署没有 `approval` 服务）⇒ 不改变任何既有行为（那条策略同时也是 `undefined`）。
    */
-  installEscalationAnswerer(childCtx, {
+  installEscalationAnswerer(childCtx, childAgent, {
     parent,
     hardCeiling: hardCeilingFor({
       // 2026-09-26 用户裁定：隔离**不是**档位天花板（两个轴：guard 守写边界、档位是权限面），
