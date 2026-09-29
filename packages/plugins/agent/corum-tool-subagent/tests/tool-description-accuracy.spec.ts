@@ -27,6 +27,64 @@ const NON_READONLY_BLOCK = SRC.indexOf('...corumReadonlyResearch ? {} : {')
 /** 从条件块之后找第一次出现（用于确认参数确实在块内）。 */
 const after = (needle: string): number => SRC.indexOf(needle, NON_READONLY_BLOCK)
 
+/**
+ * 取某 baseMode 编译产物的 persona 行 config（编译产物里读，不读源码文本）。
+ *
+ * `compilePreset` 的返回结构若变化，本 helper 会 fail-loud（抛错而不是静默返回空对象）。
+ * @param mode - 基础模式 id。
+ * @returns persona 行的 config。
+ */
+function personaRowOfMode(mode: string): Record<string, unknown> {
+  const { cordisYml } = compilePreset({
+    id: `probe-${mode}`,
+    nickname: `探针-${mode}`,
+    title: '',
+    dimension: '研发',
+    baseMode: mode,
+    prompt: '',
+    model: { provider: 'localhost', model: 'deepseek-v4-pro' },
+    skills: [],
+    mcpServers: [],
+    terminal: { mode: 'sandbox' },
+    memoryPolicy: { scope: 'agent' },
+    version: 1,
+    trust: 'user',
+  } as never)
+  const lines = cordisYml.split('\n')
+  const i = lines.findIndex(l => /^- id: persona\s*$/.test(l))
+  if (i < 0) throw new Error(`compilePreset(${mode}) 产物里没有 persona 行`)
+  const out: Record<string, unknown> = {}
+  let key: string | null = null
+  let buf: string[] = []
+  const flush = (): void => {
+    if (key === null) return
+    out[key] = buf.join('\n').trim()
+    key = null
+    buf = []
+  }
+  for (let k = i + 1; k < lines.length; k += 1) {
+    const l = lines[k]
+    if (/^- id: /.test(l)) break
+    const kv = /^\s{4}([a-zA-Z]+):\s*(.*)$/.exec(l)
+    if (kv !== null) {
+      flush()
+      key = kv[1]
+      const raw = kv[2].trim()
+      // 折叠/字面块（>- / |- / > / |）表示后面还有缩进内容
+      if (/^[>|][-+]?$/.test(raw)) { buf = []; continue }
+      // YAML 字符串会被渲染成带引号的形式（`renderRows` 的行为）⇒ 断言前先剥引号，
+      // 否则 `prefix: "You are …"` 与期望的裸文本对不上（实测踩过）。
+      const unquoted = /^"(.*)"$/.test(raw) ? raw.slice(1, -1) : raw
+      out[key] = unquoted === 'true' ? true : unquoted === 'false' ? false : unquoted
+      key = null
+      continue
+    }
+    if (key !== null && /^\s{6,}\S/.test(l)) buf.push(l.trim())
+  }
+  flush()
+  return out
+}
+
 describe('工具描述准确性：只读实例（subagent_research）不得继承写向能力面', () => {
   it('描述头按能力面分档：只读实例有自己的只读文案', () => {
     expect(NON_READONLY_BLOCK).toBeGreaterThan(-1)
@@ -158,14 +216,32 @@ describe('投送：执行纪律段的两条注入路径', () => {
     expect(body).not.toContain('ctx.tools.get(')
   })
 
-  it('② minimal：纪律被追加进编译出的人格段（complete 模式唯一通路）', () => {
-    expect(COMPILE).toContain('personaTextWithDiscipline')
+  // 2026-09-29 用户裁决：「minimal 保持官方原汁原味，我们的 Agent 预设不再允许继承此模式，
+  // 只内置一个继承此模式的极简助手」。⇒ minimal 下**不再**把 corum 纪律/输出语言拼进人格段
+  // （旧断言 `personaTextWithDiscipline` 已随该裁决删除）。本条改为断言**新契约**：
+  // ① 编译明确区分 minimal 分支；② minimal 的 persona 行只给官方原文 + complete，
+  // 不给 suffix、不拼任何 corum 内容。
+  it('② minimal：persona 保持官方原文（不再拼 corum 纪律/输出语言 —— 2026-09-29 用户裁决）', () => {
     expect(COMPILE).toContain('isComplete')
-    expect(COMPILE).toContain('text: personaTextWithDiscipline,')
+    // minimal 分支给出官方原文
+    expect(COMPILE).toContain('You are a helpful software engineer assistant.')
+    // 旧的通路（把纪律拼进 persona）不得复活
+    expect(COMPILE).not.toContain('personaTextWithDiscipline')
+    expect(personaRowOfMode('minimal')).toMatchObject({
+      prefix: 'You are a helpful software engineer assistant.',
+      suffix: '',
+      complete: true,
+      includeRuntimeContext: false,
+    })
   })
 
-  it('★ minimal 编译产物**真的**含两块纪律（编译级投送证据）', () => {
-    const text = JSON.stringify(compilePreset({
+  // 2026-09-29 用户裁决（本文档上一条已说明）：minimal **保持官方原汁原味** ⇒
+  // 不再把 corum 纪律/输出语言拼进人格段、suffix 为空。本条保留原来的**约束价值**：
+  // ① minimal 的 persona 行必须是官方原文 + complete；
+  // ② minimal 的提示词**不得点名它没有的工具**（指令与能力矛盾，2026-09-27 审查员 C 报）；
+  // ③ 反过来断言"corum 纪律/输出语言不再出现"（旧行为的防复活断言）。
+  it('★ minimal：persona 恒为官方原文、不含 corum 纪律/输出语言，且不点名不存在的工具', () => {
+    const compiled = compilePreset({
       id: 'minimal-discipline-probe',
       nickname: '极简纪律探针',
       title: '探针',
@@ -179,20 +255,27 @@ describe('投送：执行纪律段的两条注入路径', () => {
       memoryPolicy: { scope: 'agent' },
       version: 1,
       trust: 'user',
-    } as never))
-    expect(text).toContain('EFFICIENCY DISCIPLINE')
-    expect(text).toContain('SANDBOX DENIALS AND ESCALATION')
-    // 2026-09-27 P10：minimal 是 complete ⇒ 输出语言段也进不来，已追加进人格段（占位符须已插值）。
-    expect(text).toContain('OUTPUT LANGUAGE')
-    expect(text).toContain('final answer to the user must be in the language the user writes in')
-    // 占位符在**编译产物里**本就是字面量（插值发生在组装时）⇒ 不断言它不存在。
-    // 2026-09-27（审查员 C 报）：minimal 被裁到 persona/tool-bash/filesystem/tool-fs
-    // ⇒ 提示词里**不得**点名它没有的工具（指令与能力矛盾）。
+    } as never)
+    const text = JSON.stringify(compiled)
+
+    // ① persona 行 = 官方原文 + complete（用户裁决）
+    expect(personaRowOfMode('minimal')).toMatchObject({
+      prefix: 'You are a helpful software engineer assistant.',
+      suffix: '',
+      complete: true,
+      includeRuntimeContext: false,
+    })
+
+    // ② 不点名 minimal 没有的工具（保留 2026-09-27 审查员 C 的约束）
     for (const absent of ['`grep`', '`glob`', '`job_output`', '`job_kill`', 'subagent', 'orchestrate']) {
       expect(text, `minimal 提示词点名了不存在的工具：${absent}`).not.toContain(absent)
     }
-    // 沙箱块是工具无关的 ⇒ 必须整段在（单一事实源）。
-    expect(text).toContain('sandbox_permissions')
+
+    // ③ 防复活：corum 纪律与输出语言**不得**再出现在 minimal 的编译产物里
+    //    （它们的静态源仍在 corum-orchestration，供其它模式使用 —— 那是别的模式的通路）。
+    for (const gone of ['EFFICIENCY DISCIPLINE', 'SANDBOX DENIALS AND ESCALATION', 'OUTPUT LANGUAGE']) {
+      expect(text, `minimal 又注入了 corum 内容：${gone}`).not.toContain(gone)
+    }
   })
 
   it('子会话继承前提可审计（preset 生成 join）', () => {

@@ -30,6 +30,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { installTaskModelSelection } from '../src/task-model-selection.ts'
 import { VISION_CAPABILITY, VISION_SECTION } from '../src/vision.ts'
 
@@ -47,10 +48,12 @@ interface Assembly {
  */
 function makeCtx(inputModalities: string[]): {
   ctx: Context
+  agent: Agent
   run: () => Promise<Assembly>
   installedLayers: () => number
 } {
   const layers: Array<(a: unknown, c: unknown, next: () => Promise<Assembly>) => Promise<Assembly>> = []
+  const agent = { session: { id: 's1' } } as unknown as Agent
   const ctx = {
     on: (event: string, handler: unknown) => {
       if (event === 'system-prompt/assemble') {
@@ -62,7 +65,7 @@ function makeCtx(inputModalities: string[]): {
       }
     },
     llm: { resolveModelInfo: async () => ({ inputModalities }) },
-    agent: { session: { id: 's1' } },
+    agent,
   } as unknown as Context
 
   const base: Assembly = { sections: [{ name: 'base', text: 'base text' }], contexts: [], tools: [], variables: {} }
@@ -77,15 +80,15 @@ function makeCtx(inputModalities: string[]): {
     }
     return next()
   }
-  return { ctx, run, installedLayers: () => layers.length }
+  return { ctx, agent, run, installedLayers: () => layers.length }
 }
 
 const visionCount = (a: Assembly): number => a.sections.filter(s => s.name === VISION_SECTION).length
 
 describe('视觉能力段：装配后恰好一份', () => {
   it('单层安装（基线）：恰好一份，且排在末尾', async () => {
-    const { ctx, run } = makeCtx(['text', 'image'])
-    installTaskModelSelection(ctx, { current: { provider: 'p', model: 'm' }, assembled: undefined })
+    const { ctx, agent, run } = makeCtx(['text', 'image'])
+    installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: 'm' }, assembled: undefined })
     const a = await run()
     expect(visionCount(a)).toBe(1)
     expect(a.sections[a.sections.length - 1]?.name).toBe(VISION_SECTION)
@@ -94,27 +97,27 @@ describe('视觉能力段：装配后恰好一份', () => {
   })
 
   it('★ 两层安装（实机缺陷形态）：仍恰好一份', async () => {
-    const { ctx, run, installedLayers } = makeCtx(['text', 'image'])
+    const { ctx, agent, run, installedLayers } = makeCtx(['text', 'image'])
     // 建会话装一层；切 preset 的 fallback 分支又装一层（同一 agentCtx）
-    installTaskModelSelection(ctx, { current: { provider: 'p', model: 'first' }, assembled: undefined })
-    installTaskModelSelection(ctx, { current: { provider: 'p', model: 'second' }, assembled: undefined })
+    installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: 'first' }, assembled: undefined })
+    installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: 'second' }, assembled: undefined })
     expect(installedLayers()).toBe(2)
     const a = await run()
     expect(visionCount(a), '恰好一份 —— 实机缺陷形态下这里会是 2').toBe(1)
   })
 
   it('★ 三层安装也一样（幂等是结构性的，不是「两层特例」）', async () => {
-    const { ctx, run } = makeCtx(['text', 'image'])
+    const { ctx, agent, run } = makeCtx(['text', 'image'])
     for (const m of ['a', 'b', 'c']) {
-      installTaskModelSelection(ctx, { current: { provider: 'p', model: m }, assembled: undefined })
+      installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: m }, assembled: undefined })
     }
     expect(visionCount(await run())).toBe(1)
   })
 
   it('模型不支持视觉 ⇒ 一份都不注入（去重不能把它变成「总有一份」）', async () => {
-    const { ctx, run } = makeCtx(['text'])
-    installTaskModelSelection(ctx, { current: { provider: 'p', model: 'm' }, assembled: undefined })
-    installTaskModelSelection(ctx, { current: { provider: 'p', model: 'm2' }, assembled: undefined })
+    const { ctx, agent, run } = makeCtx(['text'])
+    installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: 'm' }, assembled: undefined })
+    installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: 'm2' }, assembled: undefined })
     const a = await run()
     expect(visionCount(a)).toBe(0)
     /**
@@ -133,8 +136,8 @@ describe('视觉能力段：装配后恰好一份', () => {
   })
 
   it('★ 外层已带一份视觉段时，最终也只有一份（去重是结构性的，不只是防本层重复）', async () => {
-    const { ctx, run } = makeCtx(['text', 'image'])
-    installTaskModelSelection(ctx, { current: { provider: 'p', model: 'm' }, assembled: undefined })
+    const { ctx, agent, run } = makeCtx(['text', 'image'])
+    installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: 'm' }, assembled: undefined })
     const a = await run()
     expect(visionCount(a)).toBe(1)
     // 再跑一次（模拟同一装配被复用/重入）不应累积
@@ -143,8 +146,8 @@ describe('视觉能力段：装配后恰好一份', () => {
   })
 
   it('视觉段文本用的仍是 vision.ts 的单一事实源', async () => {
-    const { ctx, run } = makeCtx(['text', 'image'])
-    installTaskModelSelection(ctx, { current: { provider: 'p', model: 'm' }, assembled: undefined })
+    const { ctx, agent, run } = makeCtx(['text', 'image'])
+    installTaskModelSelection(ctx, agent, { current: { provider: 'p', model: 'm' }, assembled: undefined })
     const a = await run()
     const sec = a.sections.find(s => s.name === VISION_SECTION)
     expect(sec?.text).toBe(VISION_CAPABILITY)

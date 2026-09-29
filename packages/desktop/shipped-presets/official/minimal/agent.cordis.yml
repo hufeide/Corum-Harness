@@ -6,10 +6,12 @@
 # the persistent shell (`bash` on POSIX, `pwsh` on win32) and
 # `str_replace_editor`. Context compaction is absent.
 
+# 0.1.5 起 `text` 改名 `prefix`（必填）。用户裁决 2026-09-29：minimal 保持官方原汁原味，
+# 且我们的 Agent 预设不再允许继承此模式（仅内置「极简模式」使用）。本行为对账源。
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: You are a helpful software engineer assistant.
+    prefix: You are a helpful software engineer assistant.
     complete: true
     includeRuntimeContext: false
 

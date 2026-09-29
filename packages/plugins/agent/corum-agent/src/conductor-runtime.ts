@@ -118,15 +118,19 @@ export class ConductorRuntime {
         text: '',
       }))
     }
-    // 基准模式（preset）追加指挥者角色段——部署人格（`deployment:persona`）保留；
+    // 基准模式（preset）追加指挥者角色段——部署人格（persona 行）保留；
     // orchestrator profile 的人格来自它自己的 preset（persona 行），不再追加（否则重复）。
-    // fork（corum）0.1.5 升级：`dsh-persona` 的 deployment persona 已从单 section 拆为
-    // prefix + suffix 两 section（`DEPLOYMENT_PERSONA_PREFIX` / `DEPLOYMENT_PERSONA_SUFFIX`），
-    // 旧的 `DEPLOYMENT_PERSONA` 已删。指挥者段排在 suffix 之后 ⇒ 稳稳落在整个 persona 块之后。
+    //
+    // **顺序语义（用户裁决 2026-09-29）**：指挥模式是**与 standard 平级的 5 个基本模式之一**
+    // ⇒「你是指挥者」是**该模式的身份**，不是附加说明 ⇒ 必须紧跟在基础身份之后（`PREFIX + 1`），
+    // 让模型先看到「你是编码 agent」再看到「你是指挥者」，两者连成一段身份。
+    // ⚠️ 不要用 `DEPLOYMENT_PERSONA_SUFFIX`（=10200）：那是官方留给「部署/本机附加信息」的位置，
+    // 在全部工具说明之后；指挥者身份放那里会把身份甩到提示词最末尾（已实测确认过该差异）。
+    // 0.1.5 里 `dsh-persona` 已把 persona 拆成 prefix(0) + suffix(10200) 两段，旧 `DEPLOYMENT_PERSONA` 已删。
     if (mode === 'preset') {
       disposers.push(agentCtx.systemPrompt.section({
         name: CONDUCTOR_SECTION,
-        order: agentCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
+        order: agentCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1,
         text: CONDUCTOR_PERSONA,
       }))
     }

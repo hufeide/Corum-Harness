@@ -19,7 +19,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type { Agent, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { VISION_CAPABILITY, VISION_SECTION } from './vision.ts'
@@ -132,18 +132,19 @@ async function supportsImageModel(ctx: Context, provider: string, model: string)
 /**
  * 安装一个「用户显式选择优先」的模型绑定。
  * @param agentCtx - 目标 Agent 的作用域上下文。
+ * @param agent - 该作用域归属的 Agent（官方 0.1.5 起由 setup 第二参传入；旧版经
+ *   `agentCtx.agent` accessor 取，0.1.5 删除了该 accessor，故改为显式参数）。
  * @param selection - 调用方持有的可变选择（current/assembled）。
  * @returns 两个作用域监听的 disposer。
  */
-export function installTaskModelSelection(agentCtx: Context, selection: ModelSelectionRef): () => void {
+export function installTaskModelSelection(agentCtx: Context, agent: Agent, selection: ModelSelectionRef): () => void {
   // 投影服务是可选依赖：没有它（精简组合）就退化成官方行为。
   const projections = (): ProjectionReader | undefined => {
     const service = (agentCtx as unknown as { sessionProjections?: ProjectionReader }).sessionProjections
     return service === undefined || typeof service.stateOf !== 'function' ? undefined : service
   }
   const pendingSelection = (): ModelSelection | null => {
-    const agent = agentCtx.agent
-    const state = agent === undefined ? undefined : projections()?.stateOf(agent.session, 'modelSelection')
+    const state = projections()?.stateOf(agent.session, 'modelSelection')
     if (state === undefined || state === null || typeof state !== 'object') return null
     const pending = (state as ModelSelectionProjectionLike).pending
     return pending === undefined || pending === null ? null : pending

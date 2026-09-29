@@ -929,13 +929,15 @@ export class CorumAgentService extends TypertRemoteService {
         provider: profileModel.provider,
         model: profileModel.model,
       },
-      setup: async (agentCtx) => {
+      // 官方 0.1.5：`AgentSetup` 为 `(agentCtx, agent)`，`agentCtx.agent` accessor 已删除
+      // ⇒ 这里用第二参拿 agent（不再读 accessor）。
+      setup: async (agentCtx: Context, agent: Agent) => {
         // 官方组装链路：mount preset，把 persona / 工具 / skill / MCP 全挂上。
         await this.ctx.agentPresets.mount(agentCtx, profile.id)
         // 额外能力注入（如 complete_task 工具），在 mount preset 之后。
         extraSetup?.(agentCtx)
-        // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
-        installTaskModelSelection(agentCtx, selection)
+        // 官方���型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
+        installTaskModelSelection(agentCtx, agent, selection)
       },
     })
 
@@ -1589,7 +1591,7 @@ export class CorumAgentService extends TypertRemoteService {
           },
           assembled: undefined,
         }
-        installTaskModelSelection(resolved.agent.ctx, reuseSelection)
+        installTaskModelSelection(resolved.agent.ctx, resolved.agent, reuseSelection)
         this.registry.setTaskSelection(String(resolved.sessionId), reuseSelection)
         // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
         this.rememberPendingPermission(String(resolved.sessionId), permission)
@@ -1613,9 +1615,11 @@ export class CorumAgentService extends TypertRemoteService {
       },
       assembled: undefined,
     }
-    const setup = async (agentCtx: Context): Promise<void> => {
+    // 见 root-agent 路径的同款注释：0.1.3 单参 setup，升级后改 `(agentCtx, agent)`。
+    const setup = async (agentCtx: Context, agent: Agent): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, profile.id)
-      installTaskModelSelection(agentCtx, selection)
+      // ⚠️ 0.1.5 升级后改为 `installTaskModelSelection(agentCtx, agent, selection)`。
+      installTaskModelSelection(agentCtx, agent, selection)
       // fork（corum）：指挥模式 / orchestrator profile——主 Agent 只思考规划、子 Agent
       // 全权执行。实现与边界见 {@link applyConductorMode}。
       this.conductor.apply(
@@ -1867,7 +1871,7 @@ export class CorumAgentService extends TypertRemoteService {
           },
           assembled: undefined,
         }
-        installTaskModelSelection(resolved.agent.ctx, fallbackSelection)
+        installTaskModelSelection(resolved.agent.ctx, resolved.agent, fallbackSelection)
         this.registry.setTaskSelection(String(sessionId), fallbackSelection)
       }
       if (switchResolved.fallback !== undefined) {

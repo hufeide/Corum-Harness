@@ -149,9 +149,10 @@ export async function resolveTaskSession(
     },
     assembled: undefined,
   }
-  const setup = async (agentCtx: Context): Promise<void> => {
+  // 官方 0.1.5：`AgentSetup` 为 `(agentCtx, agent)`，`agentCtx.agent` accessor 已删除。
+  const setup = async (agentCtx: Context, agent: Agent): Promise<void> => {
     await ctx.agentPresets.mount(agentCtx, meta.profileId)
-    installTaskModelSelection(agentCtx, selection)
+    installTaskModelSelection(agentCtx, agent, selection)
     // ⚠️ 必须在 setup 内注册（组装期），不能事后补 —— 见模块头注「为什么必须在 setup 里调」。
     host.applyConductor(sessionId, agentCtx, conductor)
   }

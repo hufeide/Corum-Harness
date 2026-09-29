@@ -37,7 +37,7 @@ overrides:
   # dsh 包是 alpha.2、而 session 核心是 alpha.1 → 冷读历史日志报
   # 「failed to observe session ... events is not iterable」。pnpm 11 的 override
   # 不支持 glob，所以下面逐个钉死（列表 = 工作区实际安装的 206 个 dsh 包）。
-  '@deepseek-ai/dsh-agent': '0.1.3-alpha.1'
+  '@deepseek-ai/dsh-agent': '0.1.5-rc.3'
   '@deepseek-ai/dsh-agent-default-model': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-agent-instructions': '0.1.3-alpha.1'
   '@deepseek-ai/dsh-agent-loop': '0.1.5-rc.3'
