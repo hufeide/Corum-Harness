@@ -15,5 +15,11 @@
     "shell:smoke": "pnpm --filter corum-desktop run smoke",
     "pack": "pnpm --filter corum-desktop run pack"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "anser": "^2.3.5",
+    "katex": "^0.16.47",
+    "mdast-util-math": "^3.0.0",
+    "micromark-extension-math": "^3.1.0"
+  }
 }

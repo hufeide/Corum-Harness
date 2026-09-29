@@ -9,6 +9,12 @@ import { defineConfig } from 'tsdown'
 const CLIENT_EXTERNALS: readonly string[] = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
+  // fork（corum）2026-09-29：本包 SessionsPane.tsx **运行时** import primitives（非 type-only）
+  // ⇒ 必须列 external，否则会被内联进 bundle，而其内部 `require("anser")`/`katex`/`mdast-util-math`
+  // /`micromark-extension-math` 会落到模块表（表里没有这 4 个）⇒ 实测报
+  // 「failed to import loader entry … client-modules: require("anser") missed the module table」。
+  // 与 corum-ui-chat / corum-ui-conversation 等 11 个已列 primitives 的包口径一致。
+  '@deepseek-ai/dsh-client-ui-primitives',
   '@deepseek-ai/dsh-client-store',
 ]
 

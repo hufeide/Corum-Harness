@@ -113,6 +113,16 @@ import {
 } from './orchestration.ts'
 import type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestration.ts'
 
+/**
+ * fork（corum）：`CorumIntegrateRejected` 带集成者子会话 id 的形态。
+ *
+ * 官方 `SubagentSettledMessageSource.senderSessionId` = "Session id of the child that
+ * settled"。集成失败时（verify 拒绝 / unmerged），集成者子会话已 settle、其 id 是该
+ * notice 的 senderSessionId。`CorumIntegrateRejected` 类（在 corum-orchestration 包）
+ * 不携带 runId，故在抛出点用交叉类型把 `String(run.id)` 挂上，catch 侧读出。
+ */
+type CorumIntegrateRejectedWithRun = CorumIntegrateRejected & { runId?: string }
+
 export const name = 'corum-tool-subagent'
 export const inject = ['tools', 'subagents', 'systemPrompt', 'sessionProjections']
 
@@ -685,11 +695,14 @@ async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResu
  * 以为「全清干净了」。注入失败只告警（可见性是增强，不能反过来让委托失败）。
  *
  * @param parent - 委派方 Agent（注入目标）。
+ * @param childId - 集成者子会话 id（notice 的 senderSessionId；官方
+ *   `SubagentSettledMessageSource.senderSessionId` = "Session id of the child that settled"）。
  * @param notice - `corumPartialIntegrationNotice()` 产出的说明文本。
  * @param logger - 注入失败时的告警出口。
  */
 function corumNotifyPartialIntegration(
   parent: Agent,
+  childId: string,
   notice: string,
   logger: { warn: (message: string) => void },
 ): void {
@@ -700,6 +713,7 @@ function corumNotifyPartialIntegration(
         kind: 'subagent-settled',
         form: 'notice',
         summary: boundContextSummary('integrate partially persisted — leftovers kept pending'),
+        senderSessionId: childId,
       } as unknown as MessageSource,
     }))
   } catch (error: unknown) {
@@ -717,11 +731,15 @@ function corumNotifyPartialIntegration(
  * 没合并、怎么收尾」推到父会话的第一步，而不是埋在工具结果里。
  *
  * @param parent - 委派方 Agent（注入目标）。
+ * @param childId - 子会话 id（notice 的 senderSessionId；官方
+ *   `SubagentSettledMessageSource.senderSessionId` = "Session id of the child that settled"。
+ *   settle 钩子传触发本次 settle 的 `info.id`；orchestrate 路径传集成者子会话 id）。
  * @param branches - 仍未合并的分支名。
  * @param logger - 注入失败时的告警出口。
  */
 function corumNotifyPendingIntegration(
   parent: Agent,
+  childId: string,
   branches: readonly string[],
   logger: { warn: (message: string) => void },
 ): void {
@@ -738,6 +756,7 @@ function corumNotifyPendingIntegration(
         kind: 'subagent-settled',
         form: 'notice',
         summary: boundContextSummary('pending integration: branches not merged'),
+        senderSessionId: childId,
       } as unknown as MessageSource,
     }))
   } catch (error: unknown) {
@@ -774,11 +793,15 @@ function corumUnblockRejectedMerge(cwd: string, logger: { warn: (message: string
  * 通知会把主 Agent 引去重做合并（它读到「分支未合并」会再派一次集成者）。
  *
  * @param parent - 委派方 Agent（注入目标）。
+ * @param childId - 集成者子会话 id（notice 的 senderSessionId；官方
+ *   `SubagentSettledMessageSource.senderSessionId` = "Session id of the child that settled"。
+ *   verify 拒绝时集成者已 settle、其 runId 即 senderSessionId）。
  * @param report - 机制产出的 verify 失败报告（含命令、退出码、输出尾部、现状与出路）。
  * @param logger - 注入失败时的告警出口。
  */
 function corumNotifyVerifyRejected(
   parent: Agent,
+  childId: string,
   report: string,
   logger: { warn: (message: string) => void },
 ): void {
@@ -792,11 +815,37 @@ function corumNotifyVerifyRejected(
         kind: 'subagent-settled',
         form: 'notice',
         summary: boundContextSummary('integrate rejected by declared verification'),
+        senderSessionId: childId,
       } as unknown as MessageSource,
     }))
   } catch (error: unknown) {
     logger.warn(`verify-rejection notice was not delivered to its parent: ${String(error)}`)
   }
+}
+
+/**
+ * fork（corum）：为 orchestrate 路径的 subagent-settled notice 取 senderSessionId。
+ *
+ * 官方 `SubagentSettledMessageSource.senderSessionId` = "Session id of the child that
+ * settled"。优先用集成者子会话 id（`integration.childSessionId`——verify/unmerged 拒绝时
+ * 由抛出点挂在 `CorumIntegrateRejected` 上、catch 侧读出）；拿不到时（opt-out 或非
+ * `CorumIntegrateRejected` 错误）从待集成分支台账取**第一个有 childSessionId 的条目**——
+ * pending 通知报的是「有分支待集成」，取一条 settled child 的 id 作为该 notice 的归属。
+ * 返回 undefined 意味着连台账也没有 childSessionId（存量台账只有 runId 的形态）——
+ * 此种情况下**不投递 notice**（senderSessionId 缺字段会被 v2→v3 迁移拒绝，宁可静默
+ * 也不写残缺 source）。
+ */
+type CorumIntegrationChildId = { childSessionId?: string }
+
+function corumNoticeChildId(
+  integration: CorumIntegrationChildId,
+  entries: readonly CorumWorktreeEntry[],
+): string | undefined {
+  if (integration.childSessionId !== undefined) return integration.childSessionId
+  for (const entry of entries) {
+    if (entry.childSessionId !== undefined) return entry.childSessionId
+  }
+  return undefined
 }
 
 /**
@@ -889,6 +938,7 @@ function corumNotifyForegroundResult(
  */
 function corumNotifyModelDecision(
   parent: Agent,
+  childId: string,
   label: string,
   summary: string,
   logger: { warn: (message: string) => void },
@@ -900,6 +950,7 @@ function corumNotifyModelDecision(
         kind: 'subagent-settled',
         form: 'notice',
         summary: boundContextSummary(`Subagent model decision (${label})`),
+        senderSessionId: childId,
       } as unknown as MessageSource,
     }))
   } catch (error: unknown) {
@@ -984,14 +1035,15 @@ function corumModelAskChannel(runtimeCtx: Context): CorumModelAskChannel {
  * 若确认无引用可删除。
  *
  * @param parent - 委派方 Agent（注入目标）。
- * @param label - 委托标签（给用户一句人话上下文）。
- * @param configured - 原定（用户配置的）模型路由。
- * @param fallback - 实际改用的主 Agent 路由。
- * @param cause - 触发回退的原因原文（子 Agent 的失败信息）。
+ * @param childId - 触发本次 settle 的子会话 id（notice 的 senderSessionId；官方
+ *   `SubagentSettledMessageSource.senderSessionId` = "Session id of the child that settled"。
+ *   failures 可能跨多条 worktree，但都由本次 `subagent/end`（单个子会话 settle）触发取走投递）。
+ * @param failures - 收口强制提交失败的 worktree 清单。
  * @param logger - 注入失败时的告警出口。
  */
 function corumNotifySettleCommitFailures(
   parent: Agent,
+  childId: string,
   failures: readonly CorumSettleCommitFailure[],
   logger: { warn: (message: string) => void },
 ): void {
@@ -1024,6 +1076,7 @@ function corumNotifySettleCommitFailures(
         kind: 'subagent-settled',
         form: 'notice',
         summary: boundContextSummary(summary),
+        senderSessionId: childId,
       } as unknown as MessageSource,
     }))
   } catch (error: unknown) {
@@ -1481,6 +1534,7 @@ export function apply(ctx: Context, config: Config): void {
     cause: string,
     signal: AbortSignal,
     notify: boolean,
+    childId: string | undefined,
   ): Promise<{ route: CorumRoute | undefined; summary: string }> => {
     /**
      * ★ 2026-09-21：**陈旧失败不问**。
@@ -1553,7 +1607,18 @@ export function apply(ctx: Context, config: Config): void {
       + `persisted=${outcome.persisted}`,
     )
     if (notify && outcome.summary !== '') {
-      corumNotifyModelDecision(parent, label, outcome.summary, ctx.logger)
+      // 子会话已 settle（attempt 0 失败 / 异步 end 失败）⇒ 有 childId，注入 subagent-settled
+      // notice（senderSessionId = "the child that settled"）。
+      // 子会话未起（后台预检 / spawn 期失败）⇒ childId undefined：此刻语义上没有 settled child，
+      // `subagent-settled` source 必须有 senderSessionId（官方 v0.1.5 校验），不能占位。
+      // 信息不丢——decision 仍已持久化、summary 写进工具结果/日志；只是不进会话流（可见性变化）。
+      if (childId !== undefined) {
+        corumNotifyModelDecision(parent, childId, label, outcome.summary, ctx.logger)
+      } else {
+        ctx.logger.warn(
+          `subagent (${label}): model decision notice not injected — no child session id (subagent never spawned); decision=${outcome.decision.kind} summary=${outcome.summary}`,
+        )
+      }
     }
     return {
       route: outcome.override,
@@ -1593,6 +1658,7 @@ export function apply(ctx: Context, config: Config): void {
         cause,
         AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS),
         true,
+        String(info.id),
       )
       if (asked.route === undefined) return
       const childId = String(info.id)
@@ -1706,7 +1772,7 @@ export function apply(ctx: Context, config: Config): void {
             + ` so the model was not told: ${failures.map(failure => `${failure.slug}: ${failure.reason}`).join('; ')}`,
         )
       } else {
-        corumNotifySettleCommitFailures(parent, failures, ctx.logger)
+        corumNotifySettleCommitFailures(parent, String(info.id), failures, ctx.logger)
       }
     }
 
@@ -1725,7 +1791,7 @@ export function apply(ctx: Context, config: Config): void {
       // 不去重就会发两条逐字相同的通知（实机确认：同一会话 seq 24/25 内容一致）。
       const fresh = pendingAfter.filter(entry => orchestration.claimPendingIntegrationNotice(sessionId, entry.branch))
       if (fresh.length > 0) {
-        corumNotifyPendingIntegration(parent, fresh.map(entry => entry.branch), ctx.logger)
+        corumNotifyPendingIntegration(parent, String(info.id), fresh.map(entry => entry.branch), ctx.logger)
       }
     }
   }) as never, { global: true })
@@ -2314,7 +2380,7 @@ export function apply(ctx: Context, config: Config): void {
           if (!corumTruth.integrated) {
             orchestration.emitFrame(sessionId)
             corumUnblockRejectedMerge(parentCwd, runtimeCtx.logger)
-            throw new CorumIntegrateRejected(
+            const rejected = new CorumIntegrateRejected(
               'unmerged',
               corumIntegrationFailure(
                 corumTruth,
@@ -2323,7 +2389,9 @@ export function apply(ctx: Context, config: Config): void {
                 outputValueText(outcome.output),
               ),
               corumPendingBranchNames,
-            )
+            ) as CorumIntegrateRejectedWithRun
+            rejected.runId = String(run.id)
+            throw rejected
           }
         }
         // fork（corum）：集成总判定——**两道闸门合取**（2026-09-16 根因修复）。
@@ -2352,11 +2420,13 @@ export function apply(ctx: Context, config: Config): void {
           if (!corumVerdict.integrated) {
             orchestration.emitFrame(sessionId)
             corumUnblockRejectedMerge(parentCwd, runtimeCtx.logger)
-            throw new CorumIntegrateRejected(
+            const rejected = new CorumIntegrateRejected(
               'verify',
               corumVerifyFailureNotice(corumVerify, corumTruth, corumHeadBefore, pending),
               corumPendingBranchNames,
-            )
+            ) as CorumIntegrateRejectedWithRun
+            rejected.runId = String(run.id)
+            throw rejected
           }
         }
         // fork（corum）2026-09-12：**部分集成**不再判死整次 fan-in。旧口径把
@@ -2371,7 +2441,7 @@ export function apply(ctx: Context, config: Config): void {
         if (corumTruth.uncommitted.length > 0) {
           orchestration.emitFrame(sessionId)
           runtimeCtx.logger.warn(`integrate partially persisted: ${corumTruth.uncommitted.join(', ')} kept pending`)
-          corumNotifyPartialIntegration(parent, corumPartialIntegrationNotice(corumTruth, corumHeadBefore), runtimeCtx.logger)
+          corumNotifyPartialIntegration(parent, String(run.id), corumPartialIntegrationNotice(corumTruth, corumHeadBefore), runtimeCtx.logger)
         }
         return outcome
       }
@@ -2496,6 +2566,9 @@ export function apply(ctx: Context, config: Config): void {
             corumLockedRouteFailure,
             exec.signal,
             args.notifyParent !== false,
+            // 子会话尚未 spawn（后台预检在委派前已知模型不可用）⇒ 无 childId，
+            // corumAskAboutModel 内部走 logger.warn（不注入 subagent-settled notice）。
+            undefined,
           )
           if (asked.route === undefined) {
             throw new Error(
@@ -2646,6 +2719,7 @@ export function apply(ctx: Context, config: Config): void {
                 reason,
                 exec.signal,
                 args.notifyParent !== false,
+                settledRunId,
               )
               if (asked.route === undefined) throw error
               // fork（corum）：提取失败子 Agent 的上下文，注入到重跑的 prompt 里——
@@ -2673,6 +2747,9 @@ export function apply(ctx: Context, config: Config): void {
               configuredFailure,
               exec.signal,
               args.notifyParent !== false,
+              // spawn 期失败（configuredFailure）⇒ 子会话从未建立，settledRunId 为空。
+              // 传 undefined ⇒ corumAskAboutModel 内部走 logger.warn（不注入 notice）。
+              settledRunId !== '' ? settledRunId : undefined,
             )
             if (asked.route !== undefined) {
               delete request.agentOptions
@@ -3237,7 +3314,10 @@ export function apply(ctx: Context, config: Config): void {
                   throw new Error(`scripted orchestration "${meta.name}" ${settled.stopReason}${settled.error !== undefined ? `: ${settled.error}` : ''}`)
                 }
                 const integration = await runIntegrate(args.merge as { verify?: string } | undefined)
-                if (!integration.integrated) corumNotifyPendingIntegration(parent, integration.pendingBranches, runtimeCtx.logger)
+                if (!integration.integrated) {
+                  const childId = corumNoticeChildId(integration, corumPendingIntegration(orchestration.entriesOf(parent.session.id)))
+                  if (childId !== undefined) corumNotifyPendingIntegration(parent, childId, integration.pendingBranches, runtimeCtx.logger)
+                }
                 return {
                   mode: 'script' as const,
                   // 引擎的 result.value 已是 JSON-safe（跨 worker realm 物化过）；类型面收窄到 JsonValue。
@@ -3335,7 +3415,7 @@ export function apply(ctx: Context, config: Config): void {
                 // 分支快照也随错误带出，因为抛出后 `entriesOf` 会按 git 实况对账：「合并提交已在
                 // 主树」的条目下一次读台账就被翻成 integrated，调用方**再也还原不出**本次被拒的
                 // 是哪几条（verify 失败正是这种形态，实测两者只差集成者选的 git 命令）。
-                const rejected = integrateError instanceof CorumIntegrateRejected ? integrateError : undefined
+                const rejected = integrateError instanceof CorumIntegrateRejected ? integrateError as CorumIntegrateRejectedWithRun : undefined
                 const pendingOnError = rejected !== undefined
                   ? [...rejected.pendingBranches]
                   : corumPendingIntegration(orchestration.entriesOf(parent.session.id)).map(entry => entry.branch)
@@ -3344,16 +3424,23 @@ export function apply(ctx: Context, config: Config): void {
                   integrated: false,
                   error: integrateError instanceof Error ? integrateError.message : String(integrateError),
                   ...rejected !== undefined ? { rejected: rejected.kind } : {},
+                  // fork：集成者子会话 id（抛出点挂在异常上）——subagent-settled notice
+                  // 的 senderSessionId 要「the child that settled」。verify/unmerged 拒绝时
+                  // 集成者已 settle，其 runId 即 senderSessionId。
+                  ...rejected?.runId !== undefined ? { childSessionId: rejected.runId } : {},
                 }
               }
               // 通知形态必须与事实一致：`verify` 拒绝时那批分支**已经在主树里**，发
               // 「are NOT merged into the main tree」是谎报（会把主 Agent 引去重做合并）。
               // 两种形态都不可静默，只是各说各的真相。
               if (!integration.integrated) {
-                if (integration.rejected === 'verify') {
-                  corumNotifyVerifyRejected(parent, integration.error ?? 'the declared verification failed', runtimeCtx.logger)
-                } else {
-                  corumNotifyPendingIntegration(parent, integration.pendingBranches, runtimeCtx.logger)
+                const childId = corumNoticeChildId(integration, corumPendingIntegration(orchestration.entriesOf(parent.session.id)))
+                if (childId !== undefined) {
+                  if (integration.rejected === 'verify') {
+                    corumNotifyVerifyRejected(parent, childId, integration.error ?? 'the declared verification failed', runtimeCtx.logger)
+                  } else {
+                    corumNotifyPendingIntegration(parent, childId, integration.pendingBranches, runtimeCtx.logger)
+                  }
                 }
               }
               return {
