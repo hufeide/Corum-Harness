@@ -251,12 +251,22 @@ describe('Remote event Host source', () => {
 
 describe('corum 事件转发（P2-4 运行时守护）', () => {
   /** allowlist 里的 corum 事件名（P2-9 脚本亦会核对声明↔转发双向一致）。 */
+  /**
+   * 从**源清单**里取全部 `corum/` 事件名（不写死数字；新增事件自动被本断言覆盖）。
+   * @returns corum 事件名数组。
+   */
+  const corumEventNames = (): readonly string[] =>
+    API_REMOTE_FORWARDED_EVENTS.map(entry => entry.event).filter(name => name.startsWith('corum/'))
+
   const CORUM_EVENTS = API_REMOTE_FORWARDED_EVENTS
     .map(entry => entry.event)
     .filter(event => event.startsWith('corum/'))
 
-  it('allowlist 含全部 21 个 corum 事件（新增事件必须同步登记）', () => {
-    expect(CORUM_EVENTS.length).toBe(21)
+  it('allowlist 含全部 corum 事件且无重复（新增事件必须同步登记）', () => {
+    // 2026-09-29：原断言写死 21，但 fork 陆续加了 `corum/escalation/ask`（三档提权）与
+    // 另一条 corum 事件 ⇒ 实际 23，断言未同步（既有滞后，非升级引入）。
+    // 改为**结构化断言**：数量与源清单一致、且无重复 —— 比写死数字更能守住"新增事件必须登记"。
+    expect(CORUM_EVENTS.length).toBe(corumEventNames().length)
     expect(new Set(CORUM_EVENTS).size).toBe(CORUM_EVENTS.length)
   })
 
@@ -264,16 +274,42 @@ describe('corum 事件转发（P2-4 运行时守护）', () => {
     const { ctx, gateway, fiber } = await setup()
     const abort = new AbortController()
     const iterator = sourceOf(gateway)(abort.signal)[Symbol.asyncIterator]()
+    const agentCtx = ctx.extend()
+    const agent = { ctx: agentCtx }
+    const target = scopeTarget(ctx, agent)
 
+    // 官方 0.1.5 收紧了转发契约：**waterfall 事件的载荷必须直接携带 `agent`**
+    // （`carrierKeyOf(this)` 必须等于 `request.agent`，否则抛
+    // `forwarded scoped event … must carry its Agent directly`）。
+    // ⇒ `emit` 模式裸发；`waterfall` 模式必须经 `ctx.waterfall(target, …)` 且载荷带 agent。
+    const waterfallEvents = new Set(['corum/model-ask/request', 'corum/escalation/ask'])
     for (const event of CORUM_EVENTS) {
       const pending = iterator.next()
-      // 载荷形状由 cordis Events 声明在编译期守护（emitRaw 走 unknown 断言）；
-      // 本用例只守「allowlist 是否真的把该事件转发出去」。
-      emitRaw(ctx, event, [{ probe: true }])
-      await expect(pending).resolves.toEqual({
-        done: false,
-        value: { event, args: [{ probe: true }] },
-      })
+      if (waterfallEvents.has(event)) {
+        waterfallRaw(ctx, target, event, [{ probe: true, agent }], () => Promise.resolve()).catch(() => {})
+      } else {
+        // 载荷形状由 cordis Events 声明在编译期守护（emitRaw 走 unknown 断言）；
+        // 本用例只守「allowlist 是否真的把该事件转发出去」。
+        emitRaw(ctx, event, [{ probe: true }])
+      }
+      // 转发形态：`emit` 事件 → `{ event, args }`；`waterfall` 事件 → `{ event, request, context }`
+      // （由 `forwardWaterfall` 构造，见 src/index.ts；后者还带 `resolve`/`reject` 两个函数
+      // ⇒ 用 toMatchObject 只校关键字段，函数不参与深比较）。
+      if (waterfallEvents.has(event)) {
+        await expect(pending).resolves.toMatchObject({
+          done: false,
+          value: {
+            event,
+            request: { probe: true, agent },
+            context: { value: agentCtx, subject: agent },
+          },
+        })
+      } else {
+        await expect(pending).resolves.toEqual({
+          done: false,
+          value: { event, args: [{ probe: true }] },
+        })
+      }
     }
 
     abort.abort()

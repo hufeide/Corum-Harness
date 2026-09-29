@@ -157,7 +157,11 @@ async function readPersistedEvents(
 ): Promise<readonly SessionEvent[]> {
   const handle = await persistence.open(sessionId, 'read')
   try {
-    return await handle.read(fromSeq)
+    // 官方 0.1.5：`SessionHandle.read` 的返回从 `readonly SessionEvent[]` 改为
+    // `SessionHandleReadResult`（`{ eventState, events }`）⇒ 这里取 `events`，
+    // 本函数对外的返回类型保持不变（4 个消费方无需改）。
+    const result = await handle.read(fromSeq)
+    return result.events
   } finally {
     await handle.close()
   }

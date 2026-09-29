@@ -310,7 +310,12 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
               ...(record.parentSession === undefined ? {} : { parentSession: record.parentSession }),
               ...(record.cwd === undefined ? {} : { cwd: record.cwd }),
             },
-            read: async (fromSeq: number) => (record.events ?? []).filter(e => e.seq >= fromSeq),
+            // 官方 0.1.5：`SessionHandle.read` 返回 `SessionHandleReadResult`
+            // （`{ eventState, events }`）而非裸数组 ⇒ 测试桩同步新形态。
+            read: async (fromSeq: number) => ({
+              eventState: 'frozen',
+              events: (record.events ?? []).filter(e => e.seq >= fromSeq),
+            }),
             close: async () => {},
           }
         },
