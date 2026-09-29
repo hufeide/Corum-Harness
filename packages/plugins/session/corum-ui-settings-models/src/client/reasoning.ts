@@ -21,6 +21,16 @@ export type ThinkingFamily = 'deepseek' | 'pi-ai' | undefined
 /** 侦测不到时的固定档 valuelist（用户定：off/low/medium/high/xhigh/max）。 */
 const FALLBACK_LEVELS: readonly string[] = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
 
+/**
+ * 可勾选的档位上界（= pi-ai schema 的键域，见 dsh-llm-pi-ai `config.ts`：
+ * `reasoningEfforts` 的**键**被 `z.union(THINKING_LEVELS)` 校验，只能是这 7 个 id；
+ * 可自由填的是**值**——每档发给网关的 wire 拼写）。
+ *
+ * 故「用户自定义多个档位」的准确语义 = 从这 7 个 id 里勾出该模型实际支持的子集。
+ * 勾选顺序按此表归一，保证落盘 dict 键序稳定（同配置重复保存不产生 diff）。
+ */
+export const KNOWN_LEVELS: readonly string[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
 /** 未配置时的默认选中档（用户定：所有模型默认 high）。 */
 export const DEFAULT_THINKING = 'high'
 
@@ -127,6 +137,45 @@ function mergeCurrent(levels: readonly string[], current: string): readonly stri
   return [...levels, current]
 }
 
+/**
+ * 读该模型**已声明的档位集合**（profile 的 `reasoningEfforts` 键），供「自定义档位」
+ * 多选控件回显初值。
+ *
+ * 与 {@link readModelThinking} 的关键区别：**不做 ① ② ③ 推理、不补 `off`**。
+ * 多选控件要回答的是「用户显式勾了哪几个」，而 readModelThinking 的 levels 是
+ * 「可用于下拉的候选集合」——它无条件给 dict 分支补上 `off`（`['off', ...keys]`），
+ * 拿它当勾选初值会把模型本来没有的 `off` 悄悄写回盘（实测 `kimi-k3` 当前
+ * `reasoningEfforts` 只有 low/high/max，经它一转就会多出 off）。
+ *
+ * @param schema - settings schema 操作。
+ * @param namespace - provider 所在 namespace view。
+ * @param settingsPath - provider profile 路径。
+ * @param modelId - 模型 id。
+ * @returns 已声明的档位 id（按 {@link KNOWN_LEVELS} 归一序）；未声明过时返回 `undefined`
+ *   （调用方据此区分「用户没表达过」与「用户表达了空集」）。
+ */
+export function declaredLevelsOf(
+  schema: SettingsSchemaOperations,
+  namespace: SettingsNamespaceView,
+  settingsPath: readonly string[],
+  modelId: string,
+): readonly string[] | undefined {
+  const list = schema.getPath(namespace.value, [...settingsPath, 'models'])
+  const raw = Array.isArray(list)
+    ? list.find((m): m is Record<string, unknown> => typeof m === 'object' && m !== null && m.id === modelId)
+    : undefined
+  const efforts = raw?.reasoningEfforts
+  // `false` = 显式声明「非推理模型」，与「没表达过」语义不同，由调用方分别处理。
+  if (efforts === false) return ['off']
+  if (typeof efforts !== 'object' || efforts === null || Array.isArray(efforts)) return undefined
+  const keys = Object.keys(efforts as Record<string, unknown>)
+  if (keys.length === 0) return undefined
+  // 归一序（与 KNOWN_LEVELS 对齐），未知键（历史手写档）按原序追加在末尾。
+  const known = KNOWN_LEVELS.filter(level => keys.includes(level))
+  const extra = keys.filter(key => !KNOWN_LEVELS.includes(key))
+  return [...known, ...extra]
+}
+
 /** 把档位 id 列表转下拉选项（不翻译，label = id）。 */
 export function thinkingOptionsOf(levels: readonly string[]): SelectOption[] {
   return levels.map(id => ({ id, label: id }))
@@ -177,4 +226,60 @@ export function catalogModelIdsOf(provider: string): readonly string[] {
     if (key.startsWith(prefix)) ids.push(key.slice(prefix.length))
   }
   return ids
+}
+
+/** 落盘结果：档位集合（dict / false）+ 归一门控后的默认档。 */
+export interface PiAiThinkingWrite {
+  /**
+   * `reasoningEfforts` 的值：
+   *   - 对象 dict = 该模型的档位集合（≥1 个非 off 档）；
+   *   - `false` = 显式声明「该模型不做推理」——这是 pi-ai 记录的**非推理模型**编码
+   *     （`false` 会剥掉 catalog 模型自带的推理能力；而**删键**在 catalog 路由上
+   *     语义是「继承内置目录的能力」，会把推理能力放回来，故二者不可互换）。
+   */
+  efforts: ReasoningEfforts | false
+  /** 归一后的默认档（`reasoning`）；'' = 不写该键。 */
+  defaultLevel: string
+}
+
+/**
+ * 把「用户勾选的档位集合 + 默认档」归一成可落盘的 pi-ai 字段。
+ *
+ * 这是「自定义档位」功能的核心不变式所在，抽成纯函数以便单测钉住（2026-09-29
+ * 用户定调：pi-ai 内置表只作预勾选**建议**，档位集合以用户勾选为准）。
+ *
+ * 两条不变式（每条都对应一个实测会炸的形态）：
+ *   ① **键域**：只保留 {@link KNOWN_LEVELS} 内的档位——pi-ai 的 `reasoningEfforts`
+ *      键被 `z.union(THINKING_LEVELS)` 校验，一个非法键会让**整个 settings 段注册
+ *      失败**，UI 只报「namespace not registered」而不指向那个键（2026-09-15 事故）。
+ *   ② **没有非 off 档 ⇒ 写 `false`**：pi-ai 拒绝只有 off 的 dict，而删键在 catalog
+ *      路由上语义是「继承内置目录能力」（会把推理放回来），故正确编码是 `false`。
+ *
+ * @param levels - 用户勾选的档位 id（可含历史非法 id，会被剔除；布尔 `false` 归一为 `off`）。
+ * @param defaultLevel - 用户选的默认档。
+ * @returns 归一后的 `reasoningEfforts`（dict 或 `false`）与默认档。
+ */
+export function piAiThinkingWrite(
+  levels: readonly (string | boolean | undefined)[],
+  defaultLevel: string,
+): PiAiThinkingWrite {
+  // 先做与 reasoningEffortsOf 同源的档位归一（布尔 false 语义上是「关闭推理」= off，
+  // **归一化而非丢弃**——见其内注释记录的 2026-09-15 事故），再按键域过滤。
+  // 顺序要紧：先过滤会把布尔 false 直接丢掉，等于悄悄少一个档。
+  const normalized = levels
+    .map(raw => typeof raw === 'string' ? raw : raw === false ? 'off' : undefined)
+    .filter((level): level is string => level !== undefined && level !== '')
+  const selected = KNOWN_LEVELS.filter(level => normalized.includes(level))
+  // wire 值 = 档位 id 本身（pi-ai 默认行为；用户不需要自定义映射）。
+  const efforts = reasoningEffortsOf(selected, undefined)
+  // 没有非 off 档 ⇒ 显式写 `false`（pi-ai 的「非推理模型」编码）。
+  if (efforts === undefined) return { efforts: false, defaultLevel: '' }
+  const defaultGated = selected.includes(defaultLevel)
+    ? defaultLevel
+    : selected.find(level => level !== 'off') ?? ''
+  return {
+    efforts,
+    // 'off' 作为默认档 = 不写 `reasoning`（不指定 provider 默认档），与既有语义一致。
+    defaultLevel: defaultGated === 'off' ? '' : defaultGated,
+  }
 }

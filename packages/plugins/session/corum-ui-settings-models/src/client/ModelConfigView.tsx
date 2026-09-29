@@ -16,7 +16,7 @@ import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { ModelCard } from './model-cards.ts'
 import { formatCapacity, parseCapacity, readModel } from './model-profile.ts'
-import { readModelThinking, reasoningEffortsOf, thinkingOptionsOf } from './reasoning.ts'
+import { readModelThinking, declaredLevelsOf, piAiThinkingWrite, thinkingOptionsOf, KNOWN_LEVELS } from './reasoning.ts'
 import { BrandLogo } from './brands.tsx'
 import { useConnTest } from './useConnTest.ts'
 
@@ -121,10 +121,68 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
   const [showCustomThinking, setShowCustomThinking] = useState(
     !modelThinking.levels.includes(modelThinking.current) && modelThinking.current !== 'off',
   )
-  const options = thinkingOptionsOf(modelThinking.levels)
-  const thinkingDesc = modelThinking.detected
-    ? `该模型支持：${modelThinking.levels.join(' / ')}`
-    : '未识别该模型 · 默认档集（可自定义）'
+  /**
+   * 该模型实际支持的档位集合（用户勾选；选择器的「推理等级」子面板就渲染这一集合）。
+   *
+   * 初值优先级（用户 2026-09-29 定调「pi-ai 的表是兜底，档位由用户设置」）：
+   *   ① 用户已显式声明过 `reasoningEfforts` → 原样回显（**不补 off**，见 declaredLevelsOf）；
+   *   ② 否则用侦测结果（catalog 表 → 兜底固定档）作**预勾选建议**，用户可改；
+   * 保存时一律以本集合落盘 `reasoningEfforts`（用户表达优先，表只是默认建议）。
+   */
+  const [levels, setLevels] = useState<readonly string[]>(() => {
+    const declared = declaredLevelsOf(schema, namespace, card.settingsPath, card.modelId)
+    return declared ?? modelThinking.levels
+  })
+  /** 用户勾选集合（按 pi-ai 键域归一序）；空 = 该模型不提供思考档。 */
+  const knownSelected = KNOWN_LEVELS.filter(level => levels.includes(level))
+  /**
+   * 是否 pi-ai 族（档位集合可落盘）。
+   *
+   * deepseek 族的模型 profile 没有 `reasoningEfforts` 字段——它的可选档位来自
+   * deepseek 适配器自己的目录链（`reasoningEffort` 只管默认档）。对它显示多选
+   * 控件会造成「勾了但不落盘」的假象，故 deepseek 族沿用原有单选语义。
+   */
+  const isPiAi = card.family !== 'deepseek'
+  const noLevels = isPiAi && knownSelected.length === 0
+  // 默认档候选只列**用户勾选的集合**（不再列侦测全集）：档位不在集合里时 pi-ai
+  // 派发会抛 UNSUPPORTED_REASONING_EFFORT，故候选集必须与落盘的 reasoningEfforts 键域一致。
+  const options = isPiAi
+    ? (noLevels ? [{ id: 'off', label: '未勾选档位' }] : thinkingOptionsOf(knownSelected))
+    : thinkingOptionsOf(modelThinking.levels)
+  const thinkingValue = !isPiAi
+    ? thinking
+    : knownSelected.includes(thinking) ? thinking : knownSelected[0] ?? 'off'
+  const thinkingDesc = `${modelThinking.detected
+    ? `侦测到：${modelThinking.levels.join(' / ')}`
+    : '未识别该模型 · 默认档集'}${isPiAi ? ` · 已选 ${knownSelected.length} 档（下方勾选实际支持的档位）` : ''}`
+  /**
+   * 勾选/取消一个档位。
+   *
+   * 取消掉当前默认档时必须同步改默认档——否则落盘的 `reasoning` 指向一个不在
+   * `reasoningEfforts` 里的档，pi-ai 在**请求期**才抛错（实测报错文案是
+   * `does not support reasoning effort "<x>"`，用户看到的是发消息失败而非设置报错）。
+   * 取消后回落到剩余档里的第一个（全取消则置 'off'，配合落盘删键 = 不可选思考等级）。
+   * 顺序按 KNOWN_LEVELS 归一，保证同配置重复保存不产生 diff。
+   */
+  const toggleLevel = (level: string): void => {
+    setSaved(false)
+    const has = levels.includes(level)
+    // 归一序（KNOWN_LEVELS）顺带剔除非键域的历史档位 id——保存时本就会剔除，
+    // 提前归一让「已选 N 档」与落盘结果一致。
+    const next = KNOWN_LEVELS.filter(l => has ? levels.includes(l) && l !== level : levels.includes(l) || l === level)
+    setLevels(next)
+    // 取消掉当前默认档时同步改默认档（见上：否则请求期才抛错）。
+    if (!next.includes(thinking)) setThinking(next[0] ?? 'off')
+  }
+  /**
+   * profile 里既有的、不在 pi-ai 键域内的历史档位 id。
+   *
+   * 必须显式提示而非静默丢弃：pi-ai 的 `reasoningEfforts` **键**被
+   * `z.union(THINKING_LEVELS)` 校验，一个非法键会让**整个 settings 段注册失败**，
+   * UI 只报「namespace not registered」（2026-09-15 事故形态，真凶是布尔键 `false`）。
+   * 保存时这些键会被剔除（保段可注册），故先告知用户会丢什么。
+   */
+  const unknownLevels = levels.filter(level => !KNOWN_LEVELS.includes(level))
   const disabled = busy || !state.writable
 
   const writeModels = async (mutate: (arr: Record<string, unknown>[], idx: number, next: Record<string, unknown>) => void): Promise<boolean> => {
@@ -159,15 +217,38 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
         const inputKey = card.family === 'deepseek' ? 'inputModalities' : 'input'
         if (image) next[inputKey] = ['text', 'image']
         else delete next[inputKey]
-        const thinkKey = card.family === 'deepseek' ? 'reasoningEffort' : 'reasoning'
-        if (thinking !== '' && thinking !== 'off') next[thinkKey] = thinking
-        else delete next[thinkKey]
-        // 方案 A：pi-ai 族同步落 reasoningEfforts 能力集合（modelCatalog 的
-        // efforts 读取源），让新建任务表单/composer 选择器能读到档位。
-        if (card.family !== 'deepseek') {
-          const efforts = reasoningEffortsOf(modelThinking.levels, next.reasoningEfforts)
-          if (efforts !== undefined) next.reasoningEfforts = efforts
-          else delete next.reasoningEfforts
+        /**
+         * 思考档落盘。
+         *
+         * **deepseek 族**（沿用原语义）：用户填的默认档原样写入 `reasoningEffort`。
+         *
+         * **pi-ai 族**（2026-09-29 用户定调「pi-ai 的表是兜底，档位由用户设置」）：
+         * 档位集合**以用户勾选为准**落盘 `reasoningEfforts`——选择器的「推理等级」
+         * 子面板读的就是它；内置表只在用户没勾过时作预勾选建议。
+         *
+         * 两条不变式（对应实测会炸的形态）：
+         *   ① 键必须落在 pi-ai 键域（KNOWN_LEVELS）内——非法键让**整段 settings 失效**
+         *      （UI 只报 namespace not registered，不指向那个键）；
+         *   ② 至少要有一个非 off 档——否则 pi-ai 报「offers no level beyond "off"」。
+         *
+         * ⚠️ 关于 `reasoning` 这个键（实测事实，避免过度归因）：pi-ai 的模型条目 schema
+         * （`modelFields`）**没有** `reasoning`，其 `resolveEntry` 也只消费
+         * id/name/api/input/contextWindow/maxTokens/compat——即**该字段对请求派发无效**，
+         * 它只被 corum 自己的 UI（readModelThinking）读回显示。真正决定每轮请求档位的是
+         * 会话的 `reasoningEffort` 选择，兜底才是**路由级** `providers.<route>.reasoning`
+         * （pi-ai `adapter.ts` 的 `options.reasoningEffort ?? profile.reasoning`）。
+         * 故这里照旧写入它（保留用户可见的默认档记录），但不宣称它门控请求行为。
+         */
+        if (card.family === 'deepseek') {
+          if (thinking !== '' && thinking !== 'off') next.reasoningEffort = thinking
+          else delete next.reasoningEffort
+        } else {
+          // 归一（键域过滤 / 非推理模型编码 / 默认档门控）收在 piAiThinkingWrite
+          // 里，由单测钉住——见 reasoning.ts 的不变式 ①②。
+          const written = piAiThinkingWrite(levels, thinking)
+          if (written.defaultLevel !== '') next.reasoning = written.defaultLevel
+          else delete next.reasoning
+          next.reasoningEfforts = written.efforts
         }
         // 费用（自建 pricing 字段）。
         const pricing: Record<string, number> = {}
@@ -264,7 +345,7 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
                 )
                 : (
                   <SelectField
-                    value={thinking}
+                    value={thinkingValue}
                     options={[...options, { id: '__custom__', label: '自定义…' }]}
                     disabled={disabled}
                     ariaLabel="默认思考模式"
@@ -285,6 +366,54 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
             </span>
           )}
         />
+        {/* 自定义档位集合（2026-09-29 用户定调）：勾出该模型实际支持的档位，
+            选择器的「推理等级」子面板即渲染这一集合。pi-ai 内置表只在没勾过时
+            作预勾选建议 —— 表未覆盖的模型（如 glm-5.3-flash）由此获得真实档位，
+            而非兜底全集。deepseek 族不出此行（其 profile 无该字段，档位来自适配器目录）。 */}
+        {isPiAi
+          ? (
+            <SettingRow
+              label="支持的档位"
+              desc="勾选该模型实际支持的推理档。取消勾选当前默认档时会自动改默认档；全不勾 = 该模型不提供思考等级。⚠️ Agent 预设里固定了某档位（如「指挥模式」的 kimi-k3 · high）时，取消勾选该档会让预设的请求在发送时失败（pi-ai 报 does not support reasoning effort）——改前请确认没有预设正在用被去掉的档。"
+              stacked
+              divider={false}
+              control={(
+                <span className={styles['levelPicker']}>
+                  {KNOWN_LEVELS.map((level) => {
+                    const on = levels.includes(level)
+                    return (
+                      <button
+                        key={level}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        aria-label={`档位 ${level}`}
+                        disabled={disabled}
+                        className={`${styles['levelChip']} ${on ? styles['levelChipOn'] as string : ''}`}
+                        onClick={() => { toggleLevel(level) }}
+                      >
+                        {level}
+                      </button>
+                    )
+                  })}
+                </span>
+              )}
+            />
+          )
+          : null}
+        {/* 历史非法档位提示：pi-ai 的 reasoningEfforts **键**只认 7 个固定 id，
+            非法键会让整个 settings 段注册失败（UI 只报 namespace not registered，
+            不指向那个键）。保存时会剔除，故先明说会丢什么，不静默吞。 */}
+        {isPiAi && unknownLevels.length > 0
+          ? (
+            <SettingRow
+              label="将被移除的历史档位"
+              desc={`该模型的档位声明里有 pi-ai 不认识的键：${unknownLevels.join(' / ')}。它们不是合法档位 id，保留会导致整个模型设置段失效，保存时会被移除。`}
+              divider={false}
+              control={<span />}
+            />
+          )
+          : null}
       </SettingGroup>
 
       <SettingGroup title="能力">

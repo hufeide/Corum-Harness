@@ -120,6 +120,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
     }
     return (
       <ModelConfigView
+        key={`new:${view.provider.provider}/${view.modelId}`}
         card={newCard}
         state={state}
         api={api}
@@ -133,6 +134,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   if (view.kind === 'config') {
     return (
       <ModelConfigView
+        /* key 按模型身份：ModelConfigView 用 useState 初始化器读 props（档位集合/
+           wire 值/容量），实例复用会把上一个模型的编辑态带进下一个（同
+           HANDOFF-2026-09-25 的「缺 React key ⇒ 组件实例被复用」事故形态）。 */
+        key={`cfg:${view.card.provider}/${view.card.modelId}`}
         card={view.card}
         state={state}
         api={api}

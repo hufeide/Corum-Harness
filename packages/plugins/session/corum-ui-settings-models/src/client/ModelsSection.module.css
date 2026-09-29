@@ -204,6 +204,30 @@
 }
 .chipInput::placeholder { color: var(--dsw-alias-label-dimmed); }
 
+/* ── 档位多选（「支持的档位」/「档位 wire 值」两行共用容器） ── */
+.levelPicker { display: flex; flex-wrap: wrap; align-items: center; gap: calc(6px * var(--corum-density-scale, 1)); }
+.levelChip {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  background: transparent;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  font: inherit;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.levelChip:hover:not(:disabled) { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+.levelChipOn {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+.levelChip:disabled { opacity: 0.6; cursor: default; }
+
 /* ── 自定义模型 id 表单字段（明显可辨识的输入框，区别于上方 selRow 按钮） ── */
 .customIdField {
   display: flex;
