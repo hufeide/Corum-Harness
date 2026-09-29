@@ -38,7 +38,9 @@
     "@deepseek-ai/dsh-client-ui-settings": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-session": "^0.1.5-rc.3",
-    "react": "^18.2.0"
+    "immer": "^10.1.1",
+    "react": "^18.2.0",
+    "zustand": "~4.4.7"
   },
   "devDependencies": {
     "@tsdown/css": "^0.22.14",
