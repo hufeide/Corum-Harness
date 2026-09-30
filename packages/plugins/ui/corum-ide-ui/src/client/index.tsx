@@ -377,6 +377,9 @@ export function apply(ctx: ClientContext): void {
           // → grid actions 订阅面通知，corum-ide-plugin-manager-ui 插件认领并
           // 打开自己的 modal 面板（三-2 服务化，原 CustomEvent 广播已退役）。
           openPluginManager: () => { layout.openPluginManager() },
+          // 设置中心触发（活动栏用户菜单）：直通 ctx.layout 的 openSettingsSection
+          // 广播（OPEN_SETTINGS_SECTION_EVENT），SettingsShell 监听后打开指定页。
+          openSettingsSection: (id: string) => { layout.openSettingsSection(id) },
           hooks: {
             theme: {
               getSnapshot: () => ctx.theme.getTheme().preference,

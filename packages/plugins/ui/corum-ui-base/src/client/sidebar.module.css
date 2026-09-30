@@ -1375,6 +1375,10 @@
 }
 
 /* ── PR2 footer 用户区（design.pen Aotdf 画板 D）───────────────────── */
+/* TODO(cleanup)：footer 用户区已从 SidebarSkeleton 删除（用户入口搬到活动栏
+   底部，见 corum-ide-ui 的 ActivityBar）。下面整组 .sidebarFooter/.footerUser/
+   .footerAvatar/.footerMenu/.footerMenuItem/.editionBadge 等样式**暂不删**——
+   G9VpSv 等其它 occupant 可能仍引用，待引用面核对后统一清理。 */
 /* 侧栏最底一行 48px：分割线（.footerDivider 与 .brandDivider 同形）+ 左侧
    「32px 圆形头像 + 本机使用 / 未登录」+ 右侧两个图标按钮（更新 / 设置）。
    用户菜单锚在 footer 行上向上弹出，故 footer 自身 position: relative。 */

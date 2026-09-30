@@ -1052,6 +1052,179 @@
   display: none; /* 活动栏只留图标 */
 }
 
+/* 用户菜单（design.pen mmJTb zmFw6）：用户入口与菜单原在侧栏 footer（G9VpSv
+   的 .footerMenu 形态），迁入活动栏后按同一视觉在本文件重写（不跨包 import
+   sidebar.module.css——tsdown 对跨包 css 子路径 import 有抽取 bug）。
+   ⚠️ .activityBar 原为 overflow:hidden（logo/按钮全在栏内、无需外溢），菜单要
+   从栏右缘弹出 ⇒ 改 overflow:visible（父级 .workbenchRow/.frame 无裁剪，不引
+   portal；侧栏 .footerMenu 的「网格裁剪」问题在活动栏这一侧不存在）。 */
+.activityBar {
+  overflow: visible;
+}
+/* 用户入口按钮：复用 .railItem（40×40 r10，含 hover/焦点态），内放 28px 圆形
+   头像（design item「用户」：btn 40×40 r10 + avatar 28 + user icon 14）。 */
+.railUserAvatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 50%;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-secondary);
+  box-sizing: border-box;
+}
+/* 菜单本体：锚活动栏右缘、底部组高度附近，向上弹出。玻璃质感照抄侧栏
+   .footerMenu（glass-1 底 + glass-border 描边 + 阴影 + 入场动画）。 */
+.railUserMenu {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 120px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: calc(1px * var(--corum-density-scale, 1));
+  width: 200px;
+  box-sizing: border-box;
+  padding: calc(6px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 12px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-base));
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  animation: railUserMenuEnter 0.14s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes railUserMenuEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* 菜单头：28px 头像 + 「本机使用 / 未登录」两行 + 档位徽标。 */
+.railUserMenuHead {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
+}
+.railUserMenuName {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+}
+.railUserMenuTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.railUserMenuSub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 1.2;
+  white-space: nowrap;
+}
+/* 档位徽标（侧栏 .editionBadge 同形：胶囊 999 圆角 22 高；PRO = brand 描边
+   + brand 字 + 星形，社区版中性灰）。 */
+.railEditionBadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  height: 22px;
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 999px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.railEditionBadge[data-edition='pro'] {
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
+}
+.railEditionBadgeIcon {
+  flex: none;
+}
+.railUserMenuDivider {
+  flex: none;
+  height: 1px;
+  margin: calc(2px * var(--corum-density-scale, 1)) 0;
+  background: var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+/* 菜单项：14px 图标 + 13px 文字，hover 交互底（与侧栏 .footerMenuItem 同法）。 */
+.railUserMenuItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: 100%;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+.railUserMenuItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+/* 「升级 PRO」：brand 色文字（仅社区版出现，PRO 版不渲染该行）。 */
+.railUserMenuItem[data-brand='true'] {
+  color: var(--dsw-alias-brand-primary);
+}
+.railUserMenuIcon {
+  flex: none;
+}
+/* 图标位（「检查更新」项需要红点叠在图标上，用 inline-flex 小盒承载）。 */
+.railUserMenuIconWrap {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 「有更新」红点角标：静态占位（更新机制未接入）。 */
+.railUserMenuDot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-error-primary, var(--dsw-alias-brand-primary));
+  box-shadow: 0 0 0 1.5px var(--corum-glass-1, var(--dsw-alias-bg-base));
+  pointer-events: none;
+}
+/* 「检查更新」项右侧小字（有更新时的版本提示）。 */
+.railUserMenuVersion {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  white-space: nowrap;
+}
+.railUserMenuLabel {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .overlayLayer {
   position: absolute;
   inset: 0;

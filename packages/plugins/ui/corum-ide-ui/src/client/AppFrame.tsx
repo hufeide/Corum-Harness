@@ -25,7 +25,7 @@ interface SessionListState {
 }
 import type { createLayoutStore } from './stores.ts'
 import type { ChromeState, GridActions, SidebarMode } from './service.ts'
-import { Blocks, FolderKanban, Lock, MessageSquare, Search, X } from 'lucide-react'
+import { Blocks, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
@@ -158,7 +158,7 @@ const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
  * 刻意**不**走网格内新槽（进入网格就会被算进 leafMinSize / collapsedWidth /
  * drop 目标，而它是壳级工作面切换、不是用户可拖拽/可隐藏的区域）。
  */
-function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot }: {
+function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot, openSettingsSection }: {
   /**
    * 当前工作面的**导出值**（= 集成中心打开 ? 'integrations' : sidebarMode）。
    *
@@ -179,10 +179,81 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   onPlugins: () => void
   /** 设置座位：`sidebar.settings` 槽的渲染结果（SettingsShell 触发器 + 面板）。 */
   settingsSlot: ReactNode
+  /**
+   * 打开设置中心某 section（用户菜单「账户与用量」= 'account'、「设置」=
+   * 'general'）。直通 ctx.layout.openSettingsSection → 广播
+   * OPEN_SETTINGS_SECTION_EVENT，SettingsShell 监听后打开面板并选中该页。
+   * （原侧栏 footer 用户区删后，账户/设置菜单入口整体搬进活动栏底部。）
+   */
+  openSettingsSection: (id: string) => void
 }) {
   const taskActive = face === 'task'
   const projectActive = face === 'project' && projectAvailable
   const integrationsActive = face === 'integrations'
+  /** 档位（与原侧栏 footer 同源）：project 槽有 occupant = PRO，空 = 社区版。 */
+  const edition: 'community' | 'pro' = projectAvailable ? 'pro' : 'community'
+  const editionLabel = edition === 'pro' ? 'PRO' : '社区版'
+
+  /* ── 用户菜单（原侧栏 footer 用户区迁入）──────────────────────────── */
+
+  // 底部轻量 popover 开合（点头像钮 toggle）。关闭时把焦点还给触发按钮
+  // （键盘用户不丢锚点）。
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userButtonRef = useRef<HTMLButtonElement>(null)
+
+  /**
+   * 关闭路径（参照原侧栏 footer popover / SettingsShell.tsx 的监听法）：
+   * ① 点击菜单与触发按钮之外的任意处关闭；② Esc 关闭并归还焦点。
+   */
+  useEffect(() => {
+    if (!userMenuOpen) return
+    const onPointerDown = (event: MouseEvent): void => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest(`.${css.railUserMenu}`) !== null) return
+      if (userButtonRef.current?.contains(target)) return
+      setUserMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      setUserMenuOpen(false)
+      userButtonRef.current?.focus()
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [userMenuOpen])
+
+  // TODO(update: 更新机制未存在)：红点角标与「v… 可用」小字恒为静态占位，待接入
+  // auto-updater 后由真实状态驱动。显式标 boolean 而不是字面量 false，保住上面
+  // 两条渲染分支的类型检查（不被常量折叠掉）。
+  const updateAvailable: boolean = false
+  const updateVersionLabel = 'v0.2.0'
+
+  /** 菜单项「账户与用量」：打开设置中心的账户页并关菜单。 */
+  const openAccount = (): void => {
+    setUserMenuOpen(false)
+    openSettingsSection('account')
+  }
+  /** 菜单项「设置」：打开设置中心通用页并关菜单。 */
+  const openGeneralSettings = (): void => {
+    setUserMenuOpen(false)
+    openSettingsSection('general')
+  }
+  /** 点「升级 PRO」：只记日志（购买链路未接入），不假装已升级。 */
+  const requestUpgrade = (): void => {
+    setUserMenuOpen(false)
+    console.debug('[activitybar] 升级 PRO（占位：购买链路未接入）')
+  }
+  /** 点「检查更新」：只记日志（更新机制未接入），不假装已检查。 */
+  const requestUpdate = (): void => {
+    setUserMenuOpen(false)
+    console.debug('[activitybar] 检查更新（占位：更新机制未接入）')
+  }
+
   /** 工作面 tooltip：激活项额外提示「点此收起/展开侧栏」（状态③ 的可发现性）。 */
   const faceTitle = (label: string, active: boolean): string =>
     (active ? `${label} · 点此${sidebarCollapsed ? '展开' : '收起'}侧栏` : label)
@@ -258,7 +329,99 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
         </button>
         {/* design bg1Ll btn-settings：设置（sidebar.settings 槽触发器座位，行为不变）。 */}
         <span className={css.railSettingsSeat}>{settingsSlot}</span>
+        {/* 用户入口（design.pen item「用户」：btn 40×40 r10 + 28 圆形头像 + user
+            图标）——原侧栏 footer 用户区删后搬到这里，点击 toggle 向上弹出的
+            用户菜单（菜单项照 mmJTb zmFw6 版，见 .railUserMenu 注释）。 */}
+        <button
+          ref={userButtonRef}
+          type="button"
+          className={css.railItem}
+          title="用户"
+          aria-label="用户菜单"
+          aria-haspopup="menu"
+          aria-expanded={userMenuOpen}
+          onClick={() => { setUserMenuOpen(!userMenuOpen) }}
+        >
+          <span className={css.railUserAvatar}>
+            <User size={14} strokeWidth={2} aria-hidden="true" />
+          </span>
+        </button>
       </div>
+
+      {/* 用户菜单（design.pen mmJTb zmFw6）：绝对定位在活动栏内、锚右下向上弹出。
+          关闭路径：① 点菜单与触发按钮之外的任意处；② Esc（关闭后焦点还给触发
+          按钮）。菜单项动作沿用原侧栏 footer 的占位/通路：账户与用量/设置 =
+          ctx.layout.openSettingsSection 广播，升级 PRO / 检查更新 = console.debug
+          占位（购买与更新机制均未接入，TODO 同侧栏原状）。 */}
+      {userMenuOpen && (
+        <div className={css.railUserMenu} role="menu" aria-label="用户菜单">
+          {/* 菜单头：28px 头像 + 「本机使用 / 未登录」两行 + 档位徽标（edition
+              与侧栏品牌行同源：project 槽有 occupant = PRO，空 = 社区版）。 */}
+          <div className={css.railUserMenuHead}>
+            <span className={css.railUserAvatar}>
+              <User size={14} strokeWidth={2} aria-hidden="true" />
+            </span>
+            <span className={css.railUserMenuName}>
+              <span className={css.railUserMenuTitle}>本机使用</span>
+              <span className={css.railUserMenuSub}>未登录</span>
+            </span>
+            <span className={css.railEditionBadge} data-edition={edition}>
+              {edition === 'pro' && <Star className={css.railEditionBadgeIcon} size={12} strokeWidth={2} aria-hidden="true" />}
+              {editionLabel}
+            </span>
+          </div>
+          <div className={css.railUserMenuDivider} />
+          <button
+            type="button"
+            role="menuitem"
+            className={css.railUserMenuItem}
+            onClick={openAccount}
+          >
+            <User className={css.railUserMenuIcon} size={14} strokeWidth={2} aria-hidden="true" />
+            <span className={css.railUserMenuLabel}>账户与用量</span>
+          </button>
+          {/* 「升级 PRO」仅社区版显示（PRO 版已是最高档位）。 */}
+          {edition === 'community' && (
+            <button
+              type="button"
+              role="menuitem"
+              className={css.railUserMenuItem}
+              data-brand="true"
+              onClick={requestUpgrade}
+            >
+              <Star className={css.railUserMenuIcon} size={14} strokeWidth={2} aria-hidden="true" />
+              <span className={css.railUserMenuLabel}>升级 PRO</span>
+            </button>
+          )}
+          {/* TODO(update: 更新机制未存在)：updateAvailable 恒为静态占位 false——
+              红点角标与「v… 可用」的渲染分支保留，待接入 auto-updater 后由真实
+              状态驱动（对齐原侧栏 footer 的 TODO 现状）。 */}
+          <button
+            type="button"
+            role="menuitem"
+            className={css.railUserMenuItem}
+            onClick={requestUpdate}
+          >
+            <span className={css.railUserMenuIconWrap}>
+              <RefreshCw className={css.railUserMenuIcon} size={14} strokeWidth={2} aria-hidden="true" />
+              {updateAvailable && <span className={css.railUserMenuDot} aria-hidden="true" />}
+            </span>
+            <span className={css.railUserMenuLabel}>检查更新</span>
+            {updateAvailable && (
+              <span className={css.railUserMenuVersion}>{updateVersionLabel} 可用</span>
+            )}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={css.railUserMenuItem}
+            onClick={openGeneralSettings}
+          >
+            <Settings className={css.railUserMenuIcon} size={14} strokeWidth={2} aria-hidden="true" />
+            <span className={css.railUserMenuLabel}>设置</span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -462,6 +625,13 @@ export type AppFrameProps =
      * 服务，靠这个 props 面反向连接；与 setTheme 同一注入模式）。
      */
     attachGridActions: (actions: GridActions) => void
+    /**
+     * 打开设置中心某 section（直通 ctx.layout.openSettingsSection，广播
+     * OPEN_SETTINGS_SECTION_EVENT、SettingsShell 监听 openSection）——活动栏
+     * 用户菜单「账户与用量」/'account' 与「设置」/'general' 用（原侧栏 footer
+     * 用户区迁入后的通路）。
+     */
+    openSettingsSection: (id: string) => void
   }
 
 /** The IDE frame (see module doc). */
@@ -479,6 +649,7 @@ export function IdeAppFrame({
   setIntegrationsOpen,
   toggleIntegrations,
   attachGridActions,
+  openSettingsSection,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   // 当前会话 id（非 blank）——details 抽屉的会话切换复位用。
@@ -1159,6 +1330,7 @@ export function IdeAppFrame({
           onSearch={onSearchFace}
           onPlugins={onPluginsFace}
           settingsSlot={renderSlot('sidebar.settings', { wide: false })}
+          openSettingsSection={openSettingsSection}
         />
 
         {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。
