@@ -54,7 +54,11 @@ export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation
 // 拖入 split/swap，其余三区域（convo/editor/终端）自由组合不卷入它。
 // 宽度仍可由其右缘 root sash 手调（minWidth 300），但不被其它区域拖动带跑。
 // `satisfies` 锚定槽域（B2）：key 拼错/多写 IDE_GRID_SLOTS 之外的槽名即编译错。
-registerSlot('corum.sidebar' satisfies IdeGridSlot, { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true, collapsedWidth: 56, visibility: 'fixed' })
+// 折叠宽 **0**（2026-09-30 定案 = 整列隐藏）：GridView 折叠态直接把 collapsedWidth
+// 当 locked 宽度用（grid.ts leafMinSize / GridView 的 locked 映射），0 ⇒ 该格不
+// 占位、主区吃满；原值 56 会在折叠后留一条空槽。展开入口 = 常驻标题栏最左的
+// 折叠/展开按钮（NavTitleBar），折叠态不再留图标轨。
+registerSlot('corum.sidebar' satisfies IdeGridSlot, { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true, collapsedWidth: 0, visibility: 'fixed' })
 registerSlot('conversation' satisfies IdeGridSlot, { label: '对话区', defaultWeight: 509, minWidth: 509, visibility: 'fixed' })
 registerSlot('corum.editor' satisfies IdeGridSlot, { label: '编辑器', defaultWeight: 700, minWidth: 205, visibility: 'fixed' })
 // 轨迹区域（2026-09-09 用户定调：抽屉形态不好用，改为独立区域——与编辑器/终端

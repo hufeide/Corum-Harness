@@ -25,7 +25,7 @@ interface SessionListState {
 }
 import type { createLayoutStore } from './stores.ts'
 import type { GridActions, SidebarMode } from './service.ts'
-import { Blocks, Columns2, FolderKanban, Lock, MessageSquare, Moon, PanelLeftClose, Search, Sun, Terminal, X } from 'lucide-react'
+import { Blocks, Columns2, FolderKanban, Lock, MessageSquare, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
@@ -54,6 +54,24 @@ import css from './AppFrame.module.css'
  * 沿 root row 的格序（sidebar, conversation, right-col）。
  */
 const TITLEBAR_CLEARANCE: readonly number[] = [40, 0, 0]
+
+/**
+ * 活动栏宽（px）：与标题栏红绿灯让位区严格同宽（2026-09-30 定案）。
+ * macOS 红绿灯实占 x=12..64（13px 灯 ×3 + 8px 间距）+ 右侧 12px 留白 = 76
+ * （见 .navTitleBarInset 与 main.ts 的 trafficLightPosition{12,13}）。原 56
+ * 比灯带窄 ⇒ 灯会压到侧栏上；改 76 后活动栏列与红绿灯列上下对齐。
+ * ⚠️ 与 AppFrame.module.css 的 `.activityBar{width}` 必须同步（CSS 不能 import
+ * 本常量，改一处要一起改，无编译期守卫）。
+ */
+const ACTIVITY_BAR_WIDTH = 76
+
+/**
+ * 折叠态标题栏行的最小宽度（px）= 红绿灯让位 76 + 折叠/展开按钮 28。
+ * 折叠后侧栏整列隐藏（collapsedWidth=0），侧栏右缘只剩活动栏的 76——窄于按钮
+ * 排所需，故行宽取本值兜住；「展开」按钮因此与展开态的「折叠」按钮落在同一
+ * x=76（design.pen 状态③ 定稿：两态按钮**零位移**）。
+ */
+const TITLEBAR_COLLAPSED_WIDTH = ACTIVITY_BAR_WIDTH + 28
 
 // ── FloatingLayer 单例桥 ──
 // AppFrame 组件树里 <FloatingLayer /> 是标题栏触发器的 sibling（Provider 在
@@ -90,10 +108,18 @@ function NavIconButton({ icon, label, onClick, active }: {
 
 /**
  * 左列导航标题栏（design.pen「窗口标题栏」d8STsd，40px）：窗口不再有通栏
- * 标题栏，本栏放进左列 nav 顶部——左侧 84px 给 macOS 红绿灯让位（整行
- * app-region:drag），右侧一排图标按钮（no-drag）：折叠侧栏 / 切换编辑器+
- * 资源管理器 / 切换终端 / 插件中心 / 主题（浅↔深）/ 设置。设置触发器渲染
- * sidebar.settings 槽（SettingsShell 触发器+面板一体，面板 portal 到 body）。
+ * 标题栏，本栏放进左列 nav 顶部——左侧 76px 给 macOS 红绿灯让位（= 活动栏宽，
+ * 两列上下对齐；整段 app-region:drag），右侧图标按钮（no-drag）。
+ *
+ * 按钮分两档（2026-09-30 定案，design.pen 状态①/状态③）：
+ *   ① 折叠/展开侧栏——**常驻**，两态落在同一坐标（红绿灯让位之后的第一个位置
+ *      x=76），展开态显示「折叠」、折叠态同位置变「展开」；它是折叠态**唯一**
+ *      的展开入口（原折叠轨 SidebarRail 已退役，折叠改整列隐藏、不留图标轨）。
+ *   ② 其余按钮（切换编辑器+资源管理器 / 切换终端 / 主题 浅↔深 / 插件中心）——
+ *      只在展开态渲染，折叠态随侧栏一起隐藏。
+ * 设置**不在本栏**：它的座位是 sidebar.settings 槽（SettingsShell 触发器+面板
+ * 一体，portal 到 body），该槽是 single 槽且座位已归活动栏底部组——两处同时
+ * 挂载会出现两个 SettingsShell 实例（两个设置面板 + onboarding 渲染两次）。
  */
 function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onTogglePanels, onToggleTerminal, onOpenPlugins, sidebarCollapsed }: {
   themePreference: ThemePreference
@@ -107,19 +133,21 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
   const isDark = themePreference === 'dark'
   return (
     <div className={css.navTitleBar}>
-      {/* 红绿灯让位 76px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘）。
-          折叠态（design J0PbdL）：窗口标题栏缩 66 只留红绿灯，actions 全隐藏
-          （各功能移到 56px 折叠轨）。 */}
+      {/* 红绿灯让位 76px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘；
+          76 = 活动栏宽，红绿灯列与活动栏列上下对齐）。 */}
       <span className={css.navTitleBarInset} />
+      {/* 折叠/展开按钮**常驻**：固定在红绿灯让位之后的第一个位置（x=76），
+          两态零位移（design.pen 状态③ 定稿）。折叠态行内只剩它一个按钮。 */}
+      <NavIconButton
+        icon={sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        label={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
+        onClick={onToggleSidebar}
+      />
       {!sidebarCollapsed && (
       <div className={css.navTitleBarActions}>
-        {/* design.pen titlebar-actions 顺序：侧栏 / 面板 / 终端 / 主题 / 设置 / 插件。
+        {/* design.pen titlebar-actions 顺序：侧栏 / 面板 / 终端 / 主题 / 插件
+            （「侧栏」= 上面那个常驻的折叠/展开钮，故本组从「面板」起）。
             图标 18×18（design 2026-08-28 统一放大）、按钮 padding 5（28×28）；插件中心是带文字按钮（最后）。 */}
-        <NavIconButton
-          icon={<PanelLeftClose size={18} />}
-          label="折叠侧栏"
-          onClick={onToggleSidebar}
-        />
         <NavIconButton icon={<Columns2 size={18} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
         <NavIconButton icon={<Terminal size={18} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
         <NavIconButton
@@ -178,7 +206,8 @@ const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
 
 /**
  * 活动栏（design.pen IrWFV 画板 E 定稿：**活动栏 = 工作面切换器**）——
- * 56px **常驻**竖排图标列（结构见 design i1ECc）：
+ * 76px **常驻**竖排图标列（结构见 design i1ECc；76 = 标题栏红绿灯让位宽，
+ * 2026-09-30 定案，原 56 比灯带窄会压到侧栏）：
  *   鲸鱼 logo 28 圆形 / 主导航组（任务 · 项目 · 搜索）/ spacer /
  *   底部组（插件 · 设置）。图标钮 40×40 r10，激活态 $glass-2 底 + 左侧 2px
  *   $brand-primary 指示条。
@@ -198,7 +227,8 @@ const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
  *     部分的工作面」，故全幅是自然结果而不是特例）。激活态由 AppFrame 本地
  *     state 决定（画板 F 的指示条 + $glass-2 底）；
  *   - 设置 → `sidebar.settings` 槽座位（复用 SettingsShell 触发器，行为不变）；
- *   - 点**当前激活**的工作面图标 ⇄ 折叠 / 展开侧边栏（design 状态③ 的联动）。
+ *   - 点**当前激活**的工作面图标 ⇄ 折叠 / 展开侧边栏（便利入口；**主入口**是
+ *     常驻标题栏最左的折叠/展开钮，两态同坐标 x=76，见 NavTitleBar）。
  *
  * 刻意**不**走网格内新槽（进入网格就会被算进 leafMinSize / collapsedWidth /
  * drop 目标，而它是壳级工作面切换、不是用户可拖拽/可隐藏的区域）。
@@ -620,11 +650,12 @@ export function IdeAppFrame({
   // 区域显隐切换（供左列标题栏图标按钮）：toggle 一组 slot 的 hidden。
   // 整组「任一可见 → 全隐藏；全隐藏 → 全显示」，保证编辑器+资源管理器成组、
   // 终端/侧栏单独切换的语义统一。
-  // 侧栏折叠（2026-08-28 重实现，design L1 侧栏折叠态 J0PbdL）：GridView 把
-  // sidebar leaf 收成 56px 图标轨（collapsedWidth），leaf 内容换成竖排图标栏
-  // （含展开按钮）。P2-2：折叠态只存本组件 state，经 COLLAPSED_SIDEBAR 显式传给
-  // GridView 与 grid 数学（rescaleGrid/resizeBranch）——grid.ts 不再持模块级
-  // 折叠 Set（ui-base 被各 bundle 内联，模块状态会按 bundle 分裂）。
+  // 侧栏折叠（2026-09-30 定案 = **整列隐藏**，design.pen 状态③）：GridView 把
+  // sidebar leaf 收到 collapsedWidth=0（见 ide-layout.ts 的 registerSlot），整列
+  // 不占位、主区吃满；展开入口 = 常驻标题栏最左的折叠/展开按钮（NavTitleBar）。
+  // P2-2：折叠态只存本组件 state，经 COLLAPSED_SIDEBAR 显式传给 GridView 与 grid
+  // 数学（rescaleGrid/resizeBranch）——grid.ts 不再持模块级折叠 Set（ui-base 被
+  // 各 bundle 内联，模块状态会按 bundle 分裂）。
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const onToggleSidebar = useCallback(() => {
     setSidebarCollapsed(c => !c)
@@ -633,7 +664,8 @@ export function IdeAppFrame({
   // 点「任务/项目」= 写 ctx.layout 的 sidebarMode（工作面的跨 bundle 单例状态，
   // 侧栏骨架按它切换任务/项目面板）+ 关掉集成中心（切走即收起，否则新工作面
   // 会被集成中心面板挡住、用户以为点击没生效）；点**当前激活**的工作面图标 =
-  // 折叠/展开侧栏（design 画板 E 状态③ 的联动，取代旧 SidebarRail 的展开按钮）。
+  // 折叠/展开侧栏（便利入口——**主入口**是常驻标题栏最左的折叠/展开钮，两态
+  // 同坐标，见 NavTitleBar）。
   // 切工作面时一并确保侧栏是展开态——否则点了图标侧栏还收着，用户看不到工作面内容。
   const onSelectFace = useCallback((face: SidebarFace) => {
     if (face === 'project' && !projectAvailable) {
@@ -870,6 +902,16 @@ export function IdeAppFrame({
     }
   }, [integrationsOpen])
 
+  // 标题栏行宽：展开态 = 侧栏右缘（活动栏 + 侧栏，侧栏可拖故用测量值），下限
+  // TITLEBAR_COLLAPSED_WIDTH 兜住（消掉折叠/展开切换瞬间测量滞后一帧的裁切）。
+  // 折叠态直接取常量 104（= 红绿灯让位 76 + 折叠/展开钮 28）：**不能靠测量**——
+  // 侧栏整列隐藏后 GridView 把该格 visibility:hidden 但**保留折叠前的 inline
+  // width**（GridView 的 size<=0 分支只置 visibility、不写 width），故量到的
+  // 「侧栏右缘」仍是折叠前的 376，行宽（= 窗口拖拽带）会虚胖到 376。
+  const titlebarWidth = sidebarCollapsed
+    ? TITLEBAR_COLLAPSED_WIDTH
+    : Math.max(sidebarRight, TITLEBAR_COLLAPSED_WIDTH)
+
   // 从面板拖入新区域到网格中某 leaf 的某侧。
   const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
     setGrid((g) => {
@@ -926,10 +968,10 @@ export function IdeAppFrame({
     if (slot === 'corum.sidebar') {
       // 侧栏（design.pen col-nav）：left-body 内的圆角 18 玻璃卡片（项目/任务双
       // 模式）。顶部贯通标题栏行（窗口标题栏 + Agent 标题栏）在 AppFrame 主 JSX
-      // 渲染，不在此 leaf 内。折叠态：leaf 被 GridView 收成 collapsedWidth=56，
-      // 只隐藏内容——**不再渲染图标轨**（PR3：原 SidebarRail 折叠替身已退役，
-      // 活动栏本就是常驻 56px 图标列，再画一行图标即是重复；「展开侧栏」入口随之
-      // 改到活动栏——点当前激活的工作面图标 ⇄ 收起/展开，见 ActivityBar 注释）。
+      // 渲染，不在此 leaf 内。折叠态：leaf 被 GridView 收到 collapsedWidth=0
+      // （整列隐藏，2026-09-30 定案），只隐藏内容——**不再渲染图标轨**（PR3：
+      // 原 SidebarRail 折叠替身已退役；展开入口在常驻标题栏最左的折叠/展开钮，
+      // 见 NavTitleBar）。
       if (sidebarCollapsed) return null
       return (
         <div className={css.sidebarPane}>
@@ -999,7 +1041,7 @@ export function IdeAppFrame({
   // 会话区占满剩余。lockedSlots 运行时锁定宽（不动 collapsedWidth 折叠轨）。
   // 折叠守卫（2026-08-31 PROGRESS 修复落地）：GridView 里 lockedSlots 优先于
   // collapsedSlots——用户主动折叠时必须从 lockedSlots 移除 sidebar，否则
-  // collapsedWidth=56 永远被 300 压制（折叠失效，宽度仍 300）。
+  // collapsedWidth=0 永远被 300 压制（折叠失效，宽度仍 300）。
   const rightAllHidden = hiddenByDefault.size === DEFAULT_HIDDEN.length
   const lockedSlots = useMemo<ReadonlyMap<string, number>>(
     () => (rightAllHidden && !sidebarCollapsed ? new Map([['corum.sidebar', 300]]) : new Map()),
@@ -1084,15 +1126,17 @@ export function IdeAppFrame({
           （IntegrationsFrame 的 .header 是 app-region:drag）。 */}
       <div
         className={css.titlebarRow}
-        /* 浮层宽度 = 侧栏右缘（2026-09-10 用户定调：会话段搬进
+        /* 浮层宽度 = 侧栏右缘、下限 104（2026-09-10 用户定调：会话段搬进
            conversation.session.header，本行只剩主窗口的窗口控制）。
+           折叠态侧栏整列隐藏后右缘只剩活动栏 76 ⇒ 由 titlebarWidth 的 max 兜住，
+           「展开」按钮与展开态的「折叠」按钮因此同坐标（零位移）。
            右侧（对话区/编辑器/终端上方）无浮层——纯内容区。 */
-        style={{ right: 'auto', width: sidebarRight }}
+        style={{ right: 'auto', width: titlebarWidth }}
         hidden={integrationsOpen}
       >
         {/* 窗口标题栏宽度跟随侧栏右缘（设计稿：覆盖侧栏正上方，侧栏拖拽时一起变）。
             该段整段 app-region:drag（窗口拖拽），内层按钮 no-drag。 */}
-        <div className={css.titlebarDrag} style={{ width: sidebarRight, flex: 'none', display: 'flex' }}>
+        <div className={css.titlebarDrag} style={{ width: titlebarWidth, flex: 'none', display: 'flex' }}>
           <NavTitleBar
             themePreference={themePreference}
             onToggleTheme={onToggleTheme}
@@ -1112,7 +1156,8 @@ export function IdeAppFrame({
       </div>
 
       {/* 工作面行（PR3 活动栏 + PR4 集成中心）：左 = 常驻活动栏（**网格外**的
-          固定 56px 列），右 = 自由二维网格（GridView）**或**集成中心全屏面板。
+          固定 76px 列 = 红绿灯让位宽，2026-09-30 定案），右 = 自由二维网格
+          （GridView）**或**集成中心全屏面板。
           活动栏刻意不走网格内新槽——网格数学（leafMinSize / collapsedWidth /
           drop 目标）会把它算进布局，而它是壳级导航、不是用户可拖拽/可隐藏的区域。
 
