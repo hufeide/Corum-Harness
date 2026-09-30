@@ -83,7 +83,6 @@
 }
 /* 段内按钮/可点控件显式 no-drag（确保可点；这些类自身也已声明 no-drag）。 */
 .titlebarDrag .navIconBtn,
-.titlebarDrag .navPluginBtn,
 .titlebarDrag .agentTrajBtn,
 .titlebarDrag button,
 .titlebarDrag [role="button"] {
@@ -122,9 +121,12 @@
   min-width: 0;
 }
 
-/* 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：padding 6 + icon 16 = 28×28 圆角 8。 */
+/* 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：padding 6 + icon 18 = 28×28 圆角 8。
+   flex:none —— 按钮宽度恒为 28，不被容器挤压（折叠态行宽 108 正好放下
+   让位 76 + 间距 4 + 按钮 28；若可被压缩，按钮会窄 4px 且有 4px 溢出容器）。 */
 .navIconBtn {
   -webkit-app-region: no-drag; /* 标题栏浮层内按钮必须可点（drag 区内默认不可交互） */
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,42 +146,13 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* 当前态高亮（如深色主题下 moon/sun 用 brand 色）。 */
-.navIconBtn[data-active] {
-  color: var(--dsw-alias-brand-primary);
-}
-
 /* 设置触发器座位（.navSettingsSeat）随 PR3 移除：座位已归活动栏底部组
    （.railSettingsSeat）。该槽是 single 槽（occupant = SettingsShell），
    常驻活动栏与标题栏两条挂载点会同时实例化 ⇒ 两个设置面板 + onboarding
    弹层渲染两次，故标题栏那份必须去掉。 */
 
-/* 插件中心按钮（design.pen action-插件中心 jyVpw）：h28 padding[0,8] 圆角 8，
-   blocks 16 + 「插件」文字 12/600，图标与文字 gap 4。 */
-.navPluginBtn {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(4px * var(--corum-density-scale, 1));
-  height: 28px;
-  margin: 0;
-  padding: 0 calc(8px * var(--corum-density-scale, 1));
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-  cursor: pointer;
-}
-.navPluginBtn:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-.navPluginLabel {
-  font-size: calc(14px * var(--corum-ui-font-scale, 1));
-  font-weight: 400;
-}
+/* 插件中心按钮（.navPluginBtn / .navPluginLabel）随 2026-09-30 定案移除：
+   插件管理入口改走活动栏「插件」→ 集成中心，标题栏那份是重复入口。 */
 
 /* ── 会话顶栏的 corum 段（design.pen b4p03B / a2otEO，会话级槽 occupant）──
    状态胶囊 + 常驻 Agent 胶囊 + 轨迹按钮。2026-09-10「顶栏归会话」后这些段渲染在

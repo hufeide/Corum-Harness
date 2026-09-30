@@ -25,7 +25,7 @@ interface SessionListState {
 }
 import type { createLayoutStore } from './stores.ts'
 import type { GridActions, SidebarMode } from './service.ts'
-import { Blocks, Columns2, FolderKanban, Lock, MessageSquare, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal, X } from 'lucide-react'
+import { Blocks, Columns2, FolderKanban, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Search, Terminal, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
@@ -66,12 +66,14 @@ const TITLEBAR_CLEARANCE: readonly number[] = [40, 0, 0]
 const ACTIVITY_BAR_WIDTH = 76
 
 /**
- * 折叠态标题栏行的最小宽度（px）= 红绿灯让位 76 + 折叠/展开按钮 28。
- * 折叠后侧栏整列隐藏（collapsedWidth=0），侧栏右缘只剩活动栏的 76——窄于按钮
- * 排所需，故行宽取本值兜住；「展开」按钮因此与展开态的「折叠」按钮落在同一
- * x=76（design.pen 状态③ 定稿：两态按钮**零位移**）。
+ * 折叠态标题栏行的宽度（px）= 红绿灯让位 76 + 间距 4 + 折叠/展开按钮 28 = 108。
+ * 折叠后侧栏整列隐藏（collapsedWidth=0），侧栏右缘只剩活动栏的 76——窄于按钮排
+ * 所需，故行宽取本值；「展开」按钮因此与展开态的「折叠」按钮落在同一 x=80
+ * （design.pen 状态③ 定稿：两态按钮**零位移**）。
+ * ⚠️ 间距（`.navTitleBar` 的 `gap: 4px`）必须计入：漏算会让按钮溢出容器 4px
+ * （实测按钮 rect 80..108，而容器只有 104 ⇒ 按钮有一截落在行外）。
  */
-const TITLEBAR_COLLAPSED_WIDTH = ACTIVITY_BAR_WIDTH + 28
+const TITLEBAR_COLLAPSED_WIDTH = ACTIVITY_BAR_WIDTH + 4 + 28
 
 // ── FloatingLayer 单例桥 ──
 // AppFrame 组件树里 <FloatingLayer /> 是标题栏触发器的 sibling（Provider 在
@@ -84,12 +86,11 @@ let floatingApiSingleton: FloatingLayerApi | null = null
 /** 主题偏好（三态）。 */
 type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：28×28 圆角 8，icon 13。 */
-function NavIconButton({ icon, label, onClick, active }: {
+/** 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：28×28 圆角 8，icon 18。 */
+function NavIconButton({ icon, label, onClick }: {
   icon: ReactNode
   label: string
   onClick: () => void
-  active?: boolean
 }) {
   return (
     <button
@@ -97,8 +98,6 @@ function NavIconButton({ icon, label, onClick, active }: {
       className={css.navIconBtn}
       title={label}
       aria-label={label}
-      aria-pressed={active}
-      data-active={active || undefined}
       onClick={onClick}
     >
       {icon}
@@ -113,30 +112,28 @@ function NavIconButton({ icon, label, onClick, active }: {
  *
  * 按钮分两档（2026-09-30 定案，design.pen 状态①/状态③）：
  *   ① 折叠/展开侧栏——**常驻**，两态落在同一坐标（红绿灯让位之后的第一个位置
- *      x=76），展开态显示「折叠」、折叠态同位置变「展开」；它是折叠态**唯一**
- *      的展开入口（原折叠轨 SidebarRail 已退役，折叠改整列隐藏、不留图标轨）。
- *   ② 其余按钮（切换编辑器+资源管理器 / 切换终端 / 主题 浅↔深 / 插件中心）——
- *      只在展开态渲染，折叠态随侧栏一起隐藏。
- * 设置**不在本栏**：它的座位是 sidebar.settings 槽（SettingsShell 触发器+面板
- * 一体，portal 到 body），该槽是 single 槽且座位已归活动栏底部组——两处同时
- * 挂载会出现两个 SettingsShell 实例（两个设置面板 + onboarding 渲染两次）。
+ *      x=80 = 让位 76 + 间距 4），展开态显示「折叠」、折叠态同位置变「展开」；
+ *      它是折叠态**唯一**的展开入口（原折叠轨 SidebarRail 已退役，折叠改整列
+ *      隐藏、不留图标轨）。
+ *   ② 其余按钮（切换编辑器+资源管理器 / 切换终端）——只在展开态渲染，折叠态
+ *      随侧栏一起隐藏。
+ * 本栏只留「窗口控制」类按钮（2026-09-30 用户定案）：**主题切换**与**插件中心**
+ * 已移除（主题走设置中心「外观」，插件管理走活动栏「插件」→ 集成中心，标题栏
+ * 那份是重复入口）；设置从来不在本栏——sidebar.settings 是 single 槽，座位归
+ * 活动栏底部组，两处同时挂载会出现两个 SettingsShell 实例。
  */
-function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onTogglePanels, onToggleTerminal, onOpenPlugins, sidebarCollapsed }: {
-  themePreference: ThemePreference
-  onToggleTheme: () => void
+function NavTitleBar({ onToggleSidebar, onTogglePanels, onToggleTerminal, sidebarCollapsed }: {
   onToggleSidebar: () => void
   onTogglePanels: () => void
   onToggleTerminal: () => void
-  onOpenPlugins: () => void
   sidebarCollapsed: boolean
 }) {
-  const isDark = themePreference === 'dark'
   return (
     <div className={css.navTitleBar}>
       {/* 红绿灯让位 76px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘；
           76 = 活动栏宽，红绿灯列与活动栏列上下对齐）。 */}
       <span className={css.navTitleBarInset} />
-      {/* 折叠/展开按钮**常驻**：固定在红绿灯让位之后的第一个位置（x=76），
+      {/* 折叠/展开按钮**常驻**：固定在红绿灯让位之后的第一个位置（x=80），
           两态零位移（design.pen 状态③ 定稿）。折叠态行内只剩它一个按钮。 */}
       <NavIconButton
         icon={sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
@@ -145,27 +142,11 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
       />
       {!sidebarCollapsed && (
       <div className={css.navTitleBarActions}>
-        {/* design.pen titlebar-actions 顺序：侧栏 / 面板 / 终端 / 主题 / 插件
-            （「侧栏」= 上面那个常驻的折叠/展开钮，故本组从「面板」起）。
-            图标 18×18（design 2026-08-28 统一放大）、按钮 padding 5（28×28）；插件中心是带文字按钮（最后）。 */}
+        {/* design.pen titlebar-actions：侧栏 / 面板 / 终端（「侧栏」= 上面那个
+            常驻的折叠/展开钮，故本组从「面板」起）。图标 18×18（design
+            2026-08-28 统一放大）、按钮 padding 6 / 命中框 28×28。 */}
         <NavIconButton icon={<Columns2 size={18} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
         <NavIconButton icon={<Terminal size={18} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
-        <NavIconButton
-          icon={isDark ? <Moon size={18} /> : <Sun size={18} />}
-          label={isDark ? '切换到浅色主题' : '切换到深色主题'}
-          onClick={onToggleTheme}
-          active={isDark}
-        />
-        {/* 设置触发器（sidebar.settings 槽）**已迁到活动栏底部组**（PR3）：该槽是
-            single 槽（occupant = SettingsShell，含触发器 + 面板 + onboarding），
-            同一时刻只能挂载一份——旧代码靠「折叠 ⟷ 展开」让标题栏与折叠轨互斥，
-            活动栏常驻后两条挂载点会同时渲染 ⇒ 两个 SettingsShell 实例（两个设置
-            面板、onboarding 弹层渲染两次）。故此处移除，座位归活动栏。 */}
-        {/* 插件中心（design.pen action-插件中心 jyVpw）：blocks 18 + 「插件」文字 14px。 */}
-        <button type="button" className={css.navPluginBtn} onClick={onOpenPlugins} title="插件中心" aria-label="插件中心">
-          <Blocks size={18} />
-          <span className={css.navPluginLabel}>插件</span>
-        </button>
       </div>
       )}
     </div>
@@ -491,12 +472,9 @@ export function IdeAppFrame({
   useSessions,
   actions,
   renderSlot,
-  useTheme,
   useSidebarMode,
   useProjectOccupied,
-  setTheme,
   setSidebarMode,
-  openPluginManager: onOpenPluginManager,
   attachGridActions,
 }: AppFrameProps) {
   const panels = useStore(s => s)
@@ -505,7 +483,6 @@ export function IdeAppFrame({
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
-  const themePreference = useTheme((p: ThemePreference) => p)
   // 活动栏工作面状态（PR3）：当前侧栏模式 + 项目工作面可用性。
   // 两者都来自 root inject 面的 hooks 室（源 = ctx.layout 的
   // sidebarModeSnapshot / corum.sidebar.project 槽占用判定），活动栏据此定激活态。
@@ -775,10 +752,6 @@ export function IdeAppFrame({
   // 现经 GridActions.toggleRegion 暴露给 session-bar 的 occupant（见下方
   // gridActions 的 toggleRegion 与 service.ts 的 ILayout.toggleRegion）。
   const onToggleTerminal = useCallback(() => { toggleRegionVisibility(['corum.panel']) }, [toggleRegionVisibility])
-  // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
-  const onToggleTheme = useCallback(() => {
-    setTheme(themePreference === 'dark' ? 'light' : 'dark')
-  }, [setTheme, themePreference])
 
   // 插件中心面板的区域显隐投影：hidden 槽位集合（读最新 gridRef，供
   // PluginManagerPanel 的 useSyncExternalStore）。setGrid 后通知订阅者。
@@ -959,10 +932,11 @@ export function IdeAppFrame({
     }
   }, [saveGridDebounced])
 
-  // 插件中心面板已拆出壳（corum-ide-plugin-manager-ui 插件）：触发经 props
-  // 的 openPluginManager（→ LayoutController → grid actions 订阅面 → 该插件
-  // 开自己的 modal）。本组件不再 import/渲染 PluginManagerPanel。
-  const openPluginManager = onOpenPluginManager
+  // 插件中心面板已拆出壳（corum-ide-plugin-manager-ui 插件）：触发原先在本组件
+  // 渲染的「插件」标题栏按钮上（→ LayoutController → grid actions 订阅面 → 该
+  // 插件开自己的 modal）。该按钮已按 2026-09-30 定案移除（插件管理入口改走
+  // 活动栏「插件」→ 集成中心），故这里不再取用 onOpenPluginManager；注入面与
+  // grid actions 的 openPluginManager 通路**保留未删**（改契约牵动该 UI 插件）。
 
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {
@@ -1138,12 +1112,9 @@ export function IdeAppFrame({
             该段整段 app-region:drag（窗口拖拽），内层按钮 no-drag。 */}
         <div className={css.titlebarDrag} style={{ width: titlebarWidth, flex: 'none', display: 'flex' }}>
           <NavTitleBar
-            themePreference={themePreference}
-            onToggleTheme={onToggleTheme}
             onToggleSidebar={onToggleSidebar}
             onTogglePanels={onTogglePanels}
             onToggleTerminal={onToggleTerminal}
-            onOpenPlugins={openPluginManager}
             sidebarCollapsed={sidebarCollapsed}
           />
         </div>
