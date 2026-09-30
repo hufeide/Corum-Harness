@@ -31,133 +31,44 @@
   --corum-session-topbar-app-region: drag;
 }
 
-/* ── 顶部标题栏行（design.pen titlebar-row，40px）──
-   absolute 浮层只覆盖左列上方，脱离文档流——mainRow 顶到窗口顶占满 frame 全高
-   （right-col 编辑器/资源管理器/终端上方无标题栏）。
-   宽度（inline style）= 侧栏右缘（活动栏 76 + 侧栏 280 = 356，展开态）；
-   折叠态侧栏整列隐藏（右缘只剩 76），行宽由 TITLEBAR_COLLAPSED_WIDTH（= 76 + 28，
-   只留红绿灯让位 + 折叠/展开按钮）兜住——见 AppFrame 的 titlebarWidth。
-   两段内容（窗口标题栏/Agent 标题栏座位）各自 app-region:drag（.titlebarDrag），
-   行本体不截获命中（pointer-events:none）让右段编辑器上方点击穿透——右侧
-   （编辑器/资源管理器/终端上方）是纯内容区，无 drag 覆盖；窗口拖拽只靠左列
-   标题栏行两段（整段 drag）。 */
-.titlebarRow {
-  -webkit-app-region: none; /* 行本体绝不 drag——右侧顶部不留拖拽区 */
+/* ── 统一标题栏**惰性挂载位**（2026-09-30，design.pen 统一标题栏）──
+   顶部 40px 这条带子由 @corum/corum-ui-titlebar 的 corum.titlebar occupant 独占；
+   壳这里只给定位、宽度与穿透，**不带任何 app-region**（drag 命中区一律由该组件
+   产生——见其 TitleBar.module.css 的拖拽不变式）。
+   为什么要单一 owner：这条带子此前被两个 owner 分别持有（本壳的按钮行 + 对话区
+   leaf 内的会话顶栏），折叠态下后者的空态拖拽带（app-region: drag）盖住本壳的
+   控件层，而 drag 位图**不遵守 z-index**、显式 no-drag 也凿不掉 ⇒ 物理鼠标点
+   「展开」被当拖拽吞掉（双击还触发 macOS 标题栏缩放）。CDP 合成事件绕过 drag
+   命中判定，故这类 bug 脚本验不出。
+   宽度 = 活动栏 + 侧栏 + 对话区格右缘（见 AppFrame 的 bandWidth）；右缘之外
+   （编辑器/资源管理器/终端上方）无浮层——纯内容区。 */
+.titlebarMount {
+  -webkit-app-region: none; /* 挂载位绝不 drag——drag 只由 occupant 的填充带产生 */
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 30; /* 压在 GridView（mainRow）上方，让位的 sidebar/conversation 卡片之下 */
-  display: flex;
-  align-items: center;
+  z-index: 30; /* 压在 GridView（mainRow）上方 */
   height: 40px;
   box-sizing: border-box;
-  /* 行本体不截获命中：右段（编辑器/资源管理器上方）无标题栏内容，必须让
-     点击穿透到下方顶到窗口顶的编辑器卡片。行内三个 flex 项（左拖拽带 /
-     控件层 / 右拖拽带）各自恢复命中。 */
+  /* 本体不截获命中：右缘之外是内容区，必须能穿透；occupant 的可点内容自带命中。 */
   pointer-events: none;
 }
 
-/* 行内三个 flex 项（左拖拽带 / 控件层 / 右拖拽带）恢复命中。 */
-.titlebarRow > * {
-  pointer-events: auto;
-}
-
-/* 集成中心打开时的整行隐藏（PR4）。不能用 UA 的 `[hidden]{display:none}` 兜底：
-   作者样式恒胜 UA 样式，而 `.titlebarRow{display:flex}` 就是作者声明 ⇒ 必须显式
-   写一条作者规则。(0,2,0) > (0,1,0)，无需 !important。
-   本行宽度锚在侧栏右缘，而集成中心是全屏独占工作面：留着它既无意义，又会与
-   集成中心面板头抢顶部 40px。窗口拖拽改由面板头承担（IntegrationsFrame）。 */
-.titlebarRow[hidden] {
+/* 集成中心打开时的隐藏（PR4）。不能用 UA 的 `[hidden]{display:none}` 兜底：
+   作者样式恒胜 UA 样式 ⇒ 必须显式写一条作者规则。(0,2,0) > (0,1,0)，无需 !important。
+   display:none 同时保证这一段**不产生任何 drag 矩形**——与 .railDragBand 互补
+   （集成中心打开时左上角 76×40 的窗口拖拽由它补回）。 */
+.titlebarMount[hidden] {
   display: none;
 }
 
-/* ── 拖拽带（窗口拖拽命中区）与控件层的**分离** ──────────────────────────────
-   ⚠️ 2026-09-30 定案：拖拽带里**不放任何控件**。原实现是「一整条 drag 段
-   （.titlebarDrag）+ 内层按钮各自 no-drag」，这种叠加下物理鼠标点在按钮上会被
-   当成窗口拖拽吞掉（真鼠标点不动，脚本却正常——CDP 的 Input.dispatchMouseEvent
-   直投渲染进程，**不走 OS/浏览器进程的 drag 命中区判定**，这类 bug 脚本天生
-   验不出）。
-   现在改成三条 flex 项并排、矩形互不重叠：
-     [左拖拽带 = 红绿灯让位 76] [控件层 .navTitleBar] [右拖拽带 = 剩余宽度]
-   ⇒ 控件层矩形内**没有任何 drag 命中区**：无论未显式声明 app-region 的后代
-   （lucide 图标是 <svg>）落到哪一层，都不可能是 drag。 */
-.titlebarDragInset,
-.titlebarDragRest {
+/* occupant 缺席时的降级：只留一条红绿灯让位拖拽带，窗口仍可拖。
+   ⚠️ 这**不是**「第二条 drag owner」——只有带子里没有 occupant 时才渲染它。 */
+.titlebarFallback {
   -webkit-app-region: drag;
-  flex: none;
-  height: 40px;
-}
-/* 左拖拽带 = 红绿灯让位区（76px = 活动栏宽）：系统红黄绿由
-   titleBarStyle:hiddenInset 保留，不自绘。灯实际占 x=12..64（13px 灯 ×3 +
-   8px 间距），右侧 12px 留白凑成 76——与活动栏（.activityBar 同 76）严格同宽，
-   红绿灯列与活动栏列因此上下对齐。 */
-.titlebarDragInset {
   width: 76px;
-}
-/* 右拖拽带：吃掉控件之后的剩余宽度（折叠态行宽 108 = 让位 76 + 间距 4 + 按钮
-   28 ⇒ 本段宽 0，正常）。 */
-.titlebarDragRest {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* 标题栏控件层（design.pen d8STsd）：折叠/展开按钮（常驻、两态同一坐标）+
-   展开态才有的其余图标按钮。夹在两条拖拽带之间；命中由 `.titlebarRow > *`
-   的 pointer-events:auto 恢复，宽度由内容决定（剩余宽度留给右拖拽带）。
-   padding-left = 左拖拽带与首个按钮之间的间距（4px，与内部 gap 同值）⇒ 按钮
-   x=80 = 让位 76 + 间距 4，与 design.pen 状态①/③ 一致。
-
-   ⚠️ **必须显式声明 no-drag**（2026-09-30 实测教训）：只把控件挪出 drag 元素、
-   让容器保持「未声明（computed none）」是**不够**的——未显式声明 app-region 的
-   region 在窗口 drag 位图里不凿孔，物理鼠标点击仍会被判进 drag 命中区（点击被
-   当窗口拖拽吞掉、双击还会走 macOS 标题栏缩放）。
-   对照证据：同层的「面板/终端」在 `.navTitleBarActions`（该类自 2026-08 起就有
-   显式 no-drag）里，鼠标点击一直正常；而常驻的折叠/展开按钮直接在**本类**下、
-   只有 none ⇒ 一直点不动（CDP 合成事件绕过 drag 命中判定，故脚本验不出来）。 */
-.navTitleBar {
-  -webkit-app-region: no-drag;
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: calc(4px * var(--corum-density-scale, 1));
-  padding-left: calc(4px * var(--corum-density-scale, 1));
   height: 40px;
-  box-sizing: border-box;
-}
-
-/* 右侧图标按钮区（不拖拽）。 */
-.navTitleBarActions {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  gap: calc(2px * var(--corum-density-scale, 1));
-  min-width: 0;
-}
-
-/* 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：padding 6 + icon 18 = 28×28 圆角 8。
-   flex:none —— 按钮宽度恒为 28，不被容器挤压（折叠态行宽 108 正好放下
-   让位 76 + 间距 4 + 按钮 28；若可被压缩，按钮会窄 4px 且有 4px 溢出容器）。 */
-.navIconBtn {
-  -webkit-app-region: no-drag; /* 标题栏浮层内按钮必须可点（drag 区内默认不可交互） */
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin: 0;
-  padding: calc(6px * var(--corum-density-scale, 1));
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-}
-
-.navIconBtn:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
 /* 设置触发器座位（.navSettingsSeat）随 PR3 移除：座位已归活动栏底部组

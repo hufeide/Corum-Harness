@@ -80,7 +80,7 @@ import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
 export { LayoutController } from './service.ts'
-export type { ILayout, SidebarMode, SidebarModeSource } from './service.ts'
+export type { ChromeSource, ChromeState, ILayout, SidebarMode, SidebarModeSource } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/corum-ui-base/client'
 export type { SlotMeta } from '@corum/corum-ui-base/client'
 // B2：IDE 壳的静态网格槽域（registerSlot 写点/ideDefaultGrid/浮动窗渲染的
@@ -169,6 +169,20 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'corum.panel': { kind: 'single'; scope: 'root' }
     /** Floating-window mount point (`?floating=<slotKey>`, S3; declared now so plugins can target it). */
     'corum.floating': { kind: 'single'; scope: 'root' }
+    /**
+     * 统一标题栏（2026-09-30；**声明权在本壳** —— 声明 = 排他渲染权）。
+     * occupant = `@corum/corum-ui-titlebar`。
+     *
+     * 由来：这条 40px 带子此前被两个 owner 分别持有（壳的窗口按钮行 + 对话区
+     * leaf 内的会话顶栏），折叠态下后者的空态拖拽带（`app-region: drag`）盖住
+     * 前者的控件层，物理鼠标点击被当拖拽吞掉。现合并成唯一 owner。
+     *
+     * ⚠️ 三件事缺一不可（与 `corum.integrations.*` 同款纪律）：
+     *   ① 此处登记 SlotMap 键名（否则 children 与注册方都会被类型系统拒掉）；
+     *   ② root 条目 `children` 表里声明（见下方 ctx.slots.register）；
+     *   ③ 注册方（corum-ui-titlebar 的 client apply）的 `name` 与之一致。
+     */
+    'corum.titlebar': { kind: 'single'; scope: 'root'; owner: TitlebarOwnerProps }
     // ── 侧栏子槽（corum-ide-sidebar-ui 骨架声明，填充插件按发行版组合）──
     /** 侧栏 · 任务模式内容（会话列表）。骨架在 corum.sidebar 注册时声明此洞。 */
     'corum.sidebar.sessions': { kind: 'single'; scope: 'root' }
@@ -240,6 +254,19 @@ export interface CorumSidebarOwnerProps {
   expandSidebar: () => void
 }
 
+/**
+ * 统一标题栏 owner share：壳下发的形态与几何（业务数据由 occupant 自己的
+ * inject 提供——会话折叠态/集成中心走 ctx.layout 的 chrome 状态）。
+ */
+export interface TitlebarOwnerProps {
+  /** `'main'` = 主窗（红绿灯让位 76）；`'floating'` = 浮窗自带顶栏（让位 66）。 */
+  variant: 'main' | 'floating'
+  /** 带子总宽（px）：右缘 = 活动栏 + 侧栏 + 对话区格右缘（见 AppFrame 的测量）。 */
+  bandWidth: number
+  /** 控件段右缘（px）：会话段自它起渲染（P2 起用）。 */
+  controlsWidth: number
+}
+
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
 export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions', 'notifications', 'fontPrefs']
@@ -306,6 +333,12 @@ export function apply(ctx: ClientContext): void {
         'corum.tabStrip': { kind: 'list', scope: 'root' },
         'corum.panel': { kind: 'single', scope: 'root' },
         'corum.floating': { kind: 'single', scope: 'root' },
+        // 统一标题栏（2026-09-30）：窗口顶部 40px 带子的唯一 owner。声明在此 =
+        // 本壳是它的排他渲染者（AppFrame 的惰性挂载位 renderSlot 它）；occupant
+        // 由 @corum/corum-ui-titlebar 经 ctx.slots.inject 注册（保证「声明先于
+        // 注册」的时序）。壳只提供定位/宽度/pointer-events，**不带任何 app-region**
+        // （drag 命中区一律由该组件产生，见其 CSS 的拖拽不变式）。
+        'corum.titlebar': { kind: 'single', scope: 'root' },
         // 集成中心三个内容子槽（PR4）：声明在此 = 本壳是它们的排他渲染者
         // （IntegrationsFrame 按子导航选中项 renderSlot 其中一个）。occupant 由
         // corum-ide-integrations-ui / corum-ide-integrations-pages-ui 经

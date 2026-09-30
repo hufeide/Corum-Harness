@@ -25,7 +25,7 @@ interface SessionListState {
 }
 import type { createLayoutStore } from './stores.ts'
 import type { ChromeState, GridActions, SidebarMode } from './service.ts'
-import { Blocks, Columns2, FolderKanban, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Search, Terminal, X } from 'lucide-react'
+import { Blocks, FolderKanban, Lock, MessageSquare, Search, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
@@ -86,73 +86,15 @@ let floatingApiSingleton: FloatingLayerApi | null = null
 /** 主题偏好（三态）。 */
 type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：28×28 圆角 8，icon 18。 */
-function NavIconButton({ icon, label, onClick }: {
-  icon: ReactNode
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      className={css.navIconBtn}
-      title={label}
-      aria-label={label}
-      onClick={onClick}
-    >
-      {icon}
-    </button>
-  )
-}
-
 /**
- * 左列导航标题栏（design.pen「窗口标题栏」d8STsd，40px）：窗口不再有通栏
- * 标题栏，本栏放进左列 nav 顶部，夹在两条拖拽带之间（左 = 红绿灯让位 76 =
- * 活动栏宽，两列上下对齐；右 = 剩余宽度）。**本层内不放 drag 区**——控件与
- * drag 命中区重叠会让物理鼠标点击被当窗口拖拽吞掉（详见 .titlebarDragInset
- * 的注释；CDP 合成事件不走 drag 命中判定，脚本验不出这类 bug）。
- *
- * 按钮分两档（2026-09-30 定案，design.pen 状态①/状态③）：
- *   ① 折叠/展开侧栏——**常驻**，两态落在同一坐标（红绿灯让位之后的第一个位置
- *      x=80 = 让位 76 + 间距 4），展开态显示「折叠」、折叠态同位置变「展开」；
- *      它是折叠态**唯一**的展开入口（原折叠轨 SidebarRail 已退役，折叠改整列
- *      隐藏、不留图标轨）。
- *   ② 其余按钮（切换编辑器+资源管理器 / 切换终端）——只在展开态渲染，折叠态
- *      随侧栏一起隐藏。
- * 本栏只留「窗口控制」类按钮（2026-09-30 用户定案）：**主题切换**与**插件中心**
- * 已移除（主题走设置中心「外观」，插件管理走活动栏「插件」→ 集成中心，标题栏
- * 那份是重复入口）；设置从来不在本栏——sidebar.settings 是 single 槽，座位归
- * 活动栏底部组，两处同时挂载会出现两个 SettingsShell 实例。
+ * 左列导航标题栏（NavTitleBar / NavIconButton）**已迁出壳**（2026-09-30）：
+ * 窗口顶部 40px 带子的唯一 owner 现在是 `@corum/corum-ui-titlebar`（占壳声明的
+ * `corum.titlebar` 槽）。迁移原因：这条带子此前被两个 owner 分别持有（壳的按钮行
+ * + 对话区 leaf 内的会话顶栏），折叠态下后者的空态拖拽带（`app-region: drag`）
+ * 盖住前者的控件层，而 drag 位图不遵守 z-index、显式 `no-drag` 也凿不掉 ⇒ 物理
+ * 鼠标点「展开」被当拖拽吞掉。壳现在只留一个**惰性挂载位**（见下方 titlebarMount），
+ * 自身不含任何 app-region。
  */
-function NavTitleBar({ onToggleSidebar, onTogglePanels, onToggleTerminal, sidebarCollapsed }: {
-  onToggleSidebar: () => void
-  onTogglePanels: () => void
-  onToggleTerminal: () => void
-  sidebarCollapsed: boolean
-}) {
-  return (
-    <div className={css.navTitleBar}>
-      {/* 红绿灯让位**不在这里**：它是行内的左拖拽带 .titlebarDragInset（76px，
-          纯 drag 命中区），本层只放按钮——控件与 drag 区不重叠，见其注释。 */}
-      {/* 折叠/展开按钮**常驻**：固定在红绿灯让位之后的第一个位置（x=80），
-          两态零位移（design.pen 状态③ 定稿）。折叠态行内只剩它一个按钮。 */}
-      <NavIconButton
-        icon={sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        label={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
-        onClick={onToggleSidebar}
-      />
-      {!sidebarCollapsed && (
-      <div className={css.navTitleBarActions}>
-        {/* design.pen titlebar-actions：侧栏 / 面板 / 终端（「侧栏」= 上面那个
-            常驻的折叠/展开钮，故本组从「面板」起）。图标 18×18（design
-            2026-08-28 统一放大）、按钮 padding 6 / 命中框 28×28。 */}
-        <NavIconButton icon={<Columns2 size={18} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
-        <NavIconButton icon={<Terminal size={18} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
-      </div>
-      )}
-    </div>
-  )
-}
 
 /**
  * 工作面标识（活动栏主导航组的两项 + 集成中心）。
@@ -417,6 +359,10 @@ export type AppFrameProps =
   & PropsRenderSlots<
     | 'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings'
     | 'corum.sidebar' | 'corum.editor' | 'corum.trajectory' | 'corum.tabStrip' | 'corum.panel'
+    // 统一标题栏（2026-09-30）：壳只在**惰性挂载位**里 renderSlot 它（带子的内容
+    // 全归 @corum/corum-ui-titlebar 的 occupant）。键名是 root 条目 children 表的
+    // 声明键 ⇒ 在此登记后 renderSlot 才有该域。
+    | 'corum.titlebar'
     // 集成中心三个内容子槽（PR4）：AppFrame 只**转交**渲染面给 IntegrationsFrame
     // （收窄到这三个键，见 IntegrationsFrameProps），自己不 renderSlot 它们。
     // 三者是 root 条目 children 表里的声明键 ⇒ 在此登记后 renderSlot 才有该域。
@@ -773,11 +719,10 @@ export function IdeAppFrame({
   useEffect(() => {
     if (!developerMode) onCloseSlot('corum.trajectory' as GridSlot)
   }, [developerMode, onCloseSlot])
-  const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor']) }, [toggleRegionVisibility])
-  // 注：轨迹按钮的显隐开关（原 onOpenTrajectory）已随会话段迁往会话级槽——
-  // 现经 GridActions.toggleRegion 暴露给 session-bar 的 occupant（见下方
-  // gridActions 的 toggleRegion 与 service.ts 的 ILayout.toggleRegion）。
-  const onToggleTerminal = useCallback(() => { toggleRegionVisibility(['corum.panel']) }, [toggleRegionVisibility])
+  // 注：面板/终端两个「快捷切换」回调（原 onTogglePanels / onToggleTerminal）已随
+  // 标题栏迁出壳（2026-09-30）——统一标题栏 occupant 经 `ctx.layout.toggleRegion`
+  // 直接切区域，壳不再需要这两个包装（下方 gridActions 的 toggleRegion 供其它
+  // 调用方使用，保持不变）。轨迹按钮同理（原 onOpenTrajectory 已随会话段迁走）。
 
   // 插件中心面板的区域显隐投影：hidden 槽位集合（读最新 gridRef，供
   // PluginManagerPanel 的 useSyncExternalStore）。setGrid 后通知订阅者。
@@ -866,28 +811,33 @@ export function IdeAppFrame({
     attachGridActions(gridActions)
   }, [attachGridActions, gridActions])
 
-  // 标题栏行（窗口控制）只覆盖侧栏正上方：宽度须跟随侧栏右缘（侧栏列宽随
-  // GridView 动态变化——sash 拖拽/折叠/窗口 resize），这里测量实际几何驱动对齐。
-  // 2026-09-10「顶栏归会话」后本行不再覆盖对话区，故只需侧栏右缘一个锚点
-  // （会话段的锚点测量已随 session-bar 迁走，改为量自身宿主 <header>）。
+  // 统一标题栏几何（2026-09-30）：壳是唯一的测量者，两个值经 owner props 下发给
+  // @corum/corum-ui-titlebar 的 corum.titlebar occupant：
+  //   · controlsWidth = 控件段右缘（折叠态常量 108 / 展开态 max(侧栏格右缘, 108)）；
+  //   · bandWidth     = 带子总宽 = **对话区格右缘**（= 活动栏 + 侧栏 + 对话区；
+  //     编辑器/终端列上方仍无标题栏，故不含它）。
+  // 量 GridView 的**格**（branchCell，宽度=列宽），不量 leaf（leaf 已被
+  // leafTopOffset 下移让位带子，其 rect 的 top 不是列顶）——故用 leaf 上溯一层。
   const [sidebarRight, setSidebarRight] = useState(296)
-  // 依赖 integrationsOpen：集成中心打开期间侧栏被隐藏（量到 0），关闭后本行
-  // 要用**立即**重量到的几何复位——否则会拿旧值/0 闪一帧（下一次 interval 才修）。
+  const [conversationRight, setConversationRight] = useState(0)
+  // 依赖 integrationsOpen：集成中心打开期间两列都被隐藏（量到 0），关闭后要用
+  // **立即**重量到的几何复位——否则会拿旧值/0 闪一帧（下一次 interval 才修）。
   useEffect(() => {
     let raf: number | null = null
+    const cellRight = (slot: string): number => {
+      const leaf = document.querySelector(`[data-slot="${slot}"]`)
+      const cell = leaf?.parentElement ?? null
+      if (cell === null) return 0
+      // 隐藏态（集成中心打开 / 该 leaf 未布局）量到 0——0 是假几何，不是真实
+      // 宽度，写进去会让带子塌成 0 宽并留下错值。调用方跳过本轮，保留上次真值。
+      return Math.round(cell.getBoundingClientRect().right)
+    }
     const measure = () => {
       raf = null
-      // 量 GridView 的格（branchCell，宽度=列宽），不量 leaf（leaf 已被
-      // leafTopOffset 下移让位标题栏，其 getBoundingClientRect 的 top 不是列顶）。
-      // branchCell 是 .leaf 的父格——用 leaf 上溯一层命中。
-      const sidebarLeaf = document.querySelector('[data-slot="corum.sidebar"]')
-      const sidebar = sidebarLeaf?.parentElement ?? null
-      if (sidebar !== null) {
-        const w = Math.round(sidebar.getBoundingClientRect().right)
-        // 隐藏态（集成中心打开 / 侧栏 leaf 未布局）量到 0——0 是假几何，不是
-        // 真实宽度，写进去会让本行塌成 0 宽并留下错值。跳过本轮，保留上次真值。
-        if (w > 0) setSidebarRight(w)
-      }
+      const side = cellRight('corum.sidebar')
+      if (side > 0) setSidebarRight(side)
+      const convo = cellRight('conversation')
+      if (convo > 0) setConversationRight(convo)
     }
     const schedule = () => { raf ??= requestAnimationFrame(measure) }
     // leaf 可能尚未挂载/布局变化——监听窗口 resize + 定期兜底测量。
@@ -901,15 +851,15 @@ export function IdeAppFrame({
     }
   }, [integrationsOpen])
 
-  // 标题栏行宽：展开态 = 侧栏右缘（活动栏 + 侧栏，侧栏可拖故用测量值），下限
-  // TITLEBAR_COLLAPSED_WIDTH 兜住（消掉折叠/展开切换瞬间测量滞后一帧的裁切）。
-  // 折叠态直接取常量 104（= 红绿灯让位 76 + 折叠/展开钮 28）：**不能靠测量**——
-  // 侧栏整列隐藏后 GridView 把该格 visibility:hidden 但**保留折叠前的 inline
-  // width**（GridView 的 size<=0 分支只置 visibility、不写 width），故量到的
-  // 「侧栏右缘」仍是折叠前的 376，行宽（= 窗口拖拽带）会虚胖到 376。
-  const titlebarWidth = sidebarCollapsed
+  // 控件段右缘：折叠态取常量——**不能靠测量**（侧栏整列隐藏后 GridView 把该格
+  // visibility:hidden 但保留折叠前的 inline width，量到的「侧栏右缘」仍是旧值，
+  // 带子会虚胖）。展开态取测量值，下限常量兜住（消掉切换瞬间测量滞后一帧的裁切）。
+  const controlsWidth = sidebarCollapsed
     ? TITLEBAR_COLLAPSED_WIDTH
     : Math.max(sidebarRight, TITLEBAR_COLLAPSED_WIDTH)
+  // 带子总宽：对话区格右缘；取不到（对话区被拖走/隐藏/浮出）或比控件段还窄时
+  // 退控件段宽（只画控件段，不画会话段）。
+  const bandWidth = conversationRight > controlsWidth ? conversationRight : controlsWidth
 
   // 从面板拖入新区域到网格中某 leaf 的某侧。
   const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
@@ -1112,46 +1062,34 @@ export function IdeAppFrame({
       ref={frameRef}
       className={css.frame}
     >
-      {/* 顶部标题栏行（design.pen titlebar-row，40px，整行 app-region:drag
-          解决窗口拖拽余量）：absolute 浮层只覆盖左列（侧栏+对话区）上方——
-          左段「窗口标题栏」（红绿灯让位 + 图标按钮，宽度跟随侧栏右缘）+ 右段
-          「Agent 标题栏」（会话标题 + 状态胶囊 + 轨迹，b4p03B，假数据占位，
-          覆盖对话区正上方）。right-col（编辑器/资源管理器/终端）顶到窗口顶，
-          其上方无标题栏（下方 mainRow 占满 frame 全高，由 GridView 的
-          leafTopOffset 给 sidebar/conversation 格让位本行）。
+      {/* 统一标题栏**惰性挂载位**（2026-09-30，design.pen 统一标题栏）：壳只提供
+          定位与宽度（absolute 浮层，覆盖 活动栏 + 侧栏 + 对话区 上方），**不带任何
+          app-region** —— 带子的全部内容（拖拽命中区 + 窗口控制按钮 + 会话段）由
+          `@corum/corum-ui-titlebar` 的 `corum.titlebar` occupant 产生。
+          为什么要单一 owner：这条带子此前被两个 owner 分别持有（本壳 + 对话区 leaf
+          内的会话顶栏），折叠态下后者的空态拖拽带（`app-region: drag`）盖住本壳
+          的控件层，而 drag 位图**不遵守 z-index**、显式 `no-drag` 也凿不掉 ⇒ 物理
+          鼠标点「展开」被当拖拽吞掉（双击还触发 macOS 标题栏缩放）。CDP 合成事件
+          绕过 drag 命中判定，故这类 bug 脚本验不出。
 
-          **集成中心打开时整行隐藏**（PR4）：该行的宽度锚在侧栏右缘，而集成中心
-          是全屏独占工作面——本行（含那排只作用于会话布局的图标按钮）留在画面上
-          既无意义、又和集成中心的面板头抢顶部 40px。窗口拖拽由面板头自己承担
-          （IntegrationsFrame 的 .header 是 app-region:drag）。 */}
+          **集成中心打开时挂载位隐藏**（PR4，`display:none` ⇒ 零 drag 矩形，与
+          `.railDragBand` 互斥）：集成中心是全屏独占工作面，带子留在画面上既无意义、
+          又和它的面板头抢顶部 40px。窗口拖拽由面板头自己承担（IntegrationsFrame）。
+
+          右侧（编辑器/资源管理器/终端上方）无浮层——纯内容区；GridView 的
+          leafTopOffset 给 sidebar/conversation 格内容让位本带子。 */}
       <div
-        className={css.titlebarRow}
-        /* 浮层宽度 = 侧栏右缘、下限 104（2026-09-10 用户定调：会话段搬进
-           conversation.session.header，本行只剩主窗口的窗口控制）。
-           折叠态侧栏整列隐藏后右缘只剩活动栏 76 ⇒ 由 titlebarWidth 的 max 兜住，
-           「展开」按钮与展开态的「折叠」按钮因此同坐标（零位移）。
-           右侧（对话区/编辑器/终端上方）无浮层——纯内容区。 */
-        style={{ right: 'auto', width: titlebarWidth }}
+        className={css.titlebarMount}
+        style={{ right: 'auto', width: bandWidth }}
         hidden={integrationsOpen}
       >
-        {/* 拖拽带与控件层**分离**（2026-09-30 定案，详见 .titlebarDragInset 的
-            注释）：[左拖拽带 = 红绿灯让位 76] [控件层] [右拖拽带 = 剩余宽度]——
-            控件矩形内没有任何 drag 命中区，物理鼠标点击不会被当窗口拖拽吞掉
-            （CDP 合成事件绕过 drag 命中判定 ⇒ 这类 bug 脚本验不出）。 */}
-        <div className={css.titlebarDragInset} />
-        <NavTitleBar
-          onToggleSidebar={onToggleSidebar}
-          onTogglePanels={onTogglePanels}
-          onToggleTerminal={onToggleTerminal}
-          sidebarCollapsed={sidebarCollapsed}
-        />
-        <div className={css.titlebarDragRest} />
-        {/* 会话段（会话标题 + 状态胶囊 + 常驻 Agent 胶囊 + 轨迹）已迁出本行
-            （2026-09-10「顶栏归会话」）：现由 corum-ide-ui 的 session-bar 注册进
-            会话级槽 `conversation.session.header.actions|utilities`，宿主是会话插件
-            ConversationSessionHeader 的 titleRow——该行随会话视图渲染，会话拖出为
-            独立窗口时自带顶栏（实测浮窗会恢复当前会话）。
-            本行从此只剩**窗口控制**（红绿灯让位 + 全局图标按钮），宽度收到侧栏右缘。 */}
+        {/* fallback：插件未装载/被停用时至少留一条红绿灯让位拖拽带，窗口仍可拖
+            （不是第二条 drag owner——此时带子里没有 occupant）。 */}
+        {renderSlot(
+          'corum.titlebar',
+          { variant: 'main', bandWidth, controlsWidth },
+          { fallback: <div className={css.titlebarFallback} data-drag-band="main:left-inset" aria-hidden="true" /> },
+        )}
       </div>
 
       {/* 工作面行（PR3 活动栏 + PR4 集成中心）：左 = 常驻活动栏（**网格外**的

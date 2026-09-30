@@ -161,6 +161,16 @@
     - id: ide-shell
       name: '@corum/corum-ide-ui'
 
+    # 统一标题栏（2026-09-30）：窗口顶部 40px 这条带子的**唯一 owner**——拖拽
+    # 命中区 + 窗口控制按钮 + 会话段全部在这里（壳只留惰性挂载位 corum.titlebar）。
+    # 此前这条带子被壳与对话区 leaf 内的会话顶栏分别持有，折叠态下后者的空态拖拽带
+    # 盖住前者的控件层 ⇒ 物理鼠标点「展开」被当拖拽吞掉（drag 位图不遵守 z-index，
+    # 显式 no-drag 也凿不掉；CDP 合成事件绕过命中判定，脚本验不出）。
+    # **基础能力、不可停用**（plugin-manager.ts 的 CORE_PLUGIN_PACKAGES）——
+    # 带子没了就没有窗口按钮与会话标题。
+    - id: ide-titlebar
+      name: '@corum/corum-ui-titlebar'
+
     # ── 真实功能插件（design.pen 区域实现）──
     # 左列骨架 + 任务模式（开源版核心）：占 corum.sidebar 并声明
     # corum.sidebar.sessions / corum.sidebar.project 两个子槽，自填 sessions

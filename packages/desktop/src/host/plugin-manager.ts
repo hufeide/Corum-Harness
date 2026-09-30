@@ -42,6 +42,9 @@ export const DISABLED_FILENAME = 'plugins.disabled.json'
  */
 export const CORE_PLUGIN_PACKAGES: ReadonlySet<string> = new Set([
   '@corum/corum-ui-model-selection',
+  // 统一标题栏（2026-09-30）：它是窗口顶部 40px 带子的**唯一 owner**（拖拽命中区 +
+  // 窗口控制按钮 + 会话段）。停用它 = 没有窗口按钮、没有会话标题、没有折叠入口。
+  '@corum/corum-ui-titlebar',
 ])
 
 /**
@@ -50,6 +53,7 @@ export const CORE_PLUGIN_PACKAGES: ReadonlySet<string> = new Set([
  */
 export const CORE_PLUGIN_ENTRIES: ReadonlySet<string> = new Set([
   'corum-ui-model-selection',
+  'ide-titlebar',
 ])
 
 /** 判定包名是否为不可关闭的 corum 基础能力插件。 */
