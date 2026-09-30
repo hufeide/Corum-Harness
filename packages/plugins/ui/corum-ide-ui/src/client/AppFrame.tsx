@@ -24,7 +24,7 @@ interface SessionListState {
   byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
 }
 import type { createLayoutStore } from './stores.ts'
-import type { GridActions, SidebarMode } from './service.ts'
+import type { ChromeState, GridActions, SidebarMode } from './service.ts'
 import { Blocks, Columns2, FolderKanban, Lock, MessageSquare, PanelLeftClose, PanelLeftOpen, Search, Terminal, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
@@ -444,6 +444,21 @@ export type AppFrameProps =
      */
     setSidebarMode: (mode: SidebarMode) => void
     /**
+     * 窗口 chrome 选择器 hook（inject hooks.chrome 绑定而来，源 =
+     * `ctx.layout.chromeSnapshot()`）：侧栏折叠 + 集成中心开关。
+     * 2026-09-30 从本组件的局部 useState 收敛进服务——标题栏改成独立插件后
+     * 壳与插件读同一份跨 bundle 单例状态（红线 1）。
+     */
+    useChrome: <S>(sel: (c: ChromeState) => S, eq?: (a: S, b: S) => boolean) => S
+    /** 折叠 ⟷ 展开侧栏（写 ctx.layout 的 chrome 状态，幂等）。 */
+    toggleSidebarCollapsed: () => void
+    /** 直接写侧栏折叠态（幂等；切工作面时用 setSidebarCollapsed(false) 确保展开）。 */
+    setSidebarCollapsed: (collapsed: boolean) => void
+    /** 打开/关闭集成中心（幂等）。 */
+    setIntegrationsOpen: (open: boolean) => void
+    /** 集成中心开关注取反（活动栏「插件」图标）。 */
+    toggleIntegrations: () => void
+    /**
      * 主题偏好写入（直通 theme 服务）。
      *
      * 注：`remote` / `openSession` 两个注入面**已不再由本组件消费**——它们随会话段
@@ -475,7 +490,12 @@ export function IdeAppFrame({
   renderSlot,
   useSidebarMode,
   useProjectOccupied,
+  useChrome,
   setSidebarMode,
+  toggleSidebarCollapsed,
+  setSidebarCollapsed,
+  setIntegrationsOpen,
+  toggleIntegrations,
   attachGridActions,
 }: AppFrameProps) {
   const panels = useStore(s => s)
@@ -500,7 +520,9 @@ export function IdeAppFrame({
   //   - 点面板头的 × → 收回。
   // 「收回后回到哪个工作面」不发散成第三份状态：集成中心期间 sidebarMode
   // **保持不动**（本 PR 不写它），故收回即自然回到用户离开前的那个侧栏工作面。
-  const [integrationsOpen, setIntegrationsOpen] = useState(false)
+  // 集成中心开关：2026-09-30 收敛进 ctx.layout 的 chrome 状态（服务单例，引用只在
+  // 字段变化时换）。集成中心内部选中的子导航仍是本组件局部 state。
+  const integrationsOpen = useChrome(c => c.integrationsOpen)
   const [integrationsSection, setIntegrationsSection] = useState<IntegrationsSection>('plugins')
   // 会话标题/空态判定（isHero）已随会话段迁往 session-bar.tsx：那里由槽 occupant
   // 直接读 `useSessions` 投影（槽是会话作用域，自带 sessionId），本组件不再需要。
@@ -634,10 +656,13 @@ export function IdeAppFrame({
   // P2-2：折叠态只存本组件 state，经 COLLAPSED_SIDEBAR 显式传给 GridView 与 grid
   // 数学（rescaleGrid/resizeBranch）——grid.ts 不再持模块级折叠 Set（ui-base 被
   // 各 bundle 内联，模块状态会按 bundle 分裂）。
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // 折叠态：2026-09-30 收敛进 ctx.layout 的 chrome 状态（见 service.ts 的
+  // ChromeState）。壳与标题栏插件读同一份，故活动栏便利入口与标题栏按钮
+  // 不会各写一份。
+  const sidebarCollapsed = useChrome(c => c.sidebarCollapsed)
   const onToggleSidebar = useCallback(() => {
-    setSidebarCollapsed(c => !c)
-  }, [])
+    toggleSidebarCollapsed()
+  }, [toggleSidebarCollapsed])
   // ── 活动栏工作面切换（PR3 + PR4）──
   // 点「任务/项目」= 写 ctx.layout 的 sidebarMode（工作面的跨 bundle 单例状态，
   // 侧栏骨架按它切换任务/项目面板）+ 关掉集成中心（切走即收起，否则新工作面
@@ -667,7 +692,7 @@ export function IdeAppFrame({
     }
     setSidebarMode(face)
     setSidebarCollapsed(false)
-  }, [integrationsOpen, projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode])
+  }, [integrationsOpen, projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode, setSidebarCollapsed, setIntegrationsOpen])
   // 搜索工作面：本 PR 仅占位。SessionsPane 的搜索框是面板内 state（searchOpen +
   // 局部 ref），没有跨 bundle 的聚焦通路（新开一条通路属侧栏插件的活，超出本 PR
   // 活动栏范围），故按定稿先占位。
@@ -679,12 +704,12 @@ export function IdeAppFrame({
   // （design.pen 画板 F 定稿）。切换只动本组件 state——sidebarMode 保持原值，
   // 故 × 关闭后侧栏还停在用户离开前的那个工作面（画板 F「回到会话布局」）。
   const onPluginsFace = useCallback(() => {
-    setIntegrationsOpen(open => !open)
-  }, [])
+    toggleIntegrations()
+  }, [toggleIntegrations])
   // 集成中心面板头的 × 关闭：回会话布局（画板 F 的关闭语义——侧边栏与会话区恢复）。
   const onCloseIntegrations = useCallback(() => {
     setIntegrationsOpen(false)
-  }, [])
+  }, [setIntegrationsOpen])
   // 传给 GridView 的折叠槽位集（useMemo 稳引用，折叠时才含 sidebar）。
   const COLLAPSED_SIDEBAR = useMemo<ReadonlySet<string>>(
     () => (sidebarCollapsed ? new Set(['corum.sidebar']) : new Set()),

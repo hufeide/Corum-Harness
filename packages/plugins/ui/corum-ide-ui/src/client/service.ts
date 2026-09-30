@@ -30,6 +30,26 @@ export interface SidebarModeSource {
   subscribe(listener: () => void): () => void
 }
 
+/**
+ * 窗口 chrome 状态（跨 bundle 单例）：侧栏折叠 + 集成中心开关。
+ *
+ * 2026-09-30 从 AppFrame 的局部 useState 收敛进本服务——标题栏改成独立插件
+ * （`@corum/corum-ui-titlebar`）后，壳与插件都要读这两个值（红线 1：跨 bundle
+ * 共享状态必须是 cordis 服务，禁止 window 全局/模块级单例）。
+ */
+export interface ChromeState {
+  /** 侧栏是否折叠（折叠 = GridView 把 corum.sidebar 格宽收成 0，整列隐藏）。 */
+  sidebarCollapsed: boolean
+  /** 集成中心是否打开（全屏独占工作面；标题栏整行隐藏，拖窗由 railDragBand 补）。 */
+  integrationsOpen: boolean
+}
+
+/** uSES 兼容的 chrome 快照源（getSnapshot 引用只在字段变化时更新）。 */
+export interface ChromeSource {
+  getSnapshot(): ChromeState
+  subscribe(listener: () => void): () => void
+}
+
 /** The layout store's bound action set (framework-baked, draft params peeled). */
 export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>
 
@@ -160,6 +180,22 @@ export interface ILayout {
   onSidebarModeChange(listener: () => void): () => void
   /** uSES 兼容源：组件侧经 InjectFace 绑定为选择器 Hook 用。 */
   sidebarModeSnapshot(): SidebarModeSource
+  /**
+   * 折叠/展开侧栏（幂等）。折叠 = GridView 把 corum.sidebar 格宽收成 0（整列
+   * 隐藏，见 ide-layout.ts 的 collapsedWidth: 0）。写方 = 标题栏插件 + 壳的
+   * 活动栏便利入口（点当前激活的工作面图标 ⇄ 折叠/展开）。
+   */
+  setSidebarCollapsed(collapsed: boolean): void
+  /** 折叠 ⟷ 展开（= setSidebarCollapsed 取反）。 */
+  toggleSidebarCollapsed(): void
+  /** 打开/关闭集成中心（幂等；全屏独占工作面）。 */
+  setIntegrationsOpen(open: boolean): void
+  /** 集成中心开关注取反。 */
+  toggleIntegrations(): void
+  /** 读 chrome 状态（快照：引用只在字段变化时更新）。 */
+  getChrome(): ChromeState
+  /** uSES 兼容源：组件侧经 InjectFace 绑定为选择器 Hook 用。 */
+  chromeSnapshot(): ChromeSource
 }
 
 /** Cross-plugin panel-action face (ctx.layout). */
@@ -170,6 +206,15 @@ export class LayoutController implements ILayout {
   #sidebarMode: SidebarMode = 'task'
   /** 侧栏模式监听者集（setSidebarMode 写值变化时广播）。 */
   #sidebarModeListeners = new Set<() => void>()
+  /**
+   * 窗口 chrome 状态（侧栏折叠 / 集成中心）。与 #sidebarMode 同为**本服务的
+   * 单例状态**（经 ctx.layout 跨 bundle 一致）。⚠️ 引用**只在字段变化时换**
+   * ——uSES getSnapshot 契约要求不变时引用稳定，否则 React 选择器 Hook 会
+   * 无限重渲染（与 AppFrame 里 hiddenSlotsSnapshot 同款约束）。
+   */
+  #chrome: ChromeState = { sidebarCollapsed: false, integrationsOpen: false }
+  /** chrome 监听者集（字段变化时广播）。 */
+  #chromeListeners = new Set<() => void>()
   /** AppFrame 接线前到达的插件中心订阅（attachGrid 时补进 grid actions）。 */
   #pendingPluginManagerListeners = new Set<() => void>()
 
@@ -299,6 +344,45 @@ export class LayoutController implements ILayout {
       getSnapshot: () => this.getSidebarMode(),
       subscribe: (listener) => this.onSidebarModeChange(listener),
     }
+  }
+
+  setSidebarCollapsed(collapsed: boolean): void {
+    if (this.#chrome.sidebarCollapsed === collapsed) return
+    this.#chrome = { ...this.#chrome, sidebarCollapsed: collapsed }
+    this.#broadcastChrome()
+  }
+
+  toggleSidebarCollapsed(): void {
+    this.setSidebarCollapsed(!this.#chrome.sidebarCollapsed)
+  }
+
+  setIntegrationsOpen(open: boolean): void {
+    if (this.#chrome.integrationsOpen === open) return
+    this.#chrome = { ...this.#chrome, integrationsOpen: open }
+    this.#broadcastChrome()
+  }
+
+  toggleIntegrations(): void {
+    this.setIntegrationsOpen(!this.#chrome.integrationsOpen)
+  }
+
+  getChrome(): ChromeState {
+    return this.#chrome
+  }
+
+  chromeSnapshot(): ChromeSource {
+    return {
+      getSnapshot: () => this.getChrome(),
+      subscribe: (listener) => {
+        this.#chromeListeners.add(listener)
+        return () => { this.#chromeListeners.delete(listener) }
+      },
+    }
+  }
+
+  /** chrome 字段变化后广播（写入方已保证值真的变了）。 */
+  #broadcastChrome(): void {
+    for (const listener of [...this.#chromeListeners]) listener()
   }
 
   /**

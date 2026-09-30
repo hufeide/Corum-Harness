@@ -333,6 +333,13 @@ export function apply(ctx: ClientContext): void {
           // （PR2 已建通路）——活动栏「任务/项目」点击写它，侧栏骨架按同一份
           // 跨 bundle 单例状态切换面板（不再需要侧栏内部的模式切换 UI）。
           setSidebarMode: (mode: SidebarMode) => { layout.setSidebarMode(mode) },
+          // 窗口 chrome 面（2026-09-30）：侧栏折叠 / 集成中心开关从 AppFrame 的
+          // 局部 useState 收敛进 ctx.layout 的**跨 bundle 单例状态**——标题栏
+          // 改成独立插件（@corum/corum-ui-titlebar）后壳与插件读同一份（红线 1）。
+          setSidebarCollapsed: (v: boolean) => { layout.setSidebarCollapsed(v) },
+          toggleSidebarCollapsed: () => { layout.toggleSidebarCollapsed() },
+          setIntegrationsOpen: (v: boolean) => { layout.setIntegrationsOpen(v) },
+          toggleIntegrations: () => { layout.toggleIntegrations() },
           // 插件中心触发：壳不持面板（业务 chrome 已拆出），经 LayoutController
           // → grid actions 订阅面通知，corum-ide-plugin-manager-ui 插件认领并
           // 打开自己的 modal 面板（三-2 服务化，原 CustomEvent 广播已退役）。
@@ -347,6 +354,9 @@ export function apply(ctx: ClientContext): void {
             // 判定（与 corum-ide-sidebar-ui 的 projectOccupied 同一判据，社区版
             // 无 occupant ⇒ false ⇒ 活动栏项目图标置灰 + lock 角标）。
             sidebarMode: layout.sidebarModeSnapshot(),
+            // 窗口 chrome 源（2026-09-30）：侧栏折叠 + 集成中心开关（同一份跨
+            // bundle 单例状态，引用只在字段变化时换）。
+            chrome: layout.chromeSnapshot(),
             projectOccupied: {
               getSnapshot: () => ctx.slots.entriesOfSlot('corum.sidebar.project').length > 0,
               subscribe: (fn: () => void) => ctx.slots.subscribe('corum.sidebar.project', fn),
