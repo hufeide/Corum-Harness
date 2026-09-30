@@ -41,35 +41,34 @@
      header buttons stay clickable. */
   z-index: 9;
   flex: none;
-  /* 会话顶栏卡片（design.pen a2otEO 主窗口 / i5ie6 独立窗口，两帧规格一致）：
-     height 44 / gap 8 / padding [0,12] / fill $glass-1 / cornerRadius 12。
-     flex column + justify-content:center 让 titleRow 垂直居中；多视图时 tabs
-     在其下自然排布（不挤同一行）。
-     外边距/高度/拖窗行为由宿主外壳经自定义属性注入：
-       --corum-session-topbar-margin    主窗口 0（贴窗口顶，与侧栏标题栏同带 0..40）；
-                                        浮窗给四边 gutter，左侧让给红绿灯。
-       --corum-session-topbar-height    主窗口 40（与壳 titlebarRow 同高，底部与
-                                        左侧红绿灯/图标按钮底对齐）；浮窗 44。
-       --corum-session-topbar-app-region 主窗口 drag（非交互区可拖窗，BUG-1）；
-                                        浮窗整条承担拖窗。 */
+  /* CORUM-PATCH(P2, 2026-09-30)：本卡片已搬进统一标题栏的会话段
+     （`corum.titlebar.session` occupant，宿主 = @corum/corum-ui-titlebar）。
+     于是它**只负责段内的一行内容**，不再自持几何或拖拽：
+       · 尺寸 = 占满会话段（width/height 100%，无外边距、无最小高度）——段宽由带子
+         按 controlsWidth/bandWidth 算好下发（原先的 `--corum-session-topbar-*`
+         契约变量随之退役，见 AppFrame.module.css）；
+       · **不声明 app-region**：那 40px 的拖拽由带子的 `.session` 填充矩形产生
+         （单一 owner）。原先这里 `drag` + 空态拖拽带正是「两个 owner 抢同一段拖拽
+         位图」的病根（折叠侧栏后它盖住壳的窗口按钮，物理鼠标点不动）。
+       · `pointer-events: auto`：带子本体是 `pointer-events: none`，交互内容必须在
+         这里恢复命中；段内按钮另行显式 no-drag（见下一条规则，注意 no-drag 是给
+         **祖先的 drag 矩形凿孔**用的，与命中判定是两件事）。 */
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: calc(8px * var(--corum-density-scale, 1));
   box-sizing: border-box;
-  min-height: var(--corum-session-topbar-height, 44px);
-  margin: var(--corum-session-topbar-margin, 12px 12px 0);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
   padding: 0 calc(12px * var(--corum-density-scale, 1));
   /* 无卡片外观（2026-09-11 用户定调）：去掉 glass-1 底、glass-border 描边与圆角，
-     让会话标题与状态胶囊**直接坐在环境背景上**，与左侧 nav 上方的 titlebarRow
-     (AppFrame.module.css .navTitleBar —— 本来就无底无边) 视觉一致。
-     布局/拖窗不变：min-height/margin/padding/app-region 全部保留。
-     注意：不要用 `background: transparent` 之外的手段（如删 padding）去「顺眼」，
-     那会破坏 BUG-1 里与红绿灯底部对齐的 40px 同带关系。 */
+     让会话标题与状态胶囊**直接坐在环境背景上**，与左侧窗口控制按钮同带一致。 */
   border: none;
   border-radius: 0;
   background: transparent;
-  -webkit-app-region: var(--corum-session-topbar-app-region, none);
+  pointer-events: auto;
 }
 
 /* 卡内可点/可选控件不拖窗（标题面包屑、状态胶囊、轨迹按钮）。 */
@@ -174,50 +173,10 @@
   display: none;
 }
 
-/* figma Tab_Group 34:11441: 35px strip, gap 36, pad-left 8, tabs bottom-aligned. */
-.tabs {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  gap: calc(36px * var(--corum-density-scale, 1));
-  margin-top: calc(4px * var(--corum-density-scale, 1));
-  padding-left: calc(8px * var(--corum-density-scale, 1));
-}
-
-/* figma .Tab 34:11442: 13/16 text (figma wt510, rendered 500), gap 8 to the 2px bar. */
-.tab {
-  position: relative;
-  padding: 0 0 calc(11px * var(--corum-density-scale, 1));
-  border: none;
-  background: transparent;
-  font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  line-height: 16px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-
-.tab::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 1px;
-  left: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-}
-
-/* Selected tab is blue, not ink: brand-primary resolves to neutral black in
-   this token sheet, so the selected state rides the business blue — the
-   nearest semantic token that stays blue in both themes. */
-.tabActive {
-  color: var(--dsw-alias-state-business-primary);
-}
-
-.tabActive::after {
-  background: var(--dsw-alias-state-business-primary);
-}
+/* 多视图 tabs（figma Tab_Group 34:11441 / .Tab 34:11442）**已随 P2 退役**：
+   40px 的标题栏带子放不下这 35px 选项卡行，而 IDE 组合里 `conversation.view`
+   只有 chat 一个 occupant（轨迹走 details 抽屉，不是 view）⇒ `tabs.length > 1`
+   不可达。需要多视图时把这条恢复成 leaf 内的浮动条（登记为 R2）。 */
 
 .viewArea {
   display: flex;
@@ -316,66 +275,16 @@
   gap: var(--dsh-composer-stack-gap);
 }
 
-/* ── 空态标题栏分隔线（2026-09-16 用户定调，**只在空态**）──────────────────
-   背景：空态时会话顶栏被 `.headerHidden { display: none }` 收走，于是「标题栏带」
-   与「内容区」之间没有任何视觉分界。用户要求补一条 1px 线。
-
-   为什么必须是绝对定位：`.scrollBody` 是 `flex: 1` 且 `overflow-y: auto`，
-   `.composerHero` 又是 `align-self: center` —— 内容永远不贴顶，用盒子模型摆不出这条线
-   （实测 scrollBody 内容从 y=173 起）。以 `.root`（`position: relative`）为锚。
-
-   ⚠️ 位置定调（2026-09-16 用户**三次**纠正，最终口径如下）：
-   用户把左栏/会话列明确分成上下两段，判据是「标题栏区高度 = 左侧那排按钮所在区域高度，
-   **只有这个区域才能拖动窗口**，下方就是 session 区域」：
-     · 上段 = **标题栏区**：高度 = 左侧按钮行所在带 = **40px**（也**只有这一段能拖窗**）
-     · 下段 = **session 区域**：从 40px 之下开始
-   ⇒ 分隔线 = 标题栏区的**下边界**，即 **y=40**（`AppFrame.module.css` 的
-     `.titlebarRow` / `.navTitleBar` 都是 `height: 40px`；实测 `titlebarDrag` 也正好
-     是 `300×40 @0,0`）。前两版我按「与 nav 品牌行对齐(110)」「紧贴带下 26px(66)」
-     都**太低**，已废。
-   换算：`.root` 顶在 y=1 ⇒ `top = 40 − 1 = 39`（写的是**相对 .root 的偏移**，不是视口 y）。
-   这个数是**算出来的**：若标题栏带高度或会话列顶部偏移变了，请同步这个算式。
-
-   颜色用设计稿既有的 1px `$glass-border`（浅 #FFFFFF / 深 #B98CFF2E），
-   与设计稿里 `UlK61` / `pDeJY` 两条线同源。 */
-.emptyDivider {
-  position: absolute;
-  top: var(--corum-empty-divider-top, 39px);
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--corum-glass-border, var(--dsw-alias-border-l2));
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* ── 空态拖窗带（2026-09-16 用户定调）────────────────────────────────────
-   用户口径：**标题栏区高度 = 左侧那排按钮所在区域高度 = 40px，且只有这个区域能拖窗**，
-   下方就是 session 区域。
-
-   为什么需要它：主窗口的标题栏浮层只覆盖到**侧栏右缘**
-   （AppFrame 的 `.titlebarRow` 用内联 `right:auto; width:sidebarRight`，其注释亦写明
-   「右侧（对话区/编辑器/终端上方）无浮层——纯内容区」）⇒ **对话区顶部的 40px 带子
-   在空态下完全不可拖窗**（实测该 x 位置上 `-webkit-app-region` 全为 `none`）。
-   有内容的会话由「会话顶栏卡片」承担这段拖拽（其 `.header` 上即
-   `-webkit-app-region: var(--corum-session-topbar-app-region, none)`、主窗注 `drag`）；
-   空态时该卡片被 `.headerHidden { display: none }` 收走 ⇒ 这段拖拽能力**整体丢失**。
-   故这里补一条**同高（40px）**的带子补回。
-
-   · 高度 = `--corum-session-topbar-height`（主窗口注入 40px），与标题栏区严格同高；
-   · `pointer-events: none`：只作拖拽命中面、不截获点击（与 AppFrame `.titlebarRow`
-     「行本体不截获命中」同一手法）；
-   · **只在空态渲染**（见 ConversationRoot.tsx），有内容时不与顶栏卡片重复覆盖。 */
-.emptyDragBand {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: var(--corum-session-topbar-height, 40px);
-  -webkit-app-region: drag;
-  pointer-events: none;
-  z-index: 1;
-}
+/* ── 空态分隔线与空态拖窗带：**已随会话段搬进统一标题栏**（P2, 2026-09-30）──
+   原先这里的两条规则（`.emptyDivider` / `.emptyDragBand`）都锚在本叶子的顶部：
+     · `.emptyDivider` 补「标题栏带 ↔ 内容区」的 1px 分界（空态时顶栏被
+       `.headerHidden` 收走，没有分界）；
+     · `.emptyDragBand` 补对话区顶部 40px 的拖窗能力（那时壳的标题栏浮层只覆盖到
+       侧栏右缘，对话区上空是纯内容区）。
+   P2 把「这条 40px 带子」整体交给 @corum/corum-ui-titlebar 之后，两者都归带子：
+   分界 = 会话段的底边（TitleBar.module.css `.session` 的 border-bottom），
+   拖窗 = 带子的填充矩形（`.session` 本体 drag）。**不要再往本叶子加 app-region**
+   ——那正是「两个 owner 抢同一段拖拽位图」的老病根。 */
 
 /* ② 子 Agent 会话底部「返回父会话」条（设计稿 q0T81 稿②）：隐藏输入框后的替代
    座位。容器与 composer 输入框同宽（--dsh-composer-card-max-width 约束 + 居中），

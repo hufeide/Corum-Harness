@@ -44,16 +44,17 @@ import css from './AppFrame.module.css'
  * 标题栏让位（design.pen L1：主窗口边距=0、titlebar-row 与 col-nav 间距=0）：
  * root row 各格内容顶部下移让位窗口标题栏浮层。
  *
- * 2026-09-10「顶栏归会话」后的取值 = `[40, 0, 0]`：
- *   - sidebar 格 offset=40——窗口控制（红绿灯让位 + 图标按钮）仍是窗口级浮层，
- *     只压在侧栏正上方，侧栏内容必须让位（标题栏底 40 + 卡片间距 0）。
- *   - conversation 格 offset=**0**——会话段已迁进会话级槽，该列上方不再有浮层，
- *     卡片顶到窗口顶；标题栏行本身也已收窄到侧栏右缘（不再覆盖对话区），
- *     故这里必须同步去让位，否则对话区顶部会白白空出 40px。
- *   - right-col 格 offset=0——编辑器/资源管理器/终端上方本来就无标题栏。
+ * 2026-09-30（P2 统一标题栏）后的取值 = `[40, 40, 0]`：
+ *   - sidebar 格 offset=40——红绿灯让位 + 窗口控件按钮仍在顶部 40px 带子里，
+ *     侧栏内容必须让位（标题栏底 40 + 卡片间距 0）。
+ *   - conversation 格 offset=**40**——会话顶栏卡片已搬进带子（occupant =
+ *     corum.titlebar.session），对话区 leaf 里只剩正文，必须整体下移 40 才不会
+ *     钻到带子底下。（此前是 0：那时顶栏卡片在 leaf 内、自己占掉这 40px。）
+ *   - right-col 格 offset=0——编辑器/资源管理器/终端上方本来就无标题栏（带子只覆
+ *     盖活动栏 + 侧栏 + 对话区，右缘 = 对话区格右缘）。
  * 沿 root row 的格序（sidebar, conversation, right-col）。
  */
-const TITLEBAR_CLEARANCE: readonly number[] = [40, 0, 0]
+const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
 
 /**
  * 活动栏宽（px）：与标题栏红绿灯让位区严格同宽（2026-09-30 定案）。

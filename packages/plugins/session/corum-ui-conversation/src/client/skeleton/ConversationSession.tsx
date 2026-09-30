@@ -52,17 +52,28 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
 }
 
 /**
- * Renders Session header chrome above the resident conversation scrollport.
- * @param props - Strict Session store, view ledger, navigation, render, and locale shares.
- * @returns the hidden blank-session header or visible title and tabs.
+ * Renders the Session band inside the unified titlebar.
+ *
+ * CORUM-PATCH(P2, 2026-09-30)：本组件从「对话区 leaf 内的会话顶栏卡片」搬到
+ * **统一标题栏的会话段**（occupant = `corum.titlebar.session`，宿主 = 插件
+ * @corum/corum-ui-titlebar）。为什么必须搬：这条 40px 带子此前被两个 owner 分别
+ * 持有（壳的窗口按钮行 + 本卡片/空态拖拽带），折叠侧栏后本卡片的
+ * `app-region: drag` 整片盖住壳的控件层——drag 位图不遵守 z-index、显式 `no-drag`
+ * 也凿不掉 ⇒ 物理鼠标点「展开」被判成拖窗（双击还触发 macOS 标题栏缩放）。
+ *
+ * 搬动带来的三处形态变化（其余逐行保留）：
+ *   ① 拖拽不再是本组件的职责（带子的填充矩形产生 drag），本组件只留
+ *      「交互元素显式 no-drag」；容器尺寸/外边距交给带子（占满会话段、无自身高度）。
+ *   ② 多视图 tabs 行不再渲染（40px 放不下；IDE 组合里 conversation.view 只有 chat
+ *      一个 occupant ⇒ tabs.length > 1 不可达）——登记为 R2，需要时改回 leaf 内条。
+ *   ③ 不再需要会话 store（tabs 是它唯一的消费者）。
+ * `<header>` 语义容器保留：状态胶囊的详情浮层靠 `closest('header')` 测锚点。
+ * @param props - Strict Session store, navigation, render, and locale shares.
+ * @returns the hidden blank-session band or the visible title with corum chrome.
  */
 export function ConversationSessionHeader({
-  sessionId, useSession, useSessions, useConversation, useConversationViews, useStore,
-  renderSlot, open, selectView, t,
+  sessionId, useSession, useSessions, useConversation, renderSlot, open, t,
 }: ConversationSessionHeaderProps) {
-  const tabs = useConversationViews(value => value)
-  const selectedId = useStore(s => s.view)
-  const active = resolveActiveView(tabs, selectedId)
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
   const session = useSession(s => s)
   const conversation = useConversation(s => s)
@@ -81,16 +92,15 @@ export function ConversationSessionHeader({
              该理由不再成立——本行重新成为会话顶栏的宿主：
                crumbs（当前会话标题/子会话面包屑） + actions（壳贡献的合并胶囊）
                + utilities（壳贡献的轨迹按钮，右对齐）。
-             .actions/.utilities 两个 list 子槽由 apply.ts 注册、此前无人 renderSlot
-             （死槽），现由本行渲染——壳经它们贡献 corum 专属 chrome，无需改本组件逻辑。
+             .actions/.utilities 两个 list 子槽由 apply.ts 声明、由本行渲染——壳经它们
+             贡献 corum 专属 chrome，无需改本组件逻辑。
 
-             fork（corum，2026-09-10）：**刻意不 renderSlot `.lineage`**。
-             官方 ui-subagent 往该槽注册 `SubagentHeaderLineage`（「N 个子代理 ⌄」），
+             fork（corum，2026-09-10）：**刻意不 renderSlot 官方 lineage 槽**
+             官方 ui-subagent 往它注册 `SubagentHeaderLineage`（「N 个子代理 ⌄」），
              那是顶栏的**第二个下拉**——用户定调「顶部下拉按钮只有一个」，子 Agent
              信息一律走壳那个合并胶囊的浮层（见 corum-ide-ui/session-bar.tsx 的
-             AgentStatusDetail）。注意这与「删除 titleRow」不同：本行仍在（提供
-             crumbs + 两个 corum 子槽），只屏蔽 lineage 一个槽；`.lineage` 的注册
-             声明保留在 apply.ts（回滚时重新 renderSlot 即可恢复，无需改契约）。 */}
+             AgentStatusDetail）。P2 起该槽的声明也随宿主退役（该包在 IDE 组合里
+             永久 pending，注册从未发生）。 */}
           <div className={css.titleRow}>
             <div className={css.titleCluster}>
               <nav className={css.crumbs} aria-label={t('session.hierarchy')}>
@@ -124,22 +134,6 @@ export function ConversationSessionHeader({
               {renderSlot('conversation.session.header.utilities', {})}
             </div>
           </div>
-          {tabs.length > 1 && (
-            <div className={css.tabs} role="tablist">
-              {tabs.map(viewTab => (
-                <button
-                  key={viewTab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={viewTab.id === active?.id}
-                  className={clsx(css.tab, viewTab.id === active?.id && css.tabActive)}
-                  onClick={() => { selectView(viewTab.id) }}
-                >
-                  {viewTab.label}
-                </button>
-              ))}
-            </div>
-          )}
         </>
       )}
     </header>

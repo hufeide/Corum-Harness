@@ -272,7 +272,9 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     locale: NS,
     children: {
       'conversation.session': { kind: 'single', scope: 'session' },
-      'conversation.session.header': { kind: 'single', scope: 'session' },
+      // CORUM-PATCH(P2, 2026-09-30)：`conversation.session.header` 子槽退役——
+      // 会话顶栏的宿主搬到统一标题栏（@corum/corum-ui-titlebar 的
+      // `corum.titlebar.session`，声明权在那边）。本条目不再渲染它。
       'conversation.composer': { kind: 'chain', scope: 'session' },
       'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
       'conversation.input.dock': { kind: 'list', scope: 'session' },
@@ -660,22 +662,23 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     }),
   }, ConversationSession)
 
+  // CORUM-PATCH(P2, 2026-09-30)：会话顶栏改为统一标题栏的**会话段** occupant
+  // （宿主 = @corum/corum-ui-titlebar 的 corum.titlebar occupant，声明权在那边）。
+  // 它同时声明并渲染 `.actions` / `.utilities` 两个 list 子槽——名字保持官方原样
+  // （壳的 session-bar 与官方生态的注册面零改签），只换了宿主。
+  // 官方 `conversation.session.header.lineage` 子槽随宿主退役（本改版从不渲染它，
+  // 且它的占位者官方 ui-subagent 在 IDE 组合里因缺 uiWorkspace 服务永久 pending）。
+  // 多视图 tabs 行不再渲染（40px 带子放不下；IDE 里 conversation.view 只有 chat
+  // 一个 occupant ⇒ tabs.length > 1 不可达），故本条目不再需要会话 store。
   const registerConversationHeader = () => slots.register({
-    name: 'conversation.session.header',
+    name: 'corum.titlebar.session',
     locale: NS,
     children: {
-      'conversation.session.header.lineage': { kind: 'single', scope: 'session' },
       'conversation.session.header.actions': { kind: 'list', scope: 'session' },
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
     },
-    store: conversationStore,
-    inject: (sessionId: SessionId, actions: BoundActions<typeof conversationStore>): ConversationSessionHeaderInjected => ({
-      hooks: { conversationViews },
+    inject: (sessionId: SessionId): ConversationSessionHeaderInjected => ({
       open: (id) => { sessions.open(id) },
-      selectView: (view) => {
-        activateView(sessionId, view)
-        actions.setView(view)
-      },
     }),
   }, ConversationSessionHeader)
 

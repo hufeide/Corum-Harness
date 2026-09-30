@@ -670,25 +670,17 @@ export function ConversationRoot({
 
   return (
     <div ref={rootResizeRef} className={css.root} data-phase={phase}>
-      {sessionId === undefined ? null : renderSlot('conversation.session.header', {})}
-      {/* 空态标题栏分隔线（2026-09-16 用户定调）：空态时**会话顶栏被隐藏**
-          （`.headerHidden { display: none }`，blank 会话不占列空间），于是「标题栏带」
-          与「内容区」没有任何视觉分界。用户要求**只在空态**补一条 1px 分隔线。
-          y 取「紧贴标题栏带(40px)下方」（用户从三个候选里选定）——见 .emptyDivider 注释。 */}
-      {(sessionId === undefined || summaryBlank === true) && (
-        <div className={css.emptyDivider} data-empty-divider="" aria-hidden="true" />
-      )}
-      {/* 空态拖窗带（2026-09-16 用户定调）：
-          用户口径「标题栏区高度 = 左侧那排按钮所在区域高度（40px），**只有这个区域才能拖动
-          窗口**，下方就是 session 区域」。主窗口标题栏浮层只覆盖到**侧栏右缘**
-          （AppFrame 的 `.titlebarRow` 显式 `style={{ right: 'auto', width: sidebarRight }}`，
-          注释写明「右侧（对话区/编辑器/终端上方）无浮层——纯内容区」）⇒
-          **对话区顶部的 40px 带子在空态下完全不可拖窗**（实测该处 `app-region` 全为 none）。
-          有内容的会话由会话顶栏卡片承担这段拖拽；空态没有它，故补一条**同高 40px** 的带子。
-          只在空态渲染，避免与顶栏卡片重复覆盖抢命中。 */}
-      {(sessionId === undefined || summaryBlank === true) && (
-        <div className={css.emptyDragBand} data-empty-drag-band="" aria-hidden="true" />
-      )}
+      {/* CORUM-PATCH(P2, 2026-09-30)：本叶子**不再持有顶栏那 40px**——
+          会话顶栏（`corum.titlebar.session` occupant）与空态拖拽带/分隔线一起搬进了
+          统一标题栏（@corum/corum-ui-titlebar）。搬走的三件：
+            · `renderSlot('conversation.session.header')`（会话顶栏卡片）
+            · `.emptyDivider`（空态 1px 分隔线）
+            · `.emptyDragBand`（空态 40px 拖窗带）
+          为什么必须搬：折叠侧栏后对话区自 x=76 起，`.emptyDragBand` 的
+          `app-region: drag` 整片盖住壳的窗口控件层（drag 位图不遵守 z-index、
+          显式 no-drag 也凿不掉）⇒ 物理鼠标点「展开」被判成拖窗。分隔线现在由
+          标题栏带子的会话段承担（TitleBar.module.css 的 `.session` 底边），
+          内容下移 40px 由壳的 `TITLEBAR_CLEARANCE` 给。 */}
       <div className={css.scrollBody} data-conversation-scroll="">
         {/* 空态与会话视图**平级**：同一时刻只会有一个非 null（相位互斥）。 */}
         {emptyState}

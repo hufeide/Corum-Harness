@@ -143,14 +143,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation': { kind: 'single'; scope: 'session-maybe'; owner: ConvOwnerProps }
     /** Strict per-Session Conversation body. */
     'conversation.session': { kind: 'single'; scope: 'session' }
-    /** Strict per-Session title, actions, and View navigation. */
-    'conversation.session.header': { kind: 'single'; scope: 'session' }
-    /** Optional replacement for one Session breadcrumb title. */
-    'conversation.session.header.lineage': {
-      kind: 'single'
-      scope: 'session'
-      owner: ConversationHeaderLineageOwnerProps
-    }
+    // CORUM-PATCH(P2, 2026-09-30)：会话顶栏的宿主从「对话区 leaf 内的顶栏卡片」
+    // 搬到**统一标题栏的会话段**——原 `conversation.session.header` 行随之退役。
+    // 声明权归带子的 occupant（@corum/corum-ui-titlebar 的 `corum.titlebar` 条目），
+    // 本包只作 occupant；此处补类型闭合（与那份声明**逐字一致**：TS 接口合并要求
+    // 相同的属性类型）。同时退役 `conversation.session.header.lineage`（官方
+    // ui-subagent 往它注册的子代理下拉；本改版仍刻意不渲染它，且该包在 IDE 组合里
+    // 因缺 `uiWorkspace` 服务而永久 pending，注册从未发生）。
+    /** corum 统一标题栏的会话段：面包屑 + 状态胶囊 + 轨迹（宿主 = 标题栏插件）。 */
+    'corum.titlebar.session': { kind: 'single'; scope: 'session' }
     /** Title-adjacent Session actions in ascending order. */
     'conversation.session.header.actions': {
       kind: 'list'
@@ -231,16 +232,6 @@ export interface HeroAgentPresetOwnerProps {
 export interface ConversationHeaderActionOwnerProps {
   /** Marker field: entries receive no owner-specific values. */
   children?: never
-}
-
-/** Plain breadcrumb data handed to the optional lineage renderer. */
-export interface ConversationHeaderLineageOwnerProps {
-  /** Session represented by this breadcrumb title. */
-  lineageSessionId: SessionId
-  /** Display title available to a combined title/control renderer. */
-  displayTitle: string
-  /** Navigate to an ancestor title when present. */
-  openTitle?: () => void
 }
 
 /** Point-in-time owner values for composer extension entries. */
@@ -449,12 +440,8 @@ export interface ConversationSessionInjected {
 
 /** Business callbacks injected into the strict Session header. */
 export interface ConversationSessionHeaderInjected {
-  /** Package-owned View roster source bound only for the Conversation header. */
-  readonly hooks: { readonly conversationViews: ObservableSnapshot<readonly ViewTab[]> }
   /** Select a Session through the Session Controller. */
   open: (sessionId: SessionId) => void
-  /** Select and activate one registered Conversation View. */
-  selectView: (view: string) => void
 }
 
 /** Owner share of the resident composer bar. */
@@ -553,7 +540,7 @@ export interface HeroBrandMarkOwnerProps {
 export type ConversationSlotProps =
   PropsRuntime<'conversation'>
   & PropsRenderSlots<
-    | 'conversation.session' | 'conversation.session.header'
+    | 'conversation.session'
     | 'conversation.composer' | 'conversation.composer.bar'
     | 'conversation.input.dock'
     | 'conversation.hero.brand.mark'
@@ -573,15 +560,13 @@ export type ConversationSessionSlotProps =
   & PropsStore<ConversationStore>
   & InjectFace<ConversationSessionInjected>
 
-/** Full props of the strict Session header. */
+/** Full props of the unified-titlebar Session band (was: strict Session header). */
 export type ConversationSessionHeaderSlotProps =
-  PropsRuntime<'conversation.session.header'>
+  PropsRuntime<'corum.titlebar.session'>
   & PropsRenderSlots<
-    'conversation.session.header.lineage'
-    | 'conversation.session.header.actions'
+    'conversation.session.header.actions'
     | 'conversation.session.header.utilities'
   >
-  & PropsStore<ConversationStore>
   & InjectFace<ConversationSessionHeaderInjected>
   & PropsLocale<'conversation'>
 

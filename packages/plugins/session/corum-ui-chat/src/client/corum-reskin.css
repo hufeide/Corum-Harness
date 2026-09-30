@@ -37,10 +37,11 @@
   color: var(--corum-label-on-brand);
 }
 
-/* ── Convo Header：底部 1px 玻璃光边分隔 ───────────────────────────── */
-[data-slot="conversation.session.header"] {
-  border-bottom: 1px solid var(--corum-glass-border);
-}
+/* ── Convo Header：底部 1px 玻璃光边分隔 ─────────────────────────────
+   2026-09-30（P2 统一标题栏）：会话顶栏搬进标题栏带子后，**这条线归带子**
+   （@corum/corum-ui-titlebar 的 `.session` 底边）。原先这里锚
+   `[data-slot="conversation.session.header"]` 是**死的**——槽出口锚点带
+   `display: contents`，没有盒子，边框根本不渲染。故删除而不是改锚点。 */
 
 /* ── 统计行（composer.dock / StatsLine）：弱化 tertiary ────────────── */
 [data-slot="conversation.composer.dock"] {

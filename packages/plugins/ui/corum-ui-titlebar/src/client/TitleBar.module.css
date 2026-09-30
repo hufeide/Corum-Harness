@@ -12,11 +12,17 @@
  * 不变式（改本文件前先读）：
  *   ① 每个窗口顶部 40px 内，`app-region: drag` 的矩形**由且仅由本组件产生**；
  *      壳只留惰性挂载位（`app-region: none`）；conversation 包内 `app-region` 归零。
- *   ② 带子内部只用**填充矩形**（.dragInset / .dragFill）承担拖拽，且与交互矩形
- *      **不相交**（flex 排列天然保证）；所有交互元素落在显式 `no-drag` 的
- *      容器里（`.controls` / `.actions` / `.iconBtn`）——未显式声明 app-region
- *      的 region 在 drag 位图里**不凿孔**（实测教训）。
- *   ③ 集成中心态由壳把挂载位设 `hidden`（`display:none` ⇒ 零 drag 矩形）。
+ *   ② 带子内部只用**填充矩形**（.dragInset / .dragSpacer / .session）承担拖拽；
+ *      控件层的交互元素落在与填充矩形**不相交**的显式 `no-drag` 容器里
+ *      （`.controls` / `.actions` / `.iconBtn`）——未显式声明 app-region 的 region
+ *      在 drag 位图里**不凿孔**（实测教训）。
+ *   ③ `.session` 是唯一「本体 drag + 内部含交互」的填充矩形：它承载 occupant 的
+ *      交互内容（crumbs / 状态胶囊 / 轨迹按钮），那些元素必须是**显式 no-drag**
+ *      （corum-ui-conversation 的 `.header button` 规则）。这是「同一子树内
+ *      drag + 显式 no-drag 后代」的形态，与②的教训（另一棵子树里叠上来的 drag
+ *      带凿不掉）不是一回事：那个坑要求「交互区只能在填充矩形之外」。
+ *   ④ 集成中心态由壳把挂载位设 `hidden`（`display:none` ⇒ 零 drag 矩形），
+ *      窗口拖拽由活动栏的 `.railDragBand` 补。
  */
 
 .band {
@@ -35,7 +41,7 @@
 /* ── 拖拽带（窗口拖拽命中区）：**不放任何控件** ───────────────────────────── */
 
 .dragInset,
-.dragFill {
+.dragSpacer {
   -webkit-app-region: drag;
   flex: none;
   align-self: stretch;
@@ -49,10 +55,30 @@
   width: 76px;
 }
 
-/* 右拖拽带：吃掉控件与会话段之后的剩余宽度。 */
-.dragFill {
-  flex: 1 1 auto;
+/* 控件层自然宽 → 会话段左缘之间那一段（= 侧栏上空）：宽度由组件下发
+   （controlsWidth - 76 - 控件自然宽）——纯 CSS 量不到控件层的自然宽。
+   有它，窗口在这段（侧栏上方）才拖得动。 */
+.dragSpacer {
+  width: 0;
+}
+
+/* 右拖拽带已由 .session 吸收（它铺到带子右缘），不再单列。 */
+
+/* ── 会话段（自 controlsWidth 起铺到带子右缘 = 对话区格右缘）────────────────
+   本体 drag：这条带子在对话区上方必须能拖窗（含空态/无会话态，那时 occupant
+   不渲染、只剩本矩形）。内部交互内容由 occupant 侧显式 no-drag（见不变式 ③）。
+   底部 1px 光边 = 与对话区内容的分界（原先由对话区 leaf 内的会话顶栏/空态分隔线
+   承担，2026-09-30 随会话段一起并入本带子）。 */
+.session {
+  -webkit-app-region: drag;
+  /* 本体不截获命中（与 .band 同款）：可点内容各自在 occupant 里恢复命中。 */
+  pointer-events: none;
+  flex: none;
+  align-self: stretch;
+  height: 100%;
+  box-sizing: border-box;
   min-width: 0;
+  border-bottom: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
 }
 
 /* ── 控件层（窗口控制按钮）────────────────────────────────────────────── */
