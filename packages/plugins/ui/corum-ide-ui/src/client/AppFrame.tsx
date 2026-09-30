@@ -354,6 +354,41 @@ function FloatingChrome({ slotKey }: { slotKey: string }) {
   )
 }
 
+/**
+ * 自带顶栏的浮动窗（`SELF_CHROME_FLOATING_SLOTS`）的**标题栏带**（P3, 2026-09-30）。
+ *
+ * 与主窗口同源：由 `@corum/corum-ui-titlebar` 的 `corum.titlebar` occupant 产生
+ * （`variant:'floating'` = `[红绿灯让位 66][会话段]`），壳只给定位与宽度、
+ * **不带任何 app-region**。
+ *
+ * 为什么还要在这里量宽度：浮窗根没有网格、也没有主窗口那套格测量，故本组件用
+ * ResizeObserver 量自己的行宽当 `bandWidth` 下发（会话段 = 行宽 − 66）。
+ * 宽度为 0 的首帧不渲染（避免给带子一个 0 宽）；fallback = 一条红绿灯让位拖拽带
+ * （插件未装载时窗口仍可拖，且它不是第二个 drag owner——此时带子里没有 occupant）。
+ */
+function FloatingTitlebarBand({ renderSlot }: { renderSlot: AppFrameProps['renderSlot'] }) {
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = rowRef.current
+    if (el === null) return undefined
+    const measure = (): void => { setWidth(Math.round(el.getBoundingClientRect().width)) }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => { observer.disconnect() }
+  }, [])
+  return (
+    <div className={css.floatingTitlebarRow} ref={rowRef}>
+      {width > 0 && renderSlot(
+        'corum.titlebar',
+        { variant: 'floating', bandWidth: width, controlsWidth: 0 },
+        { fallback: <div className={css.floatingTrafficInset} aria-hidden="true" /> },
+      )}
+    </div>
+  )
+}
+
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
@@ -1038,16 +1073,16 @@ export function IdeAppFrame({
   if (floatKey !== null) {
     const mountable = FLOATABLE_SLOTS.has(floatKey)
     // design.pen i5ie6（会话拖出为独立窗口）：承载会话的浮动窗**不画独立 chrome
-    // 行**——会话顶栏卡片本身就是窗口顶栏，左侧让出红绿灯、整条承担拖窗，即设计稿
-    // 的 `titlebar-row = [traffic-light-inset 66][session-topbar fill]` 单行结构。
+    // 行**——统一标题栏带子本身就是窗口顶栏（variant:'floating' =
+    // `[红绿灯让位 66][会话段]`，会话段即原会话顶栏卡片），左侧让出红绿灯、
+    // 整条承担拖窗。
     // 其余槽位（编辑器/终端/轨迹…）没有会话顶栏，保留 FloatingChrome 提供拖拽区与标题。
     const selfChrome = SELF_CHROME_FLOATING_SLOTS.has(floatKey)
     return (
       <div className={css.floatingRoot} data-floating={floatKey} data-self-chrome={selfChrome || undefined}>
         {selfChrome
-          /* 红绿灯让位段：系统红黄绿由 titleBarStyle:'hiddenInset' 画在左上角，
-             本元素只提供让位几何 + 拖拽命中（与右侧会话顶栏同一行）。 */
-          ? <div className={css.floatingTrafficInset} aria-hidden="true" />
+          /* 统一标题栏带（P3）：内容全归 corum.titlebar occupant；壳只给定位与宽度。 */
+          ? <FloatingTitlebarBand renderSlot={renderSlot} />
           : <FloatingChrome slotKey={floatKey} />}
         <div className={css.floatingBody}>
           {mountable

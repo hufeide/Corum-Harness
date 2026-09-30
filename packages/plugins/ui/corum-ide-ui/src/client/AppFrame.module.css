@@ -741,16 +741,26 @@
 }
 
 /* design.pen i5ie6（会话拖出为独立窗口）：自顶栏槽位的浮动窗不再有独立 chrome 行——
-   会话顶栏卡片本身就是窗口顶栏，且与红绿灯让位段**同处一行**：
-     titlebar-row = [ traffic-light-inset 66 ][ session-topbar fill ]   gap 8
-   卡片深藏在 body 内的会话视图里（ConversationRoot → header），无法与 inset 组成
-   直接的 flex 兄弟，故 inset 走绝对定位、卡片用左边距预留这一段——视觉结果与
-   设计稿的单行结构一致。 */
+   统一标题栏带子本身就是窗口顶栏（P3, 2026-09-30）：
+     titlebar-row = [ traffic-light-inset 66 ][ session-band fill ]
+   内容全归 @corum/corum-ui-titlebar 的 corum.titlebar occupant（variant='floating'），
+   壳只提供这一行的定位/边距与穿透（见 .floatingTitlebarRow）。
+   原先的写法是「inset 绝对定位 + 把卡片（深在 body 里的 ConversationRoot header）
+   用左边距 74 顶出来」的对位 hack + `--corum-session-topbar-*` 契约变量；
+   卡片搬进带子后两者都不需要了——**不要再给带子里的内容注 app-region**。 */
 .floatingRoot[data-self-chrome] {
   position: relative;
-  /* 卡片承担整条拖窗；左边距 = inset 66 + 设计稿 gap 8 = 74。 */
-  --corum-session-topbar-app-region: drag;
-  --corum-session-topbar-margin: calc(12px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)) 0 calc(74px * var(--corum-density-scale, 1));
+}
+
+/* 浮窗标题栏行的座位：与旧卡片同一套边距（上/右 12px gutter、高 40），
+   内容由带子 occupant 产生。本体不拖、不截获命中（与主窗 .titlebarMount 同款）。 */
+.floatingTitlebarRow {
+  -webkit-app-region: none;
+  flex: none;
+  position: relative;
+  height: 40px;
+  margin: calc(12px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1)) 0;
+  pointer-events: none;
 }
 
 .floatingRoot[data-self-chrome] /* 「收回到主窗口」按钮：app-region:no-drag 才能在拖拽区里点到（否则整条 chrome
@@ -780,13 +790,12 @@
 
 /* 红绿灯让位段（design.pen traffic-light-inset：66×40）：系统红黄绿由
    titleBarStyle:'hiddenInset' 画在左上角，本段只提供让位几何 + 拖拽命中，
-   不自绘（自绘会与系统灯重叠）。 */
+   不自绘（自绘会与系统灯重叠）。
+   P3 后它只剩一个身份：**标题栏插件未装载时的 fallback**（带子里的 occupant 才
+   是正常形态），故尺寸跟着行内盒走（不再是绝对定位去对位卡片）。 */
 .floatingTrafficInset {
-  position: absolute;
-  top: 12px; /* 与卡片上缘对齐（卡片 margin-top 12） */
-  left: 0;
   width: 66px;
-  height: 40px;
+  height: 100%;
   -webkit-app-region: drag;
 }
 
