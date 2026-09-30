@@ -51,6 +51,27 @@ function hostPidPath(): string {
 }
 
 /**
+ * 本进程的 host 入口绝对路径 —— 回收时用来确认「记录里的那个进程与本进程是**同一种** host」。
+ *
+ * 为什么需要（2026-10-01 事故）：dev/verify 的 host 是
+ * `<repo>/packages/desktop/lib/bridge.js`，打包态是
+ * `<app>/Contents/Resources/host/lib/bridge.js` —— 两者**不是同一个文件**，
+ * 原先却用子串 `host/lib/bridge.js` 做判据，于是只有打包态命中、dev/verify 反而不命中。
+ * 用**自己的入口路径**比对才是对称且精确的。
+ */
+const SELF_BRIDGE_PATH = fileURLToPath(import.meta.url)
+
+/**
+ * 本进程所在实例的 CDP 端口 —— dev / verify / packaged **共用同一个 home**，
+ * 故「同一个 host.pid 文件」里可能记着**另一个实例**的 host。端口是区分 dev(9222)
+ * 与 verify(9333) 的那一轴（两者入口路径相同，仅靠路径分不开）。
+ */
+function selfDebugPort(): string {
+  const port = process.env.CORUM_DEBUG_PORT
+  return port === undefined || port === '' ? '' : port
+}
+
+/**
  * 清掉同一 home 里上一代残留的 host 进程。
  *
  * 2026-09-09 事故：`before-quit` 只 `app.exit(0)`、不杀子进程，而子进程的
@@ -59,16 +80,26 @@ function hostPidPath(): string {
  * 「模型选择失败」、历史加载失败）。本轮已修两条泄漏路径，本函数负责回收**已经
  * 存在的**孤儿（老版本留下的）。
  *
- * 安全性：只杀「PID 记录在**本 home** 的 run/host.pid 里 + 该 PID 仍存活 +
- * `ps` 确认命令行是本仓库/本 app 的 host 入口」三者同时成立的进程；PID 复用导致
- * 的误杀由命令行校验挡住，任何异常都静默放过。
+ * 安全性（三重判据，缺一不可）：PID 记录在**本 home** 的 run/host.pid 里
+ * + 该 PID 仍存活 + **记录里的端口与本实例一致** + `ps` 确认命令行含**本进程的
+ * 入口路径**。PID 复用导致的误杀由命令行校验挡住，任何异常都静默放过。
+ *
+ * ⚠️ 2026-10-01 事故（「在 9222 里起 verify 把自己也杀了」）：dev / verify / packaged
+ * **三者共用 `~/.corum` 与这一份 host.pid**，而旧判据只有「cmdline 含
+ * `host/lib/bridge.js`」这一条子串 —— 恰好只有**打包态**命中 ⇒ 任何 dev/verify 实例
+ * 启动，都会把**打包态实例的 host** 顺手 SIGTERM 掉（反之打包态也回收不了 dev/verify
+ * 的孤儿）。端口 + 入口路径双判据即消除这种跨实例误杀。
  */
 async function reapStaleHost(): Promise<void> {
   if (process.platform === 'win32') return
   try {
     const raw = await readFile(hostPidPath(), 'utf8')
-    const stale = Number((JSON.parse(raw) as { pid?: unknown }).pid)
+    const record = JSON.parse(raw) as { pid?: unknown; debugPort?: unknown }
+    const stale = Number(record.pid)
     if (!Number.isSafeInteger(stale) || stale <= 0 || stale === process.pid) return
+    // 不是本实例那一代的记录（另一个端口/另一种形态的 host）⇒ 绝不动它。
+    const stalePort = typeof record.debugPort === 'string' ? record.debugPort : ''
+    if (stalePort !== selfDebugPort()) return
     try {
       process.kill(stale, 0) // 存活探测
     } catch {
@@ -80,7 +111,7 @@ async function reapStaleHost(): Promise<void> {
     } catch {
       return // 取不到命令行（权限/沙盒）→ 不动它
     }
-    if (!command.includes(join('host', 'lib', 'bridge.js'))) return // PID 复用，放过
+    if (!command.includes(SELF_BRIDGE_PATH)) return // PID 复用 / 另一种 host，放过
     process.stderr.write(`[corum-desktop] reaping stale host ${String(stale)} (a previous parent exited without killing it)\n`)
     try { process.kill(stale, 'SIGTERM') } catch { /* 竞态：已退出 */ }
     for (let i = 0; i < 20; i += 1) {
@@ -97,11 +128,11 @@ async function reapStaleHost(): Promise<void> {
   }
 }
 
-/** 记录本进程 PID，供下一代启动时回收（写失败不影响运行）。 */
+/** 记录本进程 PID（含端口，供下一代确认是「同一种 host」），写失败不影响运行。 */
 async function recordHostPid(): Promise<void> {
   try {
     await mkdir(dirname(hostPidPath()), { recursive: true })
-    await writeFile(hostPidPath(), `${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`)
+    await writeFile(hostPidPath(), `${JSON.stringify({ pid: process.pid, debugPort: selfDebugPort(), startedAt: Date.now() })}\n`)
   } catch {
     // best effort
   }

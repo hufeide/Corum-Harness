@@ -31,7 +31,8 @@
 #
 #   --mode=dev|packaged     dev（默认，吃仓库 lib/）| packaged（吃 .app 闭包）
 #   --home=dev|verify|<abs> dev→.corum-dev-home（默认）| verify→.corum-verify-home | 绝对路径
-#   --port=<n>              CDP 端口；缺省按 home 推（verify→9333，其余→9222）
+#   --port=<n>              CDP 端口；缺省按角色推（verify→9333，其余→9222）
+#                           ⚠️ verify **不继承**环境里的 CORUM_DEBUG_PORT（见下）
 #   --combo=<id>            combo id（默认 coding）
 #   --build                 start/restart 前**全量构建**（dev）
 #   --foreground            前台阻塞运行（交互调试用；默认后台秒回）
@@ -44,6 +45,9 @@
 #   CORUM_HOME / CORUM_DEBUG_PORT / CORUM_PACK_COMBO / CORUM_VERIFY_HOME /
 #   CORUM_VERIFY_PORT / CORUM_VERIFY_ALLOW_SANDBOXED / CORUM_PACK_EXCLUDE_SESSIONS /
 #   CORUM_PACK_FORCE / CORUM_PACK_APP
+#
+#   ⚠️ `CORUM_DEBUG_PORT` 只对 **dev / packaged** 角色有效 —— **verify 一律不继承**
+#   （它常从「正在运行的实例」继承到 9222，抢端口并触发互杀；要指定就显式 --port）。
 #
 # ## 三条不可动摇的安全不变式（都是**实测事故换来的**，改动前先读）
 #
@@ -122,6 +126,10 @@ shift || true
 MODE="${CORUM_MODE:-dev}"
 HOME_SEL="${CORUM_HOME_SEL:-}"
 PORT="${CORUM_DEBUG_PORT:-}"
+# PORT 的来源（arg/env/default）——verify 角色**必须**据此拒绝继承来的
+# CORUM_DEBUG_PORT，见下面「端口缺省」一节的详细说明。
+PORT_FROM="env"
+[[ -n "$PORT" ]] || PORT_FROM="unset"
 COMBO="${CORUM_PACK_COMBO:-coding}"
 DO_BUILD=0
 FOREGROUND=0
@@ -142,8 +150,8 @@ parse_args() {
       --mode)          MODE="${args[$((i + 1))]:-}"; i=$((i + 2)) ;;
       --home=*)        HOME_SEL="${a#--home=}"; i=$((i + 1)) ;;
       --home)          HOME_SEL="${args[$((i + 1))]:-}"; i=$((i + 2)) ;;
-      --port=*)        PORT="${a#--port=}"; i=$((i + 1)) ;;
-      --port)          PORT="${args[$((i + 1))]:-}"; i=$((i + 2)) ;;
+      --port=*)        PORT="${a#--port=}"; PORT_FROM="arg"; i=$((i + 1)) ;;
+      --port)          PORT="${args[$((i + 1))]:-}"; PORT_FROM="arg"; i=$((i + 2)) ;;
       --combo=*)       COMBO="${a#--combo=}"; i=$((i + 1)) ;;
       --combo)         COMBO="${args[$((i + 1))]:-}"; i=$((i + 2)) ;;
       --build)         DO_BUILD=1; i=$((i + 1)) ;;
@@ -230,8 +238,22 @@ CORUM_HOME_LABEL="$CORUM_HOME_RESOLVED"
 [[ "$CORUM_HOME_SEL" == "verify" ]] && CORUM_HOME_LABEL="$CORUM_HOME_RESOLVED (role=verify)"
 
 # 端口缺省：verify → 9333；其余 → 9222。CORUM_VERIFY_PORT 兼容旧调用。
-if [[ -z "$PORT" ]]; then
-  if [[ "$CORUM_HOME_SEL" == "verify" ]]; then PORT="${CORUM_VERIFY_PORT:-9333}"; else PORT="${CORUM_VERIFY_PORT:-9222}"; fi
+#
+# ⚠️ 2026-10-01 实测事故（`start --home=verify` 把 9222 主实例连带打死）：
+# 本脚本常被**在某个 corum 实例内部跑的子 Agent**调用，而那个进程的环境里带着
+# `CORUM_DEBUG_PORT=9222`（= 它自己所在实例的 CDP 口，见 main.ts 的 buildHostEnv
+# 全量透传 process.env）。原先这里无条件 `PORT="${CORUM_DEBUG_PORT:-}"` ⇒ verify
+# 也去抢 9222 ⇒ 与主实例同端口；再叠加下面 SELF_MARK 的前缀误判 ⇒ 自己把自己打死。
+# 处置：**verify 角色绝不继承 CORUM_DEBUG_PORT**（只有显式 `--port` / `CORUM_VERIFY_PORT` 算数）。
+if [[ "$CORUM_HOME_SEL" == "verify" ]]; then
+  if [[ "$PORT_FROM" == "env" && -n "${PORT:-}" ]]; then
+    printf '[instance] ⚠️ 已忽略从环境继承的 CORUM_DEBUG_PORT=%s —— verify 角色不继承该变量：\n' "$PORT" >&2
+    printf '[instance]    它来自某个正在运行的实例，抢同一端口必然互杀。要指定端口请用 --port=<n> 或 CORUM_VERIFY_PORT。\n' >&2
+    PORT=""
+  fi
+  PORT="${PORT:-${CORUM_VERIFY_PORT:-9333}}"
+else
+  PORT="${PORT:-${CORUM_VERIFY_PORT:-9222}}"
 fi
 export CORUM_DEBUG_PORT="$PORT"
 
@@ -254,7 +276,15 @@ if [[ "$MODE" == "packaged" ]]; then
   # 双条件不变，故安全性不降。
   SELF_MARK="$APP_PATH"
 else
-  SELF_MARK="$ROOT/packages/desktop"
+  # ⚠️ 2026-10-01 实测事故：这里原先是 `$ROOT/packages/desktop`，而它是**打包态
+  # 路径的前缀** —— 打包态 cmdline 形如
+  #   <ROOT>/packages/desktop/dist/mac-arm64/Corum.app/Contents/MacOS/Corum --combo=coding
+  # 也含该前缀 ⇒ `is_self` 把**打包态实例判成 dev/verify 自己**，`kill_tree` 连带打死
+  # （用户实测：在 9222 里跑 `start --home=verify`，9222 打包实例被杀）。
+  # 收窄到 `.../packages/desktop/lib`：dev/verify 的 main.js / bridge.js 都在 lib/ 下，
+  # 而打包态走 `dist/.../Corum.app/Contents/Resources/...`，不含该段 ⇒ 不再互相命中。
+  # （兜底清理处的 pgrep 一直是这个更窄的标记，只有 SELF_MARK 没收窄。）
+  SELF_MARK="$ROOT/packages/desktop/lib"
 fi
 mkdir -p "$RUN_DIR"
 
