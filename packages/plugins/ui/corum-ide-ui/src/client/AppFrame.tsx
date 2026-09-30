@@ -107,8 +107,10 @@ function NavIconButton({ icon, label, onClick }: {
 
 /**
  * 左列导航标题栏（design.pen「窗口标题栏」d8STsd，40px）：窗口不再有通栏
- * 标题栏，本栏放进左列 nav 顶部——左侧 76px 给 macOS 红绿灯让位（= 活动栏宽，
- * 两列上下对齐；整段 app-region:drag），右侧图标按钮（no-drag）。
+ * 标题栏，本栏放进左列 nav 顶部，夹在两条拖拽带之间（左 = 红绿灯让位 76 =
+ * 活动栏宽，两列上下对齐；右 = 剩余宽度）。**本层内不放 drag 区**——控件与
+ * drag 命中区重叠会让物理鼠标点击被当窗口拖拽吞掉（详见 .titlebarDragInset
+ * 的注释；CDP 合成事件不走 drag 命中判定，脚本验不出这类 bug）。
  *
  * 按钮分两档（2026-09-30 定案，design.pen 状态①/状态③）：
  *   ① 折叠/展开侧栏——**常驻**，两态落在同一坐标（红绿灯让位之后的第一个位置
@@ -130,9 +132,8 @@ function NavTitleBar({ onToggleSidebar, onTogglePanels, onToggleTerminal, sideba
 }) {
   return (
     <div className={css.navTitleBar}>
-      {/* 红绿灯让位 76px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘；
-          76 = 活动栏宽，红绿灯列与活动栏列上下对齐）。 */}
-      <span className={css.navTitleBarInset} />
+      {/* 红绿灯让位**不在这里**：它是行内的左拖拽带 .titlebarDragInset（76px，
+          纯 drag 命中区），本层只放按钮——控件与 drag 区不重叠，见其注释。 */}
       {/* 折叠/展开按钮**常驻**：固定在红绿灯让位之后的第一个位置（x=80），
           两态零位移（design.pen 状态③ 定稿）。折叠态行内只剩它一个按钮。 */}
       <NavIconButton
@@ -1108,16 +1109,18 @@ export function IdeAppFrame({
         style={{ right: 'auto', width: titlebarWidth }}
         hidden={integrationsOpen}
       >
-        {/* 窗口标题栏宽度跟随侧栏右缘（设计稿：覆盖侧栏正上方，侧栏拖拽时一起变）。
-            该段整段 app-region:drag（窗口拖拽），内层按钮 no-drag。 */}
-        <div className={css.titlebarDrag} style={{ width: titlebarWidth, flex: 'none', display: 'flex' }}>
-          <NavTitleBar
-            onToggleSidebar={onToggleSidebar}
-            onTogglePanels={onTogglePanels}
-            onToggleTerminal={onToggleTerminal}
-            sidebarCollapsed={sidebarCollapsed}
-          />
-        </div>
+        {/* 拖拽带与控件层**分离**（2026-09-30 定案，详见 .titlebarDragInset 的
+            注释）：[左拖拽带 = 红绿灯让位 76] [控件层] [右拖拽带 = 剩余宽度]——
+            控件矩形内没有任何 drag 命中区，物理鼠标点击不会被当窗口拖拽吞掉
+            （CDP 合成事件绕过 drag 命中判定 ⇒ 这类 bug 脚本验不出）。 */}
+        <div className={css.titlebarDragInset} />
+        <NavTitleBar
+          onToggleSidebar={onToggleSidebar}
+          onTogglePanels={onTogglePanels}
+          onToggleTerminal={onToggleTerminal}
+          sidebarCollapsed={sidebarCollapsed}
+        />
+        <div className={css.titlebarDragRest} />
         {/* 会话段（会话标题 + 状态胶囊 + 常驻 Agent 胶囊 + 轨迹）已迁出本行
             （2026-09-10「顶栏归会话」）：现由 corum-ide-ui 的 session-bar 注册进
             会话级槽 `conversation.session.header.actions|utilities`，宿主是会话插件

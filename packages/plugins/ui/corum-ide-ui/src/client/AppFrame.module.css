@@ -53,12 +53,12 @@
   height: 40px;
   box-sizing: border-box;
   /* 行本体不截获命中：右段（编辑器/资源管理器上方）无标题栏内容，必须让
-     点击穿透到下方顶到窗口顶的编辑器卡片。两段内容（窗口标题栏/Agent
-     标题栏座位）各自恢复命中与 drag。 */
+     点击穿透到下方顶到窗口顶的编辑器卡片。行内三个 flex 项（左拖拽带 /
+     控件层 / 右拖拽带）各自恢复命中。 */
   pointer-events: none;
 }
 
-/* 两段内容恢复命中——窗口标题栏段（左）与 Agent 标题栏座位（覆盖对话区上方）。 */
+/* 行内三个 flex 项（左拖拽带 / 控件层 / 右拖拽带）恢复命中。 */
 .titlebarRow > * {
   pointer-events: auto;
 }
@@ -72,44 +72,50 @@
   display: none;
 }
 
-/* 标题栏行的拖拽段：整段 app-region:drag（内层按钮各自 no-drag）。
-   注意 -webkit-app-region 非继承属性、初始值 none，且「子元素覆盖父级」只对
-   显式声明了 app-region 的后代生效——未声明的后代落入父级 drag 命中区（可拖）。
-   因此**不要**用 `.titlebarDrag *` 通配把所有后代也强设为 drag：通配 (0,1,1)
-   与下面的按钮 no-drag (0,1,1) 特异性相同、写在前会输，按钮会被改回 drag 不可点。
-   段内真正可点的控件本来就显式声明了 no-drag（自带类/本处规则），无需通配。 */
-.titlebarDrag {
+/* ── 拖拽带（窗口拖拽命中区）与控件层的**分离** ──────────────────────────────
+   ⚠️ 2026-09-30 定案：拖拽带里**不放任何控件**。原实现是「一整条 drag 段
+   （.titlebarDrag）+ 内层按钮各自 no-drag」，这种叠加下物理鼠标点在按钮上会被
+   当成窗口拖拽吞掉（真鼠标点不动，脚本却正常——CDP 的 Input.dispatchMouseEvent
+   直投渲染进程，**不走 OS/浏览器进程的 drag 命中区判定**，这类 bug 脚本天生
+   验不出）。
+   现在改成三条 flex 项并排、矩形互不重叠：
+     [左拖拽带 = 红绿灯让位 76] [控件层 .navTitleBar] [右拖拽带 = 剩余宽度]
+   ⇒ 控件层矩形内**没有任何 drag 命中区**：无论未显式声明 app-region 的后代
+   （lucide 图标是 <svg>）落到哪一层，都不可能是 drag。 */
+.titlebarDragInset,
+.titlebarDragRest {
   -webkit-app-region: drag;
+  flex: none;
+  height: 40px;
 }
-/* 段内按钮/可点控件显式 no-drag（确保可点；这些类自身也已声明 no-drag）。 */
-.titlebarDrag .navIconBtn,
-.titlebarDrag .agentTrajBtn,
-.titlebarDrag button,
-.titlebarDrag [role="button"] {
-  -webkit-app-region: no-drag;
+/* 左拖拽带 = 红绿灯让位区（76px = 活动栏宽）：系统红黄绿由
+   titleBarStyle:hiddenInset 保留，不自绘。灯实际占 x=12..64（13px 灯 ×3 +
+   8px 间距），右侧 12px 留白凑成 76——与活动栏（.activityBar 同 76）严格同宽，
+   红绿灯列与活动栏列因此上下对齐。 */
+.titlebarDragInset {
+  width: 76px;
+}
+/* 右拖拽带：吃掉控件之后的剩余宽度（折叠态行宽 108 = 让位 76 + 间距 4 + 按钮
+   28 ⇒ 本段宽 0，正常）。 */
+.titlebarDragRest {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* 窗口标题栏（design.pen d8STsd）：左侧 76px 红绿灯让位 + 折叠/展开按钮
-   （常驻、两态同一坐标）+ 展开态才有的其余图标按钮（no-drag）。宽度由外层
-   inline style 跟随侧栏右缘（覆盖侧栏正上方）；折叠态收到 104。本组件占满
-   外层，drag 由父级 titlebarRow 统一承担。 */
+/* 标题栏控件层（design.pen d8STsd）：折叠/展开按钮（常驻、两态同一坐标）+
+   展开态才有的其余图标按钮。夹在两条拖拽带之间，**自身不在任何 drag 元素内**
+   （见上）；命中由 `.titlebarRow > *` 的 pointer-events:auto 恢复，宽度由内容
+   决定（不占满行，剩余宽度留给右拖拽带）。
+   padding-left = 左拖拽带与首个按钮之间的间距（4px，与内部 gap 同值）⇒ 按钮
+   x=80 = 让位 76 + 间距 4，与 design.pen 状态①/③ 一致。 */
 .navTitleBar {
-  flex: 1;
-  min-width: 0;
+  flex: none;
   display: flex;
   align-items: center;
   gap: calc(4px * var(--corum-density-scale, 1));
+  padding-left: calc(4px * var(--corum-density-scale, 1));
   height: 40px;
   box-sizing: border-box;
-}
-
-/* 红绿灯让位区（76px = 活动栏宽）：系统红黄绿由 titleBarStyle:hiddenInset 保留，
-   不自绘。灯实际占 x=12..64（13px 灯 ×3 + 8px 间距），右侧 12px 留白凑成 76——
-   与活动栏（.activityBar 同 76）严格同宽，红绿灯列与活动栏列因此上下对齐。 */
-.navTitleBarInset {
-  flex: none;
-  width: 76px;
-  height: 40px;
 }
 
 /* 右侧图标按钮区（不拖拽）。 */
