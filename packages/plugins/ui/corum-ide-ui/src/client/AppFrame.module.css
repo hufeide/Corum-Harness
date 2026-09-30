@@ -103,12 +103,20 @@
 }
 
 /* 标题栏控件层（design.pen d8STsd）：折叠/展开按钮（常驻、两态同一坐标）+
-   展开态才有的其余图标按钮。夹在两条拖拽带之间，**自身不在任何 drag 元素内**
-   （见上）；命中由 `.titlebarRow > *` 的 pointer-events:auto 恢复，宽度由内容
-   决定（不占满行，剩余宽度留给右拖拽带）。
+   展开态才有的其余图标按钮。夹在两条拖拽带之间；命中由 `.titlebarRow > *`
+   的 pointer-events:auto 恢复，宽度由内容决定（剩余宽度留给右拖拽带）。
    padding-left = 左拖拽带与首个按钮之间的间距（4px，与内部 gap 同值）⇒ 按钮
-   x=80 = 让位 76 + 间距 4，与 design.pen 状态①/③ 一致。 */
+   x=80 = 让位 76 + 间距 4，与 design.pen 状态①/③ 一致。
+
+   ⚠️ **必须显式声明 no-drag**（2026-09-30 实测教训）：只把控件挪出 drag 元素、
+   让容器保持「未声明（computed none）」是**不够**的——未显式声明 app-region 的
+   region 在窗口 drag 位图里不凿孔，物理鼠标点击仍会被判进 drag 命中区（点击被
+   当窗口拖拽吞掉、双击还会走 macOS 标题栏缩放）。
+   对照证据：同层的「面板/终端」在 `.navTitleBarActions`（该类自 2026-08 起就有
+   显式 no-drag）里，鼠标点击一直正常；而常驻的折叠/展开按钮直接在**本类**下、
+   只有 none ⇒ 一直点不动（CDP 合成事件绕过 drag 命中判定，故脚本验不出来）。 */
 .navTitleBar {
+  -webkit-app-region: no-drag;
   flex: none;
   display: flex;
   align-items: center;
