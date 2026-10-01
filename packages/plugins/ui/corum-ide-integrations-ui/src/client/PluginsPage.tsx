@@ -41,8 +41,8 @@ import {
   SquareTerminal, Trash2, WandSparkles, X,
 } from 'lucide-react'
 import {
-  buildMosaic, mosaicStyles, mosaicTileClass, MosaicWall,
-  type MosaicSize, type MosaicTint,
+  buildMosaic, mosaicStyles, mosaicTileClass, MosaicWall, useMosaicColumns,
+  type MosaicItemHint, type MosaicSize, type MosaicTint,
 } from '@corum/corum-ui-base/client'
 import css from './PluginsPage.module.css'
 
@@ -635,6 +635,40 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     [entries],
   )
 
+  /**
+   * 磁贴群列数：`ref` 挂在下面 `css.tiles` 那个容器上，窄窗（单位宽撑不住长名字）
+   * 自动降 3 列、宽窗回 6 列；两种模式的块宽恒等，故切换不改整墙宽度。
+   */
+  const tilesRef = useRef<HTMLDivElement>(null)
+  const columns = useMosaicColumns(tilesRef)
+
+  /**
+   * 排布提示（与磁贴数据同序）：算法据此把**名字长的**放进 264 宽的槽，不再随机
+   * 落进 128 窄贴被截断。名字长度按**实际渲染的那个名字**算——本页贴面一律走
+   * `shortName(...)`（包名末段），故长度与贴面所见一致。
+   */
+  const marketHints = useMemo<MosaicItemHint[]>(
+    () => gridTiles.map(r => ({
+      nameLength: shortName(r.name).length,
+      hasDescription: r.description !== undefined && r.description !== '',
+    })),
+    [gridTiles],
+  )
+  const personalHints = useMemo<MosaicItemHint[]>(
+    () => personalTiles.map(e => ({
+      nameLength: shortName(e.moduleName).length,
+      hasDescription: e.description !== undefined && e.description !== '',
+    })),
+    [personalTiles],
+  )
+  const installedHints = useMemo<MosaicItemHint[]>(
+    () => visibleInstalled.map(e => ({
+      nameLength: shortName(e.moduleName).length,
+      hasDescription: e.description !== undefined && e.description !== '',
+    })),
+    [visibleInstalled],
+  )
+
   /* ── 详情面板选中态 ── */
 
   /** 市场态选中的检索结果（默认第一个；切换 tab/视图后回落）。 */
@@ -854,12 +888,19 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
    * 块序列与单张贴的渲染。贴是列的直接子元素（DOM 里由 Fragment 承载，不产生壳层），
    * 故 CSS 的 `.mosaicCol > [data-tile-size]` 分档列高仍然成立。
    * 本页无入口贴（市场/已装两个 tab 都没有「添加」贴）⇒ 不传 pinFirstTwoSmalls。
+   * 落位由算法按 `hints` 决定（长名字占 264 宽槽），数据下标走 `MosaicWall` 的
+   * `itemIndex` ⇒ 调用方不再需要「第 i 张贴 = 第 i 条数据」这个假设。
    */
   const renderMosaic = <X,>(
     tiles: readonly X[],
+    hints: readonly MosaicItemHint[],
     renderTile: (item: X, size: MosaicSize) => ReactNode,
   ): ReactNode => (
-    <MosaicWall items={tiles} blocks={buildMosaic(tiles.length)} renderTile={renderTile} />
+    <MosaicWall
+      items={tiles}
+      blocks={buildMosaic(tiles, { columns, hints })}
+      renderTile={renderTile}
+    />
   )
 
   /* ── 详情面板 ── */
@@ -1098,7 +1139,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
       {/* ── 2. 内容区：左磁贴群（分节）+ 右详情面板 ── */}
       <div className={css.body}>
-        <div className={css.tiles}>
+        <div className={css.tiles} ref={tilesRef}>
           {tab === 'market' && scope === 'public' && (
             <>
               {searchError !== null && <p className={css.errorText}>检索失败：{searchError}</p>}
@@ -1116,7 +1157,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
                   )}
                   <div className={css.allSection}>
                     {renderSectionHead(gridSectionLabel, false)}
-                    {renderMosaic(gridTiles, (row, size) => renderMarketTile(row, size))}
+                    {renderMosaic(gridTiles, marketHints, (row, size) => renderMarketTile(row, size))}
                   </div>
                 </>
               )}
@@ -1131,7 +1172,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
               {personalTiles.length > 0 && (
                 <div className={css.allSection}>
                   {renderSectionHead('本地 / 开发中', false)}
-                  {renderMosaic(personalTiles, (entry, size) => renderPersonalTile(entry, size))}
+                  {renderMosaic(personalTiles, personalHints, (entry, size) => renderPersonalTile(entry, size))}
                 </div>
               )}
             </>
@@ -1148,7 +1189,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
               {visibleInstalled.length > 0 && (
                 <div className={css.allSection}>
                   {renderSectionHead('已装插件', false)}
-                  {renderMosaic(visibleInstalled, (entry, size) => renderInstalledTile(entry, size))}
+                  {renderMosaic(visibleInstalled, installedHints, (entry, size) => renderInstalledTile(entry, size))}
                 </div>
               )}
             </>

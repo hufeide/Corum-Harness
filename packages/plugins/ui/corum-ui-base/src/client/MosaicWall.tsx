@@ -19,9 +19,10 @@
  *
  * @module corum-ui-base/client/Mosaic
  */
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useEffect, useState, type MutableRefObject, type ReactNode } from 'react'
 import css from './mosaic.module.css'
-import type { MosaicBlock, MosaicSize } from './mosaic.ts'
+import { pickMosaicColumns } from './mosaic.ts'
+import type { MosaicBlock, MosaicColumns, MosaicSize } from './mosaic.ts'
 
 /** 磁贴底色四档（design.pen 磁贴 fill 的四色，token 见 theme.css）。 */
 export type MosaicTint = 'violet' | 'deep' | 'slate' | 'mauve'
@@ -56,7 +57,6 @@ export interface MosaicWallProps<T> {
  * @returns 磁贴墙元素。
  */
 export function MosaicWall<T>({ items, blocks, renderTile }: MosaicWallProps<T>): ReactNode {
-  let cursor = 0
   return (
     <div className={css.tileGrid}>
       {blocks.map((block, bi) => (
@@ -64,7 +64,9 @@ export function MosaicWall<T>({ items, blocks, renderTile }: MosaicWallProps<T>)
           {block.cols.map((col, ci) => (
             <div key={`col:${bi}:${ci}`} className={css.mosaicCol} data-col={col.width}>
               {col.sizes.map((size, si) => {
-                const index = cursor++
+                /* 数据下标由算法给出（长名字会跨位置挑选，落位不再等于渲染序），
+                   无槽位信息时退回「按序取」以兼容只给 sizes 的简单用法。 */
+                const index = col.slots?.[si]?.itemIndex ?? si
                 const item = items[index]
                 if (item === undefined) return null
                 return (
@@ -179,3 +181,33 @@ export const mosaicStyles: MosaicStyleSheet = {
 }
 
 export { mosaicStyles as css }
+
+/**
+ * 按容器宽决定列数，并在窗口变化时更新（窄窗降 3 列、宽窗回 6 列）。
+ *
+ * 为什么需要它：6 列在窄窗下单位宽会掉到 80px 出头，长名字必然截断；降成 3 列后
+ * 每列宽约翻倍（同一容器宽摊到更少的列上），名称与作者都能正常显示。两种模式的
+ * 块宽**恒等**（6u+5g），故切换只改块内列结构、不改变整墙宽度。
+ *
+ * @param ref - 磁贴群容器（量其内容宽；`ResizeObserver` 监听尺寸变化）。
+ * @returns 当前应使用的列数。
+ */
+export function useMosaicColumns(ref: MutableRefObject<HTMLElement | null>): MosaicColumns {
+  const [columns, setColumns] = useState<MosaicColumns>(6)
+  useEffect(() => {
+    const el = ref.current
+    if (el === null || typeof ResizeObserver === 'undefined') return
+    const measure = (): void => {
+      const style = getComputedStyle(el)
+      const gap = Number.parseFloat(style.gap) || 8
+      /* scrollbar-gutter 预留的滚动槽也计入 clientWidth，扣掉才是真正的列可用宽。 */
+      const contentWidth = el.clientWidth - (el.offsetWidth - el.clientWidth)
+      setColumns(pickMosaicColumns(contentWidth, gap))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => { ro.disconnect() }
+  }, [ref])
+  return columns
+}

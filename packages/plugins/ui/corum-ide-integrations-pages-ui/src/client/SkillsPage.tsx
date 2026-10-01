@@ -38,9 +38,9 @@ import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentB
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import type { LucideIcon } from 'lucide-react'
 import {
-  buildMosaic, MosaicWall, mosaicStyles, mosaicTileClass,
+  buildMosaic, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
 } from '@corum/corum-ui-base/client'
-import type { MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
+import type { MosaicItemHint, MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
 import css from './SkillsPage.module.css'
 import shared from './IntegrationsPages.module.css'
 
@@ -319,9 +319,23 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
    * 钉在左上角且为 small。
    */
   const tiles = useMemo<Array<SkillInfo | null>>(() => [null, ...pool], [pool])
-  const mosaic = useMemo(
-    () => buildMosaic(tiles.length, { pinFirstTwoSmalls: true }),
+  /**
+   * 排布提示（与 `tiles` 同序）：算法据此把**名字长的**放进 264 宽槽，不再随机
+   * 落进 128 窄贴被截断。贴面渲染的名字就是 `s.name`，故按它算长度；入口贴（0 号）
+   * 由 `pinFirstTwoSmalls` 单独钉住，提示给 0 不参与抢宽槽。
+   */
+  const hints = useMemo<MosaicItemHint[]>(
+    () => tiles.map(s => s === null
+      ? { nameLength: 0 }
+      : { nameLength: s.name.length, hasDescription: s.description !== '' }),
     [tiles],
+  )
+  /** 磁贴群列数：`ref` 挂在下面包 `MosaicWall` 的 `css.tiles` 容器上，窄窗自动降 3 列。 */
+  const tilesRef = useRef<HTMLDivElement>(null)
+  const columns = useMosaicColumns(tilesRef)
+  const mosaic = useMemo(
+    () => buildMosaic(tiles, { pinFirstTwoSmalls: true, columns, hints }),
+    [tiles, columns, hints],
   )
 
   return (
@@ -367,7 +381,7 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
 
       <div className={css.body}>
         {/* 左：Metro 磁贴群（节头 + 添加磁贴 + 技能磁贴） */}
-        <div className={css.tiles}>
+        <div className={css.tiles} ref={tilesRef}>
           <span className={css.sectionHead}>技能 SKILL</span>
           {error !== null && <p className={css.hintText}>加载失败：{error}</p>}
           {skills === null && error === null && <p className={css.hintText}>加载中…</p>}

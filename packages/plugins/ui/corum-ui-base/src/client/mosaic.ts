@@ -37,6 +37,17 @@ export type MosaicSize = 'big' | 'wide' | 'tall' | 'small'
 export type MosaicBlockKind = '264' | '128'
 
 /**
+ * 列数模式：6 = 设计稿的细粒度排布（128 基准）；3 = 窄窗降列（264 基准）。
+ *
+ * 两种模式的块宽**恒等**，故单位宽公式无需分叉：
+ *   6 列行 = 2×(2u+g) + 2×u + 3g = 6u+5g
+ *   3 列行 = 3×(2u+g) + 2g     = 6u+5g
+ * 降列的意义是把同一容器宽摊到更少的列上——实测 546px 容器下 6 列的单位宽只有
+ * 83px（名称放不下），降成 3 列后每列 174px，名称与作者都能正常显示。
+ */
+export type MosaicColumns = 6 | 3
+
+/**
  * 固定种子：**换掉它就换一整套图案**，同一份数据下恒定。
  * 取值本身无深意（任意常量），只承担「可复现」这一个职责。
  */
@@ -48,12 +59,26 @@ export const MOSAIC_SEED = 0x5a17
  */
 const BLOCK_RETYPE_MAX = 5
 
-/** 块内一列：宽度档 + 该列自上而下的贴尺寸序列。 */
+/**
+ * 块内一张贴的槽位：尺寸档 + 它承载哪一条数据。
+ *
+ * `itemIndex` 由算法显式给出，而不是「按顺序数下去」：把长名字安排到 264 宽的
+ * 槽需要**跨位置挑选数据**，落位不再是「第 i 张贴 = 第 i 条数据」，故每张槽位都
+ * 记下自己的数据下标（{@link MosaicWall} 按它取数据）。
+ */
+export interface MosaicSlot {
+  readonly size: MosaicSize
+  readonly itemIndex: number
+}
+
+/** 块内一列：宽度档 + 该列自上而下的贴槽位。 */
 export interface MosaicCol {
   /** 列宽（px，未乘密度缩放）：264 或 128。 */
   readonly width: 264 | 128
-  /** 该列的贴尺寸序列（自上而下 1~2 张）。 */
-  readonly sizes: readonly MosaicSize[]
+  /** 该列的贴尺寸序列（自上而下 1~2 张）；分配数据后为可变数组。 */
+  readonly sizes: MosaicSize[]
+  /** 分配数据后填入的槽位（与 {@link sizes} 同长同序）。 */
+  slots?: MosaicSlot[]
 }
 
 /** 一个块行：高度档 + 列序列。 */
@@ -84,98 +109,135 @@ function shuffled<T>(rng: () => number, items: readonly T[]): T[] {
   return out
 }
 
+
 /**
- * 高 264 的块：四列宽 `[264,264,128,128]` 洗牌后，每列随机取单元。
+ * 名字档：算法用它在槽位之间做取舍（长名字优先给 264 宽的列）。
+ */
+/** 一条数据的排布提示。 */
+export interface MosaicItemHint {
+  /** 展示名的字符数（调用方按**实际用于渲染**的那个名字算）。 */
+  readonly nameLength: number
+  /** 是否有描述（有描述的长名才值得给大贴，换来额外高度放描述）。 */
+  readonly hasDescription?: boolean
+}
+
+/** 名字「偏长」的阈值：达到即优先安排进 264 宽的列（宽贴或大贴）。 */
+const LONG_NAME_LENGTH = 18
+
+/** 名字「很长」的阈值：配合描述可给大贴（264×264），拿到额外高度显示描述。 */
+const VERY_LONG_NAME_LENGTH = 22
+
+/** 6 列模式的块几何：四列宽 `[264,264,128,128]` 的某个排列（6u+5g）。 */
+const WIDTHS_6COL = [264, 264, 128, 128] as const
+
+/**
+ * 3 列模式的块几何：三列固定 264 宽（3×(2u+g)+2g = 6u+5g，与 6 列块等宽）。
+ * 窄窗降列时用——同一容器宽摊到 3 列上，每列宽约翻倍，长名字才放得下。
+ */
+const WIDTHS_3COL = [264, 264, 264] as const
+
+/**
+ * 生成一个高 264 的块的**列骨架**（只决定列宽排列与每列的贴数，不含数据）。
  *
- * 约束（保证整块有视觉锚点、不会退化成一整片同尺寸）：
- * 至少一张大贴；264 宽列不得全为「两条宽贴」；128 宽列不得全为「两条小贴」。
- * 违反即重抽，最多 {@link BLOCK_RETYPE_MAX} 次；耗尽后退到设计稿首帧的原始排法
- * （大 | 双宽 | 高 | 双小），保证仍有锚点。
+ * 264 宽列可装「一张大贴」或「两条宽贴竖叠」；128 宽列可装「一张高贴」或
+ * 「两条小贴竖叠」。约束：至少一张大贴（视觉锚点）、264 列不得全为双宽、
+ * 128 列不得全为双小，违反重抽；耗尽后退到设计稿首帧排法。
  *
  * @param rng - 该次渲染的 PRNG。
- * @param pinFirstTwoSmalls - 首列钉成「两条小贴竖叠」——集成中心把入口（添加 /
- *   安装本地包等）固定放在左上角第一张贴，故需要这枚钉子。插件市场无入口贴时传 false。
+ * @param mode - 列数模式（6 或 3）。
+ * @param pinFirstTwoSmalls - 首列钉成「两条小贴竖叠」：集成中心的入口贴
+ *   （添加服务器 / 添加技能等）固定落在左上角第一张，故需要这枚钉子。
  */
-export function buildBlock264(rng: () => number, pinFirstTwoSmalls = false): MosaicBlock {
+export function buildColSkeleton(
+  rng: () => number,
+  mode: MosaicColumns = 6,
+  pinFirstTwoSmalls = false,
+  preferWide = false,
+): MosaicCol[] {
+  const base = mode === 3 ? WIDTHS_3COL : WIDTHS_6COL
   for (let attempt = 0; attempt < BLOCK_RETYPE_MAX; attempt++) {
-    const widths = shuffled(rng, [264, 264, 128, 128] as const)
-    if (pinFirstTwoSmalls) widths[0] = 128
+    const widths = shuffled(rng, base)
+    /* 入口贴钉在左上角：
+       - 6 列模式：首列改 128 宽、装「两条小贴竖叠」⇒ 入口是那张小贴；
+       - 3 列模式：首列本就是 264 宽，装不下小贴，改钉成「一张宽贴」（264×128）。 */
+    if (pinFirstTwoSmalls) widths[0] = mode === 6 ? 128 : 264
     let hasBig = false
-    let allWide = true
-    let allSmall2 = true
-    const cols: MosaicCol[] = widths.map((w) => {
+    let allDoubled = true
+    const cols: MosaicCol[] = widths.map((w, i) => {
       if (w === 264) {
-        allSmall2 = false
-        if (rng() < 0.5) { hasBig = true; return { width: 264, sizes: ['big'] } }
+        if (i === 0 && pinFirstTwoSmalls && mode === 3) return { width: 264, sizes: ['wide'] }
+        /* 还有长名字等着放时，264 列一律产出「两条宽贴」——它给两个 264 宽槽位，
+           而大贴只给一个；此时多出的槽位比视觉变化更重要（长名字优先）。 */
+        if (preferWide) return { width: 264, sizes: ['wide', 'wide'] }
+        if (rng() < 0.5) {
+          hasBig = true
+          return { width: 264, sizes: ['big'] }
+        }
         return { width: 264, sizes: ['wide', 'wide'] }
       }
-      allWide = false
-      if (rng() < 0.5) return { width: 128, sizes: ['tall'] }
+      if (rng() < 0.5) {
+        allDoubled = false
+        return { width: 128, sizes: ['tall'] }
+      }
       return { width: 128, sizes: ['small', 'small'] }
     })
-    if (hasBig && !allWide && !allSmall2) return { kind: '264', cols }
+    /* 约束：至少一张大贴（视觉锚点），且至少一个非「双贴」的列。
+       `preferWide` 时整块的 264 列都是「双宽」，本就不该再要求大贴——否则每次尝试
+       都判失败、退到兜底排法（实测会把首个长名字塞回大贴，反而少一个宽槽）。 */
+    if (preferWide) return cols
+    if (hasBig && !allDoubled) return cols
+    if (pinFirstTwoSmalls && mode === 6 && cols.length > 0) {
+      cols[0] = { width: 128, sizes: ['small', 'small'] }
+    }
   }
-  return {
-    kind: '264',
-    cols: [
-      { width: 264, sizes: ['big'] },
-      { width: 264, sizes: ['wide', 'wide'] },
-      { width: 128, sizes: ['tall'] },
-      { width: 128, sizes: ['small', 'small'] },
-    ],
-  }
-}
-
-/** 高 128 的块：三种列宽模式（均 808）三选一，再洗牌 264 宽列的位置。 */
-export function buildBlock128(rng: () => number): MosaicBlock {
-  const roll = rng()
-  const base: MosaicCol[] = roll < 1 / 3
-    ? [128, 128, 128, 128, 128, 128].map(w => ({ width: w as 128, sizes: ['small'] as const }))
-    : roll < 2 / 3
-      ? [
-          { width: 264, sizes: ['wide'] },
-          ...Array.from({ length: 4 }, () => ({ width: 128 as const, sizes: ['small'] as const })),
-        ]
-      : [
-          { width: 264, sizes: ['wide'] },
-          { width: 264, sizes: ['wide'] },
-          { width: 128, sizes: ['small'] },
-          { width: 128, sizes: ['small'] },
-        ]
-  return { kind: '128', cols: shuffled(rng, base) }
-}
-
-/** 取一个块能容纳的贴数。 */
-function blockCapacity(block: MosaicBlock): number {
-  return block.cols.reduce((n, c) => n + c.sizes.length, 0)
-}
-
-/** 按列顺序保留能铺满的列前缀（不留空占位），返回裁剪后的块。 */
-function trimCols(block: MosaicBlock, room: number): MosaicBlock {
-  const cols: MosaicCol[] = []
-  let used = 0
-  for (const col of block.cols) {
-    if (used + col.sizes.length > room) break
-    cols.push(col)
-    used += col.sizes.length
-  }
-  return { kind: block.kind, cols }
+  return mode === 3
+    ? [{ width: 264, sizes: ['big'] }, { width: 264, sizes: ['wide', 'wide'] }, { width: 264, sizes: ['tall'] }]
+    : [
+        { width: 264, sizes: ['big'] },
+        { width: 264, sizes: ['wide', 'wide'] },
+        { width: 128, sizes: ['tall'] },
+        { width: 128, sizes: ['small', 'small'] },
+      ]
 }
 
 /**
- * 把 `count` 张贴排进块序列。
- *
- * 流程：首块可选钉死（{@link MosaicOptions.pinFirstTwoSmalls} 由调用方转给
- * {@link buildBlock264}）→ 逐块抽型（相邻不同型）→ 整块放得下就整块收，
- * 否则列级裁剪收尾（末块允许窄于 808，属裁剪形态而非空洞）。
- *
- * 裁剪后若一列都放不下（剩余贴数小于任一列的张数），退化为**单张贴窄块**
- * 收尾——早期实现在这里直接退出循环，导致剩余贴被静默丢弃（实测 2 张贴只渲染
- * 出 1 张，即少显示一个条目），故必须继续消费到 `count` 用尽。
- *
- * @param count - 要塞进去的贴数（调用方按数据条数计算，含入口贴）。
- * @param options - 见 {@link MosaicOptions}。
- * @returns 块序列，块的列内 sizes 是「该位置该用哪一档尺寸」，由调用方按序遍历取数据。
+ * 高 128 的块骨架：三种列宽模式（均 6u+5g）三选一，再洗牌 264 宽列的位置。
+ * 3 列模式下退化为三张宽贴（3×(2u+g)+2g），与该模式其它块等宽。
+ */
+export function buildColSkeleton128(rng: () => number, mode: MosaicColumns = 6): MosaicCol[] {
+  if (mode === 3) {
+    return shuffled(rng, WIDTHS_3COL.map(() => ({ width: 264 as const, sizes: ['wide'] as MosaicSize[] })))
+  }
+  const roll = rng()
+  const small = (): MosaicCol => ({ width: 128, sizes: ['small'] })
+  const wide = (): MosaicCol => ({ width: 264, sizes: ['wide'] })
+  const base: MosaicCol[] = roll < 1 / 3
+    ? Array.from({ length: 6 }, small)
+    : roll < 2 / 3
+      ? [wide(), small(), small(), small(), small()]
+      : [wide(), wide(), small(), small()]
+  return shuffled(rng, base)
+}
+
+/** 取一个块的贴容量。 */
+function blockCapacity(cols: readonly MosaicCol[]): number {
+  return cols.reduce((n, c) => n + c.sizes.length, 0)
+}
+
+/** 按列顺序保留能铺满的列前缀（不留空占位）。 */
+function trimCols(cols: readonly MosaicCol[], room: number): MosaicCol[] {
+  const kept: MosaicCol[] = []
+  let used = 0
+  for (const col of cols) {
+    if (used + col.sizes.length > room) break
+    kept.push(col)
+    used += col.sizes.length
+  }
+  return kept
+}
+
+/**
+ * 排布选项。
  */
 export interface MosaicOptions {
   /**
@@ -183,29 +245,124 @@ export interface MosaicOptions {
    * 添加技能 / 安装本地包）都固定落在左上角第一张，故需要这枚钉子。
    */
   readonly pinFirstTwoSmalls?: boolean
+  /**
+   * 列数模式：6（默认，设计稿的细粒度排布）或 3（窄窗降列）。
+   * 调用方按容器宽选择——见 {@link pickMosaicColumns}。
+   */
+  readonly columns?: MosaicColumns
+  /**
+   * 每条数据的排布提示（与 `items` 同序）。给了它，算法就会把**名字长的**安排到
+   * 264 宽的列（宽贴/大贴）上，而不是随机落进 128 宽的窄贴被截断。
+   * 省略则退回纯随机（与旧行为一致）。
+   */
+  readonly hints?: readonly MosaicItemHint[]
 }
 
-export function buildMosaic(count: number, options: MosaicOptions = {}): MosaicBlock[] {
+/**
+ * 按容器宽选列数：够宽用 6 列（设计稿形态），窄到单位宽撑不住长名字时降为 3 列。
+ *
+ * 判据是**单位宽**而不是容器宽本身：6 列下单位宽 = (容器宽 − 5×gap)/6，低于
+ * {@link MIN_UNIT_FOR_6COL} 时长名字在 128 列里必然截断，此时降列比缩字更可读。
+ *
+ * @param containerWidth - 磁贴群的内容宽（px）。
+ * @param gap - 列间隙（px）。
+ * @param density - 界面密度缩放（默认 1）。
+ */
+export const MIN_UNIT_FOR_6COL = 96
+
+export function pickMosaicColumns(containerWidth: number, gap = 8, density = 1): MosaicColumns {
+  const g = gap * density
+  const unit = (containerWidth - 5 * g) / 6
+  return unit < MIN_UNIT_FOR_6COL * density ? 3 : 6
+}
+
+/**
+ * 把 `items` 排进块序列。
+ *
+ * ## 长名字优先给宽槽
+ * 算法**先在整条数据里**按名字长度挑出「长名」，再按槽位顺序把它们填进 264 宽的
+ * 槽（大贴 / 宽贴）；短名字补剩下的 128 宽槽（小贴 / 高贴）。这样长名字拿到
+ * 264px 宽（窄窗降 3 列后是 ~174px 起），不再被 128px 的窄贴截成「corum…」。
+ *
+ * ## 为什么返回 itemIndex 而不是「按顺序数下去」
+ * 长名字要跨位置挑选，落位不再是「第 i 张贴 = 第 i 条数据」；块内每张槽位都显式
+ * 记下它承载的数据下标，调用方按序渲染即可（见 {@link MosaicSlot}）。
+ *
+ * ## 其它约束
+ * - 相邻块不同型（同型重抽，上限 {@link BLOCK_RETYPE_MAX}）；
+ * - 整块放得下就整块收，放不下则列级裁剪收尾（末块允许窄于整宽，属裁剪形态）；
+ * - **裁剪后仍继续消费剩余数据**——早期实现此处直接退出循环，导致剩余贴被静默
+ *   丢弃（实测 2 张贴只渲染出 1 张，即少显示一个条目）。
+ *
+ * @param items - 数据条数，或与 `hints` 等长的数据数组（只读其 `length`）。
+ * @param options - 见 {@link MosaicOptions}。
+ * @returns 块序列；块内槽位带 `size` 与 `itemIndex`，调用方按序遍历取数据渲染。
+ */
+export function buildMosaic(
+  items: number | readonly unknown[],
+  options: MosaicOptions = {},
+): MosaicBlock[] {
+  const count = typeof items === 'number' ? items : items.length
   if (count <= 0) return []
+  const mode = options.columns ?? 6
   const rng = mulberry32(MOSAIC_SEED)
   const blocks: MosaicBlock[] = []
-  let left = count
 
+  /* ── 数据分配：长名字优先占 264 宽的槽 ─────────────────────────────────── */
+  const hints = options.hints ?? []
+  const longFirst: number[] = []
+  const shortRest: number[] = []
+  for (let i = 0; i < count; i++) {
+    const len = hints[i]?.nameLength ?? 0
+    // 入口贴（第 0 位，通常是「添加」）恒为小贴，不参与抢宽槽。
+    if (i === 0 && options.pinFirstTwoSmalls === true) shortRest.push(i)
+    else if (len >= LONG_NAME_LENGTH) longFirst.push(i)
+    else shortRest.push(i)
+  }
+  // 长名内部：更长 + 有描述者优先（大贴要给描述留高度）。
+  longFirst.sort((a, b) => {
+    const la = hints[a]?.nameLength ?? 0
+    const lb = hints[b]?.nameLength ?? 0
+    if (lb !== la) return lb - la
+    const da = hints[a]?.hasDescription === true ? 1 : 0
+    const db = hints[b]?.hasDescription === true ? 1 : 0
+    return db - da
+  })
+  const queue = [...longFirst, ...shortRest]
+  let cursor = 0
+  const take = (): number => queue[cursor++] ?? 0
+
+  /* ── 逐块生成：先定列骨架，再把槽位按「宽槽优先给长名」填数据 ───────────── */
+  const buildBlock = (kind: MosaicBlockKind, pin: boolean): MosaicCol[] => {
+    /* 长名字还没排完 ⇒ 让 264 列优先产出「双宽」（两个宽槽，而不是大贴的一个）。 */
+    const preferWide = cursor < longFirst.length
+    const cols = kind === '264'
+      ? buildColSkeleton(rng, mode, pin, preferWide)
+      : buildColSkeleton128(rng, mode)
+    // 264 宽的列先填（长名字优先），128 宽的列后填。
+    const ordered = [...cols].sort((a, b) => b.width - a.width)
+    for (const col of ordered) {
+      col.slots = col.sizes.map(size => ({ size, itemIndex: take() }))
+    }
+    return cols
+  }
+
+  const colsToBlock = (kind: MosaicBlockKind, cols: MosaicCol[]): MosaicBlock => ({ kind, cols })
   const emit = (block: MosaicBlock): boolean => {
-    const trimmed = trimCols(block, left)
-    if (trimmed.cols.length === 0) return false
-    blocks.push(trimmed)
-    left -= blockCapacity(trimmed)
+    const kept = trimCols(block.cols, count - cursor)
+    if (kept.length === 0) return false
+    blocks.push({ kind: block.kind, cols: kept })
     return true
   }
 
   if (options.pinFirstTwoSmalls === true && count >= 2) {
-    emit(buildBlock264(rng, true))
+    emit(colsToBlock('264', buildBlock('264', true)))
   } else if (count === 1) {
-    emit({ kind: '128', cols: [{ width: 128, sizes: ['small'] }] })
+    const itemIndex = take()
+    emit({ kind: '128', cols: [{ width: 128, sizes: ['small'], slots: [{ size: 'small', itemIndex }] }] })
   }
 
-  while (left > 0) {
+  while (cursor < count) {
     let kind: MosaicBlockKind = rng() < 0.5 ? '264' : '128'
     const last = blocks.length === 0 ? null : blocks[blocks.length - 1]!.kind
     if (last !== null) {
@@ -214,31 +371,34 @@ export function buildMosaic(count: number, options: MosaicOptions = {}): MosaicB
       }
       if (kind === last) kind = last === '264' ? '128' : '264'
     }
-    if (!emit(kind === '264' ? buildBlock264(rng) : buildBlock128(rng))) {
-      // 剩余贴装不下任何整块：单张贴窄块收尾（型取与上一块相反，维持相邻不同型）。
-      const tailKind: MosaicBlockKind = last === '264' ? '128' : '264'
-      emit({ kind: tailKind, cols: [{ width: 128, sizes: [tailKind === '264' ? 'tall' : 'small'] }] })
-      left -= 1
-      if (left > 0) {
-        // 理论上不可达（单张块容量为 1，emit 后 left 必为 0）；留此以防未来改容量时漏改。
-        continue
-      }
-    }
+    const before = cursor
+    const block = colsToBlock(kind, buildBlock(kind, false))
+    if (emit(block)) continue
+    // 整块与裁剪都放不下：退回该块已取走的下标，改发单张贴窄块收尾。
+    cursor = before
+    const tailKind: MosaicBlockKind = last === '264' ? '128' : '264'
+    const itemIndex = take()
+    emit({
+      kind: tailKind,
+      cols: [{ width: 128, sizes: [tailKind === '264' ? 'tall' : 'small'], slots: [{ size: tailKind === '264' ? 'tall' : 'small', itemIndex }] }],
+    })
   }
   return blocks
 }
 
 /**
- * 块序列 → 扁平贴序列（按「块 → 列 → 列内自上而下」的渲染顺序）。
+ * 块序列 → 扁平贴序列（按「块 → 列 → 列内自上而下」的渲染顺序），
+ * 只返回尺寸档，数据由调用方按同序提供。
  *
- * 三个页面都按这个顺序把自己的数据贴上去，故顺序必须与 CSS 的视觉顺序一致：
- * 块内是横向 flex（列），列内是纵向 flex（贴）。
+ * 走 `buildMosaic` 的 `itemIndex` 时会重排数据，故大多数调用方应直接用
+ * {@link MosaicWall}（它按 `itemIndex` 取数据）；本函数留给「数据顺序与槽位
+ * 顺序一致」的简单场景。
  */
 export function flattenMosaic(blocks: readonly MosaicBlock[]): MosaicSize[] {
   const out: MosaicSize[] = []
   for (const block of blocks) {
     for (const col of block.cols) {
-      for (const size of col.sizes) out.push(size)
+      for (const slot of col.slots ?? []) out.push(slot.size)
     }
   }
   return out
