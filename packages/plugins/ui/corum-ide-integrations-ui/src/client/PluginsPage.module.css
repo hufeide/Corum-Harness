@@ -243,38 +243,6 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* ── 大贴底部的「安装 / 已安装」按钮（design.pen foot：绝对底部、右对齐、宽 240）*/
-
-.tileFoot {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  justify-content: flex-end;
-  padding: calc(12px * var(--corum-density-scale, 1));
-}
-
-.tileInstall {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(6px * var(--corum-density-scale, 1));
-  width: calc(240px * var(--corum-density-scale, 1));
-  max-width: 100%;
-  padding: calc(7px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 0;
-  border-radius: calc(8px * var(--corum-density-scale, 1));
-  background: var(--dsw-alias-brand-primary);
-  color: var(--corum-label-on-brand);
-  font-size: calc(12px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-.tileInstall:disabled { opacity: .55; cursor: default; }
-
 /* 已装磁贴的停用态（启停开关关闭）：名称降一档。共享磁贴表只覆盖开关与角标，
    不含这条语义，故由本页补；同样用两段类选择器压过共享 .tileName。 */
 .tiles .installedOff .installedOffName { color: var(--dsw-alias-label-tertiary); }
@@ -398,6 +366,15 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* 主体上方的内容块（名称 + 字段表 + 简介），底部操作行由 detailBody 的
+   space-between 沉底。 */
+.detailMain {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
 .detailName {
   font-size: calc(17px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
@@ -405,13 +382,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.detailTitleRow {
-  display: flex;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
-  min-width: 0;
 }
 
 .detailSub {
@@ -427,12 +397,12 @@
   line-height: 1.5;
 }
 
-/* 元信息 k/v 行：k 11 tertiary / v 11 secondary；块顶距 10、行间 6、k/v 间 8。 */
+/* 元信息 k/v 行：k 11 tertiary / v 11 secondary；无块顶距（上方由 detailMain 的 gap 承担）、
+   行间 6、k/v 间 8。 */
 .detailMeta {
   display: flex;
   flex-direction: column;
   gap: calc(6px * var(--corum-density-scale, 1));
-  padding-top: calc(10px * var(--corum-density-scale, 1));
 }
 
 .detailMetaRow { display: flex; gap: calc(8px * var(--corum-density-scale, 1)); }
@@ -452,6 +422,40 @@
   word-break: break-all;
 }
 
+/* id 值等宽展示（包名全称）。 */
+.detailMono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* 「日志」（更新日志）区：每条 = 版本号 + 日期 一行、说明一行；纵向 gap 6。 */
+.detailLogList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+
+.detailLogEntry {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+}
+
+.detailLogHead {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+.detailLogVersion {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.detailLogDate { flex: none; color: var(--dsw-alias-label-tertiary); }
+
+.detailLogNote { color: var(--dsw-alias-label-secondary); }
+
+.detailLogEmpty { color: var(--dsw-alias-label-tertiary); }
+
 /* 底部操作行：居中（iYTAN：安装 / 卸载+开关都沉底居中）、顶距 8、按钮间距 10。 */
 .detailActions {
   display: flex;
@@ -460,9 +464,6 @@
   gap: calc(10px * var(--corum-density-scale, 1));
   padding-top: calc(8px * var(--corum-density-scale, 1));
 }
-
-/* 详情标题行的版本徽章放大一档：h19 / 字号 10（贴内徽章见共享 .tileVersion）。 */
-.detailVersion { height: calc(19px * var(--corum-density-scale, 1)); font-size: calc(10px * var(--corum-ui-font-scale, 1)); }
 
 /* 详情面板的启停开关：与磁贴角标开关同形态，落位在「卸载」右侧。 */
 .detailSwitch {

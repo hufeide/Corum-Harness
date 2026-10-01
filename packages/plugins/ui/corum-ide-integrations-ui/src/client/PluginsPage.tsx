@@ -19,11 +19,14 @@
  *     在设置中心「插件管理」页）。
  *   - 磁贴底色 = 四档语义 tint（紫/深紫/灰蓝/堇），直接消费 --corum-tile-* token；
  *     热度角标（火焰 + 周下载量）只出现在市场态；已装态角标位 = 启停开关。
- *   - 大贴底部一颗「安装」主按钮（已装则换「已安装」禁用态），点击不触发选中。
+ *   - 磁贴自身没有任何操作按钮（点磁贴只做选中）；安装 / 卸载 / 启停统一只在
+ *     右侧详情面板底部，按「类型 × 状态」分派：未安装 = 单个「安装」（品牌实色）；
+ *     已安装 =「卸载」（error 描边）+ 启停开关。
  *   - 详情面板 510 固定宽 = hero(150) + body(padding[16,18], space-between)；
- *     全部元信息（发布者 / 许可证 / 主页 / 仓库 / 安装自 / 关键词 / 包名）就地
- *     展示在面板主体，无二级跳转。底部操作居中：未安装 = 单个「安装」（品牌
- *     实色）；已安装 =「卸载」（error 描边）+ 启停开关。
+ *     三个视图（市场未装 / 市场已装 / 已装 tab）共用同一套字段顺序 —— 名称（大标题）
+ *     / id / 版本 / 发布日期 / 作者 / 日志（更新日志）；其余有真值的字段（描述 /
+ *     许可证 / 主页 / 仓库 / 安装自 / 关键词 / 热度 / 分类 / 状态）排在「日志」之后。
+ *     全部信息就地展示，无二级跳转。
  *     系统插件（runtime）不在此列表暴露，仅 note 声明。
  *
  * 色值一律走 --corum-* / --dsw-alias-* token（见同目录 PluginsPage.module.css），
@@ -33,7 +36,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Blocks, BrainCircuit, Cable, Check, Cpu, Flame, KeyRound,
+  Blocks, BrainCircuit, Cable, Cpu, Flame, KeyRound,
   LoaderCircle, Palette, Plus, Puzzle, Route, Search, Server, ServerCog,
   SquareTerminal, Trash2, WandSparkles, X,
 } from 'lucide-react'
@@ -64,18 +67,57 @@ interface ListSnapshot {
   readonly dshVersion?: string
 }
 
+/** 一条更新日志（详情面板「日志」区的一行）。 */
+interface ChangelogEntry {
+  readonly version: string
+  readonly date: string
+  readonly note: string
+}
+
+/**
+ * 详情面板主体的统一字段面（三个视图共用）：名称 + 固定的六项字段 + 可选补充行。
+ * 六项 = 名称（大标题）/ id / 版本 / 发布日期 / 作者 / 日志，顺序与文案逐字固定；
+ * `extras` 是其余有真值的字段（来源 / 状态 / 许可证 / 主页 / 仓库 / 安装自 /
+ * 关键词 / 热度 / 分类），一律排在「日志」之后。
+ */
+interface DetailFields {
+  /** 名称（大标题）：包名末段。 */
+  readonly name: string
+  /** id：包名全称（等宽展示）。 */
+  readonly moduleName: string
+  readonly version?: string | undefined
+  /** 发布日期（ISO 或 YYYY-MM-DD；截前 10 位展示）。 */
+  readonly date?: string | undefined
+  /** 作者（真 publisher 优先，否则按包域反推）。 */
+  readonly author: string
+  /** 日志：该插件自己的版本变更记录。 */
+  readonly changelog?: readonly ChangelogEntry[] | undefined
+  readonly description?: string | undefined
+  readonly extras?: ReadonlyArray<readonly [string, ReactNode]> | undefined
+  readonly loading?: boolean | undefined
+}
+
 /** pluginManager.search 的一条结果（npm registry 候选）。 */
 interface SearchResult {
   readonly name: string
   readonly version: string
   readonly description?: string
   readonly installed: boolean
-  /** 最后更新日期（ISO）。 */
+  /** 最后更新日期（ISO），详情面板的「发布日期」。 */
   readonly date?: string
   /** 周下载量。 */
   readonly weeklyDownloads?: number
   /** 综合评分 0-1。 */
   readonly score?: number
+  /** 发布者（详情面板「作者」；缺省时按包域反推）。 */
+  readonly publisher?: string
+  /** 许可证（详情面板可选行）。 */
+  readonly license?: string
+  /**
+   * 更新日志：该插件自己的版本变更记录。host 的 registry 接口目前不返回，
+   * 展示用假数据先填；真值接入后此处替换为 wire 字段即可。
+   */
+  readonly changelog?: readonly ChangelogEntry[]
 }
 
 /** pluginManager.detail 的详情投影（详情面板「配置」用）。 */
@@ -172,17 +214,117 @@ const INITIAL_QUERY = 'corum plugin'
 const SEARCH_DEBOUNCE_MS = 300
 
 /**
- * 插件市场假卡片（展示用占位数据）：检索无结果时兜底，看最终磁贴效果。
- * 覆盖大贴（记忆，官方 glow）/ 宽贴（终端面板/霓虹紫主题）/ 小贴（技能管理/MCP 文件/Git 工具），
- * 含热度数值（weeklyDownloads → heatLabel）与版本徽章，数据结构同 SearchResult。
+ * 插件市场假数据（展示用）：检索无结果时兜底，用于看磁贴排布与详情面板的最终效果。
+ *
+ * 覆盖全部分类（Agent 能力 / 界面 / 主题 / 工具）+ 三种来源（官方 / 本项目 / 第三方），
+ * 让块生成器有足够素材排出错落形态、详情面板的每个字段也都有值可看。
+ * 结构同 SearchResult；`date`（发布日期）与 `changelog`（更新日志）为展示字段。
  */
 const FAKE_MARKET_TILES: readonly SearchResult[] = [
-  { name: '@corum/corum-memory', version: '1.4.2', description: '为 Agent 提供长期记忆存储与检索，跨会话记住你的偏好与项目上下文。', weeklyDownloads: 12400 },
-  { name: '@corum/corum-terminal-panel', version: '1.2.0', description: '集成终端 / 串口 / SSH 三合一底部面板，支持分屏与会话持久化。', weeklyDownloads: 3800 },
-  { name: '@corum/corum-neon-purple-theme', version: '3.0.1', description: '深色紫调主题包，含语法高亮与玻璃拟态图层定制。', weeklyDownloads: 2100 },
-  { name: '@corum/corum-skill-manager', version: '2.1.0', description: '声明式技能包：为 Agent 装配可复用的领域工作流与验证跑器。', weeklyDownloads: 8100 },
-  { name: '@corum/corum-mcp-filesystem', version: '0.9.1', description: '让 Agent 读写本地文件系统，支持目录监视与增量同步。', weeklyDownloads: 6700 },
-  { name: '@corum/corum-git-tools', version: '1.1.0', description: '分支 / 提交 / 差异审查一体化，Agent 可直接操作仓库。', weeklyDownloads: 5200 },
+  {
+    name: '@corum/corum-memory', version: '1.4.2', weeklyDownloads: 12400,
+    description: '为 Agent 提供长期记忆存储与检索。跨会话记住你的偏好、项目上下文与历史决策，支持按主题归档与语义检索。',
+    date: '2026-09-28', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '1.4.2', date: '2026-09-28', note: '语义检索支持按项目命名空间过滤' },
+      { version: '1.4.0', date: '2026-09-11', note: '新增主题归档与跨会话召回' },
+      { version: '1.3.0', date: '2026-08-22', note: '记忆写入改为异步，不再阻塞轮次' },
+    ],
+  },
+  {
+    name: '@corum/corum-terminal-panel', version: '1.2.0', weeklyDownloads: 3800,
+    description: '集成终端 / 串口 / SSH 三合一底部面板，支持分屏与会话持久化。',
+    date: '2026-09-19', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '1.2.0', date: '2026-09-19', note: '分屏布局可拖拽，会话重启后恢复' },
+      { version: '1.1.0', date: '2026-09-02', note: '串口参数表单补齐校验位与流控' },
+    ],
+  },
+  {
+    name: '@corum/corum-neon-purple-theme', version: '3.0.1', weeklyDownloads: 2100,
+    description: '深色紫调主题包，含语法高亮与玻璃拟态图层定制。',
+    date: '2026-09-30', publisher: 'corum', license: 'CC-BY-4.0',
+    changelog: [
+      { version: '3.0.1', date: '2026-09-30', note: '修正浅色下代码块对比度不足' },
+      { version: '3.0.0', date: '2026-09-14', note: '全量重做，换液态玻璃图层' },
+    ],
+  },
+  {
+    name: '@corum/corum-skill-manager', version: '2.1.0', weeklyDownloads: 8100,
+    description: '声明式技能包：为 Agent 装配可复用的领域工作流与验证跑器。',
+    date: '2026-09-12', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '2.1.0', date: '2026-09-12', note: '技能可绑定到 Agent 预设并锁版本' },
+      { version: '2.0.0', date: '2026-08-28', note: '改用 SKILL.md 单一入口，弃用 JSON 描述' },
+    ],
+  },
+  {
+    name: '@corum/corum-mcp-filesystem', version: '0.9.1', weeklyDownloads: 6700,
+    description: '让 Agent 读写本地文件系统，支持目录监视与增量同步。',
+    date: '2026-09-24', publisher: 'modelcontextprotocol', license: 'Apache-2.0',
+    changelog: [
+      { version: '0.9.1', date: '2026-09-24', note: '路径白名单支持 glob 通配' },
+      { version: '0.9.0', date: '2026-09-08', note: '增量同步改为 inotify 事件驱动' },
+    ],
+  },
+  {
+    name: '@corum/corum-git-tools', version: '1.1.0', weeklyDownloads: 5200,
+    description: '分支 / 提交 / 差异审查一体化，Agent 可直接操作仓库。',
+    date: '2026-09-21', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '1.1.0', date: '2026-09-21', note: '差异审查支持按文件折叠与逐段评论' },
+    ],
+  },
+  {
+    name: '@corum/corum-orchestrate-flow', version: '0.6.2', weeklyDownloads: 4400,
+    description: '把多步任务编排成可复现的工作流：阶段、扇出与汇总一体，失败可断点重跑。',
+    date: '2026-09-26', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '0.6.2', date: '2026-09-26', note: '扇出阶段支持并发上限' },
+      { version: '0.6.0', date: '2026-09-05', note: '工作流可在画布上可视化编辑' },
+    ],
+  },
+  {
+    name: '@corum/corum-ide-explorer-ui', version: '1.0.4', weeklyDownloads: 2900,
+    description: '资源管理器界面：文件树 / 拖拽 / 右键菜单，与编辑器联动。',
+    date: '2026-09-18', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '1.0.4', date: '2026-09-18', note: '大仓库下文件树懒加载不再卡顿' },
+    ],
+  },
+  {
+    name: '@corum/corum-statusbar-ui', version: '0.4.1', weeklyDownloads: 1600,
+    description: '底部状态栏：分支、错误数、连接状态与当前模型一目了然。',
+    date: '2026-09-15', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '0.4.1', date: '2026-09-15', note: '新增连接延迟指示' },
+    ],
+  },
+  {
+    name: '@corum/corum-token-counter', version: '0.3.0', weeklyDownloads: 980,
+    description: '实时统计每轮会话的 token 消耗与成本，按模型分别记账。',
+    date: '2026-09-09', publisher: 'corum', license: 'MIT',
+    changelog: [
+      { version: '0.3.0', date: '2026-09-09', note: '支持按模型配置单价' },
+    ],
+  },
+  {
+    name: '@community/corum-prompt-lint', version: '2.4.0', weeklyDownloads: 3100,
+    description: '提示词静态检查：发现歧义、缺失约束与自相矛盾的指令，给出改写建议。',
+    date: '2026-09-23', publisher: 'community', license: 'MIT',
+    changelog: [
+      { version: '2.4.0', date: '2026-09-23', note: '新增矛盾检测规则集' },
+      { version: '2.3.0', date: '2026-09-01', note: '规则可通过配置文件关闭' },
+    ],
+  },
+  {
+    name: '@community/corum-screenshot-diff', version: '1.0.0', weeklyDownloads: 780,
+    description: '视觉回归：对同一页面截图做逐像素比对，输出差异热力图。',
+    date: '2026-09-17', publisher: 'community', license: 'BSD-3-Clause',
+    changelog: [
+      { version: '1.0.0', date: '2026-09-17', note: '首个稳定版：像素比对 + 差异热力图' },
+    ],
+  },
 ] as unknown as readonly SearchResult[]
 
 /* ── 展示映射 ─────────────────────────────────────────────────────────────── */
@@ -251,6 +393,13 @@ function heatLabel(weeklyDownloads?: number): string | null {
   if (weeklyDownloads === undefined) return null
   if (weeklyDownloads >= 1000) return `${(weeklyDownloads / 1000).toFixed(1)}k`
   return String(weeklyDownloads)
+}
+
+/** 详情补充行：只保留有真值的那几条（无值 / 空串的直接丢掉），顺序即入参顺序。 */
+function extraRows(
+  ...rows: ReadonlyArray<readonly [string, ReactNode | undefined]>
+): ReadonlyArray<readonly [string, ReactNode]> {
+  return rows.filter((row): row is readonly [string, ReactNode] => row[1] !== undefined && row[1] !== '')
 }
 
 /**
@@ -586,10 +735,9 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     )
   }
 
-  /** 市场磁贴（检索结果条目 → 磁贴；尺寸由块几何给定）。 */
+  /** 市场磁贴（检索结果条目 → 磁贴；尺寸由块几何给定）。贴自身无操作按钮。 */
   const renderMarketTile = (row: SearchResult, size: MosaicSize): ReactNode => {
     const active = selectedMarket !== null && 'name' in selectedMarket && selectedMarket.name === row.name
-    const installed = row.installed || installedSet.has(row.name)
     const heat = heatLabel(row.weeklyDownloads)
     return (
       <button
@@ -619,25 +767,6 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
           )}
           <span className={mosaicStyles.tileSub}>{authorOf(row.name)}</span>
         </div>
-        {size === 'big' && (
-          <span className={css.tileFoot}>
-            {installed ? (
-              <button type="button" className={css.tileInstall} disabled onClick={(e) => { e.stopPropagation() }}>
-                <Check size={14} />已安装
-              </button>
-            ) : (
-              <button
-                type="button"
-                className={css.tileInstall}
-                disabled={busy.has(`install:${row.name}`)}
-                onClick={(e) => { e.stopPropagation(); void onInstall(row.name) }}
-              >
-                {busy.has(`install:${row.name}`) ? <LoaderCircle size={14} className={css.spin} /> : <Plus size={14} />}
-                安装
-              </button>
-            )}
-          </span>
-        )}
       </button>
     )
   }
@@ -760,6 +889,80 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     </div>
   )
 
+  /** 未安装态的底部操作：单个「安装」主按钮（品牌实色）。 */
+  const renderInstallAction = (name: string): ReactNode => (
+    <div className={css.detailActions}>
+      <button
+        type="button"
+        className={`${css.actionBtn} ${css.actionPrimary}`}
+        disabled={busy.has(`install:${name}`)}
+        onClick={() => { void onInstall(name) }}
+      >
+        {busy.has(`install:${name}`) ? <LoaderCircle size={14} className={css.spin} /> : <Plus size={14} />}
+        安装
+      </button>
+    </div>
+  )
+
+  /** 一条键值行（小字 label + 值）；`mono` 用于包名一类需要等宽展示的值。 */
+  const metaRow = (key: string, value: ReactNode, mono = false): ReactNode => (
+    <div className={css.detailMetaRow} key={key}>
+      <span className={css.detailMetaKey}>{key}</span>
+      <span className={`${css.detailMetaValue}${mono ? ' ' + css.detailMono : ''}`}>{value}</span>
+    </div>
+  )
+
+  /** 「日志」行（更新日志）：每条 = 版本号 + 日期 + 说明；缺失或为空给一句占位。 */
+  const changelogRow = (log?: readonly ChangelogEntry[]): ReactNode => (
+    <div className={css.detailMetaRow} key="日志">
+      <span className={css.detailMetaKey}>日志</span>
+      <span className={css.detailMetaValue}>
+        {log === undefined || log.length === 0 ? (
+          <span className={css.detailLogEmpty}>暂无更新日志</span>
+        ) : (
+          <span className={css.detailLogList}>
+            {log.map(item => (
+              <span className={css.detailLogEntry} key={`${item.version}@${item.date}`}>
+                <span className={css.detailLogHead}>
+                  <span className={css.detailLogVersion}>v{item.version}</span>
+                  <span className={css.detailLogDate}>{item.date.slice(0, 10)}</span>
+                </span>
+                <span className={css.detailLogNote}>{item.note}</span>
+              </span>
+            ))}
+          </span>
+        )}
+      </span>
+    </div>
+  )
+
+  /**
+   * 详情面板主体（三个视图共用）：「名称（大标题）+ 六项字段 + 可选补充行 + 底部操作」。
+   * 六项字段的顺序在此统一且逐字固定 —— id / 版本 / 发布日期 / 作者 / 日志（名称即大标题），
+   * 补充行（许可证 / 热度 / 分类 / 状态 / 主页 / 仓库 / 安装自 / 关键词 / 来源）一律排在
+   * 「日志」之后，不插进六项之间；描述作为一句话简介落在这两块之后。
+   */
+  const renderDetailBody = (fields: DetailFields, actions: ReactNode): ReactNode => (
+    <div className={css.detailBody}>
+      <div className={css.detailMain}>
+        <span className={css.detailName}>{fields.name}</span>
+        <div className={css.detailMeta}>
+          {metaRow('id', fields.moduleName, true)}
+          {metaRow('版本', fields.version !== undefined && fields.version !== '' ? `v${fields.version}` : '—')}
+          {metaRow('发布日期', fields.date !== undefined && fields.date !== '' ? fields.date.slice(0, 10) : '—')}
+          {metaRow('作者', fields.author)}
+          {changelogRow(fields.changelog)}
+          {(fields.extras ?? []).map(([key, value]) => metaRow(key, value))}
+        </div>
+        {fields.description !== undefined && fields.description !== '' && (
+          <p className={css.detailDesc}>{fields.description}</p>
+        )}
+        {fields.loading === true && <span className={css.detailSub}>加载中…</span>}
+      </div>
+      {actions}
+    </div>
+  )
+
   /** 市场态详情面板主体（hero 150 + body padding[16,18] + space-between）。 */
   let marketDetail: ReactNode = null
   if (tab === 'market' && selectedMarket !== null) {
@@ -767,156 +970,67 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
       const row = selectedMarket as SearchResult
       const installed = row.installed || installedSet.has(row.name)
       const installedEntry = installed ? selectedEntry : null
-      marketDetail = (
-        <div className={css.detailBody}>
-          <div className={css.detailTitleRow}>
-            <span className={css.detailName}>{shortName(row.name)}</span>
-            <span className={`${mosaicStyles.tileVersion} ${css.detailVersion}`}>v{row.version}</span>
-          </div>
-          <span className={css.detailSub}>{authorOf(row.name)} · npm</span>
-          <p className={css.detailDesc}>{row.description ?? '该插件未提供描述。'}</p>
-          <div className={css.detailMeta}>
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>包名</span>
-              <span className={css.detailMetaValue}>{row.name}</span>
-            </div>
-            {row.date !== undefined && (
-              <div className={css.detailMetaRow}>
-                <span className={css.detailMetaKey}>更新</span>
-                <span className={css.detailMetaValue}>{row.date.slice(0, 10)}</span>
-              </div>
-            )}
-            {row.weeklyDownloads !== undefined && (
-              <div className={css.detailMetaRow}>
-                <span className={css.detailMetaKey}>热度</span>
-                <span className={css.detailMetaValue}>周下载 {heatLabel(row.weeklyDownloads) ?? String(row.weeklyDownloads)}</span>
-              </div>
-            )}
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>分类</span>
-              <span className={css.detailMetaValue}>{SECTIONS.find(s => s.id === sectionOf(row.name, row.description))?.label ?? '热门'}</span>
-            </div>
-            {installedEntry !== null && (
-              <div className={css.detailMetaRow}>
-                <span className={css.detailMetaKey}>状态</span>
-                <span className={css.detailMetaValue}>{installedEntry.enabled ? '已启用' : '已停用'}</span>
-              </div>
-            )}
-          </div>
-          <div className={css.detailActions}>
-            {installedEntry !== null ? (
-              /* 已安装：与已装 tab 同形态（卸载 + 启停开关）。 */
-              renderInstalledActions(installedEntry)
-            ) : installed ? (
-              <button type="button" className={`${css.actionBtn} ${css.actionPrimary}`} disabled>
-                <Check size={14} />已安装
-              </button>
-            ) : (
-              <button
-                type="button"
-                className={`${css.actionBtn} ${css.actionPrimary}`}
-                disabled={busy.has(`install:${row.name}`)}
-                onClick={() => { void onInstall(row.name) }}
-              >
-                {busy.has(`install:${row.name}`) ? <LoaderCircle size={14} className={css.spin} /> : <Plus size={14} />}
-                安装
-              </button>
-            )}
-          </div>
-        </div>
-      )
+      marketDetail = renderDetailBody({
+        name: shortName(row.name),
+        moduleName: row.name,
+        version: row.version,
+        date: row.date,
+        author: authorOf(row.name, row.publisher),
+        changelog: row.changelog,
+        description: row.description ?? '该插件未提供描述。',
+        extras: [
+          ...extraRows(
+            ['许可证', row.license],
+            ['热度', row.weeklyDownloads !== undefined
+              ? `周下载 ${heatLabel(row.weeklyDownloads) ?? String(row.weeklyDownloads)}`
+              : undefined],
+            ['状态', installedEntry !== null ? (installedEntry.enabled ? '已启用' : '已停用') : undefined],
+          ),
+          ['分类', SECTIONS.find(s => s.id === sectionOf(row.name, row.description))?.label ?? '热门'],
+        ],
+      }, installedEntry !== null
+        ? renderInstalledActions(installedEntry)
+        /* 已装但已装清单尚未就绪（对不回条目）时不给按钮：不再画禁用态的假「已安装」。 */
+        : installed ? null : renderInstallAction(row.name))
     } else {
       const entry = selectedMarket as InstalledEntry
-      marketDetail = (
-        <div className={css.detailBody}>
-          <div className={css.detailTitleRow}>
-            <span className={css.detailName}>{shortName(entry.moduleName)}</span>
-            {entry.version !== undefined && <span className={`${mosaicStyles.tileVersion} ${css.detailVersion}`}>v{entry.version}</span>}
-          </div>
-          <span className={css.detailSub}>{authorOf(entry.moduleName)} · 本地/开发中</span>
-          <p className={css.detailDesc}>{entry.description ?? '该插件未提供描述。'}</p>
-          <div className={css.detailMeta}>
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>包名</span>
-              <span className={css.detailMetaValue}>{entry.moduleName}</span>
-            </div>
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>状态</span>
-              <span className={css.detailMetaValue}>{entry.enabled ? '已启用' : '已停用'}</span>
-            </div>
-          </div>
-          {renderInstalledActions(entry)}
-        </div>
-      )
+      marketDetail = renderDetailBody({
+        name: shortName(entry.moduleName),
+        moduleName: entry.moduleName,
+        version: entry.version,
+        author: authorOf(entry.moduleName),
+        description: entry.description ?? '该插件未提供描述。',
+        extras: [['来源', '本地/开发中'], ['状态', entry.enabled ? '已启用' : '已停用']],
+      }, renderInstalledActions(entry))
     }
   }
 
-  /** 已装态详情面板主体：全部元信息就地展示在主体，底部 = 卸载 + 启停开关。 */
+  /** 已装态详情面板主体：与市场态同一套字段，补充行取 pluginManager/detail 的真值。 */
   let installedDetail: ReactNode = null
   if (tab === 'installed' && selectedInstalled !== null) {
     const entry = selectedInstalled
     const d = detail
-    installedDetail = (
-      <div className={css.detailBody}>
-        <div className={css.detailTitleRow}>
-          <span className={css.detailName}>{shortName(entry.moduleName)}</span>
-          {entry.version !== undefined && <span className={`${mosaicStyles.tileVersion} ${css.detailVersion}`}>v{entry.version}</span>}
-        </div>
-        <span className={css.detailSub}>
-          {d?.publisher ?? authorOf(entry.moduleName)}
-          {d !== null && d.origin === 'official' ? ' · 官方' : d !== null && d.origin === 'corum' ? ' · 本项目' : d !== null ? ' · 第三方' : ''}
-        </span>
-        <p className={css.detailDesc}>{entry.description ?? d?.description ?? '该插件未提供描述。'}</p>
-        {detailLoading && <span className={css.detailSub}>加载中…</span>}
-        <div className={css.detailMeta}>
-          <div className={css.detailMetaRow}>
-            <span className={css.detailMetaKey}>包名</span>
-            <span className={css.detailMetaValue}>{d?.moduleName ?? entry.moduleName}</span>
-          </div>
-          <div className={css.detailMetaRow}>
-            <span className={css.detailMetaKey}>状态</span>
-            <span className={css.detailMetaValue}>{entry.enabled ? '已启用' : '已停用'}</span>
-          </div>
-          {d?.publisher !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>发布者</span>
-              <span className={css.detailMetaValue}>{d.publisher}</span>
-            </div>
-          )}
-          {d?.license !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>许可证</span>
-              <span className={css.detailMetaValue}>{d.license}</span>
-            </div>
-          )}
-          {d?.homepage !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>主页</span>
-              <span className={css.detailMetaValue}>{d.homepage}</span>
-            </div>
-          )}
-          {d?.repository !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>仓库</span>
-              <span className={css.detailMetaValue}>{d.repository}</span>
-            </div>
-          )}
-          {d?.installedFrom !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>安装自</span>
-              <span className={css.detailMetaValue}>{d.installedFrom}</span>
-            </div>
-          )}
-          {d?.keywords !== undefined && d.keywords.length > 0 && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>关键词</span>
-              <span className={css.detailMetaValue}>{d.keywords.join('、')}</span>
-            </div>
-          )}
-        </div>
-        {renderInstalledActions(entry)}
-      </div>
-    )
+    installedDetail = renderDetailBody({
+      name: shortName(entry.moduleName),
+      moduleName: d?.moduleName ?? entry.moduleName,
+      version: entry.version ?? d?.version,
+      author: authorOf(entry.moduleName, d?.publisher),
+      loading: detailLoading,
+      description: entry.description ?? d?.description ?? '该插件未提供描述。',
+      extras: [
+        ...extraRows(
+          ['来源', d !== null
+            ? (d.origin === 'official' ? '官方' : d.origin === 'corum' ? '本项目' : '第三方')
+            : undefined],
+          ['状态', entry.enabled ? '已启用' : '已停用'],
+          ['许可证', d?.license],
+          ['主页', d?.homepage],
+          ['仓库', d?.repository],
+          ['安装自', d?.installedFrom],
+          ['关键词', d?.keywords !== undefined && d.keywords.length > 0 ? d.keywords.join('、') : undefined],
+        ),
+      ],
+    }, renderInstalledActions(entry))
   }
 
   /** 节标题（磁贴群内的分节头，不是 tab / 不是 chip）：flame + 文字（最热门节）或纯文字。 */

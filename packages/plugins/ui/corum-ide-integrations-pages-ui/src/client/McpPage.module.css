@@ -369,6 +369,11 @@
   word-break: break-all;
 }
 
+/* 等宽值：id 一类标识符（服务名 / 技能名即 id）。 */
+.detailMetaMono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 /* 详情面板内的常驻小节（版本历史 / 绑定 Agent / SKILL.md 展开区）。 */
 .detailSection {
   display: flex;
@@ -381,6 +386,33 @@
   font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
+}
+
+/* 日志（changelog）一行：版本号 + 日期 + 变更说明，三列栅格。 */
+.detailLogRow {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+.detailLogVersion {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.detailLogDate {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailLogNote {
+  min-width: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.5;
 }
 
 /* 绑定 Agent 行：头像 + 昵称 + pin 版本徽章。 */

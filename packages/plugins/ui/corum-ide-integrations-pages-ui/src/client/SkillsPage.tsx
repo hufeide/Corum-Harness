@@ -13,6 +13,8 @@
  * （hero 150 + body）。
  *
  * 详情面板就地承担完整管理（不再跳二级 SkillDetailView 页）：
+ *   统一字段六项打头（名称 → id → 版本 → 发布日期 → 作者 → 日志，顺序固定，
+ *   与 MCP 页同构），其后才是技能语义的真值（类型 / 存储路径 / 创建时间）；
  *   版本管理（getSkillHistory + pinVersion 的 VersionSelect 下拉）与
  *   绑定此技能的 Agent（corumAgent/listProfiles 过滤）直接常驻面板内；
  *   SKILL.md 内容查看 / 编辑提交（getSkillContent/commitVersion）与
@@ -240,6 +242,36 @@ const OFFICIAL_SKILL_NAMES = new Set([
 ])
 function skillAuthorLabel(name: string): string {
   return OFFICIAL_SKILL_NAMES.has(name) ? '@corum · 官方' : '社区'
+}
+
+/* ── 详情面板统一字段的展示口径 ─────────────────────────────────────── */
+
+/** wire 上无发布/更新日期且本地也无真值时的占位（不造日期）。 */
+const MISSING_VALUE = '—'
+
+/** 详情面板「日志」区的一行（结构同插件页：版本 / 日期 / 变更说明）。 */
+interface ChangelogEntry {
+  version: string
+  date: string
+  note: string
+}
+
+/**
+ * 更新日志：skillManager wire 不返回该字段。此处是**展示用假数据**，
+ * 只为让「日志」区有内容可看；真值接入后换成从 RPC 读到的 changelog
+ * 即可（结构保持不变）。
+ */
+const CHANGELOG_PLACEHOLDER: ChangelogEntry[] = [
+  { version: 'v3', date: '2026-09-24', note: '补充反例与失败模式清单' },
+  { version: 'v2', date: '2026-09-08', note: '拆出「先看现场再下结论」一节' },
+  { version: 'v1', date: '2026-08-19', note: '首个版本：适用范围与检查清单' },
+]
+
+/** 把 ISO 时间戳压成日期（`2026-09-24T…` → `2026-09-24`）；无真值给占位。 */
+function dateOnly(iso: string | undefined): string {
+  if (iso === undefined || iso === '') return MISSING_VALUE
+  const t = iso.indexOf('T')
+  return t === -1 ? iso : iso.slice(0, t)
 }
 
 function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category, setCategory,
@@ -547,10 +579,51 @@ function SkillDetailPanel({ skill, bindings, rpc, onDeleted, onChanged, onReques
         <div>
           <div className={css.detailTitleRow}>
             <span className={css.detailName}>{skill.name}</span>
-            <span className={css.detailVersion}>{pinned ?? skill.currentVersion ?? '—'}</span>
+            <span className={css.detailVersion}>{pinned ?? skill.currentVersion ?? MISSING_VALUE}</span>
           </div>
           <span className={css.detailSub}>{OFFICIAL_SKILL_NAMES.has(skill.name) ? 'corum · 官方技能' : 'corum 技能库'}</span>
           {skill.description !== '' && <p className={css.detailDesc}>{skill.description}</p>}
+
+          {/* 统一字段六项：名称 → id → 版本 → 发布日期 → 作者 → 日志（顺序固定，
+              与插件页同构）。技能名即 id；发布日期取 createdAt 真值，缺值给占位；
+              日志 wire 无此字段，用 CHANGELOG_PLACEHOLDER 假数据先填。 */}
+          <div className={css.detailMeta}>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>名称</span>
+              <span className={css.detailMetaValue}>{skill.name}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>id</span>
+              <span className={`${css.detailMetaValue} ${css.detailMetaMono}`}>{skill.name}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>版本</span>
+              <span className={css.detailMetaValue}>{pinned ?? skill.currentVersion ?? MISSING_VALUE}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>发布日期</span>
+              {/* 真值取技能的 createdAt（wire 无独立的发布日期字段）。 */}
+              <span className={css.detailMetaValue}>{dateOnly(skill.createdAt)}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>作者</span>
+              <span className={css.detailMetaValue}>{OFFICIAL_SKILL_NAMES.has(skill.name) ? 'corum · 官方技能' : 'corum 技能库'}</span>
+            </div>
+          </div>
+
+          {/* 日志：静态占位 changelog（wire 无此字段，见 CHANGELOG_PLACEHOLDER）。 */}
+          <div className={css.detailSection}>
+            <span className={css.detailSectionHead}>日志（{CHANGELOG_PLACEHOLDER.length}）</span>
+            {CHANGELOG_PLACEHOLDER.map(entry => (
+              <div key={entry.version} className={css.detailLogRow}>
+                <span className={css.detailLogVersion}>{entry.version}</span>
+                <span className={css.detailLogDate}>{entry.date}</span>
+                <span className={css.detailLogNote}>{entry.note}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* 以下为技能已有的真值字段，保持在六项之后。 */}
           <div className={css.detailMeta}>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>类型</span>

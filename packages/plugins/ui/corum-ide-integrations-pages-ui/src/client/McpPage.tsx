@@ -12,10 +12,11 @@
  * + 右侧详情面板（hero 150 + body）。
  *
  * 详情面板两种模式：
- *   查看 — MCP 语义的信息面板：传输 / 连接状态（testConnection 运行中·工具数）/
+ *   查看 — 统一字段六项打头（名称 → id → 版本 → 发布日期 → 作者 → 日志，顺序固定），
+ *          其后才是 MCP 语义的真值：传输 / 连接状态（testConnection 运行中·工具数）/
  *          范围（cwd，空写「全局」）/ 工具清单（前 4 + 展开全部）/ 绑定 Agent
  *          （corumAgent/listProfiles 过滤）；底部居中「删除服务器」（error 描边，
- *          createPortal 确认框）。
+ *          createPortal 确认框）+ 启停开关（saveServer 翻转 disabled）。
  *   新建 — 点「添加」磁贴后表单就地搬进面板（名称 / 传输 tab stdio·SSE·WebSocket
  *          / 启动配置 JSON / 启动·运行超时 / 使用指导），校验逻辑原样保留；
  *          提交成功回「查看」。
@@ -79,6 +80,31 @@ const TRANSPORT_LABEL: Record<McpTransport, string> = {
   'stdio': 'stdio',
   'streamable-http': 'sse',
 }
+
+/** mcpManager wire 无版本字段；已安装态的「版本」用传输方式占位（不造版本号）。 */
+const VERSION_PLACEHOLDER = '传输方式'
+/** mcpManager wire 无发布/更新日期字段；缺值时用破折号占位（不造日期）。 */
+const MISSING_VALUE = '—'
+
+/* ── 日志（changelog）占位数据 ──────────────────────────────────────── */
+
+/** 详情面板「日志」区的一行（结构同插件页：版本 / 日期 / 变更说明）。 */
+interface ChangelogEntry {
+  version: string
+  date: string
+  note: string
+}
+
+/**
+ * 更新日志：mcpManager wire 不返回该字段。此处是**展示用假数据**，
+ * 只为让「日志」区有内容可看；真值接入后把 CHANGELOG_PLACEHOLDER 换成
+ * 从 RPC 读到的 changelog 即可（结构保持不变）。
+ */
+const CHANGELOG_PLACEHOLDER: ChangelogEntry[] = [
+  { version: '0.9.1', date: '2026-09-24', note: '路径白名单支持 glob 通配' },
+  { version: '0.9.0', date: '2026-09-08', note: '增量同步改为事件驱动，启动更快' },
+  { version: '0.8.2', date: '2026-08-19', note: '修复 stdio 子进程退出后未重连' },
+]
 
 /** 各传输方式的 JSON 示例（stdio=命令行启动，SSE/WebSocket=URL）。 */
 const MCP_JSON_PLACEHOLDERS: Record<AddTransport, string> = {
@@ -467,6 +493,47 @@ function McpPanelView({ rpc, server, probe, onToggled, onDeleted }: {
           <span className={css.detailSub}>modelcontextprotocol · {TRANSPORT_LABEL[server.transport]}</span>
           <p className={css.detailDesc}>{server.description ?? '该服务器未提供描述。'}</p>
 
+          {/* 统一字段六项：名称 → id → 版本 → 发布日期 → 作者 → 日志（顺序固定，
+              与插件页同构）。MCP 的版本/发布日期/日志 wire 上都没有真值，占位口径
+              见各自的注释；只有名称与 id 是真值。 */}
+          <div className={css.detailMeta}>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>名称</span>
+              <span className={css.detailMetaValue}>{server.name}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>id</span>
+              <span className={`${css.detailMetaValue} ${css.detailMetaMono}`}>{server.name}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>版本</span>
+              {/* mcpManager wire 无 version 字段 ⇒ 用传输方式占位，不造版本号。 */}
+              <span className={css.detailMetaValue}>{VERSION_PLACEHOLDER} · {TRANSPORT_LABEL[server.transport]}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>发布日期</span>
+              {/* mcpManager wire 无发布日期字段 ⇒ 缺值显示破折号，不造日期。 */}
+              <span className={css.detailMetaValue}>{MISSING_VALUE}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>作者</span>
+              <span className={css.detailMetaValue}>modelcontextprotocol · {TRANSPORT_LABEL[server.transport]}</span>
+            </div>
+          </div>
+
+          {/* 日志：静态占位 changelog（wire 无此字段，见 CHANGELOG_PLACEHOLDER）。 */}
+          <div className={css.detailSection}>
+            <span className={css.detailSectionHead}>日志（{CHANGELOG_PLACEHOLDER.length}）</span>
+            {CHANGELOG_PLACEHOLDER.map(entry => (
+              <div key={entry.version} className={css.detailLogRow}>
+                <span className={css.detailLogVersion}>{entry.version}</span>
+                <span className={css.detailLogDate}>{entry.date}</span>
+                <span className={css.detailLogNote}>{entry.note}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* 以下为 MCP 已有的真值字段，保持在六项之后。 */}
           <div className={css.detailMeta}>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>传输</span>
@@ -516,9 +583,19 @@ function McpPanelView({ rpc, server, probe, onToggled, onDeleted }: {
               </span>
             </div>
           )}
+        </div>
 
-          {/* 启停开关（面板内一行；磁贴角标只读展示状态点）。 */}
-          <div className={css.detailSwitchRow}>
+        <div>
+          {error !== null && <p className={css.hintText}>{error}</p>}
+          {/* 底部操作行：居中（删除服务器 error 描边 + 启停开关，走 saveServer 翻转 disabled）。 */}
+          <div className={css.detailActions}>
+            <button
+              type="button"
+              className={`${css.actionBtn} ${css.actionDanger}`}
+              onClick={() => { setConfirmDelete(true) }}
+            >
+              <Trash2 size={13} />删除服务器
+            </button>
             <span className={css.detailSwitchLabel}>启用此服务器</span>
             <button
               type="button"
@@ -531,20 +608,6 @@ function McpPanelView({ rpc, server, probe, onToggled, onDeleted }: {
               onClick={e => { e.stopPropagation(); void toggleDisabled() }}
             >
               <span className={mosaicStyles.tileSwitchKnob} />
-            </button>
-          </div>
-        </div>
-
-        <div>
-          {error !== null && <p className={css.hintText}>{error}</p>}
-          {/* 底部操作行：居中（删除服务器，error 描边）。 */}
-          <div className={css.detailActions}>
-            <button
-              type="button"
-              className={`${css.actionBtn} ${css.actionDanger}`}
-              onClick={() => { setConfirmDelete(true) }}
-            >
-              <Trash2 size={13} />删除服务器
             </button>
           </div>
         </div>
