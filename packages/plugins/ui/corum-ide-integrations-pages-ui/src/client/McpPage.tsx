@@ -225,6 +225,13 @@ function McpListView({ rpc, onOpenAdd }: {
             <p className={css.hintText}>暂无 MCP 服务器。点击「添加服务器」注册第一个。</p>
           )}
           <div className={css.tileGrid}>
+            {servers !== null && servers.length === 0 && loadError === null && (
+              <>
+                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
+                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
+                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
+              </>
+            )}
             {(servers ?? []).map(s => {
               const probe = probeMap[s.name]
               const enabled = s.disabled !== true

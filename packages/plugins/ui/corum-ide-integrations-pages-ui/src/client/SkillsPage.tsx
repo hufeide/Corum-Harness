@@ -15,7 +15,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ChevronDown, Download, PackagePlus, Search, Star, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Download, PackagePlus, Plus, Search, Star, Trash2, X } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { GlassButton, useIntegrationsRpc } from './face.tsx'
@@ -293,6 +293,13 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
             <p className={css.hintText}>{(skills.length === 0) ? '暂无技能，点击上方按钮导入。' : '没有匹配的技能。'}</p>
           )}
           <div className={css.tileGrid}>
+            {pool.length === 0 && error === null && skills !== null && (
+              <>
+                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
+                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
+                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
+              </>
+            )}
             {pool.map(s => {
               const enabled = !disabledSet.has(s.name)
               const active = selected !== null && selected.name === s.name

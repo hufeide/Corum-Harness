@@ -171,6 +171,20 @@ const INITIAL_QUERY = 'corum plugin'
 /** 输入防抖时长（毫秒）。 */
 const SEARCH_DEBOUNCE_MS = 300
 
+/**
+ * 插件市场假卡片（展示用占位数据）：检索无结果时兜底，看最终磁贴效果。
+ * 覆盖大贴（记忆，官方 glow）/ 宽贴（终端面板/霓虹紫主题）/ 小贴（技能管理/MCP 文件/Git 工具），
+ * 含热度数值（weeklyDownloads → heatLabel）与版本徽章，数据结构同 SearchResult。
+ */
+const FAKE_MARKET_TILES: readonly SearchResult[] = [
+  { name: '@corum/corum-memory', version: '1.4.2', description: '为 Agent 提供长期记忆存储与检索，跨会话记住你的偏好与项目上下文。', weeklyDownloads: 12400 },
+  { name: '@corum/corum-terminal-panel', version: '1.2.0', description: '集成终端 / 串口 / SSH 三合一底部面板，支持分屏与会话持久化。', weeklyDownloads: 3800 },
+  { name: '@corum/corum-neon-purple-theme', version: '3.0.1', description: '深色紫调主题包，含语法高亮与玻璃拟态图层定制。', weeklyDownloads: 2100 },
+  { name: '@corum/corum-skill-manager', version: '2.1.0', description: '声明式技能包：为 Agent 装配可复用的领域工作流与验证跑器。', weeklyDownloads: 8100 },
+  { name: '@corum/corum-mcp-filesystem', version: '0.9.1', description: '让 Agent 读写本地文件系统，支持目录监视与增量同步。', weeklyDownloads: 6700 },
+  { name: '@corum/corum-git-tools', version: '1.1.0', description: '分支 / 提交 / 差异审查一体化，Agent 可直接操作仓库。', weeklyDownloads: 5200 },
+] as unknown as readonly SearchResult[]
+
 /* ── 展示映射 ─────────────────────────────────────────────────────────────── */
 
 /** 展示名：包名末段（去 scope），如 @corum/corum-ide-sidebar-ui → corum-ide-sidebar-ui。 */
@@ -465,6 +479,8 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   /** 公开市场：按分类筛选 + 排序（下载量降序）+ 分组限量。 */
   const marketTiles = useMemo(() => {
     const rows = [...(results ?? [])].filter(r => matches(r.name, r.description) && inFilter(r.name, r.description))
+    // 展示用假卡片：检索无结果时兜底，看最终磁贴效果（FAKE_MARKET_TILES）。
+    if (rows.length === 0) return [...FAKE_MARKET_TILES]
     if (filter === 'all') {
       const buckets = new Map<string, SearchResult[]>(SECTIONS.map(s => [s.id, []]))
       for (const row of rows) {

@@ -130,6 +130,33 @@
     transparent 62%);
 }
 
+/* 占位空卡（SKILL/MCP 无数据时的占位符）：虚线描边 + 居中 plus + 「即将上线」。 */
+.tilePlaceholder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: calc(12px * var(--corum-density-scale, 1));
+  border: 1px dashed var(--corum-glass-border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-dimmed);
+  cursor: default;
+}
+.tilePlaceholderIcon {
+  display: inline-flex;
+  color: var(--dsw-alias-label-dimmed);
+}
+.tilePlaceholderText {
+  margin: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+
 .tileTop {
   display: flex;
   align-items: flex-start;
