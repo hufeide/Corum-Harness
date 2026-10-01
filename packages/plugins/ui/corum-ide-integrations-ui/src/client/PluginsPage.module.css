@@ -214,15 +214,45 @@
   gap: calc(8px * var(--corum-density-scale, 1));
 }
 
-/* ── 128 网格（大贴 2×2 / 宽贴 2×1 / 高贴 1×2 / 小贴 1×1 混排）─────────────── */
+/* ── 块生成器（design.pen 几何；替代旧 CSS grid 自动补位排法——实测 6.3% 空洞）──
+ * 基准宽度 808 的推导：
+ *  - 高 264 块：列宽 = [264,264,128,128] 的排列，264+264+128+128 + 8×3 = 808 ✓
+ *      264 列 = 大贴 264×264，或宽贴×2 竖叠 128+8+128=264；
+ *      128 列 = 高贴 128×264，或小贴×2 竖叠 128+8+128=264。
+ *  - 高 128 块：三种列宽模式之一（洗牌 264 列位置）：
+ *      128×6 = 768+40 = 808 ✓ ／ 264+128×4 = 776+32 = 808 ✓ ／ 264×2+128×2 = 784+24 = 808 ✓
+ * 磁贴群容器 808 由外框 816 + scrollbar-gutter:stable 预留 8 滚动槽保证（.tiles 不动）。
+ * 列宽单位 S=128，M=264=2S+8（随 --corum-density-scale 整体缩放）。 */
 
-.tileGrid {
-  display: grid;
-  grid-auto-flow: dense;
-  grid-template-columns: repeat(auto-fill, calc(128px * var(--corum-density-scale, 1)));
-  grid-auto-rows: calc(128px * var(--corum-density-scale, 1));
+/* 块行：横向 flex、gap 8、列等高；行高 264 / 128 两型（由 data 属性分流）。 */
+.mosaicBlock {
+  display: flex;
+  align-items: stretch;
   gap: calc(8px * var(--corum-density-scale, 1));
-  align-content: start;
+  width: 100%;
+  min-width: 0;
+}
+.mosaicBlock[data-mosaic-block='264'] { height: calc(264px * var(--corum-density-scale, 1)); }
+.mosaicBlock[data-mosaic-block='128'] { height: calc(128px * var(--corum-density-scale, 1)); }
+
+/* 块内列：纵向 flex；窄列 128、宽列 264（264 = 128+8+128，可容两贴竖叠或一张大贴）。
+ * 列宽由 data-col 声明（块生成器洗牌后哪一列是 264 只有 TSX 知道，CSS 无法推断）。 */
+.mosaicCol {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  flex: none;
+  width: calc(128px * var(--corum-density-scale, 1));
+}
+.mosaicCol[data-col='264'] { width: calc(264px * var(--corum-density-scale, 1)); }
+.mosaicCol > * { flex: 1; min-height: 0; min-width: 0; }
+
+/* 磁贴群容器内的块行纵排：gap 8 由 .tiles 已有 gap 承担（块行是它的直接子元素）。 */
+.tileGrid {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
 /* ── 磁贴本体（三态共用；底色走 --pg-tint 四档语义 tint）──────────────────── */
@@ -252,15 +282,12 @@
 .tileTintC { background: var(--corum-tile-slate); }
 .tileTintD { background: var(--corum-tile-mauve); }
 
-/* 尺寸：小贴 1×1（默认）/ 宽贴 2×1 / 高贴 1×2 / 大贴 2×2。 */
-.tileWide { grid-column: span 2; }
-.tileTall { grid-row: span 2; }
-.tileBig {
-  grid-column: span 2;
-  grid-row: span 2;
-}
+/* 尺寸：磁贴是块列的 flex 子元素 —— 列内 flex:1 已让它填满列
+ * （单贴列 = 贴占满列 = big 264×264 / tall 128×264 / wide 264×128 / small 128×128；
+ * 两贴竖叠列各占一半 = wide2/small2 的 128）。这里只保留 big 的语义类（字号 15 用）。 */
 
-/* 「最热门」热排磁贴：196×120，padding 11（design.pen 定稿）。 */
+/* 「最热门」热排磁贴：196×120，padding 11（design.pen 定稿）。热排贴在 .hotRow
+ * flex 行里 flex:1 ⇒ (808-8×3)/4 = 196 ✓，min-height 120。 */
 .hotTile {
   flex: 1;
   min-width: 0;
@@ -305,26 +332,39 @@
 }
 .hotTile .tileBottom { gap: calc(2px * var(--corum-density-scale, 1)); }
 
+/* 名称区改为纵向：名称一行（最多 2 行换行，不截断）、版本徽章另起一行——
+ * 徽章不再与名称抢同一行的宽度（旧实测 12/18 张名称被截断、最短只剩「d.」）。 */
 .tileNameRow {
   display: flex;
-  align-items: center;
-  gap: calc(5px * var(--corum-density-scale, 1));
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(4px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
+/* 名称：占整行、最多 2 行（-webkit-line-clamp），不写 ellipsis/nowrap；
+ * 固定行高（2×1.3 行）防高度抖动——名称只有一行时下方留白而非挤动徽章。 */
 .tileName {
   min-width: 0;
+  width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  line-height: 1.3;
+  min-height: calc(2 * 1.3 * 13px * var(--corum-ui-font-scale, 1));
 }
-.tileBig .tileName { font-size: calc(15px * var(--corum-ui-font-scale, 1)); }
-.hotTile .tileName { font-size: calc(12px * var(--corum-ui-font-scale, 1)); }
+.tileBig .tileName { font-size: calc(15px * var(--corum-ui-font-scale, 1)); min-height: calc(2 * 1.3 * 15px * var(--corum-ui-font-scale, 1)); }
+.hotTile .tileName { font-size: calc(12px * var(--corum-ui-font-scale, 1)); min-height: calc(2 * 1.3 * 12px * var(--corum-ui-font-scale, 1)); }
 
-/* 版本徽章 pill：fit-content 不截断、不拉伸；$glass-3 底 + 玻璃描边。 */
+/* 版本徽章 pill：fit-content 不截断、不拉伸；$glass-3 底 + 玻璃描边。
+ * 在磁贴名称区里另起一行（tileNameRow 已纵向）并顶格对齐；
+ * 详情标题行的用法保持原状（横向行内居中），故 align-self 收在 tileNameRow 内。 */
 .tileVersion {
   flex: none;
   display: inline-flex;
@@ -341,6 +381,7 @@
   font-weight: 600;
   white-space: nowrap;
 }
+.tileNameRow .tileVersion { align-self: flex-start; }
 /* 热排贴的徽章收一档：h15 / pad 0 6。 */
 .hotTile .tileVersion { height: calc(15px * var(--corum-density-scale, 1)); padding: 0 calc(6px * var(--corum-density-scale, 1)); }
 /* 详情标题行的徽章放大一档：h19 / 字号 10。 */

@@ -173,16 +173,40 @@
 
 .hintText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 
-/* ── 磁贴网格：128px 基准、gap 8（design.pen 磁贴规格）─────────────────────── */
+/* ── 磁贴马赛克：块行（高 264 / 128）纵向堆叠，块内列横向铺满 ──────────────────
+   块内一行 flex（列），各列等高；列宽只有 264 / 128 两种，块内容宽恒 808
+   （末块截断除外）：264+8+264+8+128+8+128 = 808 / 128×6+5×8 = 808 /
+   264+8+128×4+4×8 = 808 / 264+8+264+8+128+8+128 = 808。
+   块型（高 264 / 128）与列内贴型（big|wide|tall|small）由固定种子 PRNG 逐块抽取，
+   见同页 .tsx 的 buildMosaic（两份实现逐字一致）。 */
 
 .tileGrid {
-  display: grid;
-  grid-auto-flow: dense;
-  grid-template-columns: repeat(auto-fill, 128px);
-  grid-auto-rows: 128px;
+  display: flex;
+  flex-direction: column;
   gap: calc(8px * var(--corum-density-scale, 1));
-  align-content: start;
 }
+
+/* 块行：横向 flex gap 8，align-items: stretch ⇒ 列等高（design.pen 块内列等高）。 */
+.mosaicBlock {
+  display: flex;
+  align-items: stretch;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+/* 列：纵向 flex gap 8；列内贴撑满列宽，纵向按尺寸分档（264 列装 big 或两条
+   wide 竖叠；128 列装 tall 或两条 small 竖叠）。 */
+.mosaicCol {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 列宽两档：flex-grow 用名义宽度当比例、basis 为 0 ⇒ 块内容宽恰 808 时每列
+   正好落在名义宽度（808 减去间隙后按 264:264:128:128 分配），窗口不够时等比收缩。 */
+.mosaicCol264 { flex: 264 1 0; }
+.mosaicCol128 { flex: 128 1 0; }
 
 /* ── 磁贴本体：底色走 tint 局部变量（design.pen 四档真实色值 token）────────── */
 
@@ -216,13 +240,16 @@
   border-color: var(--corum-glass-border-active);
 }
 
-/* 尺寸：小贴 1×1（默认）/ 宽贴 2×1 / 大贴 2×2。 */
-.tileWide { grid-column: span 2; }
-.tileTall { grid-row: span 2; }
-.tileBig {
-  grid-column: span 2;
-  grid-row: span 2;
-}
+/* 块高两档（design.pen 高 264 / 128 块）：块高定死，列与贴再由 stretch / flex 撑满。 */
+.mosaicBlock[data-mosaic-block='264'] { height: calc(264px * var(--corum-density-scale, 1)); }
+.mosaicBlock[data-mosaic-block='128'] { height: calc(128px * var(--corum-density-scale, 1)); }
+
+/* 尺寸分档：big / tall 独占整列 ⇒ 撑满列高；wide / small 与同列另一张贴平分列高。
+   （small 无类名，走 data-tile-size 属性选择器。） */
+.tile[data-tile-size='big'] { flex: 1 1 auto; }
+.tile[data-tile-size='wide'] { flex: 1 1 0; }
+.tile[data-tile-size='tall'] { flex: 1 1 auto; }
+.tile[data-tile-size='small'] { flex: 1 1 0; }
 
 /* 大贴（主推技能）：品牌色 radial glow。 */
 .tileGlow::before {
@@ -238,6 +265,7 @@
 /* 占位空卡（SKILL/MCP 无数据时的占位符）：虚线描边 + 居中 plus + 「即将上线」。 */
 .tilePlaceholder {
   position: relative;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -284,23 +312,35 @@
   min-width: 0;
 }
 
+/* 名称行改纵向堆叠：名称独占整行（可换行、不截断），版本徽章另起一行贴左。
+   名称区给两行固定行高（13px × 1.3 × 2），行数不足时也占满 ⇒ 贴高不随名字抖动。 */
 .tileNameRow {
   display: flex;
-  align-items: center;
-  gap: calc(5px * var(--corum-density-scale, 1));
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(4px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 
+/* 名称：占整行、正常换行、最长 2 行后 clamp（用户选定「不截断成一行省略号」）。 */
 .tileName {
   min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  line-height: 1.3;
 }
-.tileBig .tileName { font-size: calc(15px * var(--corum-ui-font-scale, 1)); }
+/* 高块（big 264×264 / tall 128×264）空间足够 ⇒ 名称区固定占两行，短名也不塌陷。
+   128 高的 wide / small 贴不预留（否则连同描述会溢出贴高被裁），贴高由 flex 定死。 */
+.tile[data-tile-size='big'] .tileName { min-height: calc(39px * var(--corum-ui-font-scale, 1)); }
+.tile[data-tile-size='tall'] .tileName { min-height: calc(34px * var(--corum-ui-font-scale, 1)); }
+.tile[data-tile-size='big'] .tileName { font-size: calc(15px * var(--corum-ui-font-scale, 1)); }
 
 /* 版本徽章 pill：固定高 16、描边、fit-content 不截断不拉伸。 */
 .tileVersion {

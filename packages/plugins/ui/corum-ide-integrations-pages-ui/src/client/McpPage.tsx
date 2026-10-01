@@ -122,26 +122,183 @@ function endpointLabel(s: McpServerSummaryWire): string {
   return `${bin}${argShort}`
 }
 
-/**
- * 磁贴尺寸分级（Metro 混排）。
+/* ── 磁贴马赛克：固定种子伪随机「块生成器」 ─────────────────────────────
  *
- * 设计稿首行的排法是固定 6 拍循环（bFLLQ：大贴 264×264 → 两张宽贴 264×128 →
- * 高贴 128×264 → 两张小贴 128×128），iYTAN / VNH3k / fngID 三个 frame 完全同构。
- * 尺寸因此由**序号**决定，而不是按名字猜——按名字判会让整片网格退化成等大方块。
+ * design.pen（bFLLQ / VNH3k）的磁贴群不是 CSS grid，而是**等宽 808 的块上下堆叠**：
+ * 块内是一行 flex（列），各列等高，列宽只有 264 / 128 两种。
+ *   高 264 块 · 四列 [264,264,128,128] 的某个排列
+ *     264+8+264+8+128+8+128 = 808
+ *     264 宽列 = 大贴 big (264×264)，或两条宽贴 wide×2 (264×128 ×2)
+ *     128 宽列 = 高贴 tall (128×264)，或两条小贴 small×2 (128×128 ×2)
+ *   高 128 块 · 三种宽度模式：
+ *     [128×6]          768 + 5×8 = 808
+ *     [264,128×4]      776 + 4×8 = 808
+ *     [264,264,128×2]  784 + 3×8 = 808
+ * 旧的 `grid-auto-flow: dense` + 6 拍序号循环把每块排得一模一样，且大贴跨行时
+ * 自动放置填不满（实测空洞率 6.3%）——正是「多了以后没有设计感」的根因。
+ * 改为逐块抽型：固定种子 ⇒ 每次渲染完全一致、可复现对账。
  */
-const MOSAIC_CYCLE: readonly ('big' | 'wide' | 'wide' | 'tall' | 'small' | 'small')[] =
-  ['big', 'wide', 'wide', 'tall', 'small', 'small']
 
-/** 按序号取磁贴尺寸（6 拍循环；`grid-auto-flow: dense` 自动补位）。 */
-function mosaicSizeOf(index: number): 'big' | 'wide' | 'tall' | 'small' {
-  return MOSAIC_CYCLE[index % MOSAIC_CYCLE.length]!
+/** 固定种子：换这个值即换一套排布；同一次运行内恒定。 */
+const MOSAIC_SEED = 0x5A17
+
+/** mulberry32：32 位定种子 PRNG（同种子恒定序列，无外部依赖）。 */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** 磁贴四档尺寸（由列宽与块高共同决定，见上方几何推导）。 */
+type MosaicSize = 'big' | 'wide' | 'tall' | 'small'
+
+/** 生成期的列：列宽 + 列内自上而下 1~2 张贴的尺寸。 */
+interface MosaicColSpec {
+  width: 264 | 128
+  sizes: MosaicSize[]
+}
+
+/** 渲染期的列：贴带上全片序号（0 号恒为「添加」磁贴）。 */
+interface MosaicCol {
+  width: 264 | 128
+  tiles: Array<{ size: MosaicSize; index: number }>
+}
+
+/** 一个块：块型 = 块高（264 / 128）；列宽加和恒 808（末块截断除外）。 */
+interface MosaicBlock {
+  kind: '264' | '128'
+  cols: MosaicCol[]
+}
+
+/** Fisher–Yates 洗牌（用同一 PRNG，结果可复现）。 */
+function shuffleMosaic<T>(list: T[], rand: () => number): T[] {
+  const out = list.slice()
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1))
+    const tmp = out[i]!
+    out[i] = out[j]!
+    out[j] = tmp
+  }
+  return out
+}
+
+/**
+ * 高 264 块的四列：宽度恒为 [264,264,128,128] 的某个排列
+ * （264+8+264+8+128+8+128 = 808）；
+ *   264 宽列随机 big（1 张 264×264）或 wide×2（2 张 264×128），**至少一个 big**；
+ *   128 宽列随机 tall（1 张 128×264）或 small×2（2 张 128×128）。
+ * pinnedFirst：首块把第一列钉成 128 宽两小贴竖叠（128×128 ×2 = 264 高），
+ * 这样 0 号「添加」磁贴恰以 small 尺寸落在左上角（264 宽的列装不下方贴）。
+ */
+function cols264(rand: () => number, pinnedFirst: boolean): MosaicColSpec[] {
+  const widths: Array<264 | 128> = pinnedFirst
+    ? [128, ...shuffleMosaic<264 | 128>([264, 264, 128], rand)]
+    : shuffleMosaic<264 | 128>([264, 264, 128, 128], rand)
+  const bigAt = Math.floor(rand() * 2)
+  let seen264 = 0
+  return widths.map((width, i) => {
+    if (width === 264) {
+      const isBig = seen264 === bigAt
+      seen264 += 1
+      const sizes: MosaicSize[] = isBig ? ['big'] : ['wide', 'wide']
+      return { width, sizes }
+    }
+    if (pinnedFirst && i === 0) return { width, sizes: ['small', 'small'] }
+    const sizes: MosaicSize[] = rand() < 0.5 ? ['tall'] : ['small', 'small']
+    return { width, sizes }
+  })
+}
+
+/** 高 128 块：三种宽度模式随机取一（加和恒 808），264 宽列位置洗牌。 */
+function cols128(rand: () => number): MosaicColSpec[] {
+  const mode = Math.floor(rand() * 3)
+  const widths: Array<264 | 128> = mode === 0
+    ? [128, 128, 128, 128, 128, 128]
+    : mode === 1
+      ? shuffleMosaic<264 | 128>([264, 128, 128, 128, 128], rand)
+      : shuffleMosaic<264 | 128>([264, 264, 128, 128], rand)
+  return widths.map(width => ({ width, sizes: [width === 264 ? 'wide' : 'small'] }))
+}
+
+/** 收下一块的列：装不下的那一列连同其后所有列一并丢弃（不留空占位）。 */
+function keepCols(cols: MosaicColSpec[], room: number): MosaicColSpec[] {
+  const kept: MosaicColSpec[] = []
+  let left = room
+  for (const col of cols) {
+    if (left < col.sizes.length) break
+    kept.push(col)
+    left -= col.sizes.length
+  }
+  return kept
+}
+
+/**
+ * 生成整片磁贴群（贴数 = 数据条数 + 1，索引 0 恒为「添加」磁贴）：
+ *  - 首块恒为高 264 块（设计稿 row1），首列钉成 128 宽两小贴 —— 这样「添加」磁贴
+ *    恰以 small 尺寸落在左上角（264 宽的列装不下 128×128 的方贴）；
+ *  - 之后逐块抽型，**相邻两块必须不同型**（同型重抽）；块型只有两种取值，
+ *    故等价于交替出现而每块的内部排布仍逐块随机；
+ *  - 末块装不满时丢掉多余的列；只剩 1 张贴而首列要 2 张时换单张贴列型。
+ */
+function buildMosaic(count: number): MosaicBlock[] {
+  const rand = mulberry32(MOSAIC_SEED)
+  const specs: Array<{ kind: '264' | '128'; cols: MosaicColSpec[] }> = []
+  let left = count
+
+  /** 入块成功返回 true；首列就装不下则整块丢弃（返回 false）。 */
+  const emit = (kind: '264' | '128', cols: MosaicColSpec[]): boolean => {
+    const kept = keepCols(cols, left)
+    if (kept.length === 0) return false
+    specs.push({ kind, cols: kept })
+    left -= kept.reduce((n, col) => n + col.sizes.length, 0)
+    return true
+  }
+
+  if (count === 1) {
+    // 只有「添加」磁贴：单列一张小贴（128 高块），不留空洞。
+    emit('128', [{ width: 128, sizes: ['small'] }])
+  } else if (count > 1) {
+    // 首块恒为高 264 块（设计稿 row1），且首列钉死为「添加」+ 第一张数据贴。
+    emit('264', cols264(rand, true))
+  }
+
+  while (left > 0) {
+    let kind: '264' | '128' = rand() < 0.5 ? '264' : '128'
+    const last = specs.length === 0 ? null : specs[specs.length - 1]!.kind
+    if (last !== null) {
+      while (kind === last) kind = rand() < 0.5 ? '264' : '128'   // 同型重抽
+    }
+    if (!emit(kind, kind === '264' ? cols264(rand, false) : cols128(rand))) {
+      // 剩余贴数装不下整块：退化为单张贴的窄块，不产生空占位。
+      emit(kind, [{ width: 128, sizes: [kind === '264' ? 'tall' : 'small'] }])
+    }
+  }
+
+  // 编号：块 → 列 → 列内自上而下；0 号是「添加」磁贴。
+  let index = 0
+  return specs.map(spec => ({
+    kind: spec.kind,
+    cols: spec.cols.map(col => ({
+      width: col.width,
+      tiles: col.sizes.map((size) => {
+        const tile = { size, index }
+        index += 1
+        return tile
+      }),
+    })),
+  }))
 }
 
 /**
  * 磁贴 tint 档（design.pen bFLLQ 的四档真实色值 token）：
  * 大贴深紫 + glow、宽贴堇色、小贴紫、「添加」/未连接态给灰蓝。
  */
-function tileTintClassOf(size: 'big' | 'wide' | 'tall' | 'small'): string {
+function tileTintClassOf(size: MosaicSize): string {
   if (size === 'big') return css.tintDeep
   if (size === 'wide') return css.tintMauve
   if (size === 'tall') return css.tintSlate
@@ -214,6 +371,12 @@ function McpListView({ rpc }: {
     return pool.find(s => s.name === selectedId) ?? pool[0]
   }, [servers, selectedId])
 
+  /**
+   * 磁贴马赛克块（「添加」磁贴 + 服务器序列）。
+   * 种子固定 ⇒ 同一份数据每次渲染排布完全一致；数据条数变化才会重排。
+   */
+  const mosaic = useMemo(() => buildMosaic(1 + (servers ?? []).length), [servers])
+
   return (
     <div className={css.page}>
       {/* 页头单行：市场|已装 pill tab（design.pen bFLLQ 画了这两个 tab；MCP
@@ -234,67 +397,83 @@ function McpListView({ rpc }: {
           <span className={css.sectionHead}>MCP 服务器</span>
           {loadError !== null && <p className={css.hintText}>加载失败：{loadError}</p>}
           <div className={css.tileGrid}>
-            {/* 「添加」磁贴：固定第一张（左上角），点击后右侧详情面板切「新建」模式。 */}
-            <button
-              type="button"
-              className={`${css.tile} ${css.tintSlate}`}
-              aria-label="添加服务器"
-              onClick={() => { setPanelMode('create'); setSelectedId(null) }}
-            >
-              {/* 角标用停止态状态点的视觉形态（不可交互占位，只表达「尚未存在」）。 */}
-              <span className={css.tileCorner}>
-                <span className={`${css.tileDot} ${css.tileDotOff}`} aria-hidden="true" />
-              </span>
-              <div className={css.tileTop}>
-                <span className={css.tileIcon}><Plus size={24} /></span>
-              </div>
-              <div className={css.tileBottom}>
-                <div className={css.tileNameRow}>
-                  <span className={css.tileName}>添加</span>
-                  <span className={css.tileVersion}>MCP</span>
-                </div>
-                <span className={css.tileSub}>新端点</span>
-              </div>
-            </button>
-            {(servers ?? []).map((s, i) => {
-              const probe = probeMap[s.name]
-              const enabled = s.disabled !== true
-              const running = enabled && probe !== undefined && !probe.loading && probe.toolCount !== null
-              const active = panelMode === 'view' && selected !== undefined && selected.name === s.name
-              const size = mosaicSizeOf(i)
-              const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : size === 'tall' ? ` ${css.tileTall}` : ''
-              return (
-                <button
-                  key={s.name}
-                  type="button"
-                  className={`${css.tile}${sizeClass} ${tileTintClassOf(size)}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
-                  aria-pressed={active}
-                  title={probe?.error ?? undefined}
-                  onClick={() => { setPanelMode('view'); setSelectedId(s.name) }}
-                >
-                  {/* 角标：状态点 8×8（运行中绿 / 停止灰），绝对定位于右上角。 */}
-                  <span className={css.tileCorner}>
-                    <span className={`${css.tileDot}${running ? '' : ` ${css.tileDotOff}`}`} />
-                  </span>
-                  <div className={css.tileTop}>
-                    <span className={css.tileIcon}><FolderTree size={size === 'big' ? 30 : 24} /></span>
+            {mosaic.map((block, bi) => (
+              <div key={bi} className={css.mosaicBlock} data-mosaic-block={block.kind}>
+                {block.cols.map((col, ci) => (
+                  <div key={ci} className={`${css.mosaicCol} ${col.width === 264 ? css.mosaicCol264 : css.mosaicCol128}`}>
+                    {col.tiles.map(({ size, index }) => {
+                      /* 尺寸样式走 data-tile-size 属性选择器（见 .module.css），无需尺寸类名。 */
+                      /* 0 号恒为「添加」磁贴（块生成器把首列钉成两小贴竖叠 ⇒ 它必在左上角）。 */
+                      if (index === 0) {
+                        return (
+                          <button
+                            key="add"
+                            type="button"
+                            data-tile-size={size}
+                            className={`${css.tile} ${css.tintSlate}`}
+                            aria-label="添加服务器"
+                            onClick={() => { setPanelMode('create'); setSelectedId(null) }}
+                          >
+                            {/* 角标用停止态状态点的视觉形态（不可交互占位，只表达「尚未存在」）。 */}
+                            <span className={css.tileCorner}>
+                              <span className={`${css.tileDot} ${css.tileDotOff}`} aria-hidden="true" />
+                            </span>
+                            <div className={css.tileTop}>
+                              <span className={css.tileIcon}><Plus size={24} /></span>
+                            </div>
+                            <div className={css.tileBottom}>
+                              <div className={css.tileNameRow}>
+                                <span className={css.tileName}>添加</span>
+                                <span className={css.tileVersion}>MCP</span>
+                              </div>
+                              <span className={css.tileSub}>新端点</span>
+                            </div>
+                          </button>
+                        )
+                      }
+                      const s = (servers ?? [])[index - 1]
+                      if (s === undefined) return null
+                      const probe = probeMap[s.name]
+                      const enabled = s.disabled !== true
+                      const running = enabled && probe !== undefined && !probe.loading && probe.toolCount !== null
+                      const active = panelMode === 'view' && selected !== undefined && selected.name === s.name
+                      return (
+                        <button
+                          key={s.name}
+                          type="button"
+                          data-tile-size={size}
+                          className={`${css.tile} ${tileTintClassOf(size)}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
+                          aria-pressed={active}
+                          title={probe?.error ?? undefined}
+                          onClick={() => { setPanelMode('view'); setSelectedId(s.name) }}
+                        >
+                          {/* 角标：状态点 8×8（运行中绿 / 停止灰），绝对定位于右上角。 */}
+                          <span className={css.tileCorner}>
+                            <span className={`${css.tileDot}${running ? '' : ` ${css.tileDotOff}`}`} />
+                          </span>
+                          <div className={css.tileTop}>
+                            <span className={css.tileIcon}><FolderTree size={size === 'big' ? 30 : 24} /></span>
+                          </div>
+                          <div className={css.tileBottom}>
+                            <div className={css.tileNameRow}>
+                              <span className={css.tileName}>{s.name}</span>
+                              {/* 版本徽章位承载传输方式（wire 无版本字段，占位口径）。 */}
+                              <span className={css.tileVersion}>{TRANSPORT_LABEL[s.transport]}</span>
+                            </div>
+                            {(size === 'big' || size === 'wide') && s.description !== undefined && s.description !== '' && (
+                              <span className={css.tileDesc}>{s.description}</span>
+                            )}
+                            <span className={css.tileSub}>
+                              {TRANSPORT_LABEL[s.transport]} · {endpointLabel(s)}
+                            </span>
+                          </div>
+                        </button>
+                      )
+                    })}
                   </div>
-                  <div className={css.tileBottom}>
-                    <div className={css.tileNameRow}>
-                      <span className={css.tileName}>{s.name}</span>
-                      {/* 版本徽章位承载传输方式（wire 无版本字段，占位口径）。 */}
-                      <span className={css.tileVersion}>{TRANSPORT_LABEL[s.transport]}</span>
-                    </div>
-                    {(size === 'big' || size === 'wide') && s.description !== undefined && s.description !== '' && (
-                      <span className={css.tileDesc}>{s.description}</span>
-                    )}
-                    <span className={css.tileSub}>
-                      {TRANSPORT_LABEL[s.transport]} · {endpointLabel(s)}
-                    </span>
-                  </div>
-                </button>
-              )
-            })}
+                ))}
+              </div>
+            ))}
           </div>
           {servers !== null && servers.length === 0 && loadError === null && (
             <p className={css.hintText}>暂无 MCP 服务器。点击「添加」磁贴注册第一个。</p>

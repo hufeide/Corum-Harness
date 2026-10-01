@@ -11,8 +11,9 @@
  *   - 页头一行：tab·市场 / tab·已装（pill 形态）+ 搜索框 280×31 + 分类 chips
  *     （全部 / Agent 能力 / 界面 / 主题），下接一条全宽 1px 分隔线。
  *   - 市场态磁贴群分两节：「最热门」（节头 = flame 15 + 文字 13/600，其下
- *     196×120 热排 ×4，取该分类下载量最高 4 条）+「全部插件」（128 网格大/宽/
- *     高/小混排）。选中具名分类时只渲染该分类的节（节头文字 = 分类名）。
+ *     196×120 热排 ×4，取该分类下载量最高 4 条）+「全部插件」（块生成器混排：
+ *     固定种子伪随机选块型，块行高 264/128、列宽 264/128，几何推导见 buildMosaic）。
+ *     选中具名分类时只渲染该分类的节（节头文字 = 分类名）。
  *   - 磁贴群首张即第一个插件磁贴（设计稿无「添加」磁贴；本地包 / URL 安装入口
  *     在设置中心「插件管理」页）。
  *   - 磁贴底色 = 四档语义 tint（紫/深紫/灰蓝/堇），直接消费 --corum-tile-* token；
@@ -247,20 +248,207 @@ function heatLabel(weeklyDownloads?: number): string | null {
   return String(weeklyDownloads)
 }
 
-/**
- * 磁贴尺寸分级（Metro 混排）。
- *
- * 设计稿四个 frame（iYTAN 全部插件 / fngID 已装 / bFLLQ MCP / VNH3k 技能）的首行
- * 排法**完全同构**：大贴 264×264 → 两张宽贴 264×128（并成左列）→ 高贴 128×264
- * → 两张小贴 128×128。故尺寸由**序号**按这条 6 拍循环决定，而不是按包名域——
- * 按域判会把每个 @corum/* 都判成大贴，整片网格退化成等大的方块，丢掉稿里的错落。
- */
-const MOSAIC_CYCLE: readonly ('big' | 'wide' | 'wide' | 'tall' | 'small' | 'small')[] =
-  ['big', 'wide', 'wide', 'tall', 'small', 'small']
+/** 磁贴尺寸（Metro 混排四形，与设计稿一一对应）。 */
+export type TileSize = 'big' | 'wide' | 'tall' | 'small'
 
-/** 按序号取磁贴尺寸（6 拍循环；`grid-auto-flow: dense` 自动补位）。 */
-function mosaicSizeOf(index: number): 'big' | 'wide' | 'tall' | 'small' {
-  return MOSAIC_CYCLE[index % MOSAIC_CYCLE.length]!
+/** 一个磁贴的尺寸标注（含热排 hot 形态，供 data-tile-size 断言用）。 */
+export type TileSizeMark = TileSize | 'hot'
+
+/**
+ * 固定种子 PRNG（mulberry32）：纯函数、可复现——同一种子每次渲染产出完全一致的
+ * 块型序列，满足「固定种子伪随机、可复现对账」的验收口径。
+ * 种子常量 = 0x5A17（任意选取，写成常量保证每次构建/每次渲染同一序列）。
+ */
+const MOSAIC_SEED = 0x5A17
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6D2B79F5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** Fisher–Yates 洗牌（消费同一个 PRNG，保证整条流水线单一随机源）。 */
+function shuffled<T>(rng: () => number, items: readonly T[]): T[] {
+  const arr = [...items]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    const tmp = arr[i]!; arr[i] = arr[j]!; arr[j] = tmp
+  }
+  return arr
+}
+
+/**
+ * 块行几何（design.pen 四帧逐帧实测）：
+ *  - 高 264 块：四列等高、宽度和恰为 808。列宽集合 = [264,264,128,128] 的某个排列
+ *    （264+8+264+8+128+8+128 = 808 ✓）。264 宽列 = 一张大贴 big(264×264) 或两条
+ *    宽贴 wide2(264×128 ×2，128+8+128=264)；128 宽列 = 一条高贴 tall(128×264) 或
+ *    两条小贴 small2(128×128 ×2)。旧 grid 实测空洞率 6.3% 且每行同构，故弃 grid。
+ *  - 高 128 块：列宽模式三选一，洗牌 264 宽列的位置：
+ *      六小 [128×6]（768+40=808）／一宽四小 [264,128×4]（776+32=808）／
+ *      两宽两小 [264,264,128,128]（784+24=808）。
+ * 磁贴不够铺满最后一块时丢掉多余列/块，用完即停。
+ */
+type BlockKind = '264' | '128'
+
+/** 高 264 块的一列（内部竖叠单元）。 */
+type Block264Column =
+  | { readonly size: 'big' }                                  // 单张大贴
+  | { readonly size: 'wide'; readonly count: 2 }              // 两条宽贴竖叠
+  | { readonly size: 'tall' }                                 // 单条高贴
+  | { readonly size: 'small'; readonly count: 2 }             // 两条小贴竖叠
+
+/** 高 264 块（四列，宽度 [264,264,128,128] 的一个排列）。 */
+interface Block264 {
+  readonly kind: '264'
+  readonly columns: readonly Block264Column[]
+}
+
+/** 高 128 块的一列（联合进 big/tall/count 是为列级裁剪能复用同一张列类型）。 */
+type Block128Column =
+  | { readonly size: 'wide' }
+  | { readonly size: 'small'; readonly count?: number }
+  | { readonly size: 'big' | 'tall'; readonly count?: number }
+
+/** 高 128 块（列宽为 128×6 / 264+128×4 / 264×2+128×2 之一的某个排列）。 */
+interface Block128 {
+  readonly kind: '128'
+  readonly columns: readonly Block128Column[]
+}
+
+type MosaicBlock = Block264 | Block128
+
+/** 重抽上限：相邻块同型最多重抽 5 次（几何上 2 型随机撞型概率 1/2，5 次后仍同型则放行）。 */
+const BLOCK_RETYPE_MAX = 5
+
+/**
+ * 块生成器：固定种子 PRNG 逐块选型。
+ *  - 块型（264/128）由 PRNG 决定，相邻两块强制不同型（同型重抽，最多 5 次）；
+ *  - 264 块内：四列宽度由洗牌定排列；每个 264 宽列取 big/wide2、每个 128 宽列取
+ *    tall/small2。约束：全块至少一个 big（视觉锚点）、264 列不得全 wide2、
+ *    128 列不得全 small2（保证错落），违反即重抽（最多 5 次，仍违反则放宽）；
+ *  - 128 块内：三种宽度模式 PRNG 三选一，洗牌 264 宽列位置。
+ */
+function pickBlockKind(rng: () => number, prev: BlockKind | null): BlockKind {
+  for (let attempt = 0; attempt < BLOCK_RETYPE_MAX; attempt++) {
+    const kind: BlockKind = rng() < 0.5 ? '264' : '128'
+    if (prev === null || kind !== prev) return kind
+  }
+  // 重抽耗尽：直接取与上一块相反的型（保证相邻不同型的硬约束不破）。
+  return prev === '264' ? '128' : '264'
+}
+
+function buildBlock264(rng: () => number): Block264 {
+  for (let attempt = 0; attempt < BLOCK_RETYPE_MAX; attempt++) {
+    // 列宽排列：[264,264,128,128] 洗牌 → 8 种位置分布由 PRNG 决定。
+    const widths = shuffled(rng, [264, 264, 128, 128] as const)
+    const wideCount = widths.filter(w => w === 264).length
+    // 每列随机取单元；big 计数 ≥1、wide2 不全满、tall/small2 不全满。
+    let hasBig = false
+    let allWide = wideCount > 0
+    let allSmall2 = widths.filter(w => w === 128).length > 0
+    const columns: Block264Column[] = widths.map((w) => {
+      if (w === 264) {
+        const useBig = rng() < 0.5
+        if (useBig) { hasBig = true; return { size: 'big' } }
+        return { size: 'wide', count: 2 }
+      }
+      const useTall = rng() < 0.5
+      if (useTall) { allSmall2 = false; return { size: 'tall' } }
+      return { size: 'small', count: 2 }
+    })
+    for (const col of columns) {
+      if (col.size !== 'wide') allWide = false
+    }
+    if (hasBig && !allWide && !allSmall2) return { kind: '264', columns }
+  }
+  // 重抽耗尽：退到设计稿首帧的原始排法（大 | 双宽 | 高 | 双小），保证有锚点。
+  return { kind: '264', columns: [{ size: 'big' }, { size: 'wide', count: 2 }, { size: 'tall' }, { size: 'small', count: 2 }] }
+}
+
+function buildBlock128(rng: () => number): Block128 {
+  // 三种宽度模式 PRNG 三选一，洗牌 264 宽列位置。
+  const roll = rng()
+  const base: Block128Column[] = roll < 1 / 3
+    ? [{ size: 'small' }, { size: 'small' }, { size: 'small' }, { size: 'small' }, { size: 'small' }, { size: 'small' }]
+    : roll < 2 / 3
+      ? [{ size: 'wide' }, { size: 'small' }, { size: 'small' }, { size: 'small' }, { size: 'small' }]
+      : [{ size: 'wide' }, { size: 'wide' }, { size: 'small' }, { size: 'small' }]
+  return { kind: '128', columns: shuffled(rng, base) }
+}
+
+/** 单元 → 张数（big/tall = 1 张，wide2/small2 = 2 张，128 块列 = 1 张）。 */
+function columnTileCount(column: Block264Column | Block128Column): number {
+  return column.size === 'wide' || column.size === 'small'
+    ? (column as { count?: number }).count ?? 1
+    : 1
+}
+
+/**
+ * 块级裁剪：磁贴铺不满整块时，按列顺序取能放满的列前缀（两条竖叠的列必须
+ * 两张齐才收），多余列整体丢弃 —— 不留空占位。返回裁剪后的块与实耗张数。
+ */
+function trimBlock(block: MosaicBlock, remaining: number): { block: MosaicBlock; used: number } {
+  const columns: (Block264Column | Block128Column)[] = []
+  let used = 0
+  for (const column of block.columns) {
+    const need = columnTileCount(column)
+    if (used + need > remaining) break
+    columns.push(column)
+    used += need
+  }
+  // 按块的原 kind 收敛回 MosaicBlock（裁剪只删列，不改块型）。
+  if (block.kind === '264') return { block: { kind: '264', columns: columns as Block264Column[] }, used }
+  return { block: { kind: '128', columns: columns as Block128Column[] }, used }
+}
+
+/**
+ * 把磁贴序列填进块行：逐块生成块型并按列取贴。选块流程（全部走同一种子，可复现）：
+ *  1. PRNG 选块型（相邻不同型，重抽上限 5）→ 整块放得下就整块收（宽恰 808）；
+ *  2. 放不下 → 列级裁剪该块：收能放满的列前缀（磁贴不足的列整列丢弃，
+ *     不留空占位），此为最后一块的收尾形态（行宽 < 808 属预期，不是空洞）；
+ *  3. 裁剪后一列都放不下 → 用完即停。
+ */
+function buildMosaic<T>(tiles: readonly T[]): { blocks: MosaicBlock[]; consumed: number } {
+  const rng = mulberry32(MOSAIC_SEED)
+  const blocks: MosaicBlock[] = []
+  let cursor = 0
+  let prev: BlockKind | null = null
+  while (cursor < tiles.length) {
+    const remaining = tiles.length - cursor
+    const kind = pickBlockKind(rng, prev)
+    const block = kind === '264' ? buildBlock264(rng) : buildBlock128(rng)
+    const need = block.columns.reduce((sum, c) => sum + columnTileCount(c), 0)
+    if (need <= remaining) {
+      blocks.push(block)
+      cursor += need
+      prev = kind
+      continue
+    }
+    // 整块放不下：列级裁剪（最后一块允许窄于 808）。
+    const trimmed = trimBlock(block, remaining)
+    if (trimmed.used > 0) {
+      blocks.push(trimmed.block)
+      cursor += trimmed.used
+      prev = trimmed.block.kind
+      // 继续消费剩余的贴——此处若直接退出循环，剩下的贴会被静默丢弃
+      // （实测：2 张贴进网格只渲染出 1 张，即少显示一个插件）。
+      continue
+    }
+    // 裁剪后一列都放不下（剩余数 < 任一列的张数）：退化为单张贴的窄块收尾，
+    // 型取与上一块相反以保证相邻不同型。一列一张，故循环到此结束。
+    const tailKind: BlockKind = prev === '264' ? '128' : '264'
+    blocks.push({
+      kind: tailKind,
+      columns: [{ size: tailKind === '264' ? 'tall' : 'small' }],
+    } as MosaicBlock)
+    cursor += 1
+    break
+  }
+  return { blocks, consumed: cursor }
 }
 
 /**
@@ -276,11 +464,10 @@ function tileTintOf(name: string): 'a' | 'b' | 'c' | 'd' {
   return 'a'
 }
 
-/** 尺寸/徽章类名拼装：大贴、宽贴、高贴 + tint 档 + 选中态。 */
-function tileClasses(size: 'big' | 'wide' | 'tall' | 'small', tint: 'a' | 'b' | 'c' | 'd', active: boolean, extra?: string): string {
-  const sizeClass = size === 'big' ? css.tileBig : size === 'wide' ? css.tileWide : size === 'tall' ? css.tileTall : ''
+/** 尺寸/徽章类名拼装：大贴、宽贴、高贴 + tint 档 + 选中态（尺寸类由磁贴渲染处按 data 值拼）。 */
+function tileClasses(tint: 'a' | 'b' | 'c' | 'd', active: boolean, extra?: string): string {
   const tintClass = tint === 'b' ? css.tileTintB : tint === 'c' ? css.tileTintC : tint === 'd' ? css.tileTintD : css.tileTintA
-  return [css.tile, sizeClass, tintClass, active ? css.tileActive : '', extra ?? ''].filter(Boolean).join(' ')
+  return [css.tile, tintClass, active ? css.tileActive : '', extra ?? ''].filter(Boolean).join(' ')
 }
 
 /* ── 页面本体 ─────────────────────────────────────────────────────────────── */
@@ -563,19 +750,23 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
   /* ── 磁贴渲染 ── */
 
-  /** 市场磁贴（检索结果条目 → 磁贴；热排传 hot=true 用 196×120 形态）。
-   *  `index` 是它在网格里的序号——尺寸由 6 拍循环决定。 */
-  const renderMarketTile = (row: SearchResult, index: number, hot = false): ReactNode => {
+  /** 尺寸类映射：块内 flex 单元不再需要 grid span 类，尺寸由 CSS 按块行上下文算，
+   *  这里只保留 big 的 glow 与 big 的语义类（字号 15）。 */
+  const sizeClassOf = (size: TileSize): string =>
+    size === 'big' ? ` ${css.tileBig}` : ''
+
+  /** 市场磁贴（检索结果条目 → 磁贴；热排传 hot=true 用 196×120 形态；块内 size 由块几何决定）。 */
+  const renderMarketTile = (row: SearchResult, hot: boolean, size: TileSize): ReactNode => {
     const active = selectedMarket !== null && 'name' in selectedMarket && selectedMarket.name === row.name
     const installed = row.installed || installedSet.has(row.name)
-    const size = hot ? 'small' : mosaicSizeOf(index)
+    const mark: TileSizeMark = hot ? 'hot' : size
     const heat = heatLabel(row.weeklyDownloads)
-    const sizeClass = hot ? ` ${css.hotTile}` : size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : size === 'tall' ? ` ${css.tileTall}` : ''
     return (
       <button
         key={row.name}
         type="button"
-        className={`${tileClasses(size, tileTintOf(row.name), active)}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}`}
+        className={`${tileClasses(tileTintOf(row.name), active)}${hot ? ` ${css.hotTile}` : sizeClassOf(size)}${size === 'big' ? ' ' + css.tileGlow : ''}`}
+        data-tile-size={mark}
         aria-pressed={active}
         onClick={() => { setMarketId(row.name) }}
       >
@@ -622,14 +813,14 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   }
 
   /** 市场「个人」范围磁贴（已装条目 → 磁贴，无热度角标）。 */
-  const renderPersonalTile = (entry: InstalledEntry, index: number): ReactNode => {
+  const renderPersonalTile = (entry: InstalledEntry, size: TileSize): ReactNode => {
     const active = selectedMarket !== null && 'entryId' in selectedMarket && selectedMarket.entryId === entry.entryId
-    const size = mosaicSizeOf(index)
     return (
       <button
         key={entry.entryId}
         type="button"
-        className={`${tileClasses(size, tileTintOf(entry.moduleName), active)}${size === 'big' ? ' ' + css.tileGlow : ''}`}
+        className={`${tileClasses(tileTintOf(entry.moduleName), active)}${sizeClassOf(size)}${size === 'big' ? ' ' + css.tileGlow : ''}`}
+        data-tile-size={size}
         aria-pressed={active}
         onClick={() => { setMarketId(entry.entryId) }}
       >
@@ -651,13 +842,13 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   }
 
   /** 已装磁贴（角标位 = 启停开关）。 */
-  const renderInstalledTile = (entry: InstalledEntry, index: number): ReactNode => {
+  const renderInstalledTile = (entry: InstalledEntry, size: TileSize): ReactNode => {
     const active = selectedInstalled !== null && selectedInstalled.entryId === entry.entryId
-    const size = mosaicSizeOf(index)
     return (
       <div
         key={entry.entryId}
-        className={`${tileClasses(size, tileTintOf(entry.moduleName), active)}${size === 'big' ? ' ' + css.tileGlow : ''}`}
+        className={`${tileClasses(tileTintOf(entry.moduleName), active)}${sizeClassOf(size)}${size === 'big' ? ' ' + css.tileGlow : ''}`}
+        data-tile-size={size}
         data-off={!entry.enabled || undefined}
         role="button"
         tabIndex={0}
@@ -690,6 +881,49 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
         </div>
       </div>
     )
+  }
+
+  /**
+   * 块行渲染：把磁贴序列填进 buildMosaic 生成的块几何（泛型，三种磁贴源共用）。
+   * 一个块 = 横向 flex（列等高，align-items: stretch），块行高 264 / 128；
+   * 每列内部纵向排贴：big/tall 一张贴满、wide2/small2 两条均分（flex:1 ⇒
+   * (264-8)/2 = 128）。列宽走 CSS data-mosaic-block 上下文（见 module.css）。
+   * 每个块行加 data-mosaic-block="264"|"128"、每张贴加 data-tile-size（验收断言）。
+   */
+  const renderMosaic = <X,>(
+    tiles: readonly X[],
+    renderTile: (item: X, size: TileSize) => ReactNode,
+  ): ReactNode => {
+    const { blocks } = buildMosaic(tiles)
+    let cursor = 0
+    return blocks.map((block, bi) => (
+      <div key={`block:${bi}`} className={css.mosaicBlock} data-mosaic-block={block.kind}>
+        {block.columns.map((column, ci) => {
+          const units: Array<{ mark: TileSizeMark; size: TileSize }> = []
+          if (column.size === 'big') units.push({ mark: 'big', size: 'big' })
+          else if (column.size === 'tall') units.push({ mark: 'tall', size: 'tall' })
+          else if (column.size === 'wide') {
+            // 264 块的 wide2 列 = 两条宽贴竖叠；128 块的 wide 列 = 单张宽贴。
+            if (block.kind === '264') units.push({ mark: 'wide', size: 'wide' }, { mark: 'wide', size: 'wide' })
+            else units.push({ mark: 'wide', size: 'wide' })
+          }
+          else {
+            // 128 块小列 = 1 张；264 块 small2 列 = 2 张竖叠（count 字段区分）。
+            const count = (column as { count?: number }).count ?? 1
+            for (let i = 0; i < count; i++) units.push({ mark: 'small', size: 'small' })
+          }
+          // 列宽：264 块的 big/wide2 列 = 264；128 块的 wide 列 = 264、small 列 = 128。
+          const colWidth = block.kind === '264'
+            ? (column.size === 'big' || column.size === 'wide' ? 264 : 128)
+            : (column.size === 'wide' ? 264 : 128)
+          return (
+            <div key={`col:${bi}:${ci}`} className={css.mosaicCol} data-col={colWidth}>
+              {units.map((unit, ui) => renderTile(tiles[cursor++]!, unit.size))}
+            </div>
+          )
+        })}
+      </div>
+    ))
   }
 
   /* ── 详情面板 ── */
@@ -955,14 +1189,14 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
                     <div className={css.hotSection}>
                       {renderSectionHead('最热门', true)}
                       <div className={css.hotRow}>
-                        {hotTiles.map(row => renderMarketTile(row, 0, true))}
+                        {hotTiles.map(row => renderMarketTile(row, true, 'small'))}
                       </div>
                     </div>
                   )}
                   <div className={css.allSection}>
                     {renderSectionHead(gridSectionLabel, false)}
                     <div className={css.tileGrid}>
-                      {gridTiles.map((row, i) => renderMarketTile(row, i))}
+                      {renderMosaic(gridTiles, (row, size) => renderMarketTile(row, false, size))}
                     </div>
                   </div>
                 </>
@@ -979,7 +1213,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
                 <div className={css.allSection}>
                   {renderSectionHead('本地 / 开发中', false)}
                   <div className={css.tileGrid}>
-                    {personalTiles.map((entry, i) => renderPersonalTile(entry, i))}
+                    {renderMosaic(personalTiles, (entry, size) => renderPersonalTile(entry, size))}
                   </div>
                 </div>
               )}
@@ -998,7 +1232,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
                 <div className={css.allSection}>
                   {renderSectionHead('已装插件', false)}
                   <div className={css.tileGrid}>
-                    {visibleInstalled.map((entry, i) => renderInstalledTile(entry, i))}
+                    {renderMosaic(visibleInstalled, (entry, size) => renderInstalledTile(entry, size))}
                   </div>
                 </div>
               )}
