@@ -121,41 +121,31 @@ export function SkillsPage() {
 
   return (
     <>
-      <SettingGroup title="全局技能">
-        {error && <p className={css.hintText}>加载失败：{error}</p>}
-        {skills === null && !error && <p className={css.hintText}>加载中…</p>}
-        {skills !== null && skills.length === 0 && (
-          <p className={css.hintText}>暂无技能，点击下方按钮导入。</p>
-        )}
-        {(skills ?? []).map((s, i) => (
-          <div key={s.name}>
-            {i > 0 && <div className={css.memDivider} />}
-            <button type="button" className={css.skillRowBtn} onClick={() => setView({ kind: 'detail', name: s.name })}>
-              <Star size={14} className={css.skillIcon} />
-              <div className={css.skillMeta}>
-                <span className={css.skillLabel}>{s.name}</span>
-                <span className={css.skillDesc}>{(s.currentVersion ?? '—')} · {s.description}</span>
-              </div>
-              <span className={css.skillChip}>已绑定 {bindCount(s.name)} 个 Agent</span>
-              <span onClick={e => e.stopPropagation()}>
-                <Trash2 size={15} className={css.memDel} onClick={() => setDeleting(s)} />
-              </span>
-            </button>
-          </div>
-        ))}
-        <div className={css.actionsRow}>
-          <GlassButton onClick={() => setImportOpen(true)}>导入技能</GlassButton>
-          <GlassButton onClick={() => void importBuiltin()} disabled={builtinBusy}>
-            {builtinBusy ? '导入中…' : '导入内置技能'}
-          </GlassButton>
-        </div>
-        {builtinResult !== null && (
-          builtinResult.ok
-            ? <p className={css.hintText}>内置技能：{formatBuiltinSummary(builtinResult)}</p>
-            : <p className={css.confirmWarn}>导入内置技能失败：{builtinResult.error ?? '未知错误'}</p>
-        )}
-      </SettingGroup>
-      <p className={css.hintText}>技能是可复用的指令与资源包，可在 Agent 预设中按版本绑定。点击条目查看详情。「导入内置技能」装入随产品的官方技能集：已有同名的保留你的版本不覆盖，你删除过的不再装回。</p>
+      <SkillMarketView
+        skills={skills}
+        error={error}
+        tab={tab}
+        setTab={setTab}
+        query={query}
+        setQuery={setQuery}
+        category={category}
+        setCategory={setCategory}
+        selectedName={selectedName}
+        setSelectedName={setSelectedName}
+        disabledSet={disabledSet}
+        onToggle={(name) => setDisabledSet(prev => {
+          const next = new Set(prev)
+          if (next.has(name)) next.delete(name); else next.add(name)
+          return next
+        })}
+        bindCount={bindCount}
+        onOpenDetail={(name) => setView({ kind: 'detail', name })}
+        onDelete={(s) => setDeleting(s)}
+        onImport={() => setImportOpen(true)}
+        onImportBuiltin={() => void importBuiltin()}
+        builtinBusy={builtinBusy}
+        builtinResult={builtinResult}
+      />
       {deleting && (
         <DeleteSkillDialog
           skill={deleting}
@@ -172,6 +162,260 @@ export function SkillsPage() {
           rpc={rpc}
         />
       )}
+    </>
+  )
+}
+
+/* ── 技能市场视图：Metro 磁贴 + 右侧详情简介面板 ───────────────────── */
+
+/** 分类筛选 chips（名称关键词归桶；全部永远有）。 */
+const CATEGORIES: { id: string; label: string; match: RegExp | null }[] = [
+  { id: 'all', label: '全部', match: null },
+  { id: 'verify', label: '验证', match: /verify|cdp|test|check|audit/ },
+  { id: 'code', label: '代码', match: /code|review|refactor|lint|commit|git|dev/ },
+  { id: 'deploy', label: '部署', match: /deploy|pack|build|release|publish|ship/ },
+]
+
+function categoryOf(name: string, description: string): string {
+  const text = `${name} ${description}`.toLowerCase()
+  for (const c of CATEGORIES) {
+    if (c.match !== null && c.match.test(text)) return c.id
+  }
+  return 'other'
+}
+
+/**
+ * 磁贴尺寸分级：官方主推（cdp-verify / corum-dev-conventions 等旗舰技能）
+ * 给大贴 2×2 + 品牌 glow；有实质描述的给宽贴 2×1；其余小贴 1×1。
+ */
+function skillTileSizeOf(s: SkillInfo): 'big' | 'wide' | 'small' {
+  const n = s.name.toLowerCase()
+  if (/cdp-verify|corum-dev-conventions|official-upgrade/.test(n)) return 'big'
+  if ((s.description ?? '').length >= 40) return 'wide'
+  return 'small'
+}
+
+function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category, setCategory,
+  selectedName, setSelectedName, disabledSet, onToggle, bindCount, onOpenDetail, onDelete,
+  onImport, onImportBuiltin, builtinBusy, builtinResult }: {
+  skills: SkillInfo[] | null
+  error: string | null
+  tab: 'market' | 'installed'
+  setTab: (t: 'market' | 'installed') => void
+  query: string
+  setQuery: (q: string) => void
+  category: string
+  setCategory: (c: string) => void
+  selectedName: string | null
+  setSelectedName: (n: string) => void
+  disabledSet: Set<string>
+  onToggle: (name: string) => void
+  bindCount: (name: string) => number
+  onOpenDetail: (name: string) => void
+  onDelete: (s: SkillInfo) => void
+  onImport: () => void
+  onImportBuiltin: () => void
+  builtinBusy: boolean
+  builtinResult: BuiltinSkillImportResult | null
+}) {
+  /** 过滤后的技能池（搜索 + 分类）。「市场 | 已装」目前同一数据源，tab 仅作视图语义。 */
+  const pool = useMemo(() => {
+    let list = skills ?? []
+    const q = query.trim().toLowerCase()
+    if (q !== '') {
+      list = list.filter(s => s.name.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q))
+    }
+    if (category !== 'all') {
+      list = list.filter(s => categoryOf(s.name, s.description ?? '') === category)
+    }
+    return list
+  }, [skills, query, category])
+
+  /** 详情面板选中项（默认第一个；过滤后选中项出列则回落）。 */
+  const selected = useMemo(() => {
+    if (pool.length === 0) return null
+    const hit = selectedName !== null ? pool.find(s => s.name === selectedName) : undefined
+    return hit ?? pool[0]
+  }, [pool, selectedName])
+
+  return (
+    <div className={css.page}>
+      {/* 页头：标题 + 搜索 + 导入 */}
+      <div className={css.header}>
+        <span className={css.headerTitle}>技能</span>
+        <div className={css.searchBox}>
+          <Search size={13} className={css.searchIcon} />
+          <input
+            className={css.searchInput}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="搜索技能…"
+          />
+        </div>
+        <button type="button" className={css.addBtn} onClick={onImport}>
+          <PackagePlus size={13} />导入技能
+        </button>
+        <button type="button" className={css.addBtn} onClick={onImportBuiltin} disabled={builtinBusy}>
+          <Download size={13} />{builtinBusy ? '导入中…' : '导入内置技能'}
+        </button>
+      </div>
+
+      {/* 内部 tab：市场 | 已装 */}
+      <div className={css.tabs}>
+        <button type="button" className={`${css.tab}${tab === 'market' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('market')}>市场</button>
+        <button type="button" className={`${css.tab}${tab === 'installed' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('installed')}>已装</button>
+      </div>
+
+      {/* 分类筛选 chips */}
+      <div className={css.filterRow}>
+        {CATEGORIES.map(c => (
+          <button
+            key={c.id}
+            type="button"
+            className={`${css.filterChip}${category === c.id ? ' ' + css.filterChipActive : ''}`}
+            onClick={() => setCategory(c.id)}
+          >{c.label}</button>
+        ))}
+      </div>
+
+      {builtinResult !== null && (
+        builtinResult.ok
+          ? <p className={css.hintText}>内置技能：{formatBuiltinSummary(builtinResult)}</p>
+          : <p className={legacy.confirmWarn}>导入内置技能失败：{builtinResult.error ?? '未知错误'}</p>
+      )}
+
+      <div className={css.body}>
+        {/* 左：Metro 磁贴群 */}
+        <div className={css.tiles}>
+          {error !== null && <p className={css.hintText}>加载失败：{error}</p>}
+          {skills === null && error === null && <p className={css.hintText}>加载中…</p>}
+          {skills !== null && pool.length === 0 && error === null && (
+            <p className={css.hintText}>{(skills.length === 0) ? '暂无技能，点击上方按钮导入。' : '没有匹配的技能。'}</p>
+          )}
+          <div className={css.tileGrid}>
+            {pool.map(s => {
+              const enabled = !disabledSet.has(s.name)
+              const active = selected !== null && selected.name === s.name
+              const size = skillTileSizeOf(s)
+              const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : ''
+              return (
+                <button
+                  key={s.name}
+                  type="button"
+                  className={`${css.tile}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
+                  aria-pressed={active}
+                  onClick={() => setSelectedName(s.name)}
+                >
+                  <div className={css.tileTop}>
+                    <span className={css.tileIcon}><Star size={size === 'big' ? 24 : 18} /></span>
+                    <span
+                      role="switch"
+                      aria-checked={enabled}
+                      aria-label={`${s.name} 启用开关`}
+                      className={css.tileSwitch}
+                      data-off={enabled ? undefined : ''}
+                      onClick={e => { e.stopPropagation(); onToggle(s.name) }}
+                    >
+                      <span className={css.tileSwitchKnob} />
+                    </span>
+                  </div>
+                  <div className={css.tileBottom}>
+                    <div className={css.tileNameRow}>
+                      <span className={css.tileName}>{s.name}</span>
+                      <span className={css.tileVersion}>{s.currentVersion ?? '—'}</span>
+                    </div>
+                    {(size === 'big' || size === 'wide') && s.description !== '' && (
+                      <span className={css.tileDesc}>{s.description}</span>
+                    )}
+                    <span className={css.tileSub}>
+                      {bindCount(s.name) > 0 ? `已绑定 ${bindCount(s.name)} 个 Agent` : '未绑定 Agent'}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* 右：详情简介面板（点击磁贴就地展开；默认选第一个） */}
+        <aside className={css.detail} aria-label="技能详情">
+          {selected === null
+            ? <p className={css.hintText}>暂无可展示的技能。</p>
+            : (
+              <SkillDetailSummary
+                skill={selected}
+                enabled={!disabledSet.has(selected.name)}
+                onToggle={() => onToggle(selected.name)}
+                bindCount={bindCount(selected.name)}
+                onOpenDetail={() => onOpenDetail(selected.name)}
+                onDelete={() => onDelete(selected)}
+              />
+            )}
+        </aside>
+      </div>
+    </div>
+  )
+}
+
+/* ── 详情简介面板（磁贴选中项的就地展开；完整管理进二级详情视图）────── */
+
+function SkillDetailSummary({ skill, enabled, onToggle, bindCount, onOpenDetail, onDelete }: {
+  skill: SkillInfo
+  enabled: boolean
+  onToggle: () => void
+  bindCount: number
+  onOpenDetail: () => void
+  onDelete: () => void
+}) {
+  return (
+    <>
+      <div className={css.detailHero}>
+        <span className={css.detailHeroBadge}><Star size={30} /></span>
+      </div>
+      <div className={css.detailTitleRow}>
+        <span className={css.detailName}>{skill.name}</span>
+        <span className={css.tileVersion}>{skill.currentVersion ?? '—'}</span>
+      </div>
+      <span className={css.detailSub}>corum 技能库</span>
+      {skill.description !== '' && <p className={css.detailDesc}>{skill.description}</p>}
+      <div className={css.detailMeta}>
+        <div className={css.detailMetaRow}>
+          <span className={css.detailMetaKey}>类型</span>
+          <span className={css.detailMetaValue}>技能（SKILL.md 指令包）</span>
+        </div>
+        <div className={css.detailMetaRow}>
+          <span className={css.detailMetaKey}>状态</span>
+          <span className={css.detailMetaValue}>{enabled ? '已启用' : '已停用'}</span>
+        </div>
+        <div className={css.detailMetaRow}>
+          <span className={css.detailMetaKey}>触发</span>
+          <span className={css.detailMetaValue}>Agent 预设按版本绑定（{bindCount} 个）</span>
+        </div>
+        <div className={css.detailMetaRow}>
+          <span className={css.detailMetaKey}>版本数</span>
+          <span className={css.detailMetaValue}>{skill.versionCount} 个</span>
+        </div>
+      </div>
+      <div className={css.detailSwitchRow}>
+        <span className={css.detailSwitchLabel}>启用此技能</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          className={css.tileSwitch}
+          data-off={enabled ? undefined : ''}
+          onClick={onToggle}
+        >
+          <span className={css.tileSwitchKnob} />
+        </button>
+      </div>
+      <div className={css.detailSpacer} />
+      <div className={css.detailActions}>
+        <button type="button" className={`${css.actionBtn} ${css.actionDanger}`} onClick={onDelete}>
+          <Trash2 size={13} />删除
+        </button>
+        <button type="button" className={css.actionBtn} onClick={onOpenDetail}>管理版本与绑定</button>
+      </div>
     </>
   )
 }
@@ -211,27 +455,27 @@ function VersionSelect({ versions, pinned, onSelect, disabled }: {
   }, [open])
 
   return (
-    <div className={css.versionSelectWrap}>
+    <div className={legacy.versionSelectWrap}>
       <button
         ref={btnRef}
         type="button"
-        className={css.versionSelectBtn}
+        className={legacy.versionSelectBtn}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen(v => !v)}
       >
-        <span className={css.radioOn} />
-        <span className={css.versionMeta}>
-          <span className={css.versionId}>{current.id}</span>
-          <span className={css.versionLabel}>{current.label}</span>
+        <span className={legacy.radioOn} />
+        <span className={legacy.versionMeta}>
+          <span className={legacy.versionId}>{current.id}</span>
+          <span className={legacy.versionLabel}>{current.label}</span>
         </span>
-        <ChevronDown size={16} className={css.versionSelectChevron} />
+        <ChevronDown size={16} className={legacy.versionSelectChevron} />
       </button>
       {open && !disabled && pos && createPortal(
         <div
           ref={panelRef}
-          className={css.versionPanel}
+          className={legacy.versionPanel}
           role="listbox"
           style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: pos.width }}
         >
@@ -243,15 +487,15 @@ function VersionSelect({ versions, pinned, onSelect, disabled }: {
                 type="button"
                 role="option"
                 aria-selected={active}
-                className={active ? css.versionRowActive : css.versionRow}
+                className={active ? legacy.versionRowActive : legacy.versionRow}
                 onClick={() => { onSelect(v.id); setOpen(false) }}
               >
-                <span className={active ? css.radioOn : css.radioOff} />
-                <div className={css.versionMeta}>
-                  <span className={css.versionId}>{v.id}</span>
-                  <span className={css.versionLabel}>{v.label}</span>
+                <span className={active ? legacy.radioOn : legacy.radioOff} />
+                <div className={legacy.versionMeta}>
+                  <span className={legacy.versionId}>{v.id}</span>
+                  <span className={legacy.versionLabel}>{v.label}</span>
                 </div>
-                {active && <span className={css.currentTag}>当前使用</span>}
+                {active && <span className={legacy.currentTag}>当前使用</span>}
               </button>
             )
           })}
@@ -341,41 +585,41 @@ function SkillDetailView({ name, info, profiles, rpc, onBack, onChanged }: {
 
   return (
     <>
-      <div className={css.detailHeadRow}>
-        <button type="button" className={css.backBtn} onClick={onBack}>
+      <div className={legacy.detailHeadRow}>
+        <button type="button" className={legacy.backBtn} onClick={onBack}>
           <ArrowLeft size={14} />返回列表
         </button>
       </div>
 
       {/* 基本信息 */}
       <SettingGroup title="基本信息">
-        <div className={css.skillTitleRow}>
-          <Star size={16} className={css.skillIcon} />
-          <span className={css.skillTitle}>{name}</span>
-          {pinned && <span className={css.skillChip}>{pinned}</span>}
+        <div className={legacy.skillTitleRow}>
+          <Star size={16} className={legacy.skillIcon} />
+          <span className={legacy.skillTitle}>{name}</span>
+          {pinned && <span className={legacy.skillChip}>{pinned}</span>}
         </div>
-        <div className={css.kvRow}><span className={css.kvLabel}>描述</span><span className={css.kvValue}>{info?.description ?? '—'}</span></div>
-        <div className={css.kvRow}><span className={css.kvLabel}>存储路径</span><span className={css.kvValue}>{info?.path ?? '—'}</span></div>
-        <div className={css.kvRow}><span className={css.kvLabel}>版本数量</span><span className={css.kvValue}>{info?.versionCount ?? versions.length} 个</span></div>
-        <div className={css.kvRow}><span className={css.kvLabel}>创建时间</span><span className={css.kvValue}>{info?.createdAt ?? '—'}</span></div>
+        <div className={legacy.kvRow}><span className={legacy.kvLabel}>描述</span><span className={legacy.kvValue}>{info?.description ?? '—'}</span></div>
+        <div className={legacy.kvRow}><span className={legacy.kvLabel}>存储路径</span><span className={legacy.kvValue}>{info?.path ?? '—'}</span></div>
+        <div className={legacy.kvRow}><span className={legacy.kvLabel}>版本数量</span><span className={legacy.kvValue}>{info?.versionCount ?? versions.length} 个</span></div>
+        <div className={legacy.kvRow}><span className={legacy.kvLabel}>创建时间</span><span className={legacy.kvValue}>{info?.createdAt ?? '—'}</span></div>
       </SettingGroup>
 
       {/* SKILL.md 内容 */}
       <SettingGroup title="SKILL.md 内容">
-        {error && <p className={css.hintText}>{error}</p>}
+        {error && <p className={legacy.hintText}>{error}</p>}
         {!editing ? (
           <>
-            <pre className={css.skillViewer}>{content ?? '加载中…'}</pre>
-            <div className={css.actionsRow}>
+            <pre className={legacy.skillViewer}>{content ?? '加载中…'}</pre>
+            <div className={legacy.actionsRow}>
               <GlassButton onClick={startEdit}>✎ 编辑</GlassButton>
               <GlassButton variant="primary" onClick={() => { setDraft(content ?? ''); setCommitOpen(true) }}>提交新版本</GlassButton>
             </div>
           </>
         ) : (
           <>
-            <textarea className={css.skillEditor} value={draft} onChange={e => setDraft(e.target.value)} rows={14} />
-            <p className={css.hintText}>编辑不会立即生效——保存后将当前内容提交为新版本（自动设为当前版本）。</p>
-            <div className={css.actionsRow}>
+            <textarea className={legacy.skillEditor} value={draft} onChange={e => setDraft(e.target.value)} rows={14} />
+            <p className={legacy.hintText}>编辑不会立即生效——保存后将当前内容提交为新版本（自动设为当前版本）。</p>
+            <div className={legacy.actionsRow}>
               <GlassButton onClick={() => setEditing(false)}>取消</GlassButton>
               <GlassButton variant="primary" onClick={() => void saveAndCommit()} disabled={busy}>{busy ? '提交中…' : '保存并提交新版本'}</GlassButton>
             </div>
@@ -385,7 +629,7 @@ function SkillDetailView({ name, info, profiles, rpc, onBack, onChanged }: {
 
       {/* 版本历史：下拉选择（不 list 平铺），面板内版本项用 item 富形态，选中即生效 */}
       <SettingGroup title={`版本历史（${versions.length}）`}>
-        {versions.length === 0 && <p className={css.hintText}>暂无版本记录。</p>}
+        {versions.length === 0 && <p className={legacy.hintText}>暂无版本记录。</p>}
         {versions.length > 0 && (
           <VersionSelect
             versions={versions}
@@ -398,15 +642,15 @@ function SkillDetailView({ name, info, profiles, rpc, onBack, onChanged }: {
 
       {/* 绑定关系（全列表，只读） */}
       <SettingGroup title={`绑定此技能的 Agent（${bindings.length}）`}>
-        {bindings.length === 0 && <p className={css.hintText}>暂无 Agent 绑定此技能。</p>}
+        {bindings.length === 0 && <p className={legacy.hintText}>暂无 Agent 绑定此技能。</p>}
         {bindings.map(b => (
-          <div key={b.agentId} className={css.bindRow}>
-            <span className={css.bindAvatar}>{b.agentName[0] ?? '?'}</span>
-            <span className={css.bindName}>{b.agentName}</span>
-            <span className={css.skillChip}>pin {b.versionId}</span>
+          <div key={b.agentId} className={legacy.bindRow}>
+            <span className={legacy.bindAvatar}>{b.agentName[0] ?? '?'}</span>
+            <span className={legacy.bindName}>{b.agentName}</span>
+            <span className={legacy.skillChip}>pin {b.versionId}</span>
           </div>
         ))}
-        <p className={css.hintText}>绑定关系在 Agent 预设中管理，此处仅展示。</p>
+        <p className={legacy.hintText}>绑定关系在 Agent 预设中管理，此处仅展示。</p>
       </SettingGroup>
 
       {commitOpen && (
@@ -431,23 +675,23 @@ function CommitVersionDialog({ name, onClose, onSubmit, busy }: {
 }) {
   const [label, setLabel] = useState('')
   return createPortal(
-    <div className={css.modalOverlay} onClick={onClose}>
-      <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
-        <div className={css.modalHeader}>
-          <span className={css.modalTitle}>提交新版本</span>
-          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
+    <div className={legacy.modalOverlay} onClick={onClose}>
+      <div className={legacy.modalDialog} onClick={e => e.stopPropagation()}>
+        <div className={legacy.modalHeader}>
+          <span className={legacy.modalTitle}>提交新版本</span>
+          <button type="button" className={legacy.modalClose} onClick={onClose}><X size={16} /></button>
         </div>
-        <div className={css.modalBody}>
-          <p className={css.hintText}>把「{name}」当前的 SKILL.md 保存为一个新版本快照。</p>
-          <div className={css.formGroup}>
-            <label className={css.fieldLabel}>版本备注</label>
-            <input className={css.fieldInput} value={label} onChange={e => setLabel(e.target.value)} placeholder="如：优化评审分级模板" />
+        <div className={legacy.modalBody}>
+          <p className={legacy.hintText}>把「{name}」当前的 SKILL.md 保存为一个新版本快照。</p>
+          <div className={legacy.formGroup}>
+            <label className={legacy.fieldLabel}>版本备注</label>
+            <input className={legacy.fieldInput} value={label} onChange={e => setLabel(e.target.value)} placeholder="如：优化评审分级模板" />
           </div>
-          <p className={css.hintText}>提交后该版本将自动设为当前生效版本；Agent 仍按各自 pin 的版本引用。</p>
+          <p className={legacy.hintText}>提交后该版本将自动设为当前生效版本；Agent 仍按各自 pin 的版本引用。</p>
         </div>
-        <div className={css.modalFooter}>
-          <div className={css.footerLeft} />
-          <div className={css.footerRight}>
+        <div className={legacy.modalFooter}>
+          <div className={legacy.footerLeft} />
+          <div className={legacy.footerRight}>
             <GlassButton onClick={onClose}>取消</GlassButton>
             <GlassButton variant="primary" onClick={() => onSubmit(label || '手动提交')} disabled={busy}>{busy ? '提交中…' : '提交'}</GlassButton>
           </div>
@@ -556,59 +800,59 @@ function ImportSkillDialog({ onClose, onImported, rpc }: {
   ]
 
   return createPortal(
-    <div className={css.modalOverlay} onClick={onClose}>
-      <div className={css.modalDialog} onClick={e => e.stopPropagation()}>
-        <div className={css.modalHeader}>
-          <span className={css.modalTitle}>导入技能</span>
-          <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
+    <div className={legacy.modalOverlay} onClick={onClose}>
+      <div className={legacy.modalDialog} onClick={e => e.stopPropagation()}>
+        <div className={legacy.modalHeader}>
+          <span className={legacy.modalTitle}>导入技能</span>
+          <button type="button" className={legacy.modalClose} onClick={onClose}><X size={16} /></button>
         </div>
-        <div className={css.modalBody}>
-          <div className={css.transportPills}>
+        <div className={legacy.modalBody}>
+          <div className={legacy.transportPills}>
             {TABS.map(t => (
-              <button key={t.id} type="button" className={`${css.transportPill}${tab === t.id ? ' ' + css.transportPillActive : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
+              <button key={t.id} type="button" className={`${legacy.transportPill}${tab === t.id ? ' ' + legacy.transportPillActive : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
             ))}
           </div>
-          {error && <p className={css.confirmWarn}>{error}</p>}
+          {error && <p className={legacy.confirmWarn}>{error}</p>}
 
           {tab === 'file' && (
-            <div className={css.formGroup}>
-              <label className={css.fieldLabel}>技能目录或 SKILL.md 路径</label>
-              <input className={css.fieldInput} value={filePath} onChange={e => setFilePath(e.target.value)} placeholder="/path/to/skill" />
-              <p className={css.hintText}>需包含有效 frontmatter（name + description）的 SKILL.md。</p>
+            <div className={legacy.formGroup}>
+              <label className={legacy.fieldLabel}>技能目录或 SKILL.md 路径</label>
+              <input className={legacy.fieldInput} value={filePath} onChange={e => setFilePath(e.target.value)} placeholder="/path/to/skill" />
+              <p className={legacy.hintText}>需包含有效 frontmatter（name + description）的 SKILL.md。</p>
             </div>
           )}
 
           {tab === 'text' && (
             <>
-              <div className={css.formGroup}>
-                <label className={css.fieldLabel}>技能名称</label>
-                <input className={css.fieldInput} value={textName} onChange={e => setTextName(e.target.value)} placeholder="my-skill" />
+              <div className={legacy.formGroup}>
+                <label className={legacy.fieldLabel}>技能名称</label>
+                <input className={legacy.fieldInput} value={textName} onChange={e => setTextName(e.target.value)} placeholder="my-skill" />
               </div>
-              <div className={css.formGroup}>
-                <label className={css.fieldLabel}>SKILL.md 内容</label>
-                <textarea className={css.skillEditor} value={textContent} onChange={e => setTextContent(e.target.value)} rows={10} placeholder={'---\nname: my-skill\ndescription: 技能描述\n---\n在此粘贴 markdown 正文…'} />
-                <p className={css.hintText}>frontmatter 必须包含 name 和 description 字段。</p>
+              <div className={legacy.formGroup}>
+                <label className={legacy.fieldLabel}>SKILL.md 内容</label>
+                <textarea className={legacy.skillEditor} value={textContent} onChange={e => setTextContent(e.target.value)} rows={10} placeholder={'---\nname: my-skill\ndescription: 技能描述\n---\n在此粘贴 markdown 正文…'} />
+                <p className={legacy.hintText}>frontmatter 必须包含 name 和 description 字段。</p>
               </div>
             </>
           )}
 
           {tab === 'scan' && (
             <>
-              <div className={css.formGroup}>
-                <label className={css.fieldLabel}>目录路径</label>
-                <div className={css.formCols}>
-                  <input className={css.fieldInput} value={scanDir} onChange={e => setScanDir(e.target.value)} placeholder="/Users/you/my-skills" style={{ flex: 1 }} />
+              <div className={legacy.formGroup}>
+                <label className={legacy.fieldLabel}>目录路径</label>
+                <div className={legacy.formCols}>
+                  <input className={legacy.fieldInput} value={scanDir} onChange={e => setScanDir(e.target.value)} placeholder="/Users/you/my-skills" style={{ flex: 1 }} />
                   <GlassButton onClick={() => void doScan()} disabled={busy || !scanDir}>扫描</GlassButton>
                 </div>
               </div>
               {scanned !== null && (
-                <div className={css.formGroup}>
-                  <label className={css.fieldLabel}>识别到 {scanned.length} 个技能（已存在将跳过）</label>
-                  {scanned.length === 0 && <p className={css.hintText}>该目录下未识别到技能。</p>}
+                <div className={legacy.formGroup}>
+                  <label className={legacy.fieldLabel}>识别到 {scanned.length} 个技能（已存在将跳过）</label>
+                  {scanned.length === 0 && <p className={legacy.hintText}>该目录下未识别到技能。</p>}
                   {scanned.map(s => {
                     const exists = existing.includes(s.name)
                     return (
-                      <label key={s.name} className={css.scanRow}>
+                      <label key={s.name} className={legacy.scanRow}>
                         <input
                           type="checkbox"
                           checked={checked.has(s.name)}
@@ -619,9 +863,9 @@ function ImportSkillDialog({ onClose, onImported, rpc }: {
                             return next
                           })}
                         />
-                        <span className={exists ? css.scanNameDim : css.scanName}>{s.name}</span>
-                        <span className={css.scanDesc}>{s.description}</span>
-                        {exists && <span className={css.scanExists}>已存在</span>}
+                        <span className={exists ? legacy.scanNameDim : legacy.scanName}>{s.name}</span>
+                        <span className={legacy.scanDesc}>{s.description}</span>
+                        {exists && <span className={legacy.scanExists}>已存在</span>}
                       </label>
                     )
                   })}
@@ -630,9 +874,9 @@ function ImportSkillDialog({ onClose, onImported, rpc }: {
             </>
           )}
         </div>
-        <div className={css.modalFooter}>
-          <div className={css.footerLeft} />
-          <div className={css.footerRight}>
+        <div className={legacy.modalFooter}>
+          <div className={legacy.footerLeft} />
+          <div className={legacy.footerRight}>
             <GlassButton onClick={onClose}>取消</GlassButton>
             {tab === 'file' && <GlassButton variant="primary" onClick={() => void importFile()} disabled={busy || !filePath}>{busy ? '导入中…' : '导入'}</GlassButton>}
             {tab === 'text' && <GlassButton variant="primary" onClick={() => void importText()} disabled={busy || !textName || !textContent}>{busy ? '导入中…' : '导入'}</GlassButton>}
