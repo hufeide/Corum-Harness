@@ -13,15 +13,16 @@
  * 自持副本。各 RPC 方法名与参数逐字未动。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ChevronDown, Star, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Download, PackagePlus, Search, Star, Trash2, X } from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { GlassButton, useIntegrationsRpc } from './face.tsx'
 import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentBind, BuiltinSkillImportResult } from './types.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
-import css from './IntegrationsPages.module.css'
+import css from './SkillsPage.module.css'
+import legacy from './IntegrationsPages.module.css'
 
 /* ── 技能 ──────────────────────────────────────────────────────────── */
 
@@ -51,6 +52,13 @@ export function SkillsPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [builtinBusy, setBuiltinBusy] = useState(false)
   const [builtinResult, setBuiltinResult] = useState<BuiltinSkillImportResult | null>(null)
+  const [tab, setTab] = useState<'market' | 'installed'>('market')
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<string>('all')
+  /** 详情面板选中态（null = 默认选第一个）。 */
+  const [selectedName, setSelectedName] = useState<string | null>(null)
+  /** 本地启用态（host 侧暂无启停 RPC，先按纯 UI 态记录）。 */
+  const [disabledSet, setDisabledSet] = useState<Set<string>>(new Set())
 
   const reload = async () => {
     if (!rpc) return

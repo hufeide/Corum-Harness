@@ -1,0 +1,379 @@
+/*
+ * McpPage —— 集成中心 ·「MCP 服务器」页（Metro 磁贴改版）的样式。
+ *
+ * 与 PluginsPage.module.css 的磁贴/详情面板同一套骨架（glass-1 底 + glass-border
+ * 描边 + 圆角 10 + 三种尺寸混排 + 右侧 510px 详情面板），CSS module 不跨包
+ * import（tsdown 跨包 css 子路径 import 会错乱），故在本包自持一份副本。
+ *
+ * token 口径：--corum-glass-1/2/3、--corum-glass-border(-active)、
+ * --dsw-alias-label-*、--dsw-alias-brand-primary/text、--dsw-alias-state-success/
+ * error-primary、--dsw-alias-interactive-bg-hover、--corum-label-on-brand。
+ * 字号乘 --corum-ui-font-scale，间距/圆角乘 --corum-density-scale；图标固定 px。
+ */
+
+/* ── 页面骨架 ─────────────────────────────────────────────────────────────── */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── 页头：标题 + 添加服务器 ───────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+.headerTitle {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+.headerSpacer { flex: 1; }
+
+.addBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  height: 28px;
+  padding: 0 calc(12px * var(--corum-density-scale, 1));
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.addBtn:hover { filter: brightness(1.1); }
+
+/* ── 内容区：左磁贴群（fill）+ 右详情面板（510px 固定宽）────────────────────── */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+.tiles {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+.hintText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
+
+/* ── Metro 磁贴群 ─────────────────────────────────────────────────────────── */
+
+.tileGrid {
+  display: grid;
+  grid-auto-flow: dense;
+  grid-template-columns: repeat(auto-fill, 128px);
+  grid-auto-rows: 128px;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  align-content: start;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-1);
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.tile:hover { background: var(--corum-glass-2); }
+.tileActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border-active);
+}
+
+/* 尺寸：小贴 1×1（默认）/ 宽贴 2×1 / 大贴 2×2。 */
+.tileWide { grid-column: span 2; }
+.tileBig {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+
+/* 大贴（主推/官方 MCP）：品牌色 radial glow。 */
+.tileGlow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 78% 22%,
+    color-mix(in srgb, var(--dsw-alias-brand-primary) 36%, transparent) 0%,
+    transparent 62%);
+}
+
+.tileTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+
+.tileIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dsw-alias-brand-text);
+}
+
+.tileBottom {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.tileNameRow {
+  display: flex;
+  align-items: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.tileName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+}
+.tileBig .tileName, .tileWide .tileName { font-size: calc(14px * var(--corum-ui-font-scale, 1)); }
+
+/* 传输徽章 pill：$glass-3 底，宽度 fit-content 不截断。 */
+.tileVersion {
+  flex: none;
+  padding: 1px calc(8px * var(--corum-density-scale, 1));
+  border-radius: 999px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(9.5px * var(--corum-ui-font-scale, 1));
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.tileSub {
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileDesc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.45;
+}
+
+/* ── 磁贴角标：运行状态点（绿 = 运行中 / 灰 = 已停止）────────────────────────── */
+
+.tileDot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+.tileDotOff { background: var(--dsw-alias-label-dimmed); }
+
+/* ── 右侧详情简介面板 ─────────────────────────────────────────────────────── */
+
+.detail {
+  flex: none;
+  width: 510px;
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  padding: calc(14px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-1);
+  overflow-y: auto;
+}
+
+.detailHero {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 150px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+.detailHero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 72% 30%,
+    color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent) 0%,
+    transparent 60%);
+}
+
+.detailHeroBadge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-brand-text);
+}
+
+.detailName {
+  font-size: calc(17px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.detailSub {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.detailDesc {
+  margin: 0;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.6;
+}
+
+.detailMeta { display: flex; flex-direction: column; gap: calc(5px * var(--corum-density-scale, 1)); }
+
+.detailMetaRow { display: flex; gap: calc(10px * var(--corum-density-scale, 1)); }
+
+.detailMetaKey {
+  flex: none;
+  width: 56px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailMetaValue {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-all;
+}
+
+.detailSpacer { flex: 1; min-height: calc(6px * var(--corum-density-scale, 1)); }
+
+.detailActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+.actionBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  height: 28px;
+  padding: 0 calc(13px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.actionBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.actionBtn:disabled { opacity: .5; cursor: default; }
+
+/* 危险操作（删除服务器）：error 描边 + error 文字。 */
+.actionDanger {
+  border-color: var(--dsw-alias-state-error-primary);
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary);
+}
+.actionDanger:hover { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
+
+/* 详情里的启用开关行（mcpManager/saveServer disabled 翻转）。 */
+.detailSwitchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+}
+
+.detailSwitchLabel {
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 「展开全部/收起」等纯文字小钮（icon + 11px tertiary）。 */
+.sharedPlainBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.sharedPlainBtn:hover { color: var(--dsw-alias-label-secondary); }
