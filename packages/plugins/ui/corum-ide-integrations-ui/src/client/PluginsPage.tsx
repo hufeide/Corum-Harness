@@ -899,6 +899,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     <MosaicWall
       items={tiles}
       blocks={buildMosaic(tiles, { columns, hints })}
+      columns={columns}
       renderTile={renderTile}
     />
   )

@@ -68,7 +68,8 @@ const BLOCK_RETYPE_MAX = 5
  */
 export interface MosaicSlot {
   readonly size: MosaicSize
-  readonly itemIndex: number
+  /** 承载的数据下标；形状计划完成后由算法填写（长名字会与短名字成对交换）。 */
+  itemIndex: number
 }
 
 /** 块内一列：宽度档 + 该列自上而下的贴槽位。 */
@@ -137,6 +138,63 @@ const WIDTHS_6COL = [264, 264, 128, 128] as const
 const WIDTHS_3COL = [264, 264, 264] as const
 
 /**
+ * 3 列模式下的第二种列宽模式：`[128,128,264,264]`（1+1+2+2 单位）。
+ *
+ * 为什么 3 列模式还需要它：**`tall`（竖直矩形 128×264）只能长在 128 宽的列上**，
+ * 而 3 列的唯一合法宽度组合是 `264+264+264`（数学上 2+2+2 是 `6u+5g` 的唯一解）
+ * —— 全是 264 宽的列 ⇒ 3 列下结构上生不出竖直矩形（实测形状分布只有 big/wide）。
+ * 引入这个 4 列模式后，3 列模式也能排出「竖直矩形 + 大正方形」并存的形态。
+ * 宽度校验：128+8+128+8+264+8+264 = 808 = 6u+5g ✓（与 3 列块等宽）
+ */
+const WIDTHS_3COL_TALL = [128, 128, 264, 264] as const
+
+/**
+ * 一个块内的**形状配额**：每种形状各出几张。
+ *
+ * 这是「美观」的第二维——原来只按名字长度决定宽窄（长名给 264 列），结果 264 列
+ * 一律退化成「两条宽贴」，整片墙只剩长方形、大正方形消失（实测 wide:17 / big:1）。
+ * 现在改为**先给每个块定一份形状配方**（大正方形几张、竖直矩形几张、宽贴几张、
+ * 小贴几张），再由位置去消费配额：长名字仍然优先占宽槽，但**形状本身不再由名字
+ * 长度决定**——短名字也会轮到正方形与竖直矩形。
+ */
+export interface BlockShapePlan {
+  /** 大贴（264×264，正方形）。 */
+  readonly big: number
+  /** 宽贴（264×128，横向长方形）。 */
+  readonly wide: number
+  /** 高贴（128×264，竖直矩形）。 */
+  readonly tall: number
+  /** 小贴（128×128）。 */
+  readonly small: number
+}
+
+/**
+ * 为第 `blockIndex` 个块生成形状配方。
+ *
+ * 设计意图（用户 2026-10-01：「不要只按照名字长度来进行，短名字也可以有大正方形、
+ * 竖直的矩形，要增加一个维度，适当调节卡片的排列看上去更加有美感」）：
+ * - **每块至少一张大正方形**（264 块的锚点），保证无论数据怎么排都有正方形；
+ * - **每个 264 块至少一张竖直矩形**（128×264），让「竖着的长方形」稳定出现；
+ * - 其余槽位按一个**轮转配方表**分配，使相邻块的形状组合不同（错落）；
+ * - 配方按块序号轮转（不是随机），故同一份数据每次渲染一致、可复现对账。
+ *
+ * @param blockIndex - 第几个块（0 起）。
+ * @returns 该块的形状配额。
+ */
+export function planBlockShape(blockIndex: number): BlockShapePlan {
+  /* 轮转配方表：四种形态权重不同但每轮都覆盖到，相邻块配方不同 ⇒ 整墙不单调。
+     每行的和 ≈ 一个块的槽位数（264 块 6~7 槽 / 128 块 4~6 槽），多余的配额无害
+     （骨架消费不完就忽略），不足时 264 列自动落到双宽、128 列落到双小。 */
+  const RECIPES: readonly BlockShapePlan[] = [
+    { big: 1, wide: 1, tall: 1, small: 0 },
+    { big: 1, wide: 2, tall: 1, small: 1 },
+    { big: 1, wide: 1, tall: 1, small: 0 },
+    { big: 1, wide: 1, tall: 1, small: 1 },
+  ]
+  return RECIPES[blockIndex % RECIPES.length]!
+}
+
+/**
  * 生成一个高 264 的块的**列骨架**（只决定列宽排列与每列的贴数，不含数据）。
  *
  * 264 宽列可装「一张大贴」或「两条宽贴竖叠」；128 宽列可装「一张高贴」或
@@ -152,46 +210,68 @@ export function buildColSkeleton(
   rng: () => number,
   mode: MosaicColumns = 6,
   pinFirstTwoSmalls = false,
-  preferWide = false,
+  shape: BlockShapePlan = { big: 0, wide: 0, tall: 0, small: 0 },
 ): MosaicCol[] {
-  const base = mode === 3 ? WIDTHS_3COL : WIDTHS_6COL
+  /* 3 列模式用 `[128,128,264,264]`（4 列、6 单位）——它是 3 列模式里唯一**同时**
+     能长出 `tall`（竖直矩形，需 128 列）与容纳入口小贴的形态；纯 `[264,264,264]`
+     三列只能出 big/wide，且首个槽位放不下小贴（264 列最小单元就是一张宽贴）。
+     6 列模式用 `WIDTHS_6COL`。两者块宽恒等（6 单位 + 5 间隙）。 */
+  const base = mode === 3 ? WIDTHS_3COL_TALL : WIDTHS_6COL
   for (let attempt = 0; attempt < BLOCK_RETYPE_MAX; attempt++) {
-    const widths = shuffled(rng, base)
-    /* 入口贴钉在左上角：
-       - 6 列模式：首列改 128 宽、装「两条小贴竖叠」⇒ 入口是那张小贴；
-       - 3 列模式：首列本就是 264 宽，装不下小贴，改钉成「一张宽贴」（264×128）。 */
-    if (pinFirstTwoSmalls) widths[0] = mode === 6 ? 128 : 264
+    const widths = [...shuffled(rng, base)]
+    /* 入口贴钉在左上角。**必须换「同单位」的列，不能直接改首列宽**：
+       块宽恒等式是「单位数 = 6」（128 列 = 1 单位、264 列 = 2 单位）—— 把 2 单位的
+       首列改成 1 单位，整块就少 1 单位（实测钉后列宽 [128,128,128,264] 只剩 672、
+       应为 808）；给 3 列硬塞一个 128 列则会多出列数（实测 [264,264,264,128] 涨到
+       944）。故这里**只对调、不改值**，把首列换成同模式里已存在的 128 列。 */
+    if (pinFirstTwoSmalls) {
+      const j = widths.findIndex(w => w === 128)
+      if (j > 0) { const t = widths[0]!; widths[0] = widths[j]!; widths[j] = t }
+    }
+    // 按配额消耗形状：264 列先拿 big（每块至少一张），再 wide；128 列在 tall / small 间交替。
+    let bigLeft = shape.big
+    let wideLeft = shape.wide
+    let tallLeft = shape.tall
+    let smallLeft = shape.small
     let hasBig = false
-    let allDoubled = true
+    let hasNonDoubled = false
     const cols: MosaicCol[] = widths.map((w, i) => {
       if (w === 264) {
-        if (i === 0 && pinFirstTwoSmalls && mode === 3) return { width: 264, sizes: ['wide'] }
-        /* 还有长名字等着放时，264 列一律产出「两条宽贴」——它给两个 264 宽槽位，
-           而大贴只给一个；此时多出的槽位比视觉变化更重要（长名字优先）。 */
-        if (preferWide) return { width: 264, sizes: ['wide', 'wide'] }
-        if (rng() < 0.5) {
+        /* 264 列可装「一张大贴」（占 1 张、正方形）或「两条宽贴」（占 2 张）。
+           先满足大贴配额（它是视觉锚点），配额用尽再出双宽。 */
+        if (bigLeft > 0) {
+          bigLeft -= 1
           hasBig = true
+          hasNonDoubled = true
           return { width: 264, sizes: ['big'] }
         }
+        wideLeft -= 1
         return { width: 264, sizes: ['wide', 'wide'] }
       }
-      if (rng() < 0.5) {
-        allDoubled = false
+      /* 128 列可装「一张高贴」（竖直矩形）或「两条小贴」。 */
+      if (tallLeft > 0) {
+        tallLeft -= 1
+        hasNonDoubled = true
         return { width: 128, sizes: ['tall'] }
       }
+      smallLeft -= 1
       return { width: 128, sizes: ['small', 'small'] }
     })
-    /* 约束：至少一张大贴（视觉锚点），且至少一个非「双贴」的列。
-       `preferWide` 时整块的 264 列都是「双宽」，本就不该再要求大贴——否则每次尝试
-       都判失败、退到兜底排法（实测会把首个长名字塞回大贴，反而少一个宽槽）。 */
-    if (preferWide) return cols
-    if (hasBig && !allDoubled) return cols
+    /* 约束放宽后的判据：整块至少要有一个「大贴」或「高贴」这类**非竖叠**形状，
+       否则整块全是成对的贴、没有任何形态变化（早期只查 hasBig，导致宽窗下
+       大贴被 preferWide 挤掉后整片都是长方形）。 */
+    if (hasNonDoubled || hasBig) return cols
     if (pinFirstTwoSmalls && mode === 6 && cols.length > 0) {
       cols[0] = { width: 128, sizes: ['small', 'small'] }
     }
   }
+  // 重抽耗尽：退到设计稿首帧的排法（大 | 双宽 | 高 | 双小），保证仍有大正方形。
   return mode === 3
-    ? [{ width: 264, sizes: ['big'] }, { width: 264, sizes: ['wide', 'wide'] }, { width: 264, sizes: ['tall'] }]
+    ? [
+        { width: 264, sizes: ['big'] },
+        { width: 264, sizes: ['wide', 'wide'] },
+        { width: 264, sizes: ['tall'] },
+      ]
     : [
         { width: 264, sizes: ['big'] },
         { width: 264, sizes: ['wide', 'wide'] },
@@ -333,19 +413,20 @@ export function buildMosaic(
   const order = entryPinned ? [0, ...longFirst, ...shortRest] : [...longFirst, ...shortRest]
   let cursor = 0
   const take = (): number => order[cursor++] ?? 0
-  /** 长名是否还没排完（用于决定 264 列优先产出「双宽」还是可给大贴）。 */
-  const longStillQueued = (): boolean => cursor < (entryPinned ? 1 : 0) + longFirst.length
 
   /* ── 逐块生成 ─────────────────────────────────────────────────────────────
      顺序至关重要：**先按剩余额度裁剪列骨架，再给留下的槽位分配数据**。
      反过来（先给整块分配、再裁剪）会让被裁掉的那些列已经 `take()` 走数据下标，
      而 cursor 已越过它们 ⇒ 那些数据被静默丢弃（实测 n=12 只产出 6 个槽位、
-     n=6 只产出 1 个）。这是本算法长期存在的缺陷，与「末块裁剪」无关。 */
-  const buildBlock = (kind: MosaicBlockKind, pin: boolean, room: number): MosaicCol[] => {
-    /* 长名字还没排完 ⇒ 让 264 列优先产出「双宽」（两个宽槽，而不是大贴的一个）。 */
-    const preferWide = longStillQueued()
+     n=6 只产出 1 个）。这是本算法长期存在的缺陷，与「末块裁剪」无关。
+
+     形状**不按名字长度决定**：每块先用 {@link planBlockShape} 取一份形状配方
+     （大正方形 / 竖直矩形 / 宽贴 / 小贴各几张），再由位置消费配额 —— 于是短名字
+     也会轮到正方形与竖直矩形。名字长度只影响「谁先占宽槽」（数据分配顺序），
+     不再决定形状本身。 */
+  const buildBlock = (kind: MosaicBlockKind, pin: boolean, room: number, blockIndex: number): MosaicCol[] => {
     const skeleton = kind === '264'
-      ? buildColSkeleton(rng, mode, pin, preferWide)
+      ? buildColSkeleton(rng, mode, pin, planBlockShape(blockIndex))
       : buildColSkeleton128(rng, mode)
     const kept = trimCols(skeleton, room)
     /* 入口贴先钉进**视觉首列的第一个槽**（左上角）。不能只依赖宽度排序：列是按
@@ -375,7 +456,7 @@ export function buildMosaic(
   }
 
   if (options.pinFirstTwoSmalls === true && count >= 2) {
-    const cols = buildBlock('264', true, count)
+    const cols = buildBlock('264', true, count, 0)
     emit({ kind: '264', cols })
   } else if (count === 1) {
     const itemIndex = take()
@@ -391,7 +472,7 @@ export function buildMosaic(
       }
       if (kind === last) kind = last === '264' ? '128' : '264'
     }
-    const block = { kind, cols: buildBlock(kind, false, count - cursor) }
+    const block = { kind, cols: buildBlock(kind, false, count - cursor, blocks.length) }
     if (emit(block)) continue
     // 连一列都放不下（剩余额度小于任一列的张数）：退化为单张贴窄块收尾。
     const tailKind: MosaicBlockKind = last === '264' ? '128' : '264'

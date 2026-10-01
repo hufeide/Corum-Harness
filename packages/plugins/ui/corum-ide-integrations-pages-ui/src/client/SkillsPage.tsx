@@ -388,6 +388,7 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
           <MosaicWall
             items={tiles}
             blocks={mosaic}
+            columns={columns}
             renderTile={(s, size, index) => {
               /* 尺寸走 data-tile-size，贴必须是列的直接子元素（MosaicWall 不包壳层）。 */
               if (s === null) {

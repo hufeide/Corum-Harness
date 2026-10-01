@@ -42,6 +42,13 @@ export interface MosaicWallProps<T> {
   /** 块序列（`buildMosaic` 的输出）。 */
   readonly blocks: readonly MosaicBlock[]
   /**
+   * 列数模式（与传给 `buildMosaic` 的 `columns` 一致）。
+   *
+   * 必须传：单位宽算式随列数切换（6 列 `(W−5g)/6` / 3 列 `(W−2g)/3`），CSS 靠这个
+   * 属性选式子。不传则 3 列下三列宽和小于块宽、右缘留白（实测 522 vs 538）。
+   */
+  readonly columns?: MosaicColumns
+  /**
    * 渲染单张贴。
    * @param item - 对应位置的数据。
    * @param size - 该位置应使用的尺寸档（已由算法决定，消费方按它调字号/图标）。
@@ -56,9 +63,9 @@ export interface MosaicWallProps<T> {
  * @param props - 见 {@link MosaicWallProps}。
  * @returns 磁贴墙元素。
  */
-export function MosaicWall<T>({ items, blocks, renderTile }: MosaicWallProps<T>): ReactNode {
+export function MosaicWall<T>({ items, blocks, columns = 6, renderTile }: MosaicWallProps<T>): ReactNode {
   return (
-    <div className={css.tileGrid}>
+    <div className={css.tileGrid} data-mosaic-columns={columns}>
       {blocks.map((block, bi) => (
         <div key={`block:${bi}`} className={css.mosaicBlock} data-mosaic-block={block.kind}>
           {block.cols.map((col, ci) => (
