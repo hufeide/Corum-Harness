@@ -332,31 +332,36 @@ export function buildMosaic(
   let cursor = 0
   const take = (): number => queue[cursor++] ?? 0
 
-  /* ── 逐块生成：先定列骨架，再把槽位按「宽槽优先给长名」填数据 ───────────── */
-  const buildBlock = (kind: MosaicBlockKind, pin: boolean): MosaicCol[] => {
+  /* ── 逐块生成 ─────────────────────────────────────────────────────────────
+     顺序至关重要：**先按剩余额度裁剪列骨架，再给留下的槽位分配数据**。
+     反过来（先给整块分配、再裁剪）会让被裁掉的那些列已经 `take()` 走数据下标，
+     而 cursor 已越过它们 ⇒ 那些数据被静默丢弃（实测 n=12 只产出 6 个槽位、
+     n=6 只产出 1 个）。这是本算法长期存在的缺陷，与「末块裁剪」无关。 */
+  const buildBlock = (kind: MosaicBlockKind, pin: boolean, room: number): MosaicCol[] => {
     /* 长名字还没排完 ⇒ 让 264 列优先产出「双宽」（两个宽槽，而不是大贴的一个）。 */
     const preferWide = cursor < longFirst.length
-    const cols = kind === '264'
+    const skeleton = kind === '264'
       ? buildColSkeleton(rng, mode, pin, preferWide)
       : buildColSkeleton128(rng, mode)
+    const kept = trimCols(skeleton, room)
     // 264 宽的列先填（长名字优先），128 宽的列后填。
-    const ordered = [...cols].sort((a, b) => b.width - a.width)
+    const ordered = [...kept].sort((a, b) => b.width - a.width)
     for (const col of ordered) {
       col.slots = col.sizes.map(size => ({ size, itemIndex: take() }))
     }
-    return cols
+    return kept
   }
 
-  const colsToBlock = (kind: MosaicBlockKind, cols: MosaicCol[]): MosaicBlock => ({ kind, cols })
+  /** 收一个块：列已按额度裁好，此处只做登记。 */
   const emit = (block: MosaicBlock): boolean => {
-    const kept = trimCols(block.cols, count - cursor)
-    if (kept.length === 0) return false
-    blocks.push({ kind: block.kind, cols: kept })
+    if (block.cols.length === 0) return false
+    blocks.push(block)
     return true
   }
 
   if (options.pinFirstTwoSmalls === true && count >= 2) {
-    emit(colsToBlock('264', buildBlock('264', true)))
+    const cols = buildBlock('264', true, count)
+    emit({ kind: '264', cols })
   } else if (count === 1) {
     const itemIndex = take()
     emit({ kind: '128', cols: [{ width: 128, sizes: ['small'], slots: [{ size: 'small', itemIndex }] }] })
@@ -371,16 +376,15 @@ export function buildMosaic(
       }
       if (kind === last) kind = last === '264' ? '128' : '264'
     }
-    const before = cursor
-    const block = colsToBlock(kind, buildBlock(kind, false))
+    const block = { kind, cols: buildBlock(kind, false, count - cursor) }
     if (emit(block)) continue
-    // 整块与裁剪都放不下：退回该块已取走的下标，改发单张贴窄块收尾。
-    cursor = before
+    // 连一列都放不下（剩余额度小于任一列的张数）：退化为单张贴窄块收尾。
     const tailKind: MosaicBlockKind = last === '264' ? '128' : '264'
     const itemIndex = take()
+    const tailSize: MosaicSize = tailKind === '264' ? 'tall' : 'small'
     emit({
       kind: tailKind,
-      cols: [{ width: 128, sizes: [tailKind === '264' ? 'tall' : 'small'], slots: [{ size: tailKind === '264' ? 'tall' : 'small', itemIndex }] }],
+      cols: [{ width: 128, sizes: [tailSize], slots: [{ size: tailSize, itemIndex }] }],
     })
   }
   return blocks
