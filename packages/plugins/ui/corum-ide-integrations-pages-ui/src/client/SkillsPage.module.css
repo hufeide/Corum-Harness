@@ -150,10 +150,10 @@
   gap: calc(16px * var(--corum-density-scale, 1));
 }
 
-/* 磁贴群：纵向 flex gap 8，第一项是节头。宽度 = 稿里的 808 内容基准（VNH3k
-   `磁贴群`：6×128 + 5×8，恰好 6 列小贴）。纵向滚动条会再吃掉一条槽宽、把网格
-   挤成 5 列 ⇒ scrollbar-gutter 把槽预留在 808 之外（816 = 808 内容 + 8 滚动槽）；
-   窗口装不下时按比例收缩，余量给右侧详情。 */
+/* 磁贴群：纵向 flex gap 8，第一项是节头。基准 816 = 808 内容 + 8 滚动槽
+   （808 = 6×128 + 5×8），但它是**首选宽而非固定宽**：窗口变窄时本列先收缩，
+   由共享排布样式（mosaic.module.css）的流体单位把整面墙等比缩小——始终 6 列、
+   零空洞；`scrollbar-gutter` 把滚动槽预留在内容之外，免得网格被挤掉一列。 */
 .tiles {
   flex: 0 1 calc(816px * var(--corum-density-scale, 1));
   max-width: 100%;
@@ -178,10 +178,12 @@
 /* ── 右侧详情简介面板：面板自身无 padding，内边距由 body 承担 ───────────────── */
 
 .detail {
-  /* 详情简介 = fill_container（画稿宽度由磁贴群 808 与间隙反推，实测 ≈508，
-     与稿标 510 同口径）；面板自身无 padding，内边距由 body 承担。 */
+  /* 详情简介 = fill_container（宽窗下宽度由磁贴群 816 与间隙反推）；面板自身
+     无 padding，内边距由 body 承担。`min-width: 320px` 是**可读性保底**：窗口
+     窄到磁贴群与详情无法兼顾时，磁贴群继续按流体单位缩小（始终 6 列），详情
+     不再被压到几十像素。 */
   flex: 1;
-  min-width: 0;
+  min-width: calc(320px * var(--corum-density-scale, 1));
   display: flex;
   flex-direction: column;
   box-sizing: border-box;

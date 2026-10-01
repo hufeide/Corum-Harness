@@ -18,43 +18,62 @@
 /* ── 磁贴群：块行纵向堆叠 ─────────────────────────────────────────────────── */
 
 .tileGrid {
+  /* 响应式流体基准（本元素的 inline-size 作为查询容器，故 `100cqw` = 本元素内容宽）。
+     整套排布是**正方形单位网格**：264 = 2×128 + 8、块恒为 6 单位 + 5 间隙，
+     故一个单位宽算出来后，列宽与块高都能精确表达（见下）。
+     窄窗（默认窗口 1280 / 最小 1219）时单位随之缩小 ⇒ 始终 6 列、零空洞、
+     不被截断；宽窗封顶在稿里的 128 ⇒ 排布与设计稿逐像素一致。 */
+  container-type: inline-size;
+  --mosaic-gap: calc(8px * var(--corum-density-scale, 1));
+  --mosaic-unit: min(
+    calc(128px * var(--corum-density-scale, 1)),
+    calc((100cqw - 5 * var(--mosaic-gap)) / 6)
+  );
+
   display: flex;
   flex-direction: column;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: var(--mosaic-gap);
   align-content: start;
   min-width: 0;
 }
 
 /* ── 块行：横向 flex，各列等高 ─────────────────────────────────────────────
-   `width: 100%` 是必需的：列宽走固定宽度（见下），若本行不撑满容器，列会按
+   `width: 100%` 是必需的：列宽走单位宽（见下），若本行不撑满容器，列会按
    自身宽度收缩、整块右侧留白；早期副本漏了这条，列被 `flex: N 1 0` 拉到
-   808 宽（贴被拉成整行）——列宽改为固定宽度 + 本行撑满后不再互相争抢。 */
+   808 宽（贴被拉成整行）——列宽改为单位宽 + 本行撑满后不再互相争抢。 */
 .mosaicBlock {
   display: flex;
   align-items: stretch;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: var(--mosaic-gap);
   width: 100%;
   min-width: 0;
 }
 
-.mosaicBlock[data-mosaic-block='264'] { height: calc(264px * var(--corum-density-scale, 1)); }
-.mosaicBlock[data-mosaic-block='128'] { height: calc(128px * var(--corum-density-scale, 1)); }
+/* 块高：264 块 = 2 单位 + 1 间隙（与 264 = 2×128+8 同构）；128 块 = 1 单位。 */
+.mosaicBlock[data-mosaic-block='264'] {
+  height: calc(2 * var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1))) + var(--mosaic-gap));
+}
+.mosaicBlock[data-mosaic-block='128'] {
+  height: var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1)));
+}
 
 /* ── 列：纵向 flex；宽度由 data-col 决定 ───────────────────────────────────
-   列宽必须写死而不是 flex 比例：264 列的语义是「能装一张大贴或两条宽贴」，
-   若用 flex-grow 分配，窗口越宽列越宽、贴也被拉长成条状（不再是磁贴）。
-   128 列 = 264 列的窄档（128+8+128 = 264，纵向容量与 264 列相同）。 */
+   列宽必须是**单位宽的整数倍**而不是 flex 比例：264 列的语义是「能装一张大贴
+   或两条宽贴」，若用 flex-grow 分配，窗口越宽列越宽、贴被拉成条状（不再是磁贴）。
+   128 列 = 1 单位，264 列 = 2 单位 + 1 间隙（128+8+128 = 264，纵向容量相同）。 */
 .mosaicCol {
   display: flex;
   flex-direction: column;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: var(--mosaic-gap);
   min-width: 0;
   min-height: 0;
   flex: none;
-  width: calc(128px * var(--corum-density-scale, 1));
+  width: var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1)));
 }
 
-.mosaicCol[data-col='264'] { width: calc(264px * var(--corum-density-scale, 1)); }
+.mosaicCol[data-col='264'] {
+  width: calc(2 * var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1))) + var(--mosaic-gap));
+}
 
 /* 列内贴：撑满列宽；纵向按尺寸档分配列高。 */
 .mosaicCol > * {
@@ -76,7 +95,13 @@
   justify-content: space-between;
   overflow: hidden;
   box-sizing: border-box;
-  padding: calc(12px * var(--corum-density-scale, 1));
+  /* 内边距随单位宽一起收（稿里 12px 是按 128 基准定的）：缩到 83px 时那 24px
+     上下内边距会占掉近三成高度，是底部被裁的主因。宽窗封顶 12、窄窗压到 8。 */
+  padding: clamp(
+    calc(8px * var(--corum-density-scale, 1)),
+    calc(var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1))) * 0.09),
+    calc(12px * var(--corum-density-scale, 1))
+  );
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   background: var(--tile-tint, var(--corum-glass-1));
@@ -293,14 +318,71 @@
 
 /* ── 最热门热排（196×120 ×4，只在插件市场用）────────────────────────────── */
 
+/* 热排是 4 张等宽贴 + 3 个间隙；与磁贴群用同一套单位口径：
+   196 = 264 − 2×128/…… 不成立，故热排不按单位推，而是**按容器等分**
+   （每张 =(100% − 3×间隙)/4）。窄窗下与磁贴群同步收缩、不留溢出。 */
 .hotRow {
   display: flex;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: var(--mosaic-gap, calc(8px * var(--corum-density-scale, 1)));
   min-width: 0;
 }
 
 .hotRow > * {
   flex: 1 1 0;
   min-width: 0;
-  min-height: calc(120px * var(--corum-density-scale, 1));
+  height: calc(120px * var(--corum-density-scale, 1));
+}
+
+/*
+ * 窄窗适配：磁贴自身是尺寸查询容器。窗口变窄时整面墙按单位宽等比缩小，但**文字
+ * 不跟着缩**（缩字会伤可读性），于是小贴会先装不下：实测 1280 窗口下小贴被缩到
+ * 83×83，而「图标行 + 两行名称 + 版本徽章 + 作者小字」需约 99px，底部被裁。
+ * 按重要性依次让位（名称 > 作者 > 版本）：
+ *   ① 名称收单行（保住主标识，仍有 ellipsis）；
+ *   ② 再小则隐去版本徽章（版本在右侧详情面板里始终可见）。
+ * 宽窗（单位 128 或更大）两条都不触发，保持设计稿的两行外观与完整信息。
+ *
+ * 容器**不留 container-name**：CSS module 会给名字加哈希前缀，而 `@container`
+ * 查询里的名字是字面量、不参与哈希 ⇒ 具名查询永远匹配不上。匿名查询取最近的
+ * 容器，正是这里的 .tile。
+ */
+.tile {
+  container-type: size;
+}
+
+@container (max-height: 180px) {
+  .tileName {
+    -webkit-line-clamp: 1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    /* 单行时行高也收回一行：原 `min-height: 2×1.3em` 是为「两行不跳动」留的，
+       窄窗下那 31px 会把底部的作者小字顶出贴外。 */
+    min-height: calc(1.3em);
+  }
+}
+
+@container (max-height: 170px) {
+  .tileVersion { display: none; }
+}
+
+/* 大贴（2 单位）缩放后同样会装不下三行描述：1280 窗口下它是 174×174、最小窗
+   1219 下 154×154，装得下图标 + 单行名称 + 版本 + 作者，但三行描述会溢出。
+   描述在详情面板里有完整一份，这里收到一行；宽窗（264 基准）不触发。 */
+@container (max-height: 200px) {
+  .tileDesc { -webkit-line-clamp: 2; }
+}
+
+@container (max-height: 175px) {
+  .tileDesc { -webkit-line-clamp: 1; }
+}
+
+/* 最后一段：最小窗口（1219）下小贴被缩到 73px，而图标是 TSX 给的固定 24px
+   （不随单位缩）⇒ 图标 + 单行名称 + 作者仍差几像素装不下。此时把图标压到 16px。
+   图标尺寸本身与「界面字号」设置无关（同族插件都固定像素），故这里只按容器
+   高度收，不参与 --corum-ui-font-scale。 */
+@container (max-height: 85px) {
+  .tileIcon svg {
+    width: 16px;
+    height: 16px;
+  }
 }
