@@ -25,4 +25,10 @@ export { ConfirmDialog } from './ConfirmDialog.tsx'
 export type { ConfirmDialogProps } from './ConfirmDialog.tsx'
 export { ThemePresenter, DARK_ATTRIBUTE } from './theme-presenter.ts'
 export * from './grid.ts'
+// 集成中心磁贴墙：排布算法（mosaic.ts）+ 组件与共享样式（MosaicWall.tsx）。
+// 三个内容页（插件 / MCP / 技能）共用这一份——收敛前它们各持副本且已分叉。
+export { buildMosaic, buildBlock264, buildBlock128, flattenMosaic, MOSAIC_SEED } from './mosaic.ts'
+export type { MosaicSize, MosaicBlock, MosaicCol, MosaicBlockKind, MosaicOptions } from './mosaic.ts'
+export { MosaicWall, mosaicStyles, mosaicTileClass, mosaicTileAttrs } from './MosaicWall.tsx'
+export type { MosaicWallProps, MosaicTileProps, MosaicTint, MosaicStyleSheet } from './MosaicWall.tsx'
 import './base-theme.css'

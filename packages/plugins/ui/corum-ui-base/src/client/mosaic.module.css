@@ -1,0 +1,306 @@
+/*
+ * 磁贴墙排布样式（Mosaic）—— 集成中心三个内容页（插件 / MCP / 技能）共用。
+ * 与 `mosaic.ts` 是一对：那个决定「哪一块哪一列放哪一档尺寸」，这里负责把
+ * 几何真正落到像素上。**这是排布样式的单一事实源**（三个页面不再各持副本）。
+ *
+ * 几何口径（design.pen 四帧逐帧读实）：
+ *   块内容宽 = 808（= 磁贴群宽）：264+8+264+8+128+8+128，也是 128×6+8×5。
+ *   块高两档：264 块 / 128 块。
+ *   列宽两档：264 / 128；列内贴纵向排、gap 8。
+ *
+ * 尺寸档靠 `data-tile-size` 属性选择器（不是类名）：尺寸与块型是同一份算法的
+ * 两个输出，属性让 DOM 自带可断言口径（验收时直接读 data 属性）。
+ *
+ * 密度缩放（--corum-density-scale）与字号缩放（--corum-ui-font-scale）全仓统一；
+ * 磁贴内的字号乘字号缩放，间距/圆角/尺寸乘密度缩放。
+ */
+
+/* ── 磁贴群：块行纵向堆叠 ─────────────────────────────────────────────────── */
+
+.tileGrid {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  align-content: start;
+  min-width: 0;
+}
+
+/* ── 块行：横向 flex，各列等高 ─────────────────────────────────────────────
+   `width: 100%` 是必需的：列宽走固定宽度（见下），若本行不撑满容器，列会按
+   自身宽度收缩、整块右侧留白；早期副本漏了这条，列被 `flex: N 1 0` 拉到
+   808 宽（贴被拉成整行）——列宽改为固定宽度 + 本行撑满后不再互相争抢。 */
+.mosaicBlock {
+  display: flex;
+  align-items: stretch;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: 100%;
+  min-width: 0;
+}
+
+.mosaicBlock[data-mosaic-block='264'] { height: calc(264px * var(--corum-density-scale, 1)); }
+.mosaicBlock[data-mosaic-block='128'] { height: calc(128px * var(--corum-density-scale, 1)); }
+
+/* ── 列：纵向 flex；宽度由 data-col 决定 ───────────────────────────────────
+   列宽必须写死而不是 flex 比例：264 列的语义是「能装一张大贴或两条宽贴」，
+   若用 flex-grow 分配，窗口越宽列越宽、贴也被拉长成条状（不再是磁贴）。
+   128 列 = 264 列的窄档（128+8+128 = 264，纵向容量与 264 列相同）。 */
+.mosaicCol {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  min-height: 0;
+  flex: none;
+  width: calc(128px * var(--corum-density-scale, 1));
+}
+
+.mosaicCol[data-col='264'] { width: calc(264px * var(--corum-density-scale, 1)); }
+
+/* 列内贴：撑满列宽；纵向按尺寸档分配列高。 */
+.mosaicCol > * {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* 大贴 / 高贴独占整列（`auto` 基准让它们按内容与列高取大者，实际等同撑满）。 */
+.mosaicCol > [data-tile-size='big'],
+.mosaicCol > [data-tile-size='tall'] { flex: 1 1 auto; }
+
+/* ── 磁贴本体 ───────────────────────────────────────────────────────────── */
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--tile-tint, var(--corum-glass-1));
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+
+.tile:hover { border-color: var(--corum-glass-border-active); }
+.tile:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+
+/* 四档语义底色（design.pen 磁贴 fill，写死 hex 的四色）。带 alpha ⇒ 叠浅色底
+   自然变浅、叠深色底保持霓虹，深浅共用一组值，无需主题分叉。 */
+.tileTintViolet { --tile-tint: var(--corum-tile-violet, var(--corum-glass-1)); }
+.tileTintDeep { --tile-tint: var(--corum-tile-deep, var(--corum-glass-1)); }
+.tileTintSlate { --tile-tint: var(--corum-tile-slate, var(--corum-glass-1)); }
+.tileTintMauve { --tile-tint: var(--corum-tile-mauve, var(--corum-glass-1)); }
+
+/* 选中态：抬高一层玻璃 + 激活描边。 */
+.tileActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border-active);
+}
+
+/* 大贴的品牌色 glow（design.pen 大贴内的 radial ellipse）。 */
+.tile[data-tile-size='big']::before,
+.tileGlow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 78% 22%,
+    color-mix(in srgb, var(--dsw-alias-brand-primary) 36%, transparent) 0%,
+    transparent 62%);
+}
+
+/* ── 磁贴内部分区 ───────────────────────────────────────────────────────── */
+
+.tileTop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+
+.tileIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dsw-alias-brand-text);
+}
+
+/* 角标（热度 / 状态点 / 开关）绝对定位于右上角，不参与文档流 ⇒ 不挤压图标。 */
+.tileCorner {
+  position: absolute;
+  top: calc(10px * var(--corum-density-scale, 1));
+  right: calc(10px * var(--corum-density-scale, 1));
+  display: inline-flex;
+  align-items: center;
+  gap: calc(3px * var(--corum-density-scale, 1));
+}
+
+.tileBottom {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+/* 名称与版本徽章**纵向**排（不是并排）：并排时窄贴（128）里名称会被徽章挤到
+   只剩一两个字（实测 12/18 张被截断、极端情况只剩「d.」）。纵向后名称独享
+   整行宽、可换行到两行，徽章另起一行。 */
+.tileNameRow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  min-width: 0;
+  width: 100%;
+}
+
+.tileName {
+  width: 100%;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  line-height: 1.3;
+  /* 固定两行行高：内容长短不一（占位贴只有「添加」）时磁贴内文字块不跳动。 */
+  min-height: calc(2 * 1.3em);
+}
+
+.tile[data-tile-size='big'] .tileName { font-size: calc(15px * var(--corum-ui-font-scale, 1)); }
+
+.tileVersion {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: calc(16px * var(--corum-density-scale, 1));
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(9px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.tileSub {
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileDesc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.4;
+}
+
+/* ── 磁贴角标：状态点 / 启停开关 ─────────────────────────────────────────── */
+
+.tileDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.tileDotOff { background: var(--dsw-alias-label-dimmed); }
+
+.tileSwitch {
+  flex: none;
+  position: relative;
+  width: calc(32px * var(--corum-density-scale, 1));
+  height: calc(18px * var(--corum-density-scale, 1));
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+  transition: background .15s;
+}
+
+.tileSwitch[data-off] {
+  background: var(--corum-glass-3);
+  border-color: var(--corum-glass-border);
+}
+
+.tileSwitch:disabled { opacity: .5; cursor: default; }
+
+.tileSwitchKnob {
+  position: absolute;
+  top: 2px;
+  left: 14px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--corum-label-on-brand);
+  transition: left .15s;
+}
+
+.tileSwitch[data-off] .tileSwitchKnob {
+  left: 2px;
+  background: var(--dsw-alias-label-dimmed);
+}
+
+/* ── 占位空卡（无数据时的虚线占位，保留设计稿的「即将上线」形态）────────── */
+
+.tilePlaceholder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: calc(12px * var(--corum-density-scale, 1));
+  border: 1px dashed var(--corum-glass-border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-dimmed);
+  cursor: default;
+}
+
+.tilePlaceholderIcon {
+  display: inline-flex;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.tilePlaceholderText {
+  margin: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* ── 最热门热排（196×120 ×4，只在插件市场用）────────────────────────────── */
+
+.hotRow {
+  display: flex;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.hotRow > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: calc(120px * var(--corum-density-scale, 1));
+}

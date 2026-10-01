@@ -35,6 +35,10 @@ import { useIntegrationsRpc } from './face.tsx'
 import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentBind, BuiltinSkillImportResult } from './types.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import type { LucideIcon } from 'lucide-react'
+import {
+  buildMosaic, MosaicWall, mosaicStyles, mosaicTileClass,
+} from '@corum/corum-ui-base/client'
+import type { MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
 import css from './SkillsPage.module.css'
 import shared from './IntegrationsPages.module.css'
 
@@ -207,190 +211,17 @@ function skillIconOf(name: string): LucideIcon {
   return Sparkles
 }
 
-/* ── 磁贴马赛克：固定种子伪随机「块生成器」 ─────────────────────────────
- *
- * design.pen（bFLLQ / VNH3k）的磁贴群不是 CSS grid，而是**等宽 808 的块上下堆叠**：
- * 块内是一行 flex（列），各列等高，列宽只有 264 / 128 两种。
- *   高 264 块 · 四列 [264,264,128,128] 的某个排列
- *     264+8+264+8+128+8+128 = 808
- *     264 宽列 = 大贴 big (264×264)，或两条宽贴 wide×2 (264×128 ×2)
- *     128 宽列 = 高贴 tall (128×264)，或两条小贴 small×2 (128×128 ×2)
- *   高 128 块 · 三种宽度模式：
- *     [128×6]          768 + 5×8 = 808
- *     [264,128×4]      776 + 4×8 = 808
- *     [264,264,128×2]  784 + 3×8 = 808
- * 旧的 `grid-auto-flow: dense` + 6 拍序号循环把每块排得一模一样，且大贴跨行时
- * 自动放置填不满（实测空洞率 6.3%）——正是「多了以后没有设计感」的根因。
- * 改为逐块抽型：固定种子 ⇒ 每次渲染完全一致、可复现对账。
- */
+/* ── 磁贴 tint 档：按分类给底色（design.pen VNH3k 的四档真实色值 token）────── */
 
-/** 固定种子：换这个值即换一套排布；同一次运行内恒定。 */
-const MOSAIC_SEED = 0x5A17
-
-/** mulberry32：32 位定种子 PRNG（同种子恒定序列，无外部依赖）。 */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6D2B79F5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/** 磁贴四档尺寸（由列宽与块高共同决定，见上方几何推导）。 */
-type MosaicSize = 'big' | 'wide' | 'tall' | 'small'
-
-/** 生成期的列：列宽 + 列内自上而下 1~2 张贴的尺寸。 */
-interface MosaicColSpec {
-  width: 264 | 128
-  sizes: MosaicSize[]
-}
-
-/** 渲染期的列：贴带上全片序号（0 号恒为「添加」磁贴）。 */
-interface MosaicCol {
-  width: 264 | 128
-  tiles: Array<{ size: MosaicSize; index: number }>
-}
-
-/** 一个块：块型 = 块高（264 / 128）；列宽加和恒 808（末块截断除外）。 */
-interface MosaicBlock {
-  kind: '264' | '128'
-  cols: MosaicCol[]
-}
-
-/** Fisher–Yates 洗牌（用同一 PRNG，结果可复现）。 */
-function shuffleMosaic<T>(list: T[], rand: () => number): T[] {
-  const out = list.slice()
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rand() * (i + 1))
-    const tmp = out[i]!
-    out[i] = out[j]!
-    out[j] = tmp
-  }
-  return out
-}
-
-/**
- * 高 264 块的四列：宽度恒为 [264,264,128,128] 的某个排列
- * （264+8+264+8+128+8+128 = 808）；
- *   264 宽列随机 big（1 张 264×264）或 wide×2（2 张 264×128），**至少一个 big**；
- *   128 宽列随机 tall（1 张 128×264）或 small×2（2 张 128×128）。
- * pinnedFirst：首块把第一列钉成 128 宽两小贴竖叠（128×128 ×2 = 264 高），
- * 这样 0 号「添加」磁贴恰以 small 尺寸落在左上角（264 宽的列装不下方贴）。
- */
-function cols264(rand: () => number, pinnedFirst: boolean): MosaicColSpec[] {
-  const widths: Array<264 | 128> = pinnedFirst
-    ? [128, ...shuffleMosaic<264 | 128>([264, 264, 128], rand)]
-    : shuffleMosaic<264 | 128>([264, 264, 128, 128], rand)
-  const bigAt = Math.floor(rand() * 2)
-  let seen264 = 0
-  return widths.map((width, i) => {
-    if (width === 264) {
-      const isBig = seen264 === bigAt
-      seen264 += 1
-      const sizes: MosaicSize[] = isBig ? ['big'] : ['wide', 'wide']
-      return { width, sizes }
-    }
-    if (pinnedFirst && i === 0) return { width, sizes: ['small', 'small'] }
-    const sizes: MosaicSize[] = rand() < 0.5 ? ['tall'] : ['small', 'small']
-    return { width, sizes }
-  })
-}
-
-/** 高 128 块：三种宽度模式随机取一（加和恒 808），264 宽列位置洗牌。 */
-function cols128(rand: () => number): MosaicColSpec[] {
-  const mode = Math.floor(rand() * 3)
-  const widths: Array<264 | 128> = mode === 0
-    ? [128, 128, 128, 128, 128, 128]
-    : mode === 1
-      ? shuffleMosaic<264 | 128>([264, 128, 128, 128, 128], rand)
-      : shuffleMosaic<264 | 128>([264, 264, 128, 128], rand)
-  return widths.map(width => ({ width, sizes: [width === 264 ? 'wide' : 'small'] }))
-}
-
-/** 收下一块的列：装不下的那一列连同其后所有列一并丢弃（不留空占位）。 */
-function keepCols(cols: MosaicColSpec[], room: number): MosaicColSpec[] {
-  const kept: MosaicColSpec[] = []
-  let left = room
-  for (const col of cols) {
-    if (left < col.sizes.length) break
-    kept.push(col)
-    left -= col.sizes.length
-  }
-  return kept
-}
-
-/**
- * 生成整片磁贴群（贴数 = 数据条数 + 1，索引 0 恒为「添加」磁贴）：
- *  - 首块恒为高 264 块（设计稿 row1），首列钉成 128 宽两小贴 —— 这样「添加」磁贴
- *    恰以 small 尺寸落在左上角（264 宽的列装不下 128×128 的方贴）；
- *  - 之后逐块抽型，**相邻两块必须不同型**（同型重抽）；块型只有两种取值，
- *    故等价于交替出现而每块的内部排布仍逐块随机；
- *  - 末块装不满时丢掉多余的列；只剩 1 张贴而首列要 2 张时换单张贴列型。
- */
-function buildMosaic(count: number): MosaicBlock[] {
-  const rand = mulberry32(MOSAIC_SEED)
-  const specs: Array<{ kind: '264' | '128'; cols: MosaicColSpec[] }> = []
-  let left = count
-
-  /** 入块成功返回 true；首列就装不下则整块丢弃（返回 false）。 */
-  const emit = (kind: '264' | '128', cols: MosaicColSpec[]): boolean => {
-    const kept = keepCols(cols, left)
-    if (kept.length === 0) return false
-    specs.push({ kind, cols: kept })
-    left -= kept.reduce((n, col) => n + col.sizes.length, 0)
-    return true
-  }
-
-  if (count === 1) {
-    // 只有「添加」磁贴：单列一张小贴（128 高块），不留空洞。
-    emit('128', [{ width: 128, sizes: ['small'] }])
-  } else if (count > 1) {
-    // 首块恒为高 264 块（设计稿 row1），且首列钉死为「添加」+ 第一张数据贴。
-    emit('264', cols264(rand, true))
-  }
-
-  while (left > 0) {
-    let kind: '264' | '128' = rand() < 0.5 ? '264' : '128'
-    const last = specs.length === 0 ? null : specs[specs.length - 1]!.kind
-    if (last !== null) {
-      while (kind === last) kind = rand() < 0.5 ? '264' : '128'   // 同型重抽
-    }
-    if (!emit(kind, kind === '264' ? cols264(rand, false) : cols128(rand))) {
-      // 剩余贴数装不下整块：退化为单张贴的窄块，不产生空占位。
-      emit(kind, [{ width: 128, sizes: [kind === '264' ? 'tall' : 'small'] }])
-    }
-  }
-
-  // 编号：块 → 列 → 列内自上而下；0 号是「添加」磁贴。
-  let index = 0
-  return specs.map(spec => ({
-    kind: spec.kind,
-    cols: spec.cols.map(col => ({
-      width: col.width,
-      tiles: col.sizes.map((size) => {
-        const tile = { size, index }
-        index += 1
-        return tile
-      }),
-    })),
-  }))
-}
-
-/**
- * 磁贴 tint 档：按分类给底色（design.pen VNH3k 的四档真实色值 token）。
- */
-function skillTintClassOf(s: SkillInfo, size: MosaicSize): string {
-  if (size === 'big') return css.tintDeep
-  if (size === 'wide') return css.tintMauve
-  if (size === 'tall') return css.tintSlate
+function skillTintOf(s: SkillInfo, size: MosaicSize): MosaicTint {
+  if (size === 'big') return 'deep'
+  if (size === 'wide') return 'mauve'
+  if (size === 'tall') return 'slate'
   const cat = categoryOf(s.name, s.description ?? '')
-  if (cat === 'verify') return css.tintViolet
-  if (cat === 'code') return css.tintMauve
-  if (cat === 'deploy') return css.tintViolet
-  return css.tintSlate
+  if (cat === 'verify') return 'violet'
+  if (cat === 'code') return 'mauve'
+  if (cat === 'deploy') return 'violet'
+  return 'slate'
 }
 
 /**
@@ -450,10 +281,16 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
   }, [skills, query, category])
 
   /**
-   * 磁贴马赛克块（「添加」磁贴 + 过滤后的技能序列）。
-   * 种子固定 ⇒ 同一份数据每次渲染排布完全一致；过滤/搜索改变条数时才会重排。
+   * 磁贴序列（0 号恒为「添加」入口贴，`null` 作哨兵）+ 排布块。
+   * 排布算法与几何都来自 `@corum/corum-ui-base/client`：固定种子 ⇒ 同一份数据
+   * 每次渲染完全一致，过滤/搜索改变条数时才会重排；`pinFirstTwoSmalls` 把入口贴
+   * 钉在左上角且为 small。
    */
-  const mosaic = useMemo(() => buildMosaic(1 + pool.length), [pool])
+  const tiles = useMemo<Array<SkillInfo | null>>(() => [null, ...pool], [pool])
+  const mosaic = useMemo(
+    () => buildMosaic(tiles.length, { pinFirstTwoSmalls: true }),
+    [tiles],
+  )
 
   return (
     <div className={css.page}>
@@ -502,87 +339,79 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
           <span className={css.sectionHead}>技能 SKILL</span>
           {error !== null && <p className={css.hintText}>加载失败：{error}</p>}
           {skills === null && error === null && <p className={css.hintText}>加载中…</p>}
-          <div className={css.tileGrid}>
-            {mosaic.map((block, bi) => (
-              <div key={bi} className={css.mosaicBlock} data-mosaic-block={block.kind}>
-                {block.cols.map((col, ci) => (
-                  <div key={ci} className={`${css.mosaicCol} ${col.width === 264 ? css.mosaicCol264 : css.mosaicCol128}`}>
-                    {col.tiles.map(({ size, index }) => {
-                      /* 尺寸样式走 data-tile-size 属性选择器（见 .module.css），无需尺寸类名。 */
-                      /* 0 号恒为「添加」磁贴（块生成器把首列钉成两小贴竖叠 ⇒ 它必在左上角）。 */
-                      if (index === 0) {
-                        return (
-                          <button
-                            key="add"
-                            type="button"
-                            data-tile-size={size}
-                            className={`${css.tile} ${css.tintSlate}`}
-                            aria-label="添加技能"
-                            onClick={onImport}
-                          >
-                            <div className={css.tileTop}>
-                              <span className={css.tileIcon}><Plus size={24} /></span>
-                            </div>
-                            <div className={css.tileBottom}>
-                              <div className={css.tileNameRow}>
-                                <span className={css.tileName}>添加</span>
-                                <span className={css.tileVersion}>SKILL</span>
-                              </div>
-                              <span className={css.tileSub}>新技能</span>
-                            </div>
-                          </button>
-                        )
-                      }
-                      const s = pool[index - 1]
-                      if (s === undefined) return null
-                      const active = selected !== null && selected.name === s.name
-                      const Icon = skillIconOf(s.name)
-                      return (
-                        <button
-                          key={s.name}
-                          type="button"
-                          data-tile-size={size}
-                          className={`${css.tile} ${skillTintClassOf(s, size)}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
-                          aria-pressed={active}
-                          onClick={() => setSelectedName(s.name)}
-                        >
-                          {/* 卡片只留：图标 / 名称 / 版本徽章 / 作者小字（技能无启停概念）。 */}
-                          <div className={css.tileTop}>
-                            <span className={css.tileIcon}><Icon size={size === 'big' ? 30 : 24} /></span>
-                          </div>
-                          <div className={css.tileBottom}>
-                            <div className={css.tileNameRow}>
-                              <span className={css.tileName}>{s.name}</span>
-                              <span className={css.tileVersion}>{s.currentVersion ?? '—'}</span>
-                            </div>
-                            {(size === 'big' || size === 'wide') && s.description !== '' && (
-                              <span className={css.tileDesc}>{s.description}</span>
-                            )}
-                            <span className={css.tileSub}>{skillAuthorLabel(s.name)}</span>
-                          </div>
-                        </button>
-                      )
-                    })}
+          <MosaicWall
+            items={tiles}
+            blocks={mosaic}
+            renderTile={(s, size, index) => {
+              /* 尺寸走 data-tile-size，贴必须是列的直接子元素（MosaicWall 不包壳层）。 */
+              if (s === null) {
+                return (
+                  <button
+                    key="add"
+                    type="button"
+                    data-tile-size={size}
+                    className={mosaicTileClass({ size, tint: 'slate' })}
+                    aria-label="添加技能"
+                    onClick={onImport}
+                  >
+                    <div className={mosaicStyles.tileTop}>
+                      <span className={mosaicStyles.tileIcon}><Plus size={24} /></span>
+                    </div>
+                    <div className={mosaicStyles.tileBottom}>
+                      <div className={mosaicStyles.tileNameRow}>
+                        <span className={mosaicStyles.tileName}>添加</span>
+                        <span className={mosaicStyles.tileVersion}>SKILL</span>
+                      </div>
+                      <span className={mosaicStyles.tileSub}>新技能</span>
+                    </div>
+                  </button>
+                )
+              }
+              const active = selected !== null && selected.name === s.name
+              const Icon = skillIconOf(s.name)
+              return (
+                <button
+                  key={`${s.name}:${index}`}
+                  type="button"
+                  data-tile-size={size}
+                  className={mosaicTileClass({
+                    size,
+                    tint: skillTintOf(s, size),
+                    active,
+                    glow: size === 'big',
+                  })}
+                  aria-pressed={active}
+                  onClick={() => setSelectedName(s.name)}
+                >
+                  {/* 卡片只留：图标 / 名称 / 版本徽章 / 作者小字（技能无启停概念）。 */}
+                  <div className={mosaicStyles.tileTop}>
+                    <span className={mosaicStyles.tileIcon}><Icon size={size === 'big' ? 30 : 24} /></span>
                   </div>
-                ))}
-              </div>
-            ))}
-            {/* 空态占位（无技能时）：独立的高 128 块，三张 128×128 虚线卡。
-                末块本就允许截断（块生成器只为真实磁贴保证 808），故此处宽 3×128+2×8 = 400。 */}
-            {skills !== null && pool.length === 0 && error === null && (
-              <div className={css.mosaicBlock} data-mosaic-block="128">
-                <div className={`${css.mosaicCol} ${css.mosaicCol128}`}>
-                  <div className={css.tilePlaceholder} data-tile-size="small"><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
+                  <div className={mosaicStyles.tileBottom}>
+                    <div className={mosaicStyles.tileNameRow}>
+                      <span className={mosaicStyles.tileName}>{s.name}</span>
+                      <span className={mosaicStyles.tileVersion}>{s.currentVersion ?? '—'}</span>
+                    </div>
+                    {(size === 'big' || size === 'wide') && s.description !== '' && (
+                      <span className={mosaicStyles.tileDesc}>{s.description}</span>
+                    )}
+                    <span className={mosaicStyles.tileSub}>{skillAuthorLabel(s.name)}</span>
+                  </div>
+                </button>
+              )
+            }}
+          />
+          {/* 空态占位（无技能时）：独立的高 128 块，三张 128×128 虚线卡。
+              末块本就允许截断（块生成器只为真实磁贴保证 808），故此处宽 3×128+2×8 = 400。 */}
+          {skills !== null && pool.length === 0 && error === null && (
+            <div className={mosaicStyles.mosaicBlock} data-mosaic-block="128">
+              {[0, 1, 2].map(i => (
+                <div key={i} className={mosaicStyles.mosaicCol} data-col="128">
+                  <div className={mosaicStyles.tilePlaceholder} data-tile-size="small"><span className={mosaicStyles.tilePlaceholderIcon}><Plus size={20} /></span><p className={mosaicStyles.tilePlaceholderText}>即将上线</p></div>
                 </div>
-                <div className={`${css.mosaicCol} ${css.mosaicCol128}`}>
-                  <div className={css.tilePlaceholder} data-tile-size="small"><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
-                </div>
-                <div className={`${css.mosaicCol} ${css.mosaicCol128}`}>
-                  <div className={css.tilePlaceholder} data-tile-size="small"><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
-                </div>
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 右：详情面板（点击磁贴就地展开；版本管理 + 绑定 Agent 常驻） */}
