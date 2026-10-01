@@ -107,13 +107,15 @@ export interface IntegrationsFrameProps {
 export function IntegrationsFrame({ section, onSelectSection, onClose, renderSlot }: IntegrationsFrameProps) {
   return (
     <div className={css.panel} role="region" aria-label="集成中心">
-      {/* 面板头（画板 F t4cBj6）：icon 26 r8 + 标题 13.5/600 + spacer + × 24 r7。 */}
+      {/* 面板头（iYTAN `b17IoZ`：icon 26 r8 + 标题 13.5/600 + spacer +
+          note 10.5 + × 24 r7）。 */}
       <div className={css.header}>
         <span className={css.headerIcon} aria-hidden="true">
           <Blocks size={15} strokeWidth={2} />
         </span>
         <h2 className={css.headerTitle}>集成中心</h2>
         <span className={css.headerSpacer} />
+        <span className={css.headerNote}>× 关闭 → 回到会话布局（侧边栏与会话区恢复）</span>
         <button
           type="button"
           className={css.closeBtn}

@@ -1,26 +1,33 @@
 /**
- * SkillsPage — 集成中心 · 技能页（PR6：自设置中心 SettingsSkillsSection 迁出）。
+ * SkillsPage — 集成中心 · 技能页（design.pen VNH3k「集成中心·技能 SKILL」）。
  *
- * 数据链路：skillManager/listAll|getSkillContent|getSkillHistory|pinVersion|
- * commitVersion|deleteSkill|importFromFile|importFromText|scanDirectory|
- * importDirectory|importBuiltinSkills + corumAgent/listProfiles（绑定数）。
- * 视图结构：技能卡列表（名称/描述/来源/启停）+ 详情（基本信息 / SKILL.md 内容 /
- * 版本历史 / 绑定关系）。
+ * 数据链路（RPC 方法名与参数逐字不变）：skillManager/listAll|getSkillContent|
+ * getSkillHistory|pinVersion|commitVersion|deleteSkill|importFromFile|
+ * importFromText|scanDirectory|importDirectory|importBuiltinSkills
+ * + corumAgent/listProfiles（绑定数）。
  *
- * 迁出改动仅三处：① 组件名 SkillsSection → SkillsPage；② RPC 来源
- * useCorumRpc（设置壳 CorumRpcContext）→ useIntegrationsRpc（本包注入面，
- * 同形同义）；③ SettingGroup/ConfirmDialog/GlassButton/CSS module 换成本包
- * 自持副本。各 RPC 方法名与参数逐字未动。
+ * 视图结构（design.pen VNH3k）：页头单行（市场|已装 pill tab + 280×31 搜索框 +
+ * 分类 chips + 右端「导入技能 / 导入内置技能」）→ 全宽分隔线 → 磁贴群
+ * （节头「技能 SKILL」+ 第一张「添加」磁贴 + 技能磁贴，角标 = 启用开关）
+ * + 右侧 510px 详情简介面板（hero 150 + body，元信息 = 类型/状态/触发）。
+ * 「添加」磁贴点击打开 ImportSkillDialog（file/text/scan 三 tab 与 RPC 逐字不变）。
+ *
+ * SkillDetailView 二级视图（基本信息 / SKILL.md 内容 / 版本历史 / 绑定关系 /
+ * CommitVersionDialog / DeleteSkillDialog）功能与 RPC 全部保留。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ChevronDown, Download, PackagePlus, Plus, Search, Star, Trash2, X } from 'lucide-react'
+import {
+  ArrowLeft, ChevronDown, Download, FileSearch, GitPullRequest, PackagePlus,
+  Plus, Search, ShieldCheck, Sparkles, Star, Terminal, Trash2, X, Zap,
+} from 'lucide-react'
 import { SettingGroup } from './SettingGroup.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { GlassButton, useIntegrationsRpc } from './face.tsx'
 import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentBind, BuiltinSkillImportResult } from './types.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
+import type { LucideIcon } from 'lucide-react'
 import css from './SkillsPage.module.css'
 import legacy from './IntegrationsPages.module.css'
 
@@ -168,7 +175,7 @@ export function SkillsPage() {
 
 /* ── 技能市场视图：Metro 磁贴 + 右侧详情简介面板 ───────────────────── */
 
-/** 分类筛选 chips（名称关键词归桶；全部永远有）。 */
+/** 分类筛选 chips（名称关键词归桶；全部永远有）。文案与顺序对应 design.pen VNH3k。 */
 const CATEGORIES: { id: string; label: string; match: RegExp | null }[] = [
   { id: 'all', label: '全部', match: null },
   { id: 'verify', label: '验证', match: /verify|cdp|test|check|audit/ },
@@ -185,14 +192,65 @@ function categoryOf(name: string, description: string): string {
 }
 
 /**
- * 磁贴尺寸分级：官方主推（cdp-verify / corum-dev-conventions 等旗舰技能）
- * 给大贴 2×2 + 品牌 glow；有实质描述的给宽贴 2×1；其余小贴 1×1。
+ * 磁贴图标按技能名语义映射到 lucide（design.pen VNH3k 用 ShieldCheck/
+ * FileSearch/GitPullRequest/Terminal/Zap 等具体图标，不是统一 Star）。
  */
-function skillTileSizeOf(s: SkillInfo): 'big' | 'wide' | 'small' {
-  const n = s.name.toLowerCase()
-  if (/cdp-verify|corum-dev-conventions|official-upgrade/.test(n)) return 'big'
-  if ((s.description ?? '').length >= 40) return 'wide'
-  return 'small'
+function skillIconOf(name: string): LucideIcon {
+  const n = name.toLowerCase()
+  if (/verify|cdp|check|audit/.test(n)) return ShieldCheck
+  if (/review|lint/.test(n)) return FileSearch
+  if (/pr|pull|flow/.test(n)) return GitPullRequest
+  if (/dev|server|serve/.test(n)) return Terminal
+  if (/auto|deploy|pack/.test(n)) return Zap
+  return Sparkles
+}
+
+/**
+ * 磁贴尺寸分级（Metro 混排）。
+ *
+ * 设计稿首行的排法是固定 6 拍循环（VNH3k：大贴 264×264 → 两张宽贴 264×128 →
+ * 高贴 128×264 → 两张小贴 128×128），iYTAN / bFLLQ / fngID 三个 frame 完全同构。
+ * 尺寸因此由**序号**决定，而不是按名字猜——按名字判会让整片网格退化成等大方块。
+ */
+const MOSAIC_CYCLE: readonly ('big' | 'wide' | 'wide' | 'tall' | 'small' | 'small')[] =
+  ['big', 'wide', 'wide', 'tall', 'small', 'small']
+
+/** 按序号取磁贴尺寸（6 拍循环；`grid-auto-flow: dense` 自动补位）。 */
+function mosaicSizeOf(index: number): 'big' | 'wide' | 'tall' | 'small' {
+  return MOSAIC_CYCLE[index % MOSAIC_CYCLE.length]!
+}
+
+/**
+ * 磁贴 tint 档：按分类给底色（紫/深紫/堇色/灰蓝），token 派生。
+ * 对应 design.pen VNH3k 磁贴的多档语义底色。
+ */
+function skillTintClassOf(s: SkillInfo, size: 'big' | 'wide' | 'tall' | 'small'): string {
+  if (size === 'big') return css.tintDeep
+  if (size === 'wide') return css.tintMauve
+  if (size === 'tall') return css.tintSlate
+  const cat = categoryOf(s.name, s.description ?? '')
+  if (cat === 'verify') return css.tintViolet
+  if (cat === 'code') return css.tintMauve
+  if (cat === 'deploy') return css.tintViolet
+  return css.tintSlate
+}
+
+/**
+ * 磁贴小字 = 作者口径（design.pen VNH3k「@corum · 官方」/「社区」）。
+ * 判据：随包分发的内置技能集（packages/desktop/shipped-skills/，即
+ * 「导入内置技能」装入的那批，PROVENANCE.md 判定的官方技能）写
+ * 「@corum · 官方」；其余（用户从文件/文本/目录导入的）写「社区」。
+ * 注意 listAll wire 上没有来源字段，这里按本仓技能库的既定组成近似：
+ * 内置技能清单在编译期可知，与其求交集。
+ */
+const OFFICIAL_SKILL_NAMES = new Set([
+  'cordis-plugin-development', 'dsh-archive-agent-notes', 'dsh-ci-test-reliability',
+  'dsh-code-review', 'dsh-doc', 'dsh-find-simplifications', 'dsh-merging-stacked-prs',
+  'dsh-pre-push-checks', 'dsh-prose-standard', 'dsh-translate-docs',
+  'dsh-trim-cot-leakage', 'editing-cordis-compositions', 'record-browser-gif',
+])
+function skillAuthorLabel(name: string): string {
+  return OFFICIAL_SKILL_NAMES.has(name) ? '@corum · 官方' : '社区'
 }
 
 function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category, setCategory,
@@ -240,11 +298,12 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
 
   return (
     <div className={css.page}>
-      {/* 页头：标题 + 搜索 + 导入 */}
-      <div className={css.header}>
-        <span className={css.headerTitle}>技能</span>
+      {/* 页头单行：市场|已装 pill tab + 搜索框 + 分类 chips + 右端导入按钮（design.pen VNH3k） */}
+      <div className={css.headerRow} role="tablist" aria-label="技能分区">
+        <button type="button" role="tab" aria-selected={tab === 'market'} className={`${css.tab}${tab === 'market' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('market')}>市场</button>
+        <button type="button" role="tab" aria-selected={tab === 'installed'} className={`${css.tab}${tab === 'installed' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('installed')}>已装</button>
         <div className={css.searchBox}>
-          <Search size={13} className={css.searchIcon} />
+          <Search size={14} className={css.searchIcon} />
           <input
             className={css.searchInput}
             value={query}
@@ -252,22 +311,6 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
             placeholder="搜索技能…"
           />
         </div>
-        <button type="button" className={css.addBtn} onClick={onImport}>
-          <PackagePlus size={13} />导入技能
-        </button>
-        <button type="button" className={css.addBtn} onClick={onImportBuiltin} disabled={builtinBusy}>
-          <Download size={13} />{builtinBusy ? '导入中…' : '导入内置技能'}
-        </button>
-      </div>
-
-      {/* 内部 tab：市场 | 已装 */}
-      <div className={css.tabs}>
-        <button type="button" className={`${css.tab}${tab === 'market' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('market')}>市场</button>
-        <button type="button" className={`${css.tab}${tab === 'installed' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('installed')}>已装</button>
-      </div>
-
-      {/* 分类筛选 chips */}
-      <div className={css.filterRow}>
         {CATEGORIES.map(c => (
           <button
             key={c.id}
@@ -276,7 +319,17 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
             onClick={() => setCategory(c.id)}
           >{c.label}</button>
         ))}
+        <span className={css.headerSpacer} />
+        <button type="button" className={css.addBtn} onClick={onImport}>
+          <PackagePlus size={14} />导入技能
+        </button>
+        <button type="button" className={css.addBtn} onClick={onImportBuiltin} disabled={builtinBusy}>
+          <Download size={14} />{builtinBusy ? '导入中…' : '导入内置技能'}
+        </button>
       </div>
+
+      {/* 全宽分隔线（页头行与磁贴群之间） */}
+      <div className={css.divider} />
 
       {builtinResult !== null && (
         builtinResult.ok
@@ -285,46 +338,67 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
       )}
 
       <div className={css.body}>
-        {/* 左：Metro 磁贴群 */}
+        {/* 左：Metro 磁贴群（节头 + 添加磁贴 + 技能磁贴） */}
         <div className={css.tiles}>
+          <span className={css.sectionHead}>技能 SKILL</span>
           {error !== null && <p className={css.hintText}>加载失败：{error}</p>}
           {skills === null && error === null && <p className={css.hintText}>加载中…</p>}
-          {skills !== null && pool.length === 0 && error === null && (
-            <p className={css.hintText}>{(skills.length === 0) ? '暂无技能，点击上方按钮导入。' : '没有匹配的技能。'}</p>
-          )}
           <div className={css.tileGrid}>
-            {pool.length === 0 && error === null && skills !== null && (
+            {/* 「添加」磁贴：固定第一张（左上角），点击打开 ImportSkillDialog。 */}
+            <button
+              type="button"
+              className={`${css.tile} ${css.tintSlate}`}
+              aria-label="添加技能"
+              onClick={onImport}
+            >
+              <span className={css.tileCorner}>
+                <span className={css.tileSwitch} data-off="" aria-hidden="true" />
+              </span>
+              <div className={css.tileTop}>
+                <span className={css.tileIcon}><Plus size={24} /></span>
+              </div>
+              <div className={css.tileBottom}>
+                <div className={css.tileNameRow}>
+                  <span className={css.tileName}>添加</span>
+                  <span className={css.tileVersion}>SKILL</span>
+                </div>
+                <span className={css.tileSub}>新技能</span>
+              </div>
+            </button>
+            {skills !== null && pool.length === 0 && error === null && (
               <>
                 <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
                 <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
                 <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
               </>
             )}
-            {pool.map(s => {
+            {pool.map((s, i) => {
               const enabled = !disabledSet.has(s.name)
               const active = selected !== null && selected.name === s.name
-              const size = skillTileSizeOf(s)
-              const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : ''
+              const size = mosaicSizeOf(i)
+              const Icon = skillIconOf(s.name)
+              const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : size === 'tall' ? ` ${css.tileTall}` : ''
               return (
                 <button
                   key={s.name}
                   type="button"
-                  className={`${css.tile}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
+                  className={`${css.tile}${sizeClass} ${skillTintClassOf(s, size)}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
                   aria-pressed={active}
                   onClick={() => setSelectedName(s.name)}
                 >
+                  {/* 角标：启用开关（绝对定位于右上角；stopPropagation 防误触选中）。 */}
+                  <span
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={`${s.name} 启用开关`}
+                    className={`${css.tileCorner} ${css.tileSwitch}`}
+                    data-off={enabled ? undefined : ''}
+                    onClick={e => { e.stopPropagation(); onToggle(s.name) }}
+                  >
+                    <span className={css.tileSwitchKnob} />
+                  </span>
                   <div className={css.tileTop}>
-                    <span className={css.tileIcon}><Star size={size === 'big' ? 24 : 18} /></span>
-                    <span
-                      role="switch"
-                      aria-checked={enabled}
-                      aria-label={`${s.name} 启用开关`}
-                      className={css.tileSwitch}
-                      data-off={enabled ? undefined : ''}
-                      onClick={e => { e.stopPropagation(); onToggle(s.name) }}
-                    >
-                      <span className={css.tileSwitchKnob} />
-                    </span>
+                    <span className={css.tileIcon}><Icon size={size === 'big' ? 30 : 24} /></span>
                   </div>
                   <div className={css.tileBottom}>
                     <div className={css.tileNameRow}>
@@ -334,9 +408,7 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
                     {(size === 'big' || size === 'wide') && s.description !== '' && (
                       <span className={css.tileDesc}>{s.description}</span>
                     )}
-                    <span className={css.tileSub}>
-                      {bindCount(s.name) > 0 ? `已绑定 ${bindCount(s.name)} 个 Agent` : '未绑定 Agent'}
-                    </span>
+                    <span className={css.tileSub}>{skillAuthorLabel(s.name)}</span>
                   </div>
                 </button>
               )
@@ -390,54 +462,62 @@ function SkillDetailSummary({ skill, enabled, onToggle, bindCount, onOpenDetail,
   onOpenDetail: () => void
   onDelete: () => void
 }) {
+  const Icon = skillIconOf(skill.name)
+  /** 分类名（元信息「类型」）；未归类给默认口径。 */
+  const catLabel = CATEGORIES.find(c => c.id === categoryOf(skill.name, skill.description ?? ''))?.label
   return (
     <>
       <div className={css.detailHero}>
-        <span className={css.detailHeroBadge}><Star size={30} /></span>
+        <span className={css.detailHeroBadge}><Icon size={30} /></span>
       </div>
-      <div className={css.detailTitleRow}>
-        <span className={css.detailName}>{skill.name}</span>
-        <span className={css.tileVersion}>{skill.currentVersion ?? '—'}</span>
-      </div>
-      <span className={css.detailSub}>corum 技能库</span>
-      {skill.description !== '' && <p className={css.detailDesc}>{skill.description}</p>}
-      <div className={css.detailMeta}>
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>类型</span>
-          <span className={css.detailMetaValue}>技能（SKILL.md 指令包）</span>
+      <div className={css.detailBody}>
+        <div>
+          <div className={css.detailTitleRow}>
+            <span className={css.detailName}>{skill.name}</span>
+            <span className={css.detailVersion}>{skill.currentVersion ?? '—'}</span>
+          </div>
+          <span className={css.detailSub}>{OFFICIAL_SKILL_NAMES.has(skill.name) ? 'corum · 官方技能' : 'corum 技能库'}</span>
+          {skill.description !== '' && <p className={css.detailDesc}>{skill.description}</p>}
+          <div className={css.detailMeta}>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>类型</span>
+              <span className={css.detailMetaValue}>{catLabel !== undefined ? `${catLabel} · 技能（SKILL.md 指令包）` : '技能（SKILL.md 指令包）'}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>状态</span>
+              <span className={css.detailMetaValue}>{enabled ? '已启用' : '已停用'}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>触发</span>
+              <span className={css.detailMetaValue}>Agent 预设按版本绑定（{bindCount} 个）</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>版本数</span>
+              <span className={css.detailMetaValue}>{skill.versionCount} 个</span>
+            </div>
+          </div>
         </div>
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>状态</span>
-          <span className={css.detailMetaValue}>{enabled ? '已启用' : '已停用'}</span>
+        <div>
+          <div className={css.detailSwitchRow}>
+            <span className={css.detailSwitchLabel}>启用此技能</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              className={css.tileSwitch}
+              data-off={enabled ? undefined : ''}
+              onClick={onToggle}
+            >
+              <span className={css.tileSwitchKnob} />
+            </button>
+          </div>
+          <div className={css.detailActions}>
+            <button type="button" className={`${css.actionBtn} ${css.actionDanger}`} onClick={onDelete}>
+              <Trash2 size={13} />删除
+            </button>
+            <button type="button" className={css.actionBtn} onClick={onOpenDetail}>管理版本与绑定</button>
+          </div>
         </div>
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>触发</span>
-          <span className={css.detailMetaValue}>Agent 预设按版本绑定（{bindCount} 个）</span>
-        </div>
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>版本数</span>
-          <span className={css.detailMetaValue}>{skill.versionCount} 个</span>
-        </div>
-      </div>
-      <div className={css.detailSwitchRow}>
-        <span className={css.detailSwitchLabel}>启用此技能</span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          className={css.tileSwitch}
-          data-off={enabled ? undefined : ''}
-          onClick={onToggle}
-        >
-          <span className={css.tileSwitchKnob} />
-        </button>
-      </div>
-      <div className={css.detailSpacer} />
-      <div className={css.detailActions}>
-        <button type="button" className={`${css.actionBtn} ${css.actionDanger}`} onClick={onDelete}>
-          <Trash2 size={13} />删除
-        </button>
-        <button type="button" className={css.actionBtn} onClick={onOpenDetail}>管理版本与绑定</button>
       </div>
     </>
   )

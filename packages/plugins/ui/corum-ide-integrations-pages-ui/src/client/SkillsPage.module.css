@@ -1,56 +1,79 @@
 /*
- * SkillsPage —— 集成中心 ·「技能」页（Metro 磁贴改版）的样式。
+ * SkillsPage —— 集成中心 ·「技能」页（design.pen VNH3k「集成中心·技能 SKILL」）。
  *
- * 与 PluginsPage.module.css / McpPage.module.css 的磁贴/详情面板同一套骨架
- * （glass-1 底 + glass-border 描边 + 圆角 10 + 三种尺寸混排 + 右侧 510px 详情
- * 面板）。CSS module 不跨包 import（tsdown 跨包 css 子路径 import 会错乱），
- * 本包内 Mcp/Skills 各持一份副本。
+ * 与 McpPage.module.css 共用同一套磁贴/详情骨架（两份逐字一致，CSS module
+ * 不跨包 import 是本仓已知约束）。骨架规则：页头单行（pill tab + 搜索 +
+ * 分类 chips + 导入按钮）+ 全宽分隔线 + 磁贴网格（128px 基准、gap 8）+
+ * 右侧 510px 详情面板（hero 150 + body，面板自身无 padding）。
  *
  * token 口径：--corum-glass-1/2/3、--corum-glass-border(-active)、
- * --dsw-alias-label-*、--dsw-alias-brand-primary/text、--dsw-alias-state-*
- * 、--dsw-alias-interactive-bg-hover、--corum-label-on-brand。
- * 字号乘 --corum-ui-font-scale，间距/圆角乘 --corum-density-scale；图标固定 px。
+ * --dsw-alias-label-*、--dsw-alias-brand-primary/text、--dsw-alias-state-*、
+ * --corum-label-on-brand。磁贴底色用 color-mix 从 token 派生 tint 档（紫/深紫/
+ * 灰蓝/堇色），禁止裸 hex。字号乘 --corum-ui-font-scale，间距/圆角乘
+ * --corum-density-scale；图标固定 px。
  */
 
-/* ── 页面骨架 ─────────────────────────────────────────────────────────────── */
+/* ── 页面骨架：纵向 flex gap 16（页头行 → 分隔线 → 内容区）────────────────── */
 
 .page {
   display: flex;
   flex-direction: column;
-  gap: calc(10px * var(--corum-density-scale, 1));
+  gap: calc(16px * var(--corum-density-scale, 1));
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
   color: var(--dsw-alias-label-primary);
 }
 
-/* ── 页头：标题 + 搜索 + 导入（市场 tab 下显示）── ─────────────────────────── */
+/* ── 页头横行：tab（pill）+ 搜索框 + 分类 chips + 导入按钮 ─────────────────── */
 
-.header {
+.headerRow {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: calc(10px * var(--corum-density-scale, 1));
+  gap: calc(8px * var(--corum-density-scale, 1));
 }
 
-.headerTitle {
+.headerSpacer { flex: 1; min-width: 0; }
+
+/* 页头标题右侧留位用（导入内置技能结果提示行） */
+.headerSpacer { flex: 1; }
+
+/* tab：pill 形态（design.pen bFLLQ/VNH3k 页头 tab），无下划线 ::after。 */
+.tab {
+  flex: none;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  border: 1px solid transparent;
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
+  font-weight: 400;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.tab:hover { color: var(--dsw-alias-label-primary); }
+.tabActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border);
   color: var(--dsw-alias-label-primary);
-  white-space: nowrap;
+  font-weight: 600;
 }
 
+/* 搜索框：固定 280×31（design.pen VNH3k 搜索框）。 */
 .searchBox {
-  flex: 1;
-  min-width: 90px;
+  flex: none;
   display: flex;
   align-items: center;
-  gap: calc(6px * var(--corum-density-scale, 1));
-  height: 28px;
-  padding: 0 calc(9px * var(--corum-density-scale, 1));
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: calc(280px * var(--corum-density-scale, 1));
+  height: calc(31px * var(--corum-density-scale, 1));
+  padding: 0 calc(10px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--corum-glass-border);
-  border-radius: 8px;
-  background: var(--corum-glass-2);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-1);
 }
 
 .searchIcon { color: var(--dsw-alias-label-tertiary); flex: none; }
@@ -62,81 +85,21 @@
   outline: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
-  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-family: inherit;
 }
 .searchInput::placeholder { color: var(--dsw-alias-label-tertiary); }
 
-.addBtn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: calc(5px * var(--corum-density-scale, 1));
-  height: 28px;
-  padding: 0 calc(12px * var(--corum-density-scale, 1));
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 8px;
-  background: var(--corum-glass-2);
-  color: var(--dsw-alias-label-secondary);
-  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color .15s, color .15s;
-}
-.addBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
-.addBtn:disabled { opacity: .5; cursor: default; }
-
-/* ── 内部 tab：市场 | 已装 ────────────────────────────────────────────────── */
-
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: calc(14px * var(--corum-density-scale, 1));
-  border-bottom: 1px solid var(--corum-glass-border);
-}
-
-.tab {
-  position: relative;
-  padding: calc(5px * var(--corum-density-scale, 1)) 0 calc(7px * var(--corum-density-scale, 1));
-  border: 0;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: color .15s;
-}
-.tab:hover { color: var(--dsw-alias-label-secondary); }
-.tabActive { color: var(--dsw-alias-label-primary); }
-.tabActive::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--dsw-alias-brand-primary);
-}
-
-/* ── 分类筛选 chips（全部 / 验证 / 代码 / 部署）────────────────────────────── */
-
-.filterRow {
-  display: flex;
-  align-items: center;
-  gap: calc(6px * var(--corum-density-scale, 1));
-  flex-wrap: wrap;
-}
-
+/* 分类 chips：未选中也有描边（design.pen VNH3k 筛选行）。 */
 .filterChip {
   flex: none;
-  padding: calc(3px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
-  border: 1px solid transparent;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
   border-radius: 999px;
-  background: var(--corum-glass-1);
+  background: transparent;
   color: var(--dsw-alias-label-tertiary);
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
   font-family: inherit;
   cursor: pointer;
   transition: border-color .15s, color .15s, background .15s;
@@ -146,39 +109,84 @@
   background: var(--corum-glass-2);
   border-color: var(--corum-glass-border);
   color: var(--dsw-alias-label-primary);
+  font-weight: 600;
 }
 
-/* ── 内容区：左磁贴群（fill）+ 右详情面板（510px 固定宽）────────────────────── */
+/* 页头右侧玻璃次按钮（导入技能 / 导入内置技能 —— 技能入库唯一通道）。 */
+.addBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  height: calc(28px * var(--corum-density-scale, 1));
+  padding: 0 calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.addBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.addBtn:disabled { opacity: .5; cursor: default; }
+
+/* ── 全宽分隔线（页头行与内容区之间）──────────────────────────────────────── */
+
+.divider {
+  flex: none;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+
+/* ── 内容区：左磁贴群（808 基准）+ 右详情面板（fill）────────────────────────── */
 
 .body {
   flex: 1;
   min-height: 0;
   display: flex;
   align-items: stretch;
-  gap: calc(10px * var(--corum-density-scale, 1));
+  gap: calc(16px * var(--corum-density-scale, 1));
 }
 
+/* 磁贴群：纵向 flex gap 8，第一项是节头。宽度 = 稿里的 808 内容基准（VNH3k
+   `磁贴群`：6×128 + 5×8，恰好 6 列小贴）。纵向滚动条会再吃掉一条槽宽、把网格
+   挤成 5 列 ⇒ scrollbar-gutter 把槽预留在 808 之外（816 = 808 内容 + 8 滚动槽）；
+   窗口装不下时按比例收缩，余量给右侧详情。 */
 .tiles {
-  flex: 1;
+  flex: 0 1 calc(816px * var(--corum-density-scale, 1));
+  max-width: 100%;
   min-width: 0;
+  scrollbar-gutter: stable;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: calc(10px * var(--corum-density-scale, 1));
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+/* 节头（design.pen VNH3k「技能 SKILL」）：标题，不可点击。 */
+.sectionHead {
+  flex: none;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
 }
 
 .hintText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 
-/* ── Metro 磁贴群 ─────────────────────────────────────────────────────────── */
+/* ── 磁贴网格：128px 基准、gap 8（design.pen 磁贴规格）─────────────────────── */
 
 .tileGrid {
   display: grid;
   grid-auto-flow: dense;
   grid-template-columns: repeat(auto-fill, 128px);
   grid-auto-rows: 128px;
-  gap: calc(10px * var(--corum-density-scale, 1));
+  gap: calc(8px * var(--corum-density-scale, 1));
   align-content: start;
 }
+
+/* ── 磁贴本体：底色走 tint 局部变量（token 派生，多档语义色）───────────────── */
 
 .tile {
   position: relative;
@@ -189,25 +197,35 @@
   box-sizing: border-box;
   padding: calc(12px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
-  border-radius: 10px;
-  background: var(--corum-glass-1);
+  border-radius: calc(10px * var(--corum-density-scale, 1));
+  background: var(--tint, var(--corum-glass-1));
   text-align: left;
   font-family: inherit;
   cursor: pointer;
   transition: border-color .15s, background .15s;
 }
-.tile:hover { background: var(--corum-glass-2); }
+.tile:hover { border-color: var(--corum-glass-border-active); }
+
+/* tint 档（color-mix 从 token 派生，无裸 hex）：紫 / 深紫 / 堇色 / 灰蓝。 */
+.tintViolet { --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, var(--corum-glass-1)); }
+.tintDeep { --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, var(--corum-glass-1)); }
+.tintMauve { --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, var(--corum-glass-2)); }
+.tintSlate { --tint: color-mix(in srgb, var(--dsw-alias-label-dimmed) 10%, var(--corum-glass-1)); }
+
 .tileActive {
-  background: var(--corum-glass-2);
+  --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 24%, var(--corum-glass-2));
   border-color: var(--corum-glass-border-active);
 }
 
+/* 尺寸：小贴 1×1（默认）/ 宽贴 2×1 / 大贴 2×2。 */
 .tileWide { grid-column: span 2; }
+.tileTall { grid-row: span 2; }
 .tileBig {
   grid-column: span 2;
   grid-row: span 2;
 }
 
+/* 大贴（主推技能）：品牌色 radial glow。 */
 .tileGlow::before {
   content: '';
   position: absolute;
@@ -218,7 +236,7 @@
     transparent 62%);
 }
 
-/* 占位空卡（SKILL/MCP 无数据时的占位符）：虚线描边 + 居中 plus + 「即将上线」。 */
+/* 占位空卡（技能库为空时的占位符）：虚线描边 + 居中 plus + 「即将上线」。 */
 .tilePlaceholder {
   position: relative;
   display: flex;
@@ -230,7 +248,7 @@
   box-sizing: border-box;
   padding: calc(12px * var(--corum-density-scale, 1));
   border: 1px dashed var(--corum-glass-border);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corum-density-scale, 1));
   background: transparent;
   color: var(--dsw-alias-label-dimmed);
   cursor: default;
@@ -245,9 +263,10 @@
   color: var(--dsw-alias-label-dimmed);
 }
 
+/* 顶行：space-between + center（design.pen 磁贴顶行）。 */
 .tileTop {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: calc(6px * var(--corum-density-scale, 1));
 }
@@ -280,19 +299,25 @@
   white-space: nowrap;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
-  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
-.tileBig .tileName, .tileWide .tileName { font-size: calc(14px * var(--corum-ui-font-scale, 1)); }
+.tileBig .tileName { font-size: calc(15px * var(--corum-ui-font-scale, 1)); }
 
-/* 版本徽章 pill（当前版本号，$glass-3 底，fit-content 不截断）。 */
+/* 版本徽章 pill：固定高 16、描边、fit-content 不截断不拉伸。 */
 .tileVersion {
   flex: none;
-  padding: 1px calc(8px * var(--corum-density-scale, 1));
+  display: inline-flex;
+  align-items: center;
+  height: calc(16px * var(--corum-density-scale, 1));
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
   border-radius: 999px;
+  box-sizing: border-box;
   background: var(--corum-glass-3);
   color: var(--dsw-alias-label-tertiary);
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: calc(9.5px * var(--corum-ui-font-scale, 1));
+  font-size: calc(9px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
   white-space: nowrap;
   width: fit-content;
 }
@@ -315,51 +340,67 @@
   line-height: 1.45;
 }
 
-/* ── 磁贴角标：启用开关 ───────────────────────────────────────────────────── */
+/* ── 磁贴角标：绝对定位于右上角（技能页 = 启用开关 / MCP 页 = 状态点）────────── */
 
+.tileCorner {
+  position: absolute;
+  top: calc(10px * var(--corum-density-scale, 1));
+  right: calc(10px * var(--corum-density-scale, 1));
+}
+
+/* 启用开关：32×18、knob 14（design.pen VNH3k 磁贴角标）。 */
 .tileSwitch {
   flex: none;
   position: relative;
-  width: 26px;
-  height: 15px;
-  padding: 0;
-  border: 0;
+  display: inline-block;
+  width: calc(32px * var(--corum-density-scale, 1));
+  height: calc(18px * var(--corum-density-scale, 1));
+  padding: 2px;
+  border: 1px solid transparent;
   border-radius: 999px;
+  box-sizing: border-box;
   background: var(--dsw-alias-brand-primary);
   cursor: pointer;
-  transition: background .15s;
+  transition: background .15s, border-color .15s;
 }
-.tileSwitch[data-off] { background: var(--corum-glass-3); }
-.tileSwitch:disabled { opacity: .5; cursor: default; }
+.tileSwitch[data-off] {
+  background: var(--corum-glass-3);
+  border-color: var(--corum-glass-border);
+}
 
 .tileSwitchKnob {
   position: absolute;
-  top: 2px;
-  left: 13px;
-  width: 11px;
-  height: 11px;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: var(--corum-label-on-brand);
-  transition: left .15s;
+  background: var(--dsw-alias-label-dimmed);
+  transform: translateY(-50%);
+  transition: left .15s, background .15s;
 }
-.tileSwitch[data-off] .tileSwitchKnob { left: 2px; }
+.tileSwitch:not([data-off]) .tileSwitchKnob {
+  left: calc(100% - 16px);
+  background: var(--corum-label-on-brand);
+}
 
-/* ── 右侧详情简介面板 ─────────────────────────────────────────────────────── */
+/* ── 右侧详情简介面板：面板自身无 padding，内边距由 body 承担 ───────────────── */
 
 .detail {
-  flex: none;
-  width: 510px;
+  /* 详情简介 = fill_container（画稿宽度由磁贴群 808 与间隙反推，实测 ≈508，
+     与稿标 510 同口径）；面板自身无 padding，内边距由 body 承担。 */
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: calc(10px * var(--corum-density-scale, 1));
   box-sizing: border-box;
-  padding: calc(14px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
-  border-radius: 12px;
+  border-radius: calc(14px * var(--corum-density-scale, 1));
   background: var(--corum-glass-1);
   overflow-y: auto;
 }
 
+/* hero：150 高，无圆角（贴面板顶部），品牌色 radial glow。 */
 .detailHero {
   position: relative;
   flex: none;
@@ -368,7 +409,6 @@
   justify-content: center;
   height: 150px;
   overflow: hidden;
-  border-radius: 10px;
   background: var(--corum-glass-2);
 }
 .detailHero::before {
@@ -381,6 +421,7 @@
     transparent 60%);
 }
 
+/* 大图标徽章：64×64、r16、描边。 */
 .detailHeroBadge {
   position: relative;
   display: inline-flex;
@@ -388,12 +429,25 @@
   justify-content: center;
   width: 64px;
   height: 64px;
-  border-radius: 14px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(16px * var(--corum-density-scale, 1));
   background: var(--corum-glass-3);
   color: var(--dsw-alias-brand-text);
 }
 
-/* 详情面板空态（未选中任何磁贴）：产品 logo + glow + 引导文案（与 detailHero 同 glow 规范）。 */
+/* 详情 body：flex:1 + padding[16,18] + gap 10 + space-between。 */
+.detailBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+}
+
+/* 详情面板空态（未选中任何磁贴）：产品 logo + glow + 引导文案。 */
 .detailEmpty {
   display: flex;
   flex-direction: column;
@@ -402,6 +456,8 @@
   gap: calc(14px * var(--corum-density-scale, 1));
   height: 100%;
   min-height: 320px;
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
   text-align: center;
 }
 .detailEmptyHero {
@@ -411,7 +467,7 @@
   justify-content: center;
   width: 100%;
   height: 180px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corum-density-scale, 1));
   overflow: hidden;
   background: var(--corum-glass-2);
 }
@@ -458,6 +514,25 @@
   white-space: nowrap;
 }
 
+/* 详情标题行的版本徽章：固定高 19、描边（比磁贴徽章大一号）。 */
+.detailVersion {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: calc(19px * var(--corum-density-scale, 1));
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  box-sizing: border-box;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+  width: fit-content;
+}
+
 .detailTitleRow {
   display: flex;
   align-items: center;
@@ -475,12 +550,18 @@
   margin: 0;
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
-.detailMeta { display: flex; flex-direction: column; gap: calc(5px * var(--corum-density-scale, 1)); }
+/* 元信息块：padding-top 10、行 gap 6、kv gap 8。 */
+.detailMeta {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding-top: calc(10px * var(--corum-density-scale, 1));
+}
 
-.detailMetaRow { display: flex; gap: calc(10px * var(--corum-density-scale, 1)); }
+.detailMetaRow { display: flex; gap: calc(8px * var(--corum-density-scale, 1)); }
 
 .detailMetaKey {
   flex: none;
@@ -497,13 +578,13 @@
   word-break: break-all;
 }
 
-.detailSpacer { flex: 1; min-height: calc(6px * var(--corum-density-scale, 1)); }
-
+/* 底部操作行：padding-top 8、gap 10、右对齐。 */
 .detailActions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding-top: calc(8px * var(--corum-density-scale, 1));
 }
 
 .actionBtn {
@@ -512,13 +593,13 @@
   align-items: center;
   justify-content: center;
   gap: calc(5px * var(--corum-density-scale, 1));
-  height: 28px;
-  padding: 0 calc(13px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-secondary);
-  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: border-color .15s, color .15s;
@@ -526,15 +607,15 @@
 .actionBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
 .actionBtn:disabled { opacity: .5; cursor: default; }
 
-/* 危险操作（删除技能）：error 描边 + error 文字。 */
+/* 危险操作（删除技能）：error 描边 + error 文字 + 透明底。 */
 .actionDanger {
-  border-color: var(--dsw-alias-state-error-primary);
+  border: 1px solid var(--dsw-alias-state-error-primary);
   background: transparent;
   color: var(--dsw-alias-state-error-primary);
 }
 .actionDanger:hover { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
 
-/* 详情中的启用开关行（绑定关系 toggle）。 */
+/* 详情中的启用开关行（本地启用态）。 */
 .detailSwitchRow {
   display: flex;
   align-items: center;
@@ -543,7 +624,7 @@
   padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   border: 1px solid var(--corum-glass-border);
-  border-radius: 9px;
+  border-radius: calc(9px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2);
 }
 

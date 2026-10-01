@@ -1,21 +1,20 @@
 /**
- * McpPage — 集成中心 · MCP 页（Metro 磁贴改版）。
+ * McpPage — 集成中心 · MCP 页（design.pen bFLLQ「集成中心·MCP 服务器」）。
  *
  * 数据链路不变（RPC 方法名与参数逐字未动）：
  *   mcpManager/listServers（列表）+ testConnection（运行状态/工具数）
  *   + getServer（详情回填）+ saveServer（启停/编辑）+ deleteServer + getServerReferences
  *   + corumAgent/listProfiles（绑定 Agent 头像/昵称）。
  *
- * 视图改为「Metro 磁贴 + 右侧详情简介面板」（无市场 tab —— MCP 只有已配置
- * 服务器列表 + 「添加服务器」入口）：
- *   - 磁贴：官方参考实现（filesystem 等 stdio 服务器）给大贴 2×2 + 品牌 glow，
- *     带描述的给宽贴 2×1，其余小贴 1×1；角标 = 运行状态点（绿 = 运行中 /
- *     灰 = 已停止）；小字 = 传输 + 启动地址（如 `stdio · npx @mcp/fs`）。
- *   - 详情面板：hero（folder-tree 徽章 + glow）→ 名称/传输 → `发布方 · 传输`
- *     → 描述 → 元信息（传输/状态/范围）→ 启停开关 + 删除服务器（error 描边）。
- *     工具清单与 Agent 绑定概览保留在面板下半部（不跳二级页）。
+ * 视图结构（design.pen bFLLQ）：页头单行（市场|已装 pill tab —— MCP 未来也会有
+ * 市场，保留 tab 行；本页无搜索框、无分类 chips）→ 全宽分隔线 → 磁贴群
+ * （节头「MCP 服务器」+ 第一张「添加」磁贴 + 服务器磁贴，角标 = 运行状态点
+ * 8×8，小字 = 传输 · 启动地址）+ 右侧 510px 详情简介面板（hero 150 + body，
+ * 元信息 = 传输/状态/范围；启停开关放在详情面板内一行，磁贴角标只读展示状态）。
+ * 版本徽章位承载传输方式标签（mcpManager wire 无版本字段，字段缺失下的占位，
+ * 见 `TRANSPORT_LABEL`）。
  *
- * 「添加服务器」沿用原页内表单（McpAddView，JSON 配置 + 超时 + 使用指导）。
+ * 「添加」磁贴沿用原页内表单（McpAddView，JSON 配置 + 超时 + 使用指导，RPC 不变）。
  *
  * rpc 为 null 时降级为静态占位提示。
  * @module corum-ide-integrations-pages-ui/client/McpPage
@@ -24,7 +23,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, ChevronUp, FolderTree, Info, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { ChevronDown, ChevronUp, FolderTree, Info, Plus, Trash2 } from 'lucide-react'
 import { useIntegrationsRpc } from './face.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from './McpPage.module.css'
@@ -121,14 +120,29 @@ function endpointLabel(s: McpServerSummaryWire): string {
 }
 
 /**
- * 磁贴尺寸分级：官方参考实现（filesystem / git / fetch / memory 等常见 stdio
- * 服务器）给大贴 2×2 + glow；带描述的给宽贴 2×1；其余小贴 1×1。
+ * 磁贴尺寸分级（Metro 混排）。
+ *
+ * 设计稿首行的排法是固定 6 拍循环（bFLLQ：大贴 264×264 → 两张宽贴 264×128 →
+ * 高贴 128×264 → 两张小贴 128×128），iYTAN / VNH3k / fngID 三个 frame 完全同构。
+ * 尺寸因此由**序号**决定，而不是按名字猜——按名字判会让整片网格退化成等大方块。
  */
-function tileSizeOf(s: McpServerSummaryWire): 'big' | 'wide' | 'small' {
-  const n = s.name.toLowerCase()
-  if (/filesystem|git|fetch|memory|sequential|everything|time/.test(n)) return 'big'
-  if ((s.description ?? '').length >= 60) return 'wide'
-  return 'small'
+const MOSAIC_CYCLE: readonly ('big' | 'wide' | 'wide' | 'tall' | 'small' | 'small')[] =
+  ['big', 'wide', 'wide', 'tall', 'small', 'small']
+
+/** 按序号取磁贴尺寸（6 拍循环；`grid-auto-flow: dense` 自动补位）。 */
+function mosaicSizeOf(index: number): 'big' | 'wide' | 'tall' | 'small' {
+  return MOSAIC_CYCLE[index % MOSAIC_CYCLE.length]!
+}
+
+/**
+ * 磁贴 tint 档（token 派生，多档语义底色对应 design.pen bFLLQ）：
+ * 大贴深紫 + glow、宽贴堇色、小贴紫、「添加」/未连接态给灰蓝。
+ */
+function tileTintClassOf(size: 'big' | 'wide' | 'tall' | 'small'): string {
+  if (size === 'big') return css.tintDeep
+  if (size === 'wide') return css.tintMauve
+  if (size === 'tall') return css.tintSlate
+  return css.tintViolet
 }
 
 /* ── 主列表视图：Metro 磁贴 + 右侧详情面板 ──────────────────────────── */
@@ -186,18 +200,8 @@ function McpListView({ rpc, onOpenAdd }: {
     return () => { cancelled = true }
   }, [rpc, servers])
 
-  const toggleDisabled = async (s: McpServerSummaryWire, e: MouseEvent) => {
-    e.stopPropagation()
-    try {
-      const full = await rpc<{ server?: McpServerConfigWire }>('mcpManager', 'getServer', { name: s.name })
-      if (full.server === undefined) return
-      await rpc('mcpManager', 'saveServer', {
-        input: { ...full.server, disabled: s.disabled === true ? false : true },
-      })
-      void reload()
-    } catch { /* 列表页静默；详情面板有完整错误显示 */ }
-  }
-
+  /** 页头 tab 选中态（两个 tab 目前指向同一份服务器列表，见上方页头注释）。 */
+  const [tab, setTab] = useState<'market' | 'installed'>('market')
   /** 详情面板选中项（默认第一个；列表变化后回落）。 */
   const selected = useMemo(() => {
     const pool = servers ?? []
@@ -208,53 +212,73 @@ function McpListView({ rpc, onOpenAdd }: {
 
   return (
     <div className={css.page}>
-      {/* 页头：标题 + 添加服务器（MCP 无市场，只有已配置列表 + 添加入口） */}
-      <div className={css.header}>
-        <span className={css.headerTitle}>MCP 服务器</span>
+      {/* 页头单行：市场|已装 pill tab（design.pen bFLLQ 画了这两个 tab；MCP
+          目前只有已配置服务器这一份数据，「市场」态尚未接入 ⇒ 两个 tab 都指向
+          同一列表，选中态仍按稿呈现，将来接市场时在此分叉）。 */}
+      <div className={css.headerRow} role="tablist" aria-label="MCP 分区">
+        <button type="button" role="tab" aria-selected={tab === 'market'} className={`${css.tab}${tab === 'market' ? ' ' + css.tabActive : ''}`} onClick={() => { setTab('market') }}>市场</button>
+        <button type="button" role="tab" aria-selected={tab === 'installed'} className={`${css.tab}${tab === 'installed' ? ' ' + css.tabActive : ''}`} onClick={() => { setTab('installed') }}>已装</button>
         <span className={css.headerSpacer} />
-        <button type="button" className={css.addBtn} onClick={onOpenAdd}>
-          <Plus size={14} />添加服务器
-        </button>
       </div>
 
+      {/* 全宽分隔线（页头行与磁贴群之间） */}
+      <div className={css.divider} />
+
       <div className={css.body}>
-        {/* 左：Metro 磁贴群 */}
+        {/* 左：Metro 磁贴群（节头 + 添加磁贴 + 服务器磁贴） */}
         <div className={css.tiles}>
+          <span className={css.sectionHead}>MCP 服务器</span>
           {loadError !== null && <p className={css.hintText}>加载失败：{loadError}</p>}
-          {servers !== null && servers.length === 0 && loadError === null && (
-            <p className={css.hintText}>暂无 MCP 服务器。点击「添加服务器」注册第一个。</p>
-          )}
           <div className={css.tileGrid}>
-            {servers !== null && servers.length === 0 && loadError === null && (
-              <>
-                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
-                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
-                <div className={css.tilePlaceholder}><span className={css.tilePlaceholderIcon}><Plus size={20} /></span><p className={css.tilePlaceholderText}>即将上线</p></div>
-              </>
-            )}
-            {(servers ?? []).map(s => {
+            {/* 「添加」磁贴：固定第一张（左上角），点击进 McpAddView。 */}
+            <button
+              type="button"
+              className={`${css.tile} ${css.tintSlate}`}
+              aria-label="添加服务器"
+              onClick={onOpenAdd}
+            >
+              {/* 角标用停止态状态点的视觉形态（不可交互占位，只表达「尚未存在」）。 */}
+              <span className={css.tileCorner}>
+                <span className={`${css.tileDot} ${css.tileDotOff}`} aria-hidden="true" />
+              </span>
+              <div className={css.tileTop}>
+                <span className={css.tileIcon}><Plus size={24} /></span>
+              </div>
+              <div className={css.tileBottom}>
+                <div className={css.tileNameRow}>
+                  <span className={css.tileName}>添加</span>
+                  <span className={css.tileVersion}>MCP</span>
+                </div>
+                <span className={css.tileSub}>新端点</span>
+              </div>
+            </button>
+            {(servers ?? []).map((s, i) => {
               const probe = probeMap[s.name]
               const enabled = s.disabled !== true
               const running = enabled && probe !== undefined && !probe.loading && probe.toolCount !== null
               const active = selected !== null && selected.name === s.name
-              const size = tileSizeOf(s)
-              const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : ''
+              const size = mosaicSizeOf(i)
+              const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : size === 'tall' ? ` ${css.tileTall}` : ''
               return (
                 <button
                   key={s.name}
                   type="button"
-                  className={`${css.tile}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
+                  className={`${css.tile}${sizeClass} ${tileTintClassOf(size)}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
                   aria-pressed={active}
                   title={probe?.error ?? undefined}
                   onClick={() => { setSelectedId(s.name) }}
                 >
-                  <div className={css.tileTop}>
-                    <span className={css.tileIcon}><FolderTree size={size === 'big' ? 24 : 18} /></span>
+                  {/* 角标：状态点 8×8（运行中绿 / 停止灰），绝对定位于右上角。 */}
+                  <span className={css.tileCorner}>
                     <span className={`${css.tileDot}${running ? '' : ` ${css.tileDotOff}`}`} />
+                  </span>
+                  <div className={css.tileTop}>
+                    <span className={css.tileIcon}><FolderTree size={size === 'big' ? 30 : 24} /></span>
                   </div>
                   <div className={css.tileBottom}>
                     <div className={css.tileNameRow}>
                       <span className={css.tileName}>{s.name}</span>
+                      {/* 版本徽章位承载传输方式（wire 无版本字段，占位口径）。 */}
                       <span className={css.tileVersion}>{TRANSPORT_LABEL[s.transport]}</span>
                     </div>
                     {(size === 'big' || size === 'wide') && s.description !== undefined && s.description !== '' && (
@@ -268,6 +292,9 @@ function McpListView({ rpc, onOpenAdd }: {
               )
             })}
           </div>
+          {servers !== null && servers.length === 0 && loadError === null && (
+            <p className={css.hintText}>暂无 MCP 服务器。点击「添加」磁贴注册第一个。</p>
+          )}
         </div>
 
         {/* 右：详情简介面板（点击磁贴就地展开；默认选第一个） */}
@@ -275,7 +302,7 @@ function McpListView({ rpc, onOpenAdd }: {
           {selected === null
             ? <DetailEmpty
                 title="选择一个 MCP 服务器"
-                desc="点左侧任意服务器磁贴，在这里查看它的连接配置、状态与工具；「添加服务器」注册新端点。"
+                desc="点左侧任意服务器磁贴，在这里查看它的连接配置、状态与工具；「添加」磁贴注册新端点。"
               />
             : (
               <McpDetailSummary
@@ -366,6 +393,7 @@ function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: 
         ? `运行中 · ${probe.toolCount} 个工具`
         : `未连接 · ${probe?.error ?? '探测失败'}`
 
+  /** 启停开关（详情面板内一行）：saveServer disabled 翻转，RPC 不变。 */
   const toggleDisabled = async () => {
     if (busy || config === null) return
     setBusy(true)
@@ -399,74 +427,96 @@ function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: 
       <div className={css.detailHero}>
         <span className={css.detailHeroBadge}><FolderTree size={30} /></span>
       </div>
-      <div className={css.detailTitleRow}>
-        <span className={css.detailName}>{server.name}</span>
-        <span className={css.tileVersion}>{TRANSPORT_LABEL[server.transport]}</span>
-      </div>
-      <span className={css.detailSub}>modelcontextprotocol · {TRANSPORT_LABEL[server.transport]}</span>
-      <p className={css.detailDesc}>{server.description ?? '该服务器未提供描述。'}</p>
+      <div className={css.detailBody}>
+        <div>
+          <div className={css.detailTitleRow}>
+            <span className={css.detailName}>{server.name}</span>
+            {/* 版本徽章位承载传输方式标签（wire 无版本字段，占位口径）。 */}
+            <span className={css.detailVersion}>{TRANSPORT_LABEL[server.transport]}</span>
+          </div>
+          <span className={css.detailSub}>modelcontextprotocol · {TRANSPORT_LABEL[server.transport]}</span>
+          <p className={css.detailDesc}>{server.description ?? '该服务器未提供描述。'}</p>
 
-      <div className={css.detailMeta}>
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>传输</span>
-          <span className={css.detailMetaValue}>{TRANSPORT_LABEL[server.transport]}{startCommand !== '' ? ` · ${startCommand}` : ''}</span>
-        </div>
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>状态</span>
-          <span className={css.detailMetaValue}>{statusText}</span>
-        </div>
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>范围</span>
-          <span className={css.detailMetaValue}>{config?.cwd ?? '全局'}</span>
-        </div>
-      </div>
+          <div className={css.detailMeta}>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>传输</span>
+              <span className={css.detailMetaValue}>{TRANSPORT_LABEL[server.transport]}{startCommand !== '' ? ` · ${startCommand}` : ''}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>状态</span>
+              <span className={css.detailMetaValue}>{statusText}</span>
+            </div>
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>范围</span>
+              <span className={css.detailMetaValue}>{config?.cwd ?? '全局'}</span>
+            </div>
+          </div>
 
-      {/* 工具清单概览（前 4 个 + 展开全部） */}
-      {tools.length > 0 && (
-        <div className={css.detailSwitchRow}>
-          <span className={css.detailSwitchLabel}>工具 {tools.length} 个</span>
-          {hiddenCount > 0 && !expanded && (
-            <button type="button" className={css.sharedPlainBtn} onClick={() => setExpanded(true)}>
-              <ChevronDown size={13} />展开全部
-            </button>
+          {/* 工具清单概览（前 4 个 + 展开全部） */}
+          {tools.length > 0 && (
+            <div className={css.detailSwitchRow}>
+              <span className={css.detailSwitchLabel}>工具 {tools.length} 个</span>
+              {hiddenCount > 0 && !expanded && (
+                <button type="button" className={css.sharedPlainBtn} onClick={() => setExpanded(true)}>
+                  <ChevronDown size={13} />展开全部
+                </button>
+              )}
+              {expanded && (
+                <button type="button" className={css.sharedPlainBtn} onClick={() => setExpanded(false)}>
+                  <ChevronUp size={13} />收起
+                </button>
+              )}
+            </div>
           )}
-          {expanded && (
-            <button type="button" className={css.sharedPlainBtn} onClick={() => setExpanded(false)}>
-              <ChevronUp size={13} />收起
-            </button>
+          {visibleTools.map(tool => (
+            <div key={tool.name} className={css.detailMetaRow} title={tool.description ?? ''}>
+              <span className={css.detailMetaKey}>{running ? '可用' : '工具'}</span>
+              <span className={css.detailMetaValue}>{tool.name}</span>
+            </div>
+          ))}
+
+          {/* Agent 绑定概览 */}
+          {references !== null && (
+            <div className={css.detailMetaRow}>
+              <span className={css.detailMetaKey}>绑定</span>
+              <span className={css.detailMetaValue}>
+                {boundAgents.length > 0
+                  ? boundAgents.map(a => `${a.nickname ?? a.id}${a.title !== undefined && a.title !== '' ? '-' + a.title : ''}`).join('、')
+                  : `已绑定 ${references.length} 个 Agent 预设`}
+              </span>
+            </div>
           )}
-        </div>
-      )}
-      {visibleTools.map(tool => (
-        <div key={tool.name} className={css.detailMetaRow} title={tool.description ?? ''}>
-          <span className={css.detailMetaKey}>{running ? '可用' : '工具'}</span>
-          <span className={css.detailMetaValue}>{tool.name}</span>
-        </div>
-      ))}
 
-      {/* Agent 绑定概览 */}
-      {references !== null && (
-        <div className={css.detailMetaRow}>
-          <span className={css.detailMetaKey}>绑定</span>
-          <span className={css.detailMetaValue}>
-            {boundAgents.length > 0
-              ? boundAgents.map(a => `${a.nickname ?? a.id}${a.title !== undefined && a.title !== '' ? '-' + a.title : ''}`).join('、')
-              : `已绑定 ${references.length} 个 Agent 预设`}
-          </span>
+          {/* 启停开关（详情面板内一行；磁贴角标只读展示状态点）。 */}
+          <div className={css.detailSwitchRow}>
+            <span className={css.detailSwitchLabel}>启用此服务器</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              aria-label={`${server.name} 启用开关`}
+              className={css.tileSwitch}
+              data-off={enabled ? undefined : ''}
+              disabled={busy || config === null}
+              onClick={e => { e.stopPropagation(); void toggleDisabled() }}
+            >
+              <span className={css.tileSwitchKnob} />
+            </button>
+          </div>
         </div>
-      )}
 
-      {error !== null && <p className={css.hintText}>{error}</p>}
-
-      <div className={css.detailSpacer} />
-      <div className={css.detailActions}>
-        <button
-          type="button"
-          className={`${css.actionBtn} ${css.actionDanger}`}
-          onClick={() => { setConfirmDelete(true) }}
-        >
-          <Trash2 size={13} />删除服务器
-        </button>
+        <div>
+          {error !== null && <p className={css.hintText}>{error}</p>}
+          <div className={css.detailActions}>
+            <button
+              type="button"
+              className={`${css.actionBtn} ${css.actionDanger}`}
+              onClick={() => { setConfirmDelete(true) }}
+            >
+              <Trash2 size={13} />删除服务器
+            </button>
+          </div>
+        </div>
       </div>
 
       {confirmDelete && createPortal(
@@ -567,10 +617,11 @@ function McpAddView({ rpc, onBack }: {
 
   return (
     <div className={css.page}>
-      <div className={css.header}>
-        <span className={css.headerTitle}>添加服务器</span>
+      <div className={css.headerRow}>
+        <span className={css.sectionHead}>添加服务器</span>
         <span className={css.headerSpacer} />
       </div>
+      <div className={css.divider} />
 
       {/* 表单卡片沿 shared 的 mcpCard 形态（迁出副本，不跨包新增依赖） */}
       <div className={css.tiles}>

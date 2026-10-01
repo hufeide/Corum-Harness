@@ -1,20 +1,27 @@
 /**
- * PluginsPage —— 集成中心 ·「插件」内容页（Metro 磁贴改版）。
+ * PluginsPage —— 集成中心 ·「插件」内容页（Metro 磁贴版）。
+ *
+ * 对应 design.pen 定稿：iYTAN「集成中心·插件市场」+ fngID「已装插件」。
  *
  * 保留 PR5 的数据面（RPC 方法名与参数逐字未动）：
  *   - list() / search({query}) / detail({entryId}) / install({spec})
  *     / uninstall({entryId}) / setEnabled({entryId, enabled})。
- * 视图改为「Metro 磁贴 + 右侧详情简介面板」：
- *   - 市场态：搜索框 + 分类筛选 chips（全部 / Agent 能力 / 界面 / 主题）+
- *     磁贴混排（官方/主推 = 大贴 264×264 + 品牌 glow，长描述 = 宽贴 264×128，
- *     其余 = 小贴 128×128），角标 = 火焰 + 周下载量；详情面板操作 =
- *     安装（品牌实色）/ 查看详情（玻璃描边）。
- *   - 已装态：磁贴角标 = 启停开关（pluginManager/setEnabled）；详情面板
- *     操作 = 配置（pluginManager/detail 投影就地展示）/ 卸载（error 描边）。
- *     系统插件（runtime）不在此列表暴露，仅 note 声明。
  *
- * 磁贴选中态 = React state（每 tab 各记一个 id，默认选第一个）；
- * 详情面板与磁贴群同级（flex 横排：左磁贴 fill / 右详情 510px 固定宽）。
+ * 视图结构：
+ *   - 页头一行：tab·市场 / tab·已装（pill 形态）+ 搜索框 280×31 + 分类 chips
+ *     （全部 / Agent 能力 / 界面 / 主题），下接一条全宽 1px 分隔线。
+ *   - 市场态磁贴群分两节：「最热门」（节头 = flame 15 + 文字 13/600，其下
+ *     196×120 热排 ×4，取该分类下载量最高 4 条）+「全部插件」（128 网格大/宽/
+ *     高/小混排）。选中具名分类时只渲染该分类的节（节头文字 = 分类名）。
+ *   - 「添加」是一张普通小磁贴，固定在磁贴群第一格（左上角），点开弹出原有
+ *     三来源菜单（npm / 本地包 / URL）；来源条与提交逻辑不变。
+ *   - 磁贴底色 = 四档语义 tint（紫/深紫/灰蓝/堇），由 token color-mix 派生；
+ *     热度角标（火焰 + 周下载量）只出现在市场态；已装态角标位 = 启停开关。
+ *   - 大贴底部一颗「安装」主按钮（已装则换「已安装」禁用态），点击不触发选中。
+ *   - 详情面板 510 固定宽 = hero(150) + body(padding[16,18], space-between)；
+ *     市场态操作 = 安装（品牌实色）/ 查看详情（玻璃次钮）；已装态 =
+ *     配置（就地展开 pluginManager/detail 投影）/ 卸载（error 描边）。
+ *     系统插件（runtime）不在此列表暴露，仅 note 声明。
  *
  * 色值一律走 --corum-* / --dsw-alias-* token（见同目录 PluginsPage.module.css），
  * 本文件不出现裸 hex。
@@ -23,7 +30,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Blocks, BrainCircuit, Cable, Check, ChevronDown, Cpu, ExternalLink, Flame, FolderOpen, KeyRound,
+  Blocks, BrainCircuit, Cable, Check, Cpu, ExternalLink, Flame, FolderOpen, KeyRound,
   Link2, LoaderCircle, Package, Palette, Plus, Puzzle, Route, Search, Server, ServerCog,
   SquareTerminal, Trash2, WandSparkles, X,
 } from 'lucide-react'
@@ -114,7 +121,7 @@ type Tab = 'market' | 'installed'
 /** 市场范围分段：公开 = npm registry 上的包；个人 = 本地/开发中插件。 */
 type MarketScope = 'public' | 'personal'
 
-/** 「添加 ▾」的三个安装来源。 */
+/** 「添加」磁贴的三个安装来源。 */
 type AddSource = 'npm' | 'local' | 'url'
 
 /** 添加来源的文案（菜单项 + 来源条标签 / 输入提示）。 */
@@ -146,6 +153,7 @@ interface Section {
 /**
  * 四个分类筛选 + 归类关键词。关键词取 corum 生态的真实分组口径（Agent 能力 =
  * 编排/技能/子智能体/MCP，界面 = 面板/侧栏/编辑器/终端，主题 = 主题/图标/字体）。
+ * 「热门」不再是 chip（design.pen 分类只有这四个），它只作兜底归类 + 「最热门」节。
  */
 const SECTIONS: readonly Section[] = [
   { id: 'popular', label: '热门', keywords: [] },
@@ -164,6 +172,9 @@ const SECTIONS: readonly Section[] = [
 
 /** 每个分类的磁贴数上限（磁贴群是「概览」，不是完整列表页）。 */
 const SECTION_LIMIT = 6
+
+/** 「最热门」热排的张数（design.pen：196×120 ×4）。 */
+const HOT_ROW_LIMIT = 4
 
 /** 检索词（挂载即检索一次；分类归类在本页做，不额外打 registry）。 */
 const INITIAL_QUERY = 'corum plugin'
@@ -254,13 +265,40 @@ function heatLabel(weeklyDownloads?: number): string | null {
 }
 
 /**
- * 磁贴尺寸分级（Metro 混排）：官方/主推（@corum / @deepseek-ai 域）= 大贴 2×2
- * + glow；描述较长的 = 宽贴 2×1；其余 = 小贴 1×1。
+ * 磁贴尺寸分级（Metro 混排）。
+ *
+ * 设计稿四个 frame（iYTAN 全部插件 / fngID 已装 / bFLLQ MCP / VNH3k 技能）的首行
+ * 排法**完全同构**：大贴 264×264 → 两张宽贴 264×128（并成左列）→ 高贴 128×264
+ * → 两张小贴 128×128。故尺寸由**序号**按这条 6 拍循环决定，而不是按包名域——
+ * 按域判会把每个 @corum/* 都判成大贴，整片网格退化成等大的方块，丢掉稿里的错落。
  */
-function tileSizeOf(name: string, description?: string): 'big' | 'wide' | 'small' {
-  if (name.startsWith('@corum/') || name.startsWith('@deepseek-ai/')) return 'big'
-  if ((description ?? '').length >= 120) return 'wide'
-  return 'small'
+const MOSAIC_CYCLE: readonly ('big' | 'wide' | 'wide' | 'tall' | 'small' | 'small')[] =
+  ['big', 'wide', 'wide', 'tall', 'small', 'small']
+
+/** 按序号取磁贴尺寸（6 拍循环；`grid-auto-flow: dense` 自动补位）。 */
+function mosaicSizeOf(index: number): 'big' | 'wide' | 'tall' | 'small' {
+  return MOSAIC_CYCLE[index % MOSAIC_CYCLE.length]!
+}
+
+/**
+ * 磁贴底色的四档语义 tint（design.pen：紫 / 深紫 / 灰蓝 / 堇）。
+ * CSS 端按 tileTintA~D 派生；这里按包名语义稳定取档：官方/主推 = 深、主题包 = 堇、
+ * 界面类 = 灰蓝、其余 = 紫，同一张磁贴每次渲染取到同一档。
+ */
+function tileTintOf(name: string): string {
+  const n = name.toLowerCase()
+  if (n.startsWith('@corum/')) return 'a'
+  if (n.startsWith('@deepseek-ai/')) return 'b'
+  if (/theme|palette|color|icon|font|主题/.test(n)) return 'd'
+  if (/ui|ide-|panel|sidebar|editor|terminal|界面|面板/.test(n)) return 'c'
+  return 'a'
+}
+
+/** 尺寸/徽章类名拼装：大贴、宽贴、高贴 + tint 档 + 选中态。 */
+function tileClasses(size: 'big' | 'wide' | 'tall' | 'small', tint: string, active: boolean, extra?: string): string {
+  const sizeClass = size === 'big' ? css.tileBig : size === 'wide' ? css.tileWide : size === 'tall' ? css.tileTall : ''
+  const tintClass = tint === 'b' ? css.tileTintB : tint === 'c' ? css.tileTintC : tint === 'd' ? css.tileTintD : css.tileTintA
+  return [css.tile, sizeClass, tintClass, active ? css.tileActive : '', extra ?? ''].filter(Boolean).join(' ')
 }
 
 /* ── 页面本体 ─────────────────────────────────────────────────────────────── */
@@ -286,7 +324,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // 「添加 ▾」下拉 + 来源条（mode=null 表示来源条收起）。
+  // 「添加」磁贴的三来源下拉（mode=null 表示来源条收起）。
   const [addOpen, setAddOpen] = useState(false)
   const [addSource, setAddSource] = useState<AddSource | null>(null)
   const [addSpec, setAddSpec] = useState('')
@@ -298,6 +336,8 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   // 已装详情投影（pluginManager/detail，选中条目变化时拉取）。
   const [detail, setDetail] = useState<PluginDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  // 已装态「配置」按钮的就地展开/收起。
+  const [configOpen, setConfigOpen] = useState(false)
 
   /* ── 数据读取 ── */
 
@@ -351,7 +391,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     }, SEARCH_DEBOUNCE_MS)
   }, [cancelPending, runSearch, scope, tab])
 
-  // 「添加 ▾」下拉：点外部关闭（纯组件本地 effect）。
+  // 「添加」磁贴的下拉：点外部关闭（纯组件本地 effect）。
   useEffect(() => {
     if (!addOpen) return
     const onDown = (e: MouseEvent): void => {
@@ -374,7 +414,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     }
   }, [])
 
-  /** 安装（详情面板主操作；市场角标已装的磁贴不再出安装钮）。 */
+  /** 安装（大贴底部主按钮 / 详情面板主操作）。 */
   const onInstall = useCallback((name: string) => withBusy(`install:${name}`, async () => {
     const result = await callRemote<MutationResult>('install', { spec: name })
     if (!result.ok) {
@@ -506,6 +546,21 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     return rows.slice(0, SECTION_LIMIT * 2)
   }, [results, matches, inFilter, filter])
 
+  /** 「最热门」热排：当前市场磁贴里下载量最高的前 4 条（不足 4 条有几条画几条）。 */
+  const hotTiles = useMemo(() => {
+    if (filter !== 'all') return []
+    return [...marketTiles]
+      .sort((a, b) => (b.weeklyDownloads ?? 0) - (a.weeklyDownloads ?? 0))
+      .slice(0, HOT_ROW_LIMIT)
+  }, [marketTiles, filter])
+
+  /** 「全部插件」网格：全量视图排除热排已展示的那几张，具名分类视图直接用全量。 */
+  const gridTiles = useMemo(() => {
+    if (filter !== 'all') return marketTiles
+    const hotNames = new Set(hotTiles.map(r => r.name))
+    return marketTiles.filter(r => !hotNames.has(r.name))
+  }, [marketTiles, hotTiles, filter])
+
   /** 市场「个人」范围的磁贴数据（与已装同构）。 */
   const personalTiles = personalEntries
 
@@ -539,6 +594,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     let cancelled = false
     setDetail(null)
     setDetailLoading(true)
+    setConfigOpen(false)
     void (async () => {
       try {
         const r = await callRemote<{ detail: PluginDetail }>('detail', { entryId: selectedInstalled.entryId })
@@ -555,73 +611,132 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   /** 搜索框提示语随当前视图切换（一个搜索框服务三个视图，不重复画框）。 */
   const searchPlaceholder = tab === 'installed'
     ? '搜索已装插件'
-    : scope === 'personal' ? '搜索本地/开发中插件' : '搜索插件'
+    : scope === 'personal' ? '搜索本地/开发中插件' : '搜索插件…'
 
   const bridge = typeof window === 'undefined'
     ? undefined
     : (window as unknown as { corumDesktop?: DesktopBridge }).corumDesktop
   const canRestart = typeof bridge?.restartHost === 'function'
 
-  /** 分类 chips（全部 + 具名分类）。 */
-  const filterChips: ReadonlyArray<readonly [string, string]> = [['all', '全部'], ...SECTIONS.map(s => [s.id, s.label] as const)]
+  /** 分类 chips（全部 + 具名分类；「热门」不再是 chip，改为节标题）。 */
+  const filterChips: ReadonlyArray<readonly [string, string]> = [['all', '全部'], ...SECTIONS.filter(s => s.id !== 'popular').map(s => [s.id, s.label] as const)]
 
   /* ── 磁贴渲染 ── */
 
-  /** 市场磁贴（检索结果条目 → 磁贴）。 */
-  const renderMarketTile = (row: SearchResult & { entryId?: string }): ReactNode => {
+  /** 「添加」磁贴（磁贴群第一格；点开弹三来源菜单，菜单相对磁贴定位）。 */
+  const renderAddTile = (): ReactNode => (
+    <div className={css.addTileWrap} key="__add__" ref={addRef}>
+      <button
+        type="button"
+        className={tileClasses('small', 'a', false)}
+        aria-haspopup="menu"
+        aria-expanded={addOpen}
+        onClick={() => { setAddOpen(open => !open) }}
+      >
+        <div className={css.tileTop}>
+          <span className={css.tileIcon}><Plus size={24} /></span>
+        </div>
+        <div className={css.tileBottom}>
+          <div className={css.tileNameRow}>
+            <span className={css.tileName}>添加</span>
+            <span className={css.tileVersion}>v—</span>
+          </div>
+          <span className={css.tileSub}>新端点</span>
+        </div>
+      </button>
+      {addOpen && (
+        <div className={css.addMenu} role="menu" aria-label="安装来源">
+          {(['npm', 'local', 'url'] as const).map(source => (
+            <button
+              key={source}
+              type="button"
+              role="menuitem"
+              className={css.addOption}
+              onClick={(e) => { e.stopPropagation(); onPickSource(source) }}
+            >
+              <span className={css.addOptionIcon}>
+                {source === 'npm' ? <Package size={14} /> : source === 'local' ? <FolderOpen size={14} /> : <Link2 size={14} />}
+              </span>
+              <span className={css.addOptionText}>{ADD_SOURCE_LABEL[source]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  /** 市场磁贴（检索结果条目 → 磁贴；热排传 hot=true 用 196×120 形态）。
+   *  `index` 是它在网格里的序号（含首张「添加」磁贴）——尺寸由 6 拍循环决定。 */
+  const renderMarketTile = (row: SearchResult, index: number, hot = false): ReactNode => {
     const active = selectedMarket !== null && 'name' in selectedMarket && selectedMarket.name === row.name
     const installed = row.installed || installedSet.has(row.name)
-    const size = tileSizeOf(row.name, row.description)
+    const size = hot ? 'small' : mosaicSizeOf(index)
     const heat = heatLabel(row.weeklyDownloads)
-    const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : ''
+    const sizeClass = hot ? ` ${css.hotTile}` : size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : size === 'tall' ? ` ${css.tileTall}` : ''
     return (
       <button
         key={row.name}
         type="button"
-        className={`${css.tile}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
+        className={`${tileClasses(size, tileTintOf(row.name), active)}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}`}
         aria-pressed={active}
         onClick={() => { setMarketId(row.name) }}
       >
         <div className={css.tileTop}>
-          <span className={css.tileIcon}>{pluginIcon(row.name, size === 'big' ? 24 : 18)}</span>
-          <span className={css.tileHeat}>
-            {heat !== null && (
-              <>
-                <Flame size={12} className={css.tileHeatIcon} />
-                <span className={css.tileHeatValue}>{heat}</span>
-              </>
-            )}
-          </span>
+          <span className={css.tileIcon}>{pluginIcon(row.name, hot ? 22 : size === 'big' ? 34 : 24)}</span>
         </div>
+        {heat !== null && (
+          <span className={css.tileHeat}>
+            <Flame size={12} className={css.tileHeatIcon} />
+            <span className={css.tileHeatValue}>{heat}</span>
+          </span>
+        )}
         <div className={css.tileBottom}>
           <div className={css.tileNameRow}>
             <span className={css.tileName}>{shortName(row.name)}</span>
             <span className={css.tileVersion}>v{row.version}</span>
           </div>
-          {(size === 'big' || size === 'wide') && row.description !== undefined && row.description !== '' && (
+          {!hot && (size === 'big' || size === 'wide') && row.description !== undefined && row.description !== '' && (
             <span className={css.tileDesc}>{row.description}</span>
           )}
           <span className={css.tileSub}>{authorOf(row.name)}</span>
         </div>
+        {size === 'big' && (
+          <span className={css.tileFoot}>
+            {installed ? (
+              <button type="button" className={css.tileInstall} disabled onClick={(e) => { e.stopPropagation() }}>
+                <Check size={14} />已安装
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={css.tileInstall}
+                disabled={busy.has(`install:${row.name}`)}
+                onClick={(e) => { e.stopPropagation(); void onInstall(row.name) }}
+              >
+                {busy.has(`install:${row.name}`) ? <LoaderCircle size={14} className={css.spin} /> : <Plus size={14} />}
+                安装
+              </button>
+            )}
+          </span>
+        )}
       </button>
     )
   }
 
-  /** 市场「个人」范围磁贴（已装条目 → 磁贴，已装徽章）。 */
-  const renderPersonalTile = (entry: InstalledEntry): ReactNode => {
+  /** 市场「个人」范围磁贴（已装条目 → 磁贴，无热度角标）。 */
+  const renderPersonalTile = (entry: InstalledEntry, index: number): ReactNode => {
     const active = selectedMarket !== null && 'entryId' in selectedMarket && selectedMarket.entryId === entry.entryId
-    const size = tileSizeOf(entry.moduleName, entry.description)
-    const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : ''
+    const size = mosaicSizeOf(index)
     return (
       <button
         key={entry.entryId}
         type="button"
-        className={`${css.tile}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
+        className={`${tileClasses(size, tileTintOf(entry.moduleName), active)}${size === 'big' ? ' ' + css.tileGlow : ''}`}
         aria-pressed={active}
         onClick={() => { setMarketId(entry.entryId) }}
       >
         <div className={css.tileTop}>
-          <span className={css.tileIcon}>{pluginIcon(entry.moduleName, size === 'big' ? 24 : 18)}</span>
+          <span className={css.tileIcon}>{pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}</span>
         </div>
         <div className={css.tileBottom}>
           <div className={css.tileNameRow}>
@@ -637,15 +752,14 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     )
   }
 
-  /** 已装磁贴（角标 = 启停开关）。 */
-  const renderInstalledTile = (entry: InstalledEntry): ReactNode => {
+  /** 已装磁贴（角标位 = 启停开关）。 */
+  const renderInstalledTile = (entry: InstalledEntry, index: number): ReactNode => {
     const active = selectedInstalled !== null && selectedInstalled.entryId === entry.entryId
-    const size = tileSizeOf(entry.moduleName, entry.description)
-    const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : ''
+    const size = mosaicSizeOf(index)
     return (
       <div
         key={entry.entryId}
-        className={`${css.tile}${sizeClass}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
+        className={`${tileClasses(size, tileTintOf(entry.moduleName), active)}${size === 'big' ? ' ' + css.tileGlow : ''}`}
         data-off={!entry.enabled || undefined}
         role="button"
         tabIndex={0}
@@ -654,7 +768,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setInstalledId(entry.entryId) } }}
       >
         <div className={css.tileTop}>
-          <span className={css.tileIcon}>{pluginIcon(entry.moduleName, size === 'big' ? 24 : 18)}</span>
+          <span className={css.tileIcon}>{pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}</span>
           <button
             type="button"
             role="switch"
@@ -682,20 +796,17 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
   /* ── 详情面板 ── */
 
-  /** 市场态详情面板主体。 */
+  /** 市场态详情面板主体（hero 150 + body padding[16,18] + space-between）。 */
   let marketDetail: ReactNode = null
   if (tab === 'market' && selectedMarket !== null) {
     if (scope === 'public') {
       const row = selectedMarket as SearchResult
       const installed = row.installed || installedSet.has(row.name)
       marketDetail = (
-        <>
-          <div className={css.detailHero}>
-            <span className={css.detailHeroBadge}>{pluginIcon(row.name, 30)}</span>
-          </div>
+        <div className={css.detailBody}>
           <div className={css.detailTitleRow}>
             <span className={css.detailName}>{shortName(row.name)}</span>
-            <span className={css.tileVersion}>v{row.version}</span>
+            <span className={`${css.tileVersion} ${css.detailVersion}`}>v{row.version}</span>
           </div>
           <span className={css.detailSub}>{authorOf(row.name)} · npm</span>
           <p className={css.detailDesc}>{row.description ?? '该插件未提供描述。'}</p>
@@ -717,41 +828,39 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
               <span className={css.detailMetaValue}>{SECTIONS.find(s => s.id === sectionOf(row.name, row.description))?.label ?? '热门'}</span>
             </div>
           </div>
-          <div className={css.detailSpacer} />
           <div className={css.detailActions}>
-            {installed
-              ? (
-                <button type="button" className={css.actionBtn} disabled>
-                  <Check size={13} />已安装
-                </button>
-              )
-              : (
-                <button
-                  type="button"
-                  className={`${css.actionBtn} ${css.actionPrimary}`}
-                  disabled={busy.has(`install:${row.name}`)}
-                  onClick={() => { void onInstall(row.name) }}
-                >
-                  {busy.has(`install:${row.name}`) ? <LoaderCircle size={13} className={css.spin} /> : <Plus size={13} />}
-                  安装
-                </button>
-              )}
-            <button type="button" className={css.actionBtn} onClick={() => { void onInstall(row.name) }} disabled={installed}>
-              <ExternalLink size={13} />查看详情
+            {installed ? (
+              <button type="button" className={`${css.actionBtn} ${css.actionPrimary}`} disabled>
+                <Check size={14} />已安装
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={`${css.actionBtn} ${css.actionPrimary}`}
+                disabled={busy.has(`install:${row.name}`)}
+                onClick={() => { void onInstall(row.name) }}
+              >
+                {busy.has(`install:${row.name}`) ? <LoaderCircle size={14} className={css.spin} /> : <Plus size={14} />}
+                安装
+              </button>
+            )}
+            <button
+              type="button"
+              className={css.actionBtn}
+              onClick={() => { setMarketId(row.name) }}
+            >
+              <ExternalLink size={14} />查看详情
             </button>
           </div>
-        </>
+        </div>
       )
     } else {
       const entry = selectedMarket as InstalledEntry
       marketDetail = (
-        <>
-          <div className={css.detailHero}>
-            <span className={css.detailHeroBadge}>{pluginIcon(entry.moduleName, 30)}</span>
-          </div>
+        <div className={css.detailBody}>
           <div className={css.detailTitleRow}>
             <span className={css.detailName}>{shortName(entry.moduleName)}</span>
-            {entry.version !== undefined && <span className={css.tileVersion}>v{entry.version}</span>}
+            {entry.version !== undefined && <span className={`${css.tileVersion} ${css.detailVersion}`}>v{entry.version}</span>}
           </div>
           <span className={css.detailSub}>{authorOf(entry.moduleName)} · 本地/开发中</span>
           <p className={css.detailDesc}>{entry.description ?? '该插件未提供描述。'}</p>
@@ -765,131 +874,122 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
               <span className={css.detailMetaValue}>{entry.enabled ? '已启用' : '已停用'}</span>
             </div>
           </div>
-          <div className={css.detailSpacer} />
           <div className={css.detailActions}>
-            <button type="button" className={css.actionBtn} disabled>
-              <Check size={13} />已安装
+            <button type="button" className={`${css.actionBtn} ${css.actionPrimary}`} disabled>
+              <Check size={14} />已安装
             </button>
           </div>
-        </>
+        </div>
       )
     }
   }
 
-  /** 已装态详情面板主体。 */
+  /** 已装态详情面板主体：操作 = 配置（就地展开 detail 投影）+ 卸载。 */
   let installedDetail: ReactNode = null
   if (tab === 'installed' && selectedInstalled !== null) {
     const entry = selectedInstalled
     const d = detail
     installedDetail = (
-      <>
-        <div className={css.detailHero}>
-          <span className={css.detailHeroBadge}>{pluginIcon(entry.moduleName, 30)}</span>
-        </div>
+      <div className={css.detailBody}>
         <div className={css.detailTitleRow}>
           <span className={css.detailName}>{shortName(entry.moduleName)}</span>
-          {entry.version !== undefined && <span className={css.tileVersion}>v{entry.version}</span>}
+          {entry.version !== undefined && <span className={`${css.tileVersion} ${css.detailVersion}`}>v{entry.version}</span>}
         </div>
         <span className={css.detailSub}>
           {d?.publisher ?? authorOf(entry.moduleName)}
           {d !== null && d.origin === 'official' ? ' · 官方' : d !== null && d.origin === 'corum' ? ' · 本项目' : d !== null ? ' · 第三方' : ''}
         </span>
         <p className={css.detailDesc}>{entry.description ?? d?.description ?? '该插件未提供描述。'}</p>
+        {configOpen && (
+          <div className={css.configPanel}>
+            {detailLoading && <span className={css.detailSub}>加载中…</span>}
+            {d !== null && (
+              <>
+                <div className={css.detailMetaRow}>
+                  <span className={css.detailMetaKey}>包名</span>
+                  <span className={css.detailMetaValue}>{d.moduleName}</span>
+                </div>
+                {d.publisher !== undefined && (
+                  <div className={css.detailMetaRow}>
+                    <span className={css.detailMetaKey}>发布者</span>
+                    <span className={css.detailMetaValue}>{d.publisher}</span>
+                  </div>
+                )}
+                {d.license !== undefined && (
+                  <div className={css.detailMetaRow}>
+                    <span className={css.detailMetaKey}>许可证</span>
+                    <span className={css.detailMetaValue}>{d.license}</span>
+                  </div>
+                )}
+                {d.homepage !== undefined && (
+                  <div className={css.detailMetaRow}>
+                    <span className={css.detailMetaKey}>主页</span>
+                    <span className={css.detailMetaValue}>{d.homepage}</span>
+                  </div>
+                )}
+                {d.repository !== undefined && (
+                  <div className={css.detailMetaRow}>
+                    <span className={css.detailMetaKey}>仓库</span>
+                    <span className={css.detailMetaValue}>{d.repository}</span>
+                  </div>
+                )}
+                {d.installedFrom !== undefined && (
+                  <div className={css.detailMetaRow}>
+                    <span className={css.detailMetaKey}>安装自</span>
+                    <span className={css.detailMetaValue}>{d.installedFrom}</span>
+                  </div>
+                )}
+                {d.keywords !== undefined && d.keywords.length > 0 && (
+                  <div className={css.detailMetaRow}>
+                    <span className={css.detailMetaKey}>关键词</span>
+                    <span className={css.detailMetaValue}>{d.keywords.join('、')}</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
         <div className={css.detailMeta}>
           <div className={css.detailMetaRow}>
             <span className={css.detailMetaKey}>状态</span>
             <span className={css.detailMetaValue}>{entry.enabled ? '已启用' : '已停用'}</span>
           </div>
-          {d?.license !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>许可证</span>
-              <span className={css.detailMetaValue}>{d.license}</span>
-            </div>
-          )}
-          {d?.homepage !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>主页</span>
-              <span className={css.detailMetaValue}>{d.homepage}</span>
-            </div>
-          )}
-          {d?.installedFrom !== undefined && (
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>安装自</span>
-              <span className={css.detailMetaValue}>{d.installedFrom}</span>
-            </div>
-          )}
         </div>
-        <div className={css.detailSpacer} />
         <div className={css.detailActions}>
+          <button type="button" className={css.actionBtn} aria-expanded={configOpen} onClick={() => { setConfigOpen(open => !open) }}>
+            配置
+          </button>
           <button
             type="button"
-            className={css.actionBtn}
+            className={`${css.actionBtn} ${css.actionDanger}`}
             disabled={busy.has(`uninstall:${entry.entryId}`)}
             onClick={() => { void onUninstall(entry) }}
           >
-            {busy.has(`uninstall:${entry.entryId}`) ? <LoaderCircle size={13} className={css.spin} /> : <Trash2 size={13} />}
+            {busy.has(`uninstall:${entry.entryId}`) ? <LoaderCircle size={14} className={css.spin} /> : <Trash2 size={14} />}
             卸载
           </button>
         </div>
-      </>
+      </div>
     )
   }
 
+  /** 节标题（磁贴群内的分节头，不是 tab / 不是 chip）：flame + 文字（最热门节）或纯文字。 */
+  const renderSectionHead = (label: string, withFlame: boolean): ReactNode => (
+    <div className={css.sectionHead}>
+      {withFlame && <span className={css.sectionHeadIcon}><Flame size={15} /></span>}
+      <span className={css.sectionHeadText}>{label}</span>
+    </div>
+  )
+
+  /** 「全部插件」分类节头文字：全部 = 固定文案；具名分类 = 该分类名。 */
+  const gridSectionLabel = filter === 'all'
+    ? '全部插件'
+    : (SECTIONS.find(s => s.id === filter)?.label ?? '全部插件')
+
   return (
     <div className={css.page}>
-      {/* ── 1. 页头：标题 + 搜索 + 添加▾ ── */}
+      {/* ── 1. 页头一行：tab pill ×2 + 搜索框 280×31 + 分类 chips（iYTAN o5WYjl）── */}
       <div className={css.header}>
-        <span className={css.headerTitle}>插件</span>
-        <div className={css.searchBox}>
-          <Search size={13} className={css.searchIcon} />
-          <input
-            className={css.searchInput}
-            value={query}
-            placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
-            onChange={e => { onQueryChange(e.target.value) }}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return
-              if (tab !== 'market' || scope !== 'public') return
-              cancelPending()
-              void runSearch(query)
-            }}
-          />
-        </div>
-        <div className={css.addWrap} ref={addRef}>
-          <button
-            type="button"
-            className={css.addBtn}
-            aria-haspopup="menu"
-            aria-expanded={addOpen}
-            onClick={() => { setAddOpen(open => !open) }}
-          >
-            <span>添加</span>
-            <ChevronDown size={14} />
-          </button>
-          {addOpen && (
-            <div className={css.addMenu} role="menu" aria-label="安装来源">
-              {(['npm', 'local', 'url'] as const).map(source => (
-                <button
-                  key={source}
-                  type="button"
-                  role="menuitem"
-                  className={css.addOption}
-                  onClick={() => { onPickSource(source) }}
-                >
-                  <span className={css.addOptionIcon}>
-                    {source === 'npm' ? <Package size={14} /> : source === 'local' ? <FolderOpen size={14} /> : <Link2 size={14} />}
-                  </span>
-                  <span className={css.addOptionText}>{ADD_SOURCE_LABEL[source]}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── 2. 内部 tab：市场 | 已装 ── */}
-      <div className={css.tabs} role="tablist" aria-label="插件分区">
         {([['market', '市场'], ['installed', '已装']] as ReadonlyArray<readonly [Tab, string]>).map(([id, label]) => (
           <button
             key={id}
@@ -906,9 +1006,37 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
             }}
           >{label}</button>
         ))}
+        <div className={css.searchBox}>
+          <Search size={14} className={css.searchIcon} />
+          <input
+            className={css.searchInput}
+            value={query}
+            placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
+            onChange={e => { onQueryChange(e.target.value) }}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return
+              if (tab !== 'market' || scope !== 'public') return
+              cancelPending()
+              void runSearch(query)
+            }}
+          />
+        </div>
+        <div className={css.filterRow} role="group" aria-label="分类筛选">
+          {filterChips.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`${css.filterChip}${filter === id ? ' ' + css.filterChipActive : ''}`}
+              aria-pressed={filter === id}
+              onClick={() => { setFilter(id) }}
+            >{label}</button>
+          ))}
+        </div>
       </div>
+      <div className={css.headerDivider} />
 
-      {/* ── 3. 来源条：添加▾ 选中某一来源后内联展开 ── */}
+      {/* ── 2. 来源条：「添加」磁贴选中某一来源后内联展开 ── */}
       {addSource !== null && (
         <div className={css.sourceBar}>
           <span className={css.sourceLabel}>{ADD_SOURCE_LABEL[addSource]}</span>
@@ -935,30 +1063,33 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
         </div>
       )}
 
-      {/* ── 4. 内容区：左磁贴群 + 右详情面板 ── */}
+      {/* ── 3. 内容区：左磁贴群（分节）+ 右详情面板 ── */}
       <div className={css.body}>
         <div className={css.tiles}>
-          {/* 分类筛选 chips（全部 / Agent 能力 / 界面 / 主题；热门仅在「全部」视图作兜底归类） */}
-          <div className={css.filterRow} role="group" aria-label="分类筛选">
-            {filterChips.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={`${css.filterChip}${filter === id ? ' ' + css.filterChipActive : ''}`}
-                aria-pressed={filter === id}
-                onClick={() => { setFilter(id) }}
-              >{label}</button>
-            ))}
-          </div>
-
           {tab === 'market' && scope === 'public' && (
             <>
               {searchError !== null && <p className={css.errorText}>检索失败：{searchError}</p>}
               {searchError === null && results === null && <p className={css.hintText}>检索中…</p>}
               {results !== null && marketTiles.length === 0 && <p className={css.hintText}>没有匹配的插件</p>}
-              <div className={css.tileGrid}>
-                {marketTiles.map(row => renderMarketTile(row))}
-              </div>
+              {marketTiles.length > 0 && (
+                <>
+                  {filter === 'all' && hotTiles.length > 0 && (
+                    <div className={css.hotSection}>
+                      {renderSectionHead('最热门', true)}
+                      <div className={css.hotRow}>
+                        {hotTiles.map(row => renderMarketTile(row, 0, true))}
+                      </div>
+                    </div>
+                  )}
+                  <div className={css.allSection}>
+                    {renderSectionHead(gridSectionLabel, false)}
+                    <div className={css.tileGrid}>
+                      {renderAddTile()}
+                      {gridTiles.map((row, i) => renderMarketTile(row, i))}
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -967,9 +1098,15 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
               {error !== null && entries === null && <p className={css.errorText}>加载失败：{error}</p>}
               {entries === null && error === null && <p className={css.hintText}>加载中…</p>}
               {entries !== null && personalTiles.length === 0 && <p className={css.hintText}>没有本地/开发中插件</p>}
-              <div className={css.tileGrid}>
-                {personalTiles.map(entry => renderPersonalTile(entry))}
-              </div>
+              {personalTiles.length > 0 && (
+                <div className={css.allSection}>
+                  {renderSectionHead('本地 / 开发中', false)}
+                  <div className={css.tileGrid}>
+                    {renderAddTile()}
+                    {personalTiles.map((entry, i) => renderPersonalTile(entry, i))}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -981,9 +1118,14 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
               {entries !== null && visibleInstalled.length === 0 && (
                 <p className={css.hintText}>{keyword === '' ? '没有已装插件' : '没有符合条件的插件'}</p>
               )}
-              <div className={css.tileGrid}>
-                {visibleInstalled.map(entry => renderInstalledTile(entry))}
-              </div>
+              {visibleInstalled.length > 0 && (
+                <div className={css.allSection}>
+                  {renderSectionHead('已装插件', false)}
+                  <div className={css.tileGrid}>
+                    {visibleInstalled.map((entry, i) => renderInstalledTile(entry, i))}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -992,12 +1134,23 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
         {/* 右侧详情简介面板（点击磁贴就地展开；默认选第一个） */}
         <aside className={css.detail} aria-label="插件详情">
+          {/* hero(150) 在面板顶部全宽；body(padding[16,18], space-between) 承担其余内容与操作。 */}
+          {tab === 'market' && selectedMarket !== null && (
+            <div className={css.detailHero}>
+              <span className={css.detailHeroBadge}>{pluginIcon('name' in selectedMarket ? selectedMarket.name : selectedMarket.moduleName, 30)}</span>
+            </div>
+          )}
+          {tab === 'installed' && selectedInstalled !== null && (
+            <div className={css.detailHero}>
+              <span className={css.detailHeroBadge}>{pluginIcon(selectedInstalled.moduleName, 30)}</span>
+            </div>
+          )}
           {tab === 'market' && (marketDetail ?? <DetailEmpty title="选择一个插件" desc="点左侧任意插件磁贴，在这里查看它的简介、热度与版本；点「安装」一键装入。" />)}
           {tab === 'installed' && (installedDetail ?? <DetailEmpty title="选择一个已装插件" desc="点左侧任意已装插件磁贴，在这里查看它的版本、状态与操作；开关可就地启停。" />)}
         </aside>
       </div>
 
-      {/* ── 5. 操作反馈条（安装/卸载/启停后的提示 + 可选「立即重启」）── */}
+      {/* ── 4. 操作反馈条（安装/卸载/启停后的提示 + 可选「立即重启」）── */}
       {notice !== null && (
         <div className={css.notice}>
           <span className={css.noticeText}>{notice}</span>

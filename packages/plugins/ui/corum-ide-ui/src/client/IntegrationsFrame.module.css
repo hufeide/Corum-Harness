@@ -66,10 +66,18 @@
   white-space: nowrap;
 }
 
-/* 头部的弹性留白（画板 F MBZlf `sp`）。 */
+/* 头部的弹性留白（iYTAN `wdxwk` `sp`）。 */
 .headerSpacer {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* 头部关闭语义注（iYTAN `IfD5M`：10.5 / $label-tertiary，紧邻关闭钮左侧）。 */
+.headerNote {
+  flex: none;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
 }
 
 /* 关闭钮（画板 F v4Jf8B：24×24 r7 · 透明底 + $glass-border 描边，icon x 13 ·
@@ -107,10 +115,10 @@
   display: flex;
 }
 
-/* 子导航（画板 F Vyfds：118 宽、右边界 1px、padding [10,8]、gap 2）。 */
+/* 子导航（iYTAN `CVJF0`：150 宽、右边界 1px、padding [10,8]、gap 2）。 */
 .subNav {
   flex: none;
-  width: 118px;
+  width: 150px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -152,9 +160,9 @@
   background: var(--dsw-alias-brand-primary);
 }
 
-/* 激活 pill（画板 F LXBpE：行内 30 高 r8、padding [0,8]、gap 6；激活 $glass-2 底 +
-   $glass-border 描边）。未激活也保留 1px 透明描边——否则激活瞬间内容宽度跳
-   2px、图标与文字会平移。 */
+/* 激活 pill（iYTAN `e3tiPl`：行内 30 高 r8、padding [0,8]、gap 6；激活 $glass-2
+   底 + $glass-border 描边，文字 $label-primary）。未激活也保留 1px 透明描边——
+   否则激活瞬间内容宽度跳 2px、图标与文字会平移。 */
 .subNavPill {
   display: flex;
   align-items: center;
@@ -166,7 +174,7 @@
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
   transition: background 0.12s ease, color 0.12s ease;
 }
 
@@ -177,7 +185,7 @@
 .subNavItem[data-active] .subNavPill {
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   border-color: var(--corum-glass-border, var(--dsw-alias-border-l1));
-  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  color: var(--dsw-alias-label-primary);
 }
 
 .subNavItem:focus-visible .subNavPill {
@@ -185,7 +193,9 @@
   outline-offset: 2px;
 }
 
-/* 子导航项文案（画板 F iVYcj/SOjKU：11.5；激活 600，未激活 normal）。 */
+/* 子导航项文案（iYTAN `xaQcn`/`BfmOz`/`QCCFb`：11.5；激活 600，未激活
+   normal。未激活取 $label-secondary、激活取 $label-primary——激活时改的是底色
+   与描边，文字层级不再跳变）。 */
 .subNavLabel {
   font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
   font-weight: 400;
@@ -194,10 +204,9 @@
 
 .subNavItem[data-active] .subNavLabel {
   font-weight: 600;
-  color: var(--dsw-alias-label-primary);
 }
 
-/* 内容区（画板 F wXUJu：padding 12、gap 10）：三个内容子槽之一。
+/* 内容区（iYTAN `NTYUn`：padding 20、gap 16）：三个内容子槽之一。
    纵向 flex；**滚动条永远在外层**（overflow 用 auto 而非 scroll），页面自身
    不设 flex:1（`> *` 的 flex:none + min-height:0）——PR6 两页的根是 fragment
    （迁出前靠设置壳的 `.body` 提供内边距与滚动），到集成中心后由本容器承担；
@@ -209,7 +218,7 @@
   display: flex;
   flex-direction: column;
   gap: calc(10px * var(--corum-density-scale, 1));
-  padding: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(20px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   overflow-y: auto;
 }
