@@ -581,12 +581,12 @@ function SkillDetailPanel({ skill, bindings, rpc, onDeleted, onChanged, onReques
             <span className={css.detailName}>{skill.name}</span>
             <span className={css.detailVersion}>{pinned ?? skill.currentVersion ?? MISSING_VALUE}</span>
           </div>
-          <span className={css.detailSub}>{OFFICIAL_SKILL_NAMES.has(skill.name) ? 'corum · 官方技能' : 'corum 技能库'}</span>
           {skill.description !== '' && <p className={css.detailDesc}>{skill.description}</p>}
 
-          {/* 统一字段六项：名称 → id → 版本 → 发布日期 → 作者 → 日志（顺序固定，
-              与插件页同构）。技能名即 id；发布日期取 createdAt 真值，缺值给占位；
-              日志 wire 无此字段，用 CHANGELOG_PLACEHOLDER 假数据先填。 */}
+          {/* 统一字段六项：名称 → id → 版本 → 发布日期 → 作者 → 日志（与插件页同构）。
+              技能名即 id；版本取 pin ?? currentVersion（真值）；发布日期取 createdAt
+              真值；日志 wire 无此字段，用 CHANGELOG_PLACEHOLDER 假数据先填。
+              作者只在字段区出现一次——标题下方不再重复同一行小字。 */}
           <div className={css.detailMeta}>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>名称</span>

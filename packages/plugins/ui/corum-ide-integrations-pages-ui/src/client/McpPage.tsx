@@ -81,10 +81,12 @@ const TRANSPORT_LABEL: Record<McpTransport, string> = {
   'streamable-http': 'sse',
 }
 
-/** mcpManager wire 无版本字段；已安装态的「版本」用传输方式占位（不造版本号）。 */
-const VERSION_PLACEHOLDER = '传输方式'
-/** mcpManager wire 无发布/更新日期字段；缺值时用破折号占位（不造日期）。 */
-const MISSING_VALUE = '—'
+/**
+ * 「版本」与「发布日期」在 MCP 详情面板里**不显示**：`mcpManager` 的 wire
+ * （listServers / getServer）只回 name / transport / endpoint / description /
+ * disabled，没有版本号也没有发布或更新日期。与其拿传输方式或破折号充数
+ * （假值容易被读成真实元信息），不如省掉这两行。
+ */
 
 /* ── 日志（changelog）占位数据 ──────────────────────────────────────── */
 
@@ -487,15 +489,16 @@ function McpPanelView({ rpc, server, probe, onToggled, onDeleted }: {
         <div>
           <div className={css.detailTitleRow}>
             <span className={css.detailName}>{server.name}</span>
-            {/* 版本徽章位承载传输方式标签（wire 无版本字段，占位口径）。 */}
+            {/* 标题旁的传输指示徽章：传输方式是 wire 上的真值（不是版本占位）。 */}
             <span className={css.detailVersion}>{TRANSPORT_LABEL[server.transport]}</span>
           </div>
-          <span className={css.detailSub}>modelcontextprotocol · {TRANSPORT_LABEL[server.transport]}</span>
           <p className={css.detailDesc}>{server.description ?? '该服务器未提供描述。'}</p>
 
-          {/* 统一字段六项：名称 → id → 版本 → 发布日期 → 作者 → 日志（顺序固定，
-              与插件页同构）。MCP 的版本/发布日期/日志 wire 上都没有真值，占位口径
-              见各自的注释；只有名称与 id 是真值。 */}
+          {/* 统一字段六项：名称 → id → 日志（与插件页同构的信息架构）。
+              MCP 的「版本」「发布日期」wire 上没有真值（mcpManager 只回 name /
+              transport / endpoint / description），故这两行**不显示**而不是拿
+              传输方式或破折号充数——假值比缺行更容易被误读成真实元信息。
+              日志同样是展示用占位（见 MCP_FAKE_CHANGELOG）。 */}
           <div className={css.detailMeta}>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>名称</span>
@@ -504,16 +507,6 @@ function McpPanelView({ rpc, server, probe, onToggled, onDeleted }: {
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>id</span>
               <span className={`${css.detailMetaValue} ${css.detailMetaMono}`}>{server.name}</span>
-            </div>
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>版本</span>
-              {/* mcpManager wire 无 version 字段 ⇒ 用传输方式占位，不造版本号。 */}
-              <span className={css.detailMetaValue}>{VERSION_PLACEHOLDER} · {TRANSPORT_LABEL[server.transport]}</span>
-            </div>
-            <div className={css.detailMetaRow}>
-              <span className={css.detailMetaKey}>发布日期</span>
-              {/* mcpManager wire 无发布日期字段 ⇒ 缺值显示破折号，不造日期。 */}
-              <span className={css.detailMetaValue}>{MISSING_VALUE}</span>
             </div>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>作者</span>
