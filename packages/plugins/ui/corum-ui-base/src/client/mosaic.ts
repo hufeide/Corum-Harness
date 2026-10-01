@@ -308,15 +308,16 @@ export function buildMosaic(
   const rng = mulberry32(MOSAIC_SEED)
   const blocks: MosaicBlock[] = []
 
-  /* ── 数据分配：长名字优先占 264 宽的槽 ─────────────────────────────────── */
+  /* ── 数据分配：长名字优先占 264 宽的槽 ───────────────────────────────────
+     入口贴（下标 0，通常是「添加」）**不进长名队列**：它固定占整个墙的第一个槽位
+     （左上角）。若把它混进队列，长名字会排到它前面、把它挤到墙中间
+     （实测传 hints 时「左上角是入口贴」的命中率只有 3/118）。 */
   const hints = options.hints ?? []
+  const entryPinned = options.pinFirstTwoSmalls === true && count >= 2
   const longFirst: number[] = []
   const shortRest: number[] = []
-  for (let i = 0; i < count; i++) {
-    const len = hints[i]?.nameLength ?? 0
-    // 入口贴（第 0 位，通常是「添加」）恒为小贴，不参与抢宽槽。
-    if (i === 0 && options.pinFirstTwoSmalls === true) shortRest.push(i)
-    else if (len >= LONG_NAME_LENGTH) longFirst.push(i)
+  for (let i = entryPinned ? 1 : 0; i < count; i++) {
+    if ((hints[i]?.nameLength ?? 0) >= LONG_NAME_LENGTH) longFirst.push(i)
     else shortRest.push(i)
   }
   // 长名内部：更长 + 有描述者优先（大贴要给描述留高度）。
@@ -328,9 +329,12 @@ export function buildMosaic(
     const db = hints[b]?.hasDescription === true ? 1 : 0
     return db - da
   })
-  const queue = [...longFirst, ...shortRest]
+  /** 数据分配顺序：入口贴在队首（若被钉），其后是「长名（最长在前）→ 其余」。 */
+  const order = entryPinned ? [0, ...longFirst, ...shortRest] : [...longFirst, ...shortRest]
   let cursor = 0
-  const take = (): number => queue[cursor++] ?? 0
+  const take = (): number => order[cursor++] ?? 0
+  /** 长名是否还没排完（用于决定 264 列优先产出「双宽」还是可给大贴）。 */
+  const longStillQueued = (): boolean => cursor < (entryPinned ? 1 : 0) + longFirst.length
 
   /* ── 逐块生成 ─────────────────────────────────────────────────────────────
      顺序至关重要：**先按剩余额度裁剪列骨架，再给留下的槽位分配数据**。
@@ -339,15 +343,26 @@ export function buildMosaic(
      n=6 只产出 1 个）。这是本算法长期存在的缺陷，与「末块裁剪」无关。 */
   const buildBlock = (kind: MosaicBlockKind, pin: boolean, room: number): MosaicCol[] => {
     /* 长名字还没排完 ⇒ 让 264 列优先产出「双宽」（两个宽槽，而不是大贴的一个）。 */
-    const preferWide = cursor < longFirst.length
+    const preferWide = longStillQueued()
     const skeleton = kind === '264'
       ? buildColSkeleton(rng, mode, pin, preferWide)
       : buildColSkeleton128(rng, mode)
     const kept = trimCols(skeleton, room)
-    // 264 宽的列先填（长名字优先），128 宽的列后填。
+    /* 入口贴先钉进**视觉首列的第一个槽**（左上角）。不能只依赖宽度排序：列是按
+       宽度降序取数的（为了让长名字进 264 列），那样数据 0 会落到最宽的列、而不是
+       最靠前的列（实测命中率只有 203/400）。 */
+    let firstColPlaced = false
+    if (pin && kept.length > 0 && kept[0]!.sizes.length > 0) {
+      const first = kept[0]!
+      first.slots = [{ size: first.sizes[0]!, itemIndex: take() }]
+      firstColPlaced = true
+    }
+    // 其余槽位：264 宽的列先填（长名字优先），128 宽的列后填。
     const ordered = [...kept].sort((a, b) => b.width - a.width)
     for (const col of ordered) {
-      col.slots = col.sizes.map(size => ({ size, itemIndex: take() }))
+      const start = firstColPlaced && col === kept[0] ? 1 : 0
+      const rest = col.sizes.slice(start).map(size => ({ size, itemIndex: take() }))
+      col.slots = col.slots === undefined ? rest : [...col.slots, ...rest]
     }
     return kept
   }

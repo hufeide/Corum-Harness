@@ -49,12 +49,28 @@
   min-width: 0;
 }
 
-/* 块高：264 块 = 2 单位 + 1 间隙（与 264 = 2×128+8 同构）；128 块 = 1 单位。 */
+/* ── 块高 ─────────────────────────────────────────────────────────────────
+   几何上：264 块 = 2 单位 + 1 间隙（与 264 = 2×128+8 同构）；128 块 = 1 单位。
+   宽窗（单位封顶 128）下就是设计稿的 264 / 128，逐像素一致。
+
+   但**贴的内容有最小高度需求**（图标 + 名称 + 作者 ≈ 96px），而窄窗降列后单位宽
+   掉到 80px 出头 ⇒ 264 块里的「两条竖叠贴」各只有 83px、128 块只有 83px，内容差
+   1px 放不下（实测 3 列下 16 张贴全被裁）。故给两种块各加**可读性保底**：
+   - 128 块：≥ 一张贴的最小内容高（96）；
+   - 264 块：≥ 两条竖叠贴各 96 + 间隙（96×2 + 8 = 200）。
+   宽窗下单位推导值更大、保底不生效，设计稿形态不变；窄窗下块略高于正方形单位
+   （代价是磁贴不再严格正方形），换来内容不被裁。 */
 .mosaicBlock[data-mosaic-block='264'] {
-  height: calc(2 * var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1))) + var(--mosaic-gap));
+  height: max(
+    calc(2 * var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1))) + var(--mosaic-gap)),
+    calc(200px * var(--corum-density-scale, 1))
+  );
 }
 .mosaicBlock[data-mosaic-block='128'] {
-  height: var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1)));
+  height: max(
+    var(--mosaic-unit, calc(128px * var(--corum-density-scale, 1))),
+    calc(96px * var(--corum-density-scale, 1))
+  );
 }
 
 /* ── 列：纵向 flex；宽度由 data-col 决定 ───────────────────────────────────
