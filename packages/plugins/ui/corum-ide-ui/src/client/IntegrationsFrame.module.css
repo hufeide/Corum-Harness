@@ -26,19 +26,19 @@
   backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
-/* 面板头（画板 F t4cBj6）：48 高，icon 26 + 标题 13.5/600 + spacer + × 24。
-   顶栏让位 40px（画板 F 的壳无窗口 chrome，本壳必须补）：壳的窗口标题栏行是覆盖
-   左列的 absolute 浮层，集成中心打开时它整行隐藏（见 AppFrame），故面板头自己
-   承担那 40px 让位 + 窗口拖拽（app-region:drag，见下）。 */
+/* 面板头（iYTAN `b17IoZ`：48 高、padding [0,12]、gap 8、底边 1px 分隔线）。
+   这里**不做 40px 顶部让位**：面板从活动栏右缘 x=76 起，而 macOS 红绿灯实占
+   x=12..64 —— 两者不重叠，让位只会把面板头压到 88 高、把内容整体推低（用户
+   反馈「距窗口上方边距过大」）。窗口拖拽由本行自身的 app-region:drag 承担。 */
 .header {
   -webkit-app-region: drag;
   flex: none;
   display: flex;
   align-items: center;
   gap: calc(8px * var(--corum-density-scale, 1));
-  height: calc(48px * var(--corum-density-scale, 1) + 40px);
+  height: calc(48px * var(--corum-density-scale, 1));
   box-sizing: border-box;
-  padding: 40px calc(12px * var(--corum-density-scale, 1)) 0;
+  padding: 0 calc(12px * var(--corum-density-scale, 1));
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
 
@@ -115,10 +115,12 @@
   display: flex;
 }
 
-/* 子导航（iYTAN `CVJF0`：150 宽、右边界 1px、padding [10,8]、gap 2）。 */
+/* 子导航（design.pen「子导航 280（与会话侧栏同宽）」：280 宽、右边界 1px、
+   padding [10,8]、gap 2）。与会话侧栏同宽 = 三条集成域与任务模式左栏同一条
+   竖线，切换工作面时视觉基线不跳。 */
 .subNav {
   flex: none;
-  width: 150px;
+  width: 280px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

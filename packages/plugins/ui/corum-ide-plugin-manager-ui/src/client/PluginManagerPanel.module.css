@@ -810,6 +810,111 @@ body[data-ds-dark-theme] .panel {
   background: var(--pm-glass-2);
 }
 
+/* ── 补充安装入口（安装本地包 / 从 URL 安装）─────────────────────────────
+ * 取色走壳 body 层的 --corum-glass-* token（面板挂在 body 下，继承得到；
+ * 亮暗翻转随 body[data-ds-dark-theme] 自动生效），字体/密度走壳的缩放轴。 */
+
+/* 玻璃底次按钮（searchRow 尾部，与排序钮同排）：glass-2 底 + glass-border 描边 */
+.addEntryBtn {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--pm-label-secondary);
+  font-family: var(--corum-ui-font-family, inherit);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.addEntryBtn:hover {
+  color: var(--pm-label-primary);
+  border-color: var(--pm-glass-border-active);
+}
+
+.addEntryIcon {
+  flex: none;
+  color: var(--pm-label-tertiary);
+}
+
+/* 来源条：URL 入口在页头下方内联展开（输入 + 安装 + 取消） */
+.sourceBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  width: 100%;
+}
+
+.sourceLabel {
+  flex: none;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--pm-label-secondary);
+  white-space: nowrap;
+}
+
+.sourceInput {
+  flex: 1;
+  min-width: 0;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--pm-label-primary);
+  font-family: var(--corum-ui-font-family, inherit);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  outline: none;
+}
+
+.sourceInput::placeholder {
+  color: var(--pm-label-dimmed);
+}
+
+.sourceInput:focus {
+  border-color: var(--pm-glass-border-active);
+}
+
+.sourceBtn {
+  flex: none;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 8px;
+  background: var(--pm-brand-primary);
+  color: var(--pm-label-on-brand);
+  font-family: var(--corum-ui-font-family, inherit);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sourceBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sourceCancel {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(8px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pm-label-secondary);
+  cursor: pointer;
+}
+
+.sourceCancel:hover {
+  color: var(--pm-label-primary);
+}
+
 /* ── 动效降级 ────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

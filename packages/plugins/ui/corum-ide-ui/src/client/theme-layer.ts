@@ -32,10 +32,10 @@ import type { ThemeTokenOverrides } from '@deepseek-ai/dsh-client-ui-theme/clien
 export const GLASS_TOKENS: ThemeTokenOverrides = {
   // Backgrounds — the glass hierarchy over the base.
   '--dsw-alias-bg-base': { light: '#E9E9F2', dark: '#0D0817' },
-  '--dsw-alias-bg-layer-1': { light: '#FFFFFFE6', dark: '#1D112BD9' },
-  '--dsw-alias-bg-layer-2': { light: '#FFFFFFCC', dark: '#2A1840D9' },
-  '--dsw-alias-bg-layer-3': { light: '#FFFFFFB3', dark: '#372050CC' },
-  '--dsw-alias-bg-overlay': { light: '#FFFFFFB3', dark: '#372050CC' },
+  '--dsw-alias-bg-layer-1': { light: '#FFFFFFE6', dark: '#1D112B9E' },
+  '--dsw-alias-bg-layer-2': { light: '#FFFFFFCC', dark: '#2A18409E' },
+  '--dsw-alias-bg-layer-3': { light: '#FFFFFFB3', dark: '#37205095' },
+  '--dsw-alias-bg-overlay': { light: '#FFFFFFB3', dark: '#37205095' },
   // Glass light-edge border (white in light, neon-translucent in dark).
   '--dsw-alias-border-l1': { light: '#FFFFFF', dark: '#B98CFF2E' },
   // Label hierarchy.
@@ -57,6 +57,6 @@ export const GLASS_TOKENS: ThemeTokenOverrides = {
   '--dsw-alias-markdown-code-block': { light: '#DDDCE8', dark: '#0A0612' },
   '--dsw-alias-markdown-inline-code': { light: '#DDDCE8', dark: '#1D112B' },
   // Shell chrome: the sidebar fill and the primary button ride the glass/brand.
-  '--dsw-specific-sidebar-fill': { light: '#FFFFFFE6', dark: '#1D112BD9' },
+  '--dsw-specific-sidebar-fill': { light: '#FFFFFFE6', dark: '#1D112B9E' },
   '--dsw-alias-button-primary-fill': { light: '#5B21F5', dark: '#01CDFE' },
 }

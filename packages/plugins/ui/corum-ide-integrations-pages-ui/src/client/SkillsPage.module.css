@@ -2,15 +2,16 @@
  * SkillsPage —— 集成中心 ·「技能」页（design.pen VNH3k「集成中心·技能 SKILL」）。
  *
  * 与 McpPage.module.css 共用同一套磁贴/详情骨架（两份逐字一致，CSS module
- * 不跨包 import 是本仓已知约束）。骨架规则：页头单行（pill tab + 搜索 +
- * 分类 chips + 导入按钮）+ 全宽分隔线 + 磁贴网格（128px 基准、gap 8）+
- * 右侧 510px 详情面板（hero 150 + body，面板自身无 padding）。
+ * 不跨包 import 是本仓已知约束）。骨架规则：页头单行（pill tab）+ 全宽分隔线 +
+ * 磁贴网格（128px 基准、gap 8）+ 右侧详情面板（hero 150 + body，面板自身无
+ * padding），详情面板改 flex:1 而磁贴群占 808 基准。
  *
  * token 口径：--corum-glass-1/2/3、--corum-glass-border(-active)、
  * --dsw-alias-label-*、--dsw-alias-brand-primary/text、--dsw-alias-state-*、
- * --corum-label-on-brand。磁贴底色用 color-mix 从 token 派生 tint 档（紫/深紫/
- * 灰蓝/堇色），禁止裸 hex。字号乘 --corum-ui-font-scale，间距/圆角乘
- * --corum-density-scale；图标固定 px。
+ * --corum-label-on-brand。磁贴底色直接消费 design.pen bFLLQ 写死的四档色值
+ * token（--corum-tile-violet/deep/slate/mauve，见 corum-ide-ui theme.css），
+ * 禁止裸 hex。字号乘 --corum-ui-font-scale，间距/圆角乘 --corum-density-scale；
+ * 图标固定 px。
  */
 
 /* ── 页面骨架：纵向 flex gap 16（页头行 → 分隔线 → 内容区）────────────────── */
@@ -35,9 +36,6 @@
 }
 
 .headerSpacer { flex: 1; min-width: 0; }
-
-/* 页头标题右侧留位用（导入内置技能结果提示行） */
-.headerSpacer { flex: 1; }
 
 /* tab：pill 形态（design.pen bFLLQ/VNH3k 页头 tab），无下划线 ::after。 */
 .tab {
@@ -90,7 +88,7 @@
 }
 .searchInput::placeholder { color: var(--dsw-alias-label-tertiary); }
 
-/* 分类 chips：未选中也有描边（design.pen VNH3k 筛选行）。 */
+/* 分类 chips：MCP 页无分类筛选（VNH3k 无此元素）；类保留以对齐骨架。 */
 .filterChip {
   flex: none;
   padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
@@ -112,7 +110,7 @@
   font-weight: 600;
 }
 
-/* 页头右侧玻璃次按钮（导入技能 / 导入内置技能 —— 技能入库唯一通道）。 */
+/* 页头右侧玻璃次按钮（本页默认不使用；与 SkillsPage 骨架保持逐字一致）。 */
 .addBtn {
   flex: none;
   display: inline-flex;
@@ -186,7 +184,7 @@
   align-content: start;
 }
 
-/* ── 磁贴本体：底色走 tint 局部变量（token 派生，多档语义色）───────────────── */
+/* ── 磁贴本体：底色走 tint 局部变量（design.pen 四档真实色值 token）────────── */
 
 .tile {
   position: relative;
@@ -206,14 +204,15 @@
 }
 .tile:hover { border-color: var(--corum-glass-border-active); }
 
-/* tint 档（color-mix 从 token 派生，无裸 hex）：紫 / 深紫 / 堇色 / 灰蓝。 */
-.tintViolet { --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, var(--corum-glass-1)); }
-.tintDeep { --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, var(--corum-glass-1)); }
-.tintMauve { --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, var(--corum-glass-2)); }
-.tintSlate { --tint: color-mix(in srgb, var(--dsw-alias-label-dimmed) 10%, var(--corum-glass-1)); }
+/* tint 档（直接消费 theme.css 的 design.pen 四色 token，无派生）：
+   紫（VNH3k tint-violet）/ 深紫（tint-deep）/ 堇（tint-mauve）/ 灰蓝（tint-slate）。 */
+.tintViolet { --tint: var(--corum-tile-violet); }
+.tintDeep { --tint: var(--corum-tile-deep); }
+.tintMauve { --tint: var(--corum-tile-mauve); }
+.tintSlate { --tint: var(--corum-tile-slate); }
 
 .tileActive {
-  --tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 24%, var(--corum-glass-2));
+  --tint: var(--corum-tile-deep);
   border-color: var(--corum-glass-border-active);
 }
 
@@ -236,7 +235,7 @@
     transparent 62%);
 }
 
-/* 占位空卡（技能库为空时的占位符）：虚线描边 + 居中 plus + 「即将上线」。 */
+/* 占位空卡（SKILL/MCP 无数据时的占位符）：虚线描边 + 居中 plus + 「即将上线」。 */
 .tilePlaceholder {
   position: relative;
   display: flex;
@@ -340,7 +339,7 @@
   line-height: 1.45;
 }
 
-/* ── 磁贴角标：绝对定位于右上角（技能页 = 启用开关 / MCP 页 = 状态点）────────── */
+/* ── 磁贴角标：绝对定位于右上角（MCP 页 = 运行状态点）────────────────────── */
 
 .tileCorner {
   position: absolute;
@@ -348,7 +347,7 @@
   right: calc(10px * var(--corum-density-scale, 1));
 }
 
-/* 启用开关：32×18、knob 14（design.pen VNH3k 磁贴角标）。 */
+/* 启停开关：MCP 页磁贴角标是状态点不是开关；类保留给详情面板内一行使用。 */
 .tileSwitch {
   flex: none;
   position: relative;
@@ -384,12 +383,24 @@
   background: var(--corum-label-on-brand);
 }
 
+/* ── 磁贴角标：运行状态点 8×8（绿 = 运行中 / 灰 = 已停止，绝对定位于右上角）──── */
+
+.tileDot {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+.tileDotOff { background: var(--dsw-alias-label-dimmed); }
+
 /* ── 右侧详情简介面板：面板自身无 padding，内边距由 body 承担 ───────────────── */
 
 .detail {
   /* 详情简介 = fill_container（画稿宽度由磁贴群 808 与间隙反推，实测 ≈508，
      与稿标 510 同口径）；面板自身无 padding，内边距由 body 承担。 */
-  flex: 1 1 0;
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -578,11 +589,160 @@
   word-break: break-all;
 }
 
-/* 底部操作行：padding-top 8、gap 10、右对齐。 */
+/* 详情面板内的常驻小节（版本历史 / 绑定 Agent / SKILL.md 展开区）。 */
+.detailSection {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding-top: calc(10px * var(--corum-density-scale, 1));
+}
+
+.detailSectionHead {
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 绑定 Agent 行：头像 + 昵称 + pin 版本徽章。 */
+.detailBindRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.detailBindAvatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(20px * var(--corum-density-scale, 1));
+  height: calc(20px * var(--corum-density-scale, 1));
+  border-radius: 999px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+}
+
+.detailBindName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 面板内行内小操作组（编辑 / 提交新版本等）。 */
+.detailInlineActions {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+/* 详情面板「新建」模式的表单纵向堆叠（原整页表单就地搬进面板）。 */
+.detailFormStack {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.detailFormTitle {
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  padding-bottom: calc(4px * var(--corum-density-scale, 1));
+}
+
+.detailFormLbl {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  padding-top: calc(4px * var(--corum-density-scale, 1));
+}
+
+.detailFormInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+}
+.detailFormInput:focus { outline: none; border-color: var(--corum-glass-border-active); }
+
+/* 传输方式 tab（stdio / SSE·HTTP / WebSocket）：pill 形态。 */
+.detailFormTabs {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+
+.detailFormTab {
+  flex: none;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.detailFormTab:hover { color: var(--dsw-alias-label-secondary); }
+.detailFormTabActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.detailFormJson {
+  width: 100%;
+  box-sizing: border-box;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 1.5;
+  resize: vertical;
+  min-height: calc(96px * var(--corum-density-scale, 1));
+}
+.detailFormJson:focus { outline: none; border-color: var(--corum-glass-border-active); }
+
+.detailFormCols {
+  display: flex;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+.detailFormCol {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+}
+
+.detailFormHint {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.5;
+}
+
+/* 底部操作行：居中（面板宽度内水平居中）。 */
 .detailActions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   gap: calc(10px * var(--corum-density-scale, 1));
   padding-top: calc(8px * var(--corum-density-scale, 1));
 }
@@ -607,7 +767,28 @@
 .actionBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
 .actionBtn:disabled { opacity: .5; cursor: default; }
 
-/* 危险操作（删除技能）：error 描边 + error 文字 + 透明底。 */
+/* 主按钮（添加服务器 / 安装）：品牌色底 + on-brand 文字。 */
+.actionPrimary {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1));
+  border: 0;
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.actionPrimary:hover { opacity: .9; }
+.actionPrimary:disabled { opacity: .5; cursor: default; }
+
+/* 危险操作（删除服务器）：error 描边 + error 文字 + 透明底。 */
 .actionDanger {
   border: 1px solid var(--dsw-alias-state-error-primary);
   background: transparent;
@@ -615,7 +796,7 @@
 }
 .actionDanger:hover { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
 
-/* 详情中的启用开关行（本地启用态）。 */
+/* 详情里的启停开关行（mcpManager/saveServer disabled 翻转）。 */
 .detailSwitchRow {
   display: flex;
   align-items: center;

@@ -11,12 +11,9 @@
  *   $interactive-bg-hover       → --dsw-alias-interactive-bg-hover
  *   $label-on-brand             → --corum-label-on-brand（品牌底上的近黑可读色）
  *
- * 磁贴底色是设计稿的 4 档语义 tint（紫 / 深紫 / 灰蓝 / 堇），全部由 token 派生：
- *   --pg-tint  挂在 tint 类上、由 .tile 的 background 消费；
- *   --pg-accent 是「灰蓝/堇」两档的基色——主题层没有 --dsw-alias-brand-accent，
- *   故用 color-mix 把 brand-primary 往 label-dimmed 方向压成偏灰的辅色（不引入裸 hex）。
- * 唯一一条非 token 取色是 --pg-shadow（添加菜单浮层投影），声明在 .page 根上，
- * 与 PluginManagerPanel 的 --pm-shadow / SettingsSections 的 --plg-shadow 同口径。
+ * 磁贴底色是设计稿的 4 档语义 tint（紫 / 深紫 / 灰蓝 / 堇），直接消费
+ * corum-ide-ui theme.css 里的 --corum-tile-violet / -deep / -slate / -mauve
+ * （设计稿四帧写死的紫系色值，不做任何混合派生）。
  *
  * 字号一律 `calc(<N>px * var(--corum-ui-font-scale, 1))`（界面字号设置联动），
  * 间距/圆角一律乘 --corum-density-scale（界面密度设置）。图标尺寸保持固定 px。
@@ -26,11 +23,9 @@
 /* ── 页面骨架 ─────────────────────────────────────────────────────────────── */
 
 .page {
-  --pg-shadow: rgb(0 0 0 / 25%);
-
   display: flex;
   flex-direction: column;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: calc(16px * var(--corum-density-scale, 1));
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
@@ -135,111 +130,6 @@
   font-weight: 600;
 }
 
-/* ── 添加磁贴的三来源菜单（挂在小磁贴上，相对磁贴定位）───────────────────── */
-
-.addMenu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 30;
-  min-width: 168px;
-  padding: calc(4px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: calc(10px * var(--corum-density-scale, 1));
-  background: var(--corum-glass-1);
-  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
-  box-shadow: 0 12px 32px var(--pg-shadow);
-}
-
-.addOption {
-  display: flex;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
-  width: 100%;
-  padding: calc(6px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 0;
-  border-radius: calc(7px * var(--corum-density-scale, 1));
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.addOption:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.addOptionIcon { display: inline-flex; color: var(--dsw-alias-label-tertiary); flex: none; }
-.addOptionText { flex: 1; }
-
-/* ── 来源条（选中某一安装来源后内联展开）──────────────────────────────────── */
-
-.sourceBar {
-  display: flex;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
-  padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: calc(10px * var(--corum-density-scale, 1));
-  background: var(--corum-glass-2);
-}
-
-.sourceLabel {
-  flex: none;
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-}
-
-.sourceInput {
-  flex: 1;
-  min-width: 80px;
-  height: calc(26px * var(--corum-density-scale, 1));
-  padding: 0 calc(8px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: calc(7px * var(--corum-density-scale, 1));
-  background: var(--corum-glass-3);
-  color: var(--dsw-alias-label-primary);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  outline: none;
-}
-.sourceInput:focus { border-color: var(--corum-glass-border-active); }
-.sourceInput::placeholder { color: var(--dsw-alias-label-tertiary); font-family: inherit; }
-
-.sourceBtn {
-  flex: none;
-  height: calc(26px * var(--corum-density-scale, 1));
-  padding: 0 calc(11px * var(--corum-density-scale, 1));
-  border: 0;
-  border-radius: calc(7px * var(--corum-density-scale, 1));
-  background: var(--dsw-alias-brand-primary);
-  color: var(--corum-label-on-brand);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-.sourceBtn:disabled { opacity: .5; cursor: default; }
-
-.sourceCancel {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 0;
-  border-radius: calc(7px * var(--corum-density-scale, 1));
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-.sourceCancel:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-
 /* ── 2. 内容区：左磁贴群（808 基准）+ 右详情面板（fill）────────────────────── */
 
 /* 卡片网格（iYTAN `nVsoY`）：左磁贴群 808 + gap 16 + 右详情 fill = 1334，
@@ -338,10 +228,6 @@
 /* ── 磁贴本体（三态共用；底色走 --pg-tint 四档语义 tint）──────────────────── */
 
 .tile {
-  /* 灰蓝/堇档的辅色基色：主题层无 brand-accent，token 派生（见文件头注释）。 */
-  --pg-accent: color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, var(--dsw-alias-label-dimmed));
-  --pg-tint: var(--corum-glass-1);
-
   position: relative;
   display: flex;
   flex-direction: column;
@@ -351,7 +237,7 @@
   padding: calc(12px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: calc(10px * var(--corum-density-scale, 1));
-  background: var(--pg-tint);
+  background: var(--corum-tile-violet);
   text-align: left;
   font-family: inherit;
   cursor: pointer;
@@ -359,11 +245,12 @@
 }
 .tile:hover, .tileActive { border-color: var(--corum-glass-border-active); }
 
-/* 四档语义 tint（紫 / 深紫 / 灰蓝 / 堇），由 color-mix 从品牌 token 派生。 */
-.tileTintA { --pg-tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
-.tileTintB { --pg-tint: color-mix(in srgb, var(--dsw-alias-brand-primary) 24%, transparent); }
-.tileTintC { --pg-tint: color-mix(in srgb, var(--pg-accent) 16%, transparent); }
-.tileTintD { --pg-tint: color-mix(in srgb, var(--pg-accent) 30%, transparent); }
+/* 四档语义 tint（design.pen 写死的紫系 hex，走 --corum-tile-* token）：
+   violet 紫（官方/主推）· deep 深紫（主题/调色）· slate 灰蓝（MCP/服务）· mauve 堇（工具/数据/终端）。 */
+.tileTintA { background: var(--corum-tile-violet); }
+.tileTintB { background: var(--corum-tile-deep); }
+.tileTintC { background: var(--corum-tile-slate); }
+.tileTintD { background: var(--corum-tile-mauve); }
 
 /* 尺寸：小贴 1×1（默认）/ 宽贴 2×1 / 高贴 1×2 / 大贴 2×2。 */
 .tileWide { grid-column: span 2; }
@@ -381,14 +268,14 @@
   padding: calc(11px * var(--corum-density-scale, 1));
 }
 
-/* 大贴（主推/官方）：品牌色 radial glow。 */
+/* 大贴（主推/官方）：品牌色 radial glow（紫系 token 直取，不派生）。 */
 .tileGlow::before {
   content: '';
   position: absolute;
   inset: 0;
   pointer-events: none;
   background: radial-gradient(circle at 78% 22%,
-    color-mix(in srgb, var(--dsw-alias-brand-primary) 36%, transparent) 0%,
+    var(--corum-tile-deep) 0%,
     transparent 62%);
 }
 
@@ -560,12 +447,6 @@
 }
 .tileInstall:disabled { opacity: .55; cursor: default; }
 
-/* ── 「添加」磁贴（磁贴群第一格；菜单弹层挂在其包裹层上）──────────────────── */
-
-/* 包裹层是 grid item；磁贴本体铺满格子，addMenu 绝对定位不被磁贴 overflow:hidden 裁掉。 */
-.addTileWrap { position: relative; }
-.addTileWrap .tile { width: 100%; height: 100%; }
-
 /* ── 右侧详情简介面板（fill；面板无内边距，内边距全部由 body 承担）────────── */
 
 .detail {
@@ -599,7 +480,7 @@
   inset: 0;
   pointer-events: none;
   background: radial-gradient(circle at 72% 30%,
-    color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent) 0%,
+    var(--corum-tile-deep) 0%,
     transparent 60%);
 }
 
@@ -657,7 +538,7 @@
   inset: 0;
   pointer-events: none;
   background: radial-gradient(circle at 50% 42%,
-    color-mix(in srgb, var(--dsw-alias-brand-primary) 34%, transparent) 0%,
+    var(--corum-tile-deep) 0%,
     transparent 62%);
 }
 .detailEmptyLogo {
@@ -739,26 +620,46 @@
   word-break: break-all;
 }
 
-/* 已装态「配置」就地展开的投影块（publisher/license/homepage/installedFrom…）。 */
-.configPanel {
-  display: flex;
-  flex-direction: column;
-  gap: calc(6px * var(--corum-density-scale, 1));
-  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: calc(10px * var(--corum-density-scale, 1));
-  background: var(--corum-glass-2);
-}
-
-/* 底部操作行：右对齐、顶距 8、按钮间距 10。 */
+/* 底部操作行：居中（iYTAN：安装 / 卸载+开关都沉底居中）、顶距 8、按钮间距 10。 */
 .detailActions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   gap: calc(10px * var(--corum-density-scale, 1));
   padding-top: calc(8px * var(--corum-density-scale, 1));
 }
+
+/* 详情面板的启停开关：与磁贴角标开关同形态，落位在「卸载」右侧。 */
+.detailSwitch {
+  flex: none;
+  position: relative;
+  width: calc(32px * var(--corum-density-scale, 1));
+  height: calc(18px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.detailSwitch[data-off] {
+  background: var(--corum-glass-3);
+  border-color: var(--corum-glass-border);
+}
+.detailSwitch:disabled { opacity: .5; cursor: default; }
+
+.detailSwitchKnob {
+  position: absolute;
+  top: calc(2px * var(--corum-density-scale, 1));
+  left: calc(100% - 16px);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--corum-label-on-brand);
+  transition: left .15s, background .15s;
+}
+.detailSwitch[data-off] .detailSwitchKnob { left: calc(2px * var(--corum-density-scale, 1)); background: var(--dsw-alias-label-dimmed); }
 
 /* 操作钮：安装 = 品牌实色主钮 / 次钮 = 玻璃底描边 / 卸载 = error 描边。 */
 .actionBtn {

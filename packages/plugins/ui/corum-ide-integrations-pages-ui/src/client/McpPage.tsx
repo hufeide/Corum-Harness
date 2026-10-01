@@ -3,25 +3,28 @@
  *
  * 数据链路不变（RPC 方法名与参数逐字未动）：
  *   mcpManager/listServers（列表）+ testConnection（运行状态/工具数）
- *   + getServer（详情回填）+ saveServer（启停/编辑）+ deleteServer + getServerReferences
- *   + corumAgent/listProfiles（绑定 Agent 头像/昵称）。
+ *   + getServer（详情回填）+ saveServer（添加/启停/编辑）+ deleteServer
+ *   + getServerReferences + corumAgent/listProfiles（绑定 Agent 头像/昵称）。
  *
- * 视图结构（design.pen bFLLQ）：页头单行（市场|已装 pill tab —— MCP 未来也会有
- * 市场，保留 tab 行；本页无搜索框、无分类 chips）→ 全宽分隔线 → 磁贴群
- * （节头「MCP 服务器」+ 第一张「添加」磁贴 + 服务器磁贴，角标 = 运行状态点
- * 8×8，小字 = 传输 · 启动地址）+ 右侧 510px 详情简介面板（hero 150 + body，
- * 元信息 = 传输/状态/范围；启停开关放在详情面板内一行，磁贴角标只读展示状态）。
- * 版本徽章位承载传输方式标签（mcpManager wire 无版本字段，字段缺失下的占位，
- * 见 `TRANSPORT_LABEL`）。
+ * 视图结构（design.pen bFLLQ）：页头单行（市场|已装 pill tab，本页无搜索框、
+ * 无分类 chips）→ 全宽分隔线 → 磁贴群（节头「MCP 服务器」+ 第一张「添加」
+ * 磁贴 + 服务器磁贴，角标 = 运行状态点 8×8，小字 = 传输 · 启动地址）
+ * + 右侧详情面板（hero 150 + body）。
  *
- * 「添加」磁贴沿用原页内表单（McpAddView，JSON 配置 + 超时 + 使用指导，RPC 不变）。
+ * 详情面板两种模式：
+ *   查看 — MCP 语义的信息面板：传输 / 连接状态（testConnection 运行中·工具数）/
+ *          范围（cwd，空写「全局」）/ 工具清单（前 4 + 展开全部）/ 绑定 Agent
+ *          （corumAgent/listProfiles 过滤）；底部居中「删除服务器」（error 描边，
+ *          createPortal 确认框）。
+ *   新建 — 点「添加」磁贴后表单就地搬进面板（名称 / 传输 tab stdio·SSE·WebSocket
+ *          / 启动配置 JSON / 启动·运行超时 / 使用指导），校验逻辑原样保留；
+ *          提交成功回「查看」。
  *
  * rpc 为 null 时降级为静态占位提示。
  * @module corum-ide-integrations-pages-ui/client/McpPage
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import type { MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronUp, FolderTree, Info, Plus, Trash2 } from 'lucide-react'
 import { useIntegrationsRpc } from './face.tsx'
@@ -97,7 +100,7 @@ const MCP_JSON_PLACEHOLDERS: Record<AddTransport, string> = {
 }`,
 }
 
-/** 添加页传输 tab（stdio / SSE·HTTP / WebSocket）。 */
+/** 详情面板「新建」模式的传输 tab（stdio / SSE·HTTP / WebSocket）。 */
 type AddTransport = 'stdio' | 'sse' | 'websocket'
 const ADD_TRANSPORT_OPTIONS: Array<{ value: AddTransport; label: string }> = [
   { value: 'stdio', label: 'stdio' },
@@ -135,7 +138,7 @@ function mosaicSizeOf(index: number): 'big' | 'wide' | 'tall' | 'small' {
 }
 
 /**
- * 磁贴 tint 档（token 派生，多档语义底色对应 design.pen bFLLQ）：
+ * 磁贴 tint 档（design.pen bFLLQ 的四档真实色值 token）：
  * 大贴深紫 + glow、宽贴堇色、小贴紫、「添加」/未连接态给灰蓝。
  */
 function tileTintClassOf(size: 'big' | 'wide' | 'tall' | 'small'): string {
@@ -147,15 +150,16 @@ function tileTintClassOf(size: 'big' | 'wide' | 'tall' | 'small'): string {
 
 /* ── 主列表视图：Metro 磁贴 + 右侧详情面板 ──────────────────────────── */
 
-function McpListView({ rpc, onOpenAdd }: {
+function McpListView({ rpc }: {
   rpc: CorumRpcCall
-  onOpenAdd: () => void
 }) {
   const [servers, setServers] = useState<McpServerSummaryWire[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [probeMap, setProbeMap] = useState<Record<string, ProbeState>>({})
-  /** 详情面板选中态（null = 默认选第一个）。 */
+  /** 详情面板选中态（null = 未选中，展示空态）。 */
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  /** 详情面板模式：查看选中服务器 / 新建（「添加」磁贴触发）。 */
+  const [panelMode, setPanelMode] = useState<'view' | 'create'>('view')
 
   const reload = async () => {
     try {
@@ -202,12 +206,12 @@ function McpListView({ rpc, onOpenAdd }: {
 
   /** 页头 tab 选中态（两个 tab 目前指向同一份服务器列表，见上方页头注释）。 */
   const [tab, setTab] = useState<'market' | 'installed'>('market')
-  /** 详情面板选中项（默认第一个；列表变化后回落）。 */
+  /** 详情面板选中项（默认选第一个；列表变化后回落——与插件页同一口径）。 */
   const selected = useMemo(() => {
     const pool = servers ?? []
-    if (pool.length === 0) return null
-    const hit = selectedId !== null ? pool.find(s => s.name === selectedId) : undefined
-    return hit ?? pool[0]
+    if (pool.length === 0) return undefined
+    if (selectedId === null) return pool[0]
+    return pool.find(s => s.name === selectedId) ?? pool[0]
   }, [servers, selectedId])
 
   return (
@@ -230,12 +234,12 @@ function McpListView({ rpc, onOpenAdd }: {
           <span className={css.sectionHead}>MCP 服务器</span>
           {loadError !== null && <p className={css.hintText}>加载失败：{loadError}</p>}
           <div className={css.tileGrid}>
-            {/* 「添加」磁贴：固定第一张（左上角），点击进 McpAddView。 */}
+            {/* 「添加」磁贴：固定第一张（左上角），点击后右侧详情面板切「新建」模式。 */}
             <button
               type="button"
               className={`${css.tile} ${css.tintSlate}`}
               aria-label="添加服务器"
-              onClick={onOpenAdd}
+              onClick={() => { setPanelMode('create'); setSelectedId(null) }}
             >
               {/* 角标用停止态状态点的视觉形态（不可交互占位，只表达「尚未存在」）。 */}
               <span className={css.tileCorner}>
@@ -256,7 +260,7 @@ function McpListView({ rpc, onOpenAdd }: {
               const probe = probeMap[s.name]
               const enabled = s.disabled !== true
               const running = enabled && probe !== undefined && !probe.loading && probe.toolCount !== null
-              const active = selected !== null && selected.name === s.name
+              const active = panelMode === 'view' && selected !== undefined && selected.name === s.name
               const size = mosaicSizeOf(i)
               const sizeClass = size === 'big' ? ` ${css.tileBig}` : size === 'wide' ? ` ${css.tileWide}` : size === 'tall' ? ` ${css.tileTall}` : ''
               return (
@@ -266,7 +270,7 @@ function McpListView({ rpc, onOpenAdd }: {
                   className={`${css.tile}${sizeClass} ${tileTintClassOf(size)}${size === 'big' ? ' ' + css.tileGlow : ''}${active ? ' ' + css.tileActive : ''}`}
                   aria-pressed={active}
                   title={probe?.error ?? undefined}
-                  onClick={() => { setSelectedId(s.name) }}
+                  onClick={() => { setPanelMode('view'); setSelectedId(s.name) }}
                 >
                   {/* 角标：状态点 8×8（运行中绿 / 停止灰），绝对定位于右上角。 */}
                   <span className={css.tileCorner}>
@@ -297,29 +301,37 @@ function McpListView({ rpc, onOpenAdd }: {
           )}
         </div>
 
-        {/* 右：详情简介面板（点击磁贴就地展开；默认选第一个） */}
+        {/* 右：详情面板（查看选中服务器 / 新建模式两态） */}
         <aside className={css.detail} aria-label="服务器详情">
-          {selected === null
-            ? <DetailEmpty
-                title="选择一个 MCP 服务器"
-                desc="点左侧任意服务器磁贴，在这里查看它的连接配置、状态与工具；「添加」磁贴注册新端点。"
-              />
-            : (
-              <McpDetailSummary
+          {panelMode === 'create'
+            ? (
+              <McpPanelCreate
                 rpc={rpc}
-                server={selected}
-                probe={probeMap[selected.name]}
-                onToggled={() => { void reload() }}
-                onDeleted={() => { setSelectedId(null); void reload() }}
+                onSaved={(name) => { setPanelMode('view'); setSelectedId(name); void reload() }}
+                onCancel={() => { setPanelMode('view'); setSelectedId(null) }}
               />
-            )}
+            )
+            : selected === undefined
+              ? <DetailEmpty
+                  title="选择一个 MCP 服务器"
+                  desc="点左侧任意服务器磁贴，在这里查看它的连接状态、工具与绑定；「添加」磁贴在此新建端点。"
+                />
+              : (
+                <McpPanelView
+                  rpc={rpc}
+                  server={selected}
+                  probe={probeMap[selected.name]}
+                  onToggled={() => { void reload() }}
+                  onDeleted={() => { setSelectedId(null); void reload() }}
+                />
+              )}
         </aside>
       </div>
     </div>
   )
 }
 
-/* ── 详情简介面板（磁贴选中项的就地展开，不跳二级页）────────────────────── */
+/* ── 详情面板共用：空态 + 底部操作行（居中）──────────────────────────── */
 
 /** 详情面板空态（未选中任何磁贴）：产品 logo + glow + 引导文案。 */
 function DetailEmpty({ title, desc }: { title: string; desc: string }) {
@@ -334,7 +346,10 @@ function DetailEmpty({ title, desc }: { title: string; desc: string }) {
   )
 }
 
-function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: CorumRpcCall
+/* ── 详情面板 · 查看模式（MCP 语义信息面板）──────────────────────────── */
+
+function McpPanelView({ rpc, server, probe, onToggled, onDeleted }: {
+  rpc: CorumRpcCall
   server: McpServerSummaryWire
   probe: ProbeState | undefined
   onToggled: () => void
@@ -393,7 +408,7 @@ function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: 
         ? `运行中 · ${probe.toolCount} 个工具`
         : `未连接 · ${probe?.error ?? '探测失败'}`
 
-  /** 启停开关（详情面板内一行）：saveServer disabled 翻转，RPC 不变。 */
+  /** 启停开关（面板内一行）：saveServer disabled 翻转，RPC 不变。 */
   const toggleDisabled = async () => {
     if (busy || config === null) return
     setBusy(true)
@@ -448,7 +463,7 @@ function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: 
             </div>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>范围</span>
-              <span className={css.detailMetaValue}>{config?.cwd ?? '全局'}</span>
+              <span className={css.detailMetaValue}>{config?.cwd !== undefined && config.cwd !== '' ? config.cwd : '全局'}</span>
             </div>
           </div>
 
@@ -487,7 +502,7 @@ function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: 
             </div>
           )}
 
-          {/* 启停开关（详情面板内一行；磁贴角标只读展示状态点）。 */}
+          {/* 启停开关（面板内一行；磁贴角标只读展示状态点）。 */}
           <div className={css.detailSwitchRow}>
             <span className={css.detailSwitchLabel}>启用此服务器</span>
             <button
@@ -507,6 +522,7 @@ function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: 
 
         <div>
           {error !== null && <p className={css.hintText}>{error}</p>}
+          {/* 底部操作行：居中（删除服务器，error 描边）。 */}
           <div className={css.detailActions}>
             <button
               type="button"
@@ -549,11 +565,12 @@ function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: 
   )
 }
 
-/* ── 添加视图（页内表单，RPC 不变） ───────────────────────────────── */
+/* ── 详情面板 · 新建模式（原 McpAddView 表单就地搬进面板，RPC 与校验不变）── */
 
-function McpAddView({ rpc, onBack }: {
+function McpPanelCreate({ rpc, onSaved, onCancel }: {
   rpc: CorumRpcCall
-  onBack: () => void
+  onSaved: (name: string) => void
+  onCancel: () => void
 }) {
   const [name, setName] = useState('')
   const [transport, setTransport] = useState<AddTransport>('stdio')
@@ -607,7 +624,7 @@ function McpAddView({ rpc, onBack }: {
     setBusy(true)
     try {
       await rpc('mcpManager', 'saveServer', { input })
-      onBack()
+      onSaved(name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -616,104 +633,93 @@ function McpAddView({ rpc, onBack }: {
   }
 
   return (
-    <div className={css.page}>
-      <div className={css.headerRow}>
-        <span className={css.sectionHead}>添加服务器</span>
-        <span className={css.headerSpacer} />
+    <>
+      {/* 面板头：添加模式标题（对应 hero 位）。 */}
+      <div className={css.detailHero}>
+        <span className={css.detailHeroBadge}><Plus size={30} /></span>
       </div>
-      <div className={css.divider} />
+      <div className={css.detailBody}>
+        <div className={css.detailFormStack}>
+          <span className={css.detailFormTitle}>添加 MCP 服务</span>
 
-      {/* 表单卡片沿 shared 的 mcpCard 形态（迁出副本，不跨包新增依赖） */}
-      <div className={css.tiles}>
-        <div className={shared.mcpCard} style={{ gap: 12 }}>
-          <div className={shared.mcpCardTitleRow}>
-            <span className={shared.mcpCardTitle}>服务器信息</span>
-            <span className={shared.mcpCardTip}>名称用于 Agent 展示与工具引用</span>
-          </div>
-          <span className={shared.mcpFieldLbl}>服务器名称</span>
+          <span className={css.detailFormLbl}>服务器名称</span>
           <input
-            className={shared.mcpFieldInput}
+            className={css.detailFormInput}
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder="my-mcp-server"
           />
-          <span className={shared.mcpFieldLbl}>传输方式</span>
-          <div className={shared.mcpTransportTabs}>
+
+          <span className={css.detailFormLbl}>传输方式</span>
+          <div className={css.detailFormTabs} role="tablist" aria-label="传输方式">
             {ADD_TRANSPORT_OPTIONS.map(t => (
               <button
                 key={t.value}
                 type="button"
-                className={t.value === transport ? shared.mcpTransportTabActive : shared.mcpTransportTab}
+                role="tab"
+                aria-selected={t.value === transport}
+                className={t.value === transport ? css.detailFormTabActive : css.detailFormTab}
                 onClick={() => setTransport(t.value)}
               >{t.label}</button>
             ))}
           </div>
-        </div>
 
-        <div className={shared.mcpCard} style={{ gap: 10 }}>
-          <div className={shared.mcpCardTitleRow}>
-            <span className={shared.mcpCardTitle}>启动配置 (JSON)</span>
-            <span className={shared.mcpCardTip}>stdio 使用命令行启动，SSE/WebSocket 填写 URL</span>
-          </div>
+          <span className={css.detailFormLbl}>启动配置 (JSON)</span>
           <textarea
-            className={shared.mcpJsonEditor}
+            className={css.detailFormJson}
             value={configJson}
             onChange={e => setConfigJson(e.target.value)}
             placeholder={MCP_JSON_PLACEHOLDERS[transport]}
           />
-        </div>
+          <span className={css.detailFormHint}>stdio 使用命令行启动，SSE/WebSocket 填写 URL。</span>
 
-        <div className={shared.mcpCard} style={{ gap: 10 }}>
-          <div className={shared.mcpCols}>
-            <div className={shared.mcpCol}>
-              <span className={shared.mcpColLbl}>启动超时 (ms)</span>
-              <input className={shared.mcpColInput} value={startTimeout} onChange={e => setStartTimeout(e.target.value)} />
+          <div className={css.detailFormCols}>
+            <div className={css.detailFormCol}>
+              <span className={css.detailFormLbl}>启动超时 (ms)</span>
+              <input className={css.detailFormInput} value={startTimeout} onChange={e => setStartTimeout(e.target.value)} />
             </div>
-            <div className={shared.mcpCol}>
-              <span className={shared.mcpColLbl}>运行超时 (ms)</span>
-              <input className={shared.mcpColInput} value={runTimeout} onChange={e => setRunTimeout(e.target.value)} />
+            <div className={css.detailFormCol}>
+              <span className={css.detailFormLbl}>运行超时 (ms)</span>
+              <input className={css.detailFormInput} value={runTimeout} onChange={e => setRunTimeout(e.target.value)} />
             </div>
           </div>
-          <span className={shared.mcpHintDim}>超时后该服务器将被标记为未连接，并自动尝试重连。</span>
-        </div>
+          <span className={css.detailFormHint}>超时后该服务器将被标记为未连接，并自动尝试重连。</span>
 
-        <div className={shared.mcpCard} style={{ gap: 10 }}>
-          <span className={shared.mcpColLbl}>使用指导（写给模型）</span>
+          <span className={css.detailFormLbl}>使用指导（写给模型）</span>
           <textarea
-            className={shared.mcpJsonEditor}
-            style={{ minHeight: 96 }}
+            className={css.detailFormJson}
             value={guidance}
             onChange={e => setGuidance(e.target.value)}
             placeholder={'一句话用途；典型调用顺序；坑。例如：\n先 get_app_state 看当前打开的文件，再 batch_design；同一 .pen 文件不要并发改。'}
           />
-          <span className={shared.mcpHintDim}>
-            这段会进提示词，仅对**授权了该服务**的 Agent 生效（保存后即时生效，不必重启）。留空则不注入。
+          <span className={css.detailFormHint}>
+            这段会进提示词，仅对授权了该服务的 Agent 生效（保存后即时生效，不必重启）。留空则不注入。
           </span>
+
+          {error !== null && <p className={css.hintText}>{error}</p>}
         </div>
 
-        {error !== null && <p className={css.hintText}>{error}</p>}
-
-        <div className={shared.mcpActions}>
-          <button type="button" className={shared.mcpActionCancel} onClick={onBack}>取消</button>
-          <button type="button" className={shared.mcpActionPrimary} disabled={busy} onClick={() => { void submit() }}>
+        {/* 底部操作行：居中（取消 + 提交主按钮）。 */}
+        <div className={css.detailActions}>
+          <button type="button" className={css.actionBtn} onClick={onCancel}>取消</button>
+          <button
+            type="button"
+            className={css.actionPrimary}
+            disabled={busy}
+            onClick={() => { void submit() }}
+          >
             <Plus size={14} />{busy ? '添加中…' : '添加服务器'}
           </button>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
-/* ── Section 入口：列表 / 添加两态 ─────────────────────────────────── */
+/* ── Section 入口 ─────────────────────────────────────────────────── */
 
 export function McpPage() {
   const rpc = useIntegrationsRpc()
-  const [view, setView] = useState<{ kind: 'list' } | { kind: 'add' }>({ kind: 'list' })
-
-  if (rpc === null) return <p className={shared.hintText}>RPC 服务未就绪。</p>
-
-  if (view.kind === 'add') {
-    return <McpAddView rpc={rpc} onBack={() => setView({ kind: 'list' })} />
-  }
-  return <McpListView rpc={rpc} onOpenAdd={() => setView({ kind: 'add' })} />
+  if (rpc === null) return <p className={css.hintText}>RPC 服务未就绪。</p>
+  return <McpListView rpc={rpc} />
 }

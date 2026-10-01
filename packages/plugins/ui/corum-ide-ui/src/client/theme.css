@@ -29,6 +29,18 @@ body {
   --corum-glass-border: #FFFFFF;
   --corum-glass-border-active: #5B21F5;
   /*
+   * 集成中心磁贴的 4 档语义底色（design.pen 集成中心四帧的磁贴 fill）。
+   *
+   * 这四档在 design.pen 里是**写死的 hex**（不在设计变量表里），四帧的磁贴按
+   * 语义分派：紫 `#5B21F5` / 深紫 `#7C3AED` / 灰蓝 `#3B3663` / 堇 `#4C1D95`，
+   * 各自带 15~25% 的 alpha。因为是**带 alpha 的色**，叠在浅色底上自然变浅紫、
+   * 叠在深色底上保持霓虹紫，故深浅两套共用同一组值、不需要主题分叉。
+   */
+  --corum-tile-violet: #5B21F533;
+  --corum-tile-deep: #7C3AED26;
+  --corum-tile-slate: #3B366340;
+  --corum-tile-mauve: #4C1D9530;
+  /*
    * 毛玻璃的 backdrop 滤镜（**深浅共用一处**，2026-09-15 抽成变量）。
    *
    * 由来：此前 `blur(20px) saturate(140%)` 这**同一个值**硬编码在 **14 个文件的 25 处**

@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Cable, ChevronDown, ChevronLeft, Cpu, Download, KeyRound, Puzzle, Search, Server,
+  Cable, ChevronDown, ChevronLeft, Cpu, Download, FolderOpen, KeyRound, Link2, LoaderCircle, Puzzle, Search, Server,
   ServerCog, Sparkles, Star, Terminal, X,
 } from 'lucide-react'
 import { getAllRegisteredSlots, getSlotMeta } from '@corum/corum-ui-base/client'
@@ -75,9 +75,16 @@ export interface PluginManagerPanelProps {
   callRemote: <T>(method: string, args: Record<string, unknown>) => Promise<T>
 }
 
-/** 桌面 preload 桥上本面板用到的面。 */
-interface RestartBridge {
+/** 桌面 preload 桥的窄化面（红线 3：本地能力接口，不 import 壳实现包）。 */
+interface DesktopBridge {
   restartHost?: () => Promise<{ ok: boolean }>
+  pickDirectory?: (options?: { title?: string }) => Promise<{ path: string | null; cancelled?: boolean; error?: string }>
+}
+
+/** 取 preload 桥（非桌面壳 / 老 preload 下返回 undefined，调用方静默降级）。 */
+function desktopBridge(): DesktopBridge | undefined {
+  if (typeof window === 'undefined') return undefined
+  return (window as unknown as { corumDesktop?: DesktopBridge }).corumDesktop
 }
 
 /** body 的两个内容态：market = 插件市场（默认），views = 视图管理（次级入口）。 */
@@ -90,6 +97,18 @@ type SortMode = 'latest' | 'downloads'
 const SORT_LABEL: Readonly<Record<SortMode, string>> = {
   latest: '排序：最新',
   downloads: '排序：下载量',
+}
+
+/**
+ * 补充安装入口（沿用集成中心移除的「添加 ▾」那套文案与行为）：市场页只留
+ * 搜索 + 每行安装钮，本地目录与 URL 形态的包从本面板的这两枚次按钮进。
+ */
+const ADD_ENTRY_LABEL = { local: '安装本地包…', url: '从 URL 安装' } as const
+
+/** 来源条输入框的提示语（来源对应 npm spec 的形态）。 */
+const ADD_ENTRY_PLACEHOLDER: Readonly<Record<'local' | 'url', string>> = {
+  local: '包目录，如 file:/Users/me/dev/my-plugin',
+  url: 'npm 支持的 URL，如 https://github.com/me/plugin.git 或 tarball 地址',
 }
 
 /** 分类 chip（design.pen：推荐 / Agent / 工具 / 主题 / 检索 / 终端）。 */
@@ -171,6 +190,10 @@ export function PluginManagerPanel({
 
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [notice, setNotice] = useState<string | null>(null)
+
+  // 补充安装入口：'local' | 'url' = 来源条展开中，null = 收起（spec 输入随条一起重置）。
+  const [addSource, setAddSource] = useState<'local' | 'url' | null>(null)
+  const [addSpec, setAddSpec] = useState('')
 
   // 排序下拉：点外部关闭（无全局状态，纯组件本地 effect）。
   const selectRef = useRef<HTMLDivElement | null>(null)
@@ -280,9 +303,49 @@ export function PluginManagerPanel({
     onSetRegionHidden(slot, !currentlyHidden)
   }, [onSetRegionHidden])
 
+  /** 点补充入口：URL 展开来源条；本地包先弹原生目录选择器，选中后直接组装 file: spec 安装。 */
+  const onPickAddEntry = useCallback((source: 'local' | 'url') => {
+    if (source !== 'local') {
+      setAddSpec('')
+      setAddSource('url')
+      return
+    }
+    void (async () => {
+      const picked = await desktopBridge()?.pickDirectory?.({ title: '选择插件包目录' })
+      const path = picked?.path ?? null
+      if (path === null) return // 取消：来源条不打开
+      const spec = `file:${path}`
+      await withBusy(`install:${spec}`, async () => {
+        const result = await callRemote<MutationResult>('install', { spec })
+        if (!result.ok) {
+          setNotice(`安装失败：${result.log ?? '未知错误'}`)
+          return
+        }
+        setNotice(`已安装 ${spec}，重启后生效`)
+        await refreshCount()
+      })
+    })()
+  }, [withBusy, callRemote, refreshCount])
+
+  /** 提交来源条的 spec（host install 就是 pnpm add <spec>，file:/git/tarball 天然支持）。 */
+  const onSubmitAdd = useCallback(() => {
+    const spec = addSpec.trim()
+    if (spec === '') return
+    void withBusy(`install:${spec}`, async () => {
+      const result = await callRemote<MutationResult>('install', { spec })
+      if (!result.ok) {
+        setNotice(`安装失败：${result.log ?? '未知错误'}`)
+        return
+      }
+      setNotice(`已安装 ${spec}，重启后生效`)
+      setAddSpec('')
+      setAddSource(null)
+      await refreshCount()
+    })
+  }, [addSpec, withBusy, callRemote, refreshCount])
+
   const onRestart = useCallback(() => {
-    const bridge = (window as unknown as { corumDesktop?: RestartBridge }).corumDesktop
-    void bridge?.restartHost?.().then(() => { setNotice(null) })
+    void desktopBridge()?.restartHost?.()?.then(() => { setNotice(null) })
   }, [])
 
   // 客户端排序当前结果：latest = date 降序，downloads = weeklyDownloads 降序。
@@ -397,7 +460,46 @@ export function PluginManagerPanel({
                   </div>
                 )}
               </div>
+              {/* 补充安装入口：本地目录（原生选择器）/ URL（页内来源条），玻璃底次按钮 */}
+              {(['local', 'url'] as const).map(source => (
+                <button
+                  key={source}
+                  type="button"
+                  className={css.addEntryBtn}
+                  onClick={() => { onPickAddEntry(source) }}
+                >
+                  {source === 'local' ? <FolderOpen size={14} className={css.addEntryIcon} /> : <Link2 size={14} className={css.addEntryIcon} />}
+                  {ADD_ENTRY_LABEL[source]}
+                </button>
+              ))}
             </div>
+
+            {/* 来源条：URL 入口展开（本地包走目录选择器不经此条），Enter 直装 */}
+            {addSource !== null && (
+              <div className={css.sourceBar}>
+                <span className={css.sourceLabel}>{ADD_ENTRY_LABEL[addSource]}</span>
+                <input
+                  className={css.sourceInput}
+                  value={addSpec}
+                  placeholder={ADD_ENTRY_PLACEHOLDER[addSource]}
+                  aria-label={ADD_ENTRY_LABEL[addSource]}
+                  onChange={e => { setAddSpec(e.target.value) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') onSubmitAdd() }}
+                />
+                <button
+                  type="button"
+                  className={css.sourceBtn}
+                  disabled={addSpec.trim() === '' || busy.has(`install:${addSpec.trim()}`)}
+                  onClick={onSubmitAdd}
+                >安装</button>
+                <button
+                  type="button"
+                  className={css.sourceCancel}
+                  aria-label="取消安装"
+                  onClick={() => { setAddSource(null); setAddSpec('') }}
+                ><X size={14} /></button>
+              </div>
+            )}
 
             {/* cats FQRAU：六枚分类 chip = 预设检索关键词 */}
             <div className={css.chips} role="group" aria-label="插件分类">
