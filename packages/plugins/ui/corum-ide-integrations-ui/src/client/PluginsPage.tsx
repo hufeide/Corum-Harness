@@ -976,8 +976,8 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
         {/* 右侧详情简介面板（点击磁贴就地展开；默认选第一个） */}
         <aside className={css.detail} aria-label="插件详情">
-          {tab === 'market' && (marketDetail ?? <p className={css.hintText}>暂无可展示的插件。</p>)}
-          {tab === 'installed' && (installedDetail ?? <p className={css.hintText}>暂无可展示的插件。</p>)}
+          {tab === 'market' && (marketDetail ?? <DetailEmpty title="选择一个插件" desc="点左侧任意插件磁贴，在这里查看它的简介、热度与版本；点「安装」一键装入。" />)}
+          {tab === 'installed' && (installedDetail ?? <DetailEmpty title="选择一个已装插件" desc="点左侧任意已装插件磁贴，在这里查看它的版本、状态与操作；开关可就地启停。" />)}
         </aside>
       </div>
 
@@ -1003,3 +1003,16 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 /** 供后续「分类完整列表页」复用的分节口径（当前页只做概览分组）。 */
 export { SECTIONS }
 export type { Section, SearchResult }
+
+/** 详情面板空态（未选中任何磁贴）：产品 logo + glow + 引导文案。 */
+function DetailEmpty({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className={css.detailEmpty}>
+      <div className={css.detailEmptyHero}>
+        <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
+      </div>
+      <p className={css.detailEmptyTitle}>{title}</p>
+      <p className={css.detailEmptyDesc}>{desc}</p>
+    </div>
+  )
+}

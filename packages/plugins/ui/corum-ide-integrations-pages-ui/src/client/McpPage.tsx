@@ -266,7 +266,10 @@ function McpListView({ rpc, onOpenAdd }: {
         {/* 右：详情简介面板（点击磁贴就地展开；默认选第一个） */}
         <aside className={css.detail} aria-label="服务器详情">
           {selected === null
-            ? <p className={css.hintText}>暂无可展示的服务器。</p>
+            ? <DetailEmpty
+                title="选择一个 MCP 服务器"
+                desc="点左侧任意服务器磁贴，在这里查看它的连接配置、状态与工具；「添加服务器」注册新端点。"
+              />
             : (
               <McpDetailSummary
                 rpc={rpc}
@@ -284,8 +287,20 @@ function McpListView({ rpc, onOpenAdd }: {
 
 /* ── 详情简介面板（磁贴选中项的就地展开，不跳二级页）────────────────────── */
 
-function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {
-  rpc: CorumRpcCall
+/** 详情面板空态（未选中任何磁贴）：产品 logo + glow + 引导文案。 */
+function DetailEmpty({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className={css.detailEmpty}>
+      <div className={css.detailEmptyHero}>
+        <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
+      </div>
+      <p className={css.detailEmptyTitle}>{title}</p>
+      <p className={css.detailEmptyDesc}>{desc}</p>
+    </div>
+  )
+}
+
+function McpDetailSummary({ rpc, server, probe, onToggled, onDeleted }: {  rpc: CorumRpcCall
   server: McpServerSummaryWire
   probe: ProbeState | undefined
   onToggled: () => void

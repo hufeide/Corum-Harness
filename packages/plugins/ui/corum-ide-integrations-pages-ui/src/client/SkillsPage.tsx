@@ -340,7 +340,10 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
         {/* 右：详情简介面板（点击磁贴就地展开；默认选第一个） */}
         <aside className={css.detail} aria-label="技能详情">
           {selected === null
-            ? <p className={css.hintText}>暂无可展示的技能。</p>
+            ? <DetailEmpty
+                title="选择一个技能"
+                desc="点左侧任意技能磁贴，在这里查看它的简介、状态与绑定；「管理版本与绑定」进入完整管理。"
+              />
             : (
               <SkillDetailSummary
                 skill={selected}
@@ -358,6 +361,19 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
 }
 
 /* ── 详情简介面板（磁贴选中项的就地展开；完整管理进二级详情视图）────── */
+
+/** 详情面板空态（未选中任何磁贴）：产品 logo + glow + 引导文案。 */
+function DetailEmpty({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className={css.detailEmpty}>
+      <div className={css.detailEmptyHero}>
+        <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
+      </div>
+      <p className={css.detailEmptyTitle}>{title}</p>
+      <p className={css.detailEmptyDesc}>{desc}</p>
+    </div>
+  )
+}
 
 function SkillDetailSummary({ skill, enabled, onToggle, bindCount, onOpenDetail, onDelete }: {
   skill: SkillInfo
