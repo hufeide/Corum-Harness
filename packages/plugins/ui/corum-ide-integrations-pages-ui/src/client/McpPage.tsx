@@ -334,7 +334,6 @@ function McpListView({ rpc }: {
                     /* 版本徽章位承载传输方式（wire 无版本字段，占位口径）。 */
                     version={TRANSPORT_LABEL[s.transport]}
                     /* 除 small 外都传描述（tall 纵向空间富余）；空串不渲染。 */
-                    desc={size !== 'small' && s.description !== undefined && s.description !== '' ? s.description : undefined}
                     sub={`${TRANSPORT_LABEL[s.transport]} · ${endpointLabel(s)}`}
                     corner={(
                       <span className={mosaicStyles.tileCorner}>

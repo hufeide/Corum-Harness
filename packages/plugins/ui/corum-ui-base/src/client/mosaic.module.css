@@ -213,15 +213,16 @@
   min-width: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   overflow: hidden;
   overflow-wrap: anywhere;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   line-height: 1.3;
-  /* 固定两行行高：内容长短不一（占位贴只有「添加」）时磁贴内文字块不跳动。 */
-  min-height: calc(2 * 1.3em);
+  /* 固定三行行高：内容长短不一（占位贴只有「添加」）时磁贴内文字块不跳动。
+     简介移出卡片后这里由两行放宽到三行 —— 腾出的空间给名称。 */
+  min-height: calc(3 * 1.3em);
 }
 
 .tile[data-tile-size='big'] .tileName { font-size: calc(15px * var(--corum-ui-font-scale, 1)); }
@@ -251,26 +252,21 @@
   white-space: nowrap;
 }
 
-.tileDesc {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  color: var(--dsw-alias-label-secondary);
-  line-height: 1.4;
-}
-
 /* ── 按形状分档的贴内布局 ─────────────────────────────────────────────────
    同一个 `MosaicTileBody` 骨架，四种形状各自换**信息组织方式**（不只是调字号）：
 
-     big   264×264 正方形：图标居左上（用户 2026-10-02 定调，不做居中封面）
-                          → 名称 2 行 → 描述 3 行 → 作者。面积最大，描述是主角。
-     wide  264×128 宽扁：  **图文并排**（图标左、文字右），描述 2 行；横向空间
-                          富余，故不让图标独占一行。
-     tall  128×264 窄高：  图标居上 → 名称 2 行 → 描述 3 行 → 作者沉底；
-                          纵向空间富余、横向窄，故描述换行更多。
-     small 128×128 最小：  只有图标 + 名称，不塞描述（面积不够，塞了必裁）。
+     big   264×264 正方形：图标居左上 → 名称（最多 3 行）→ 作者
+     wide  264×128 宽扁：  **图文并排**（图标左、文字右）→ 名称（2 行）→ 作者
+     tall  128×264 窄高：  图标居上 → 名称（3 行）→ 作者沉底
+     small 128×128 最小：  图标 + 名称（2 行）
+
+   ⚠️ **卡片上不渲染简介**（用户 2026-10-02 定调：「我希望将简介放在详细信息里去」）。
+   简介只在右侧详情面板呈现（三页的 `.detailDesc` 已展示全文）。理由有二：
+     1. 卡片面积有限，简介在窄贴里只能被钳成两三行残句，信息价值低；
+     2. 原先靠「@container 按贴高隐藏简介」实现分档，而贴高随窗口在阈值附近来回跨越
+        ⇒ **同一张卡片在不同窗口尺寸下简介时而出现时而消失**（用户实测报障
+        「缩小窗口后小卡片反而有简介，放大全屏反而没有」）。移除后这类分支不复存在。
+   腾出的纵向空间让给名称（行数 2 → 3）与图标（略放大），卡片不显得空。
 
    实现方式：骨架元素（`.tileBodyScaffold`）按形状切换 `flex-direction`，
    而不是给每种形状写一套 JSX —— 结构一份、布局四档，消费方无需分支。
@@ -297,15 +293,14 @@
   min-width: 0;
 }
 
-/* tall：纵向富余 ⇒ 让描述多吃行数、作者沉底。 */
+/* tall：纵向富余 ⇒ 作者沉底（名称与作者分列两端）。 */
 .tile[data-tile-size='tall'] .tileBodyScaffold {
   justify-content: space-between;
 }
 
-/* big：描述是主角，给它 3 行；名称 2 行。small 不渲染描述（由消费方决定）。 */
-.tile[data-tile-size='big'] .tileDesc { -webkit-line-clamp: 3; }
-.tile[data-tile-size='wide'] .tileDesc { -webkit-line-clamp: 2; }
-.tile[data-tile-size='tall'] .tileDesc { -webkit-line-clamp: 3; }
+/* 大贴与高贴的名称可占三行（简介移出卡片后，行数从两行放宽）。 */
+.tile[data-tile-size='big'] .tileName,
+.tile[data-tile-size='tall'] .tileName { -webkit-line-clamp: 3; min-height: calc(3 * 1.3em); }
 
 /* ── 磁贴角标：状态点 / 启停开关 ─────────────────────────────────────────── */
 
@@ -421,11 +416,17 @@
 
 @container (max-height: 180px) {
   .tileName {
+    -webkit-line-clamp: 2;
+    min-height: calc(2 * 1.3em);
+  }
+}
+
+@container (max-height: 140px) {
+  .tileName {
     -webkit-line-clamp: 1;
     white-space: nowrap;
     text-overflow: ellipsis;
-    /* 单行时行高也收回一行：原 `min-height: 2×1.3em` 是为「两行不跳动」留的，
-       窄窗下那 31px 会把底部的作者小字顶出贴外。 */
+    /* 单行时行高也收回一行：三行行高是为「不跳动」留的，窄贴里会把作者顶出贴外。 */
     min-height: calc(1.3em);
   }
 }
@@ -434,19 +435,8 @@
   .tileVersion { display: none; }
 }
 
-/* 大贴（2 单位）缩放后同样会装不下三行描述：1280 窗口下它是 174×174、最小窗
-   1219 下 154×154，装得下图标 + 单行名称 + 版本 + 作者，但三行描述会溢出。
-   描述在详情面板里有完整一份，这里收到一行；宽窗（264 基准）不触发。 */
-@container (max-height: 200px) {
-  .tileDesc { -webkit-line-clamp: 2; }
-}
-
-@container (max-height: 175px) {
-  .tileDesc { -webkit-line-clamp: 1; }
-}
-
 /* 最后一段：最小窗口（1219）下小贴被缩到 73px，而图标是 TSX 给的固定 24px
-   （不随单位缩）⇒ 图标 + 单行名称 + 作者仍差几像素装不下。此时把图标压到 16px。
+   （不随单位缩）⇒ 图标 + 名称 + 作者仍差几像素装不下。此时把图标压到 16px。
    图标尺寸本身与「界面字号」设置无关（同族插件都固定像素），故这里只按容器
    高度收，不参与 --corum-ui-font-scale。 */
 @container (max-height: 85px) {

@@ -432,7 +432,6 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
                     name={s.name}
                     version={s.currentVersion ?? '—'}
                     /* 除 small 外都传描述（tall 纵向空间富余）；空串不渲染。 */
-                    desc={size !== 'small' && s.description !== '' ? s.description : undefined}
                     sub={skillAuthorLabel(s.name)}
                   />
                 </button>

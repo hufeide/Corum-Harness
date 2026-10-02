@@ -787,7 +787,6 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
           name={shortName(row.name)}
           version={`v${row.version}`}
           /* 除 small 外都传描述（tall 纵向空间富余，也吃 3 行）；空串不渲染。 */
-          desc={size !== 'small' && row.description !== undefined && row.description !== '' ? row.description : undefined}
           sub={authorOf(row.name)}
           corner={heat === null ? undefined : (
             <span className={mosaicStyles.tileCorner}>
@@ -816,7 +815,6 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
           icon={pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}
           name={shortName(entry.moduleName)}
           version={entry.version !== undefined ? `v${entry.version}` : undefined}
-          desc={size !== 'small' && entry.description !== undefined && entry.description !== '' ? entry.description : undefined}
           sub={authorOf(entry.moduleName)}
         />
       </button>
@@ -851,7 +849,6 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
             ? shortName(entry.moduleName)
             : <span className={css.installedOffName}>{shortName(entry.moduleName)}</span>}
           version={entry.version !== undefined ? `v${entry.version}` : undefined}
-          desc={size !== 'small' && entry.description !== undefined && entry.description !== '' ? entry.description : undefined}
           sub={`${authorOf(entry.moduleName)} · ${entry.enabled ? '已启用' : '已停用'}`}
           corner={(
             <button
