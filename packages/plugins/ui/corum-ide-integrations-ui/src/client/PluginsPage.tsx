@@ -41,7 +41,7 @@ import {
   SquareTerminal, Trash2, WandSparkles, X,
 } from 'lucide-react'
 import {
-  buildMosaic, mosaicStyles, mosaicTileClass, MosaicWall, useMosaicColumns,
+  buildMosaic, MosaicTileBody, mosaicStyles, mosaicTileClass, MosaicWall, useMosaicColumns,
   type MosaicItemHint, type MosaicSize, type MosaicTint,
 } from '@corum/corum-ui-base/client'
 import css from './PluginsPage.module.css'
@@ -749,22 +749,22 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
         aria-pressed={active}
         onClick={() => { setMarketId(row.name) }}
       >
-        <div className={mosaicStyles.tileTop}>
-          <span className={mosaicStyles.tileIcon}>{pluginIcon(row.name, 22)}</span>
-        </div>
-        {heat !== null && (
-          <span className={mosaicStyles.tileCorner}>
-            <Flame size={12} className={css.tileHeatIcon} />
-            <span className={css.tileHeatValue}>{heat}</span>
-          </span>
-        )}
-        <div className={mosaicStyles.tileBottom}>
-          <div className={mosaicStyles.tileNameRow}>
-            <span className={`${mosaicStyles.tileName} ${css.hotName}`}>{shortName(row.name)}</span>
-            <span className={`${mosaicStyles.tileVersion} ${css.hotVersion}`}>v{row.version}</span>
-          </div>
-          <span className={mosaicStyles.tileSub}>{authorOf(row.name)}</span>
-        </div>
+        {/*
+          热排贴 data-tile-size="hot" 不命中共享表的形状分档规则，布局等同默认纵向；
+          名称/版本徽章的收档类（hotName / hotVersion）由内层 span 挂进骨架。
+        */}
+        <MosaicTileBody
+          icon={pluginIcon(row.name, 22)}
+          name={<span className={css.hotName}>{shortName(row.name)}</span>}
+          version={<span className={css.hotVersion}>v{row.version}</span>}
+          sub={authorOf(row.name)}
+          corner={heat === null ? undefined : (
+            <span className={mosaicStyles.tileCorner}>
+              <Flame size={12} className={css.tileHeatIcon} />
+              <span className={css.tileHeatValue}>{heat}</span>
+            </span>
+          )}
+        />
       </button>
     )
   }
@@ -782,25 +782,20 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
         aria-pressed={active}
         onClick={() => { setMarketId(row.name) }}
       >
-        <div className={mosaicStyles.tileTop}>
-          <span className={mosaicStyles.tileIcon}>{pluginIcon(row.name, size === 'big' ? 34 : 24)}</span>
-        </div>
-        {heat !== null && (
-          <span className={mosaicStyles.tileCorner}>
-            <Flame size={12} className={css.tileHeatIcon} />
-            <span className={css.tileHeatValue}>{heat}</span>
-          </span>
-        )}
-        <div className={mosaicStyles.tileBottom}>
-          <div className={mosaicStyles.tileNameRow}>
-            <span className={mosaicStyles.tileName}>{shortName(row.name)}</span>
-            <span className={mosaicStyles.tileVersion}>v{row.version}</span>
-          </div>
-          {(size === 'big' || size === 'wide') && row.description !== undefined && row.description !== '' && (
-            <span className={mosaicStyles.tileDesc}>{row.description}</span>
+        <MosaicTileBody
+          icon={pluginIcon(row.name, size === 'big' ? 34 : 24)}
+          name={shortName(row.name)}
+          version={`v${row.version}`}
+          /* 除 small 外都传描述（tall 纵向空间富余，也吃 3 行）；空串不渲染。 */
+          desc={size !== 'small' && row.description !== undefined && row.description !== '' ? row.description : undefined}
+          sub={authorOf(row.name)}
+          corner={heat === null ? undefined : (
+            <span className={mosaicStyles.tileCorner}>
+              <Flame size={12} className={css.tileHeatIcon} />
+              <span className={css.tileHeatValue}>{heat}</span>
+            </span>
           )}
-          <span className={mosaicStyles.tileSub}>{authorOf(row.name)}</span>
-        </div>
+        />
       </button>
     )
   }
@@ -817,19 +812,13 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
         aria-pressed={active}
         onClick={() => { setMarketId(entry.entryId) }}
       >
-        <div className={mosaicStyles.tileTop}>
-          <span className={mosaicStyles.tileIcon}>{pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}</span>
-        </div>
-        <div className={mosaicStyles.tileBottom}>
-          <div className={mosaicStyles.tileNameRow}>
-            <span className={mosaicStyles.tileName}>{shortName(entry.moduleName)}</span>
-            {entry.version !== undefined && <span className={mosaicStyles.tileVersion}>v{entry.version}</span>}
-          </div>
-          {(size === 'big' || size === 'wide') && entry.description !== undefined && entry.description !== '' && (
-            <span className={mosaicStyles.tileDesc}>{entry.description}</span>
-          )}
-          <span className={mosaicStyles.tileSub}>{authorOf(entry.moduleName)}</span>
-        </div>
+        <MosaicTileBody
+          icon={pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}
+          name={shortName(entry.moduleName)}
+          version={entry.version !== undefined ? `v${entry.version}` : undefined}
+          desc={size !== 'small' && entry.description !== undefined && entry.description !== '' ? entry.description : undefined}
+          sub={authorOf(entry.moduleName)}
+        />
       </button>
     )
   }
@@ -855,29 +844,28 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
         onClick={() => { setInstalledId(entry.entryId) }}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setInstalledId(entry.entryId) } }}
       >
-        <div className={mosaicStyles.tileTop}>
-          <span className={mosaicStyles.tileIcon}>{pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={entry.enabled}
-            aria-label={`${shortName(entry.moduleName)} 启用开关`}
-            className={mosaicStyles.tileSwitch}
-            data-off={!entry.enabled || undefined}
-            disabled={busy.has(`toggle:${entry.entryId}`)}
-            onClick={(e) => { e.stopPropagation(); void onToggleEnabled(entry) }}
-          ><span className={mosaicStyles.tileSwitchKnob} /></button>
-        </div>
-        <div className={mosaicStyles.tileBottom}>
-          <div className={mosaicStyles.tileNameRow}>
-            <span className={`${mosaicStyles.tileName}${entry.enabled ? '' : ' ' + css.installedOffName}`}>{shortName(entry.moduleName)}</span>
-            {entry.version !== undefined && <span className={mosaicStyles.tileVersion}>v{entry.version}</span>}
-          </div>
-          {(size === 'big' || size === 'wide') && entry.description !== undefined && entry.description !== '' && (
-            <span className={mosaicStyles.tileDesc}>{entry.description}</span>
+        {/* 角标位 = 启停开关（绝对定位右上角，不参与排版）；停用态名称降一档。 */}
+        <MosaicTileBody
+          icon={pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}
+          name={entry.enabled
+            ? shortName(entry.moduleName)
+            : <span className={css.installedOffName}>{shortName(entry.moduleName)}</span>}
+          version={entry.version !== undefined ? `v${entry.version}` : undefined}
+          desc={size !== 'small' && entry.description !== undefined && entry.description !== '' ? entry.description : undefined}
+          sub={`${authorOf(entry.moduleName)} · ${entry.enabled ? '已启用' : '已停用'}`}
+          corner={(
+            <button
+              type="button"
+              role="switch"
+              aria-checked={entry.enabled}
+              aria-label={`${shortName(entry.moduleName)} 启用开关`}
+              className={mosaicStyles.tileSwitch}
+              data-off={!entry.enabled || undefined}
+              disabled={busy.has(`toggle:${entry.entryId}`)}
+              onClick={(e) => { e.stopPropagation(); void onToggleEnabled(entry) }}
+            ><span className={mosaicStyles.tileSwitchKnob} /></button>
           )}
-          <span className={mosaicStyles.tileSub}>{authorOf(entry.moduleName)} · {entry.enabled ? '已启用' : '已停用'}</span>
-        </div>
+        />
       </div>
     )
   }

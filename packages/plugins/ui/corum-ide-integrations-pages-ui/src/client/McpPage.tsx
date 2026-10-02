@@ -31,7 +31,7 @@ import { ChevronDown, ChevronUp, FolderTree, Info, Plus, Trash2 } from 'lucide-r
 import { useIntegrationsRpc } from './face.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
-  buildMosaic, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
+  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
 } from '@corum/corum-ui-base/client'
 import type { MosaicItemHint, MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
 import css from './McpPage.module.css'
@@ -295,19 +295,17 @@ function McpListView({ rpc }: {
                     onClick={() => { setPanelMode('create'); setSelectedId(null) }}
                   >
                     {/* 角标用停止态状态点的视觉形态（不可交互占位，只表达「尚未存在」）。 */}
-                    <span className={mosaicStyles.tileCorner}>
-                      <span className={`${mosaicStyles.tileDot} ${mosaicStyles.tileDotOff}`} aria-hidden="true" />
-                    </span>
-                    <div className={mosaicStyles.tileTop}>
-                      <span className={mosaicStyles.tileIcon}><Plus size={24} /></span>
-                    </div>
-                    <div className={mosaicStyles.tileBottom}>
-                      <div className={mosaicStyles.tileNameRow}>
-                        <span className={mosaicStyles.tileName}>添加</span>
-                        <span className={mosaicStyles.tileVersion}>MCP</span>
-                      </div>
-                      <span className={mosaicStyles.tileSub}>新端点</span>
-                    </div>
+                    <MosaicTileBody
+                      icon={<Plus size={24} />}
+                      name="添加"
+                      version="MCP"
+                      sub="新端点"
+                      corner={(
+                        <span className={mosaicStyles.tileCorner}>
+                          <span className={`${mosaicStyles.tileDot} ${mosaicStyles.tileDotOff}`} aria-hidden="true" />
+                        </span>
+                      )}
+                    />
                   </button>
                 )
               }
@@ -330,26 +328,20 @@ function McpListView({ rpc }: {
                   title={probe?.error ?? undefined}
                   onClick={() => { setPanelMode('view'); setSelectedId(s.name) }}
                 >
-                  {/* 角标：状态点 8×8（运行中绿 / 停止灰），绝对定位于右上角。 */}
-                  <span className={mosaicStyles.tileCorner}>
-                    <span className={`${mosaicStyles.tileDot}${running ? '' : ` ${mosaicStyles.tileDotOff}`}`} />
-                  </span>
-                  <div className={mosaicStyles.tileTop}>
-                    <span className={mosaicStyles.tileIcon}><FolderTree size={size === 'big' ? 30 : 24} /></span>
-                  </div>
-                  <div className={mosaicStyles.tileBottom}>
-                    <div className={mosaicStyles.tileNameRow}>
-                      <span className={mosaicStyles.tileName}>{s.name}</span>
-                      {/* 版本徽章位承载传输方式（wire 无版本字段，占位口径）。 */}
-                      <span className={mosaicStyles.tileVersion}>{TRANSPORT_LABEL[s.transport]}</span>
-                    </div>
-                    {(size === 'big' || size === 'wide') && s.description !== undefined && s.description !== '' && (
-                      <span className={mosaicStyles.tileDesc}>{s.description}</span>
+                  <MosaicTileBody
+                    icon={<FolderTree size={size === 'big' ? 30 : 24} />}
+                    name={s.name}
+                    /* 版本徽章位承载传输方式（wire 无版本字段，占位口径）。 */
+                    version={TRANSPORT_LABEL[s.transport]}
+                    /* 除 small 外都传描述（tall 纵向空间富余）；空串不渲染。 */
+                    desc={size !== 'small' && s.description !== undefined && s.description !== '' ? s.description : undefined}
+                    sub={`${TRANSPORT_LABEL[s.transport]} · ${endpointLabel(s)}`}
+                    corner={(
+                      <span className={mosaicStyles.tileCorner}>
+                        <span className={`${mosaicStyles.tileDot}${running ? '' : ` ${mosaicStyles.tileDotOff}`}`} />
+                      </span>
                     )}
-                    <span className={mosaicStyles.tileSub}>
-                      {TRANSPORT_LABEL[s.transport]} · {endpointLabel(s)}
-                    </span>
-                  </div>
+                  />
                 </button>
               )
             }}

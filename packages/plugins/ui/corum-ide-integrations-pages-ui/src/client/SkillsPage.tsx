@@ -38,7 +38,7 @@ import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentB
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import type { LucideIcon } from 'lucide-react'
 import {
-  buildMosaic, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
+  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
 } from '@corum/corum-ui-base/client'
 import type { MosaicItemHint, MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
 import css from './SkillsPage.module.css'
@@ -401,16 +401,12 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
                     aria-label="添加技能"
                     onClick={onImport}
                   >
-                    <div className={mosaicStyles.tileTop}>
-                      <span className={mosaicStyles.tileIcon}><Plus size={24} /></span>
-                    </div>
-                    <div className={mosaicStyles.tileBottom}>
-                      <div className={mosaicStyles.tileNameRow}>
-                        <span className={mosaicStyles.tileName}>添加</span>
-                        <span className={mosaicStyles.tileVersion}>SKILL</span>
-                      </div>
-                      <span className={mosaicStyles.tileSub}>新技能</span>
-                    </div>
+                    <MosaicTileBody
+                      icon={<Plus size={24} />}
+                      name="添加"
+                      version="SKILL"
+                      sub="新技能"
+                    />
                   </button>
                 )
               }
@@ -431,19 +427,14 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
                   onClick={() => setSelectedName(s.name)}
                 >
                   {/* 卡片只留：图标 / 名称 / 版本徽章 / 作者小字（技能无启停概念）。 */}
-                  <div className={mosaicStyles.tileTop}>
-                    <span className={mosaicStyles.tileIcon}><Icon size={size === 'big' ? 30 : 24} /></span>
-                  </div>
-                  <div className={mosaicStyles.tileBottom}>
-                    <div className={mosaicStyles.tileNameRow}>
-                      <span className={mosaicStyles.tileName}>{s.name}</span>
-                      <span className={mosaicStyles.tileVersion}>{s.currentVersion ?? '—'}</span>
-                    </div>
-                    {(size === 'big' || size === 'wide') && s.description !== '' && (
-                      <span className={mosaicStyles.tileDesc}>{s.description}</span>
-                    )}
-                    <span className={mosaicStyles.tileSub}>{skillAuthorLabel(s.name)}</span>
-                  </div>
+                  <MosaicTileBody
+                    icon={<Icon size={size === 'big' ? 30 : 24} />}
+                    name={s.name}
+                    version={s.currentVersion ?? '—'}
+                    /* 除 small 外都传描述（tall 纵向空间富余）；空串不渲染。 */
+                    desc={size !== 'small' && s.description !== '' ? s.description : undefined}
+                    sub={skillAuthorLabel(s.name)}
+                  />
                 </button>
               )
             }}

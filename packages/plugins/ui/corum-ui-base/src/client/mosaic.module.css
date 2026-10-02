@@ -261,6 +261,52 @@
   line-height: 1.4;
 }
 
+/* ── 按形状分档的贴内布局 ─────────────────────────────────────────────────
+   同一个 `MosaicTileBody` 骨架，四种形状各自换**信息组织方式**（不只是调字号）：
+
+     big   264×264 正方形：图标居左上（用户 2026-10-02 定调，不做居中封面）
+                          → 名称 2 行 → 描述 3 行 → 作者。面积最大，描述是主角。
+     wide  264×128 宽扁：  **图文并排**（图标左、文字右），描述 2 行；横向空间
+                          富余，故不让图标独占一行。
+     tall  128×264 窄高：  图标居上 → 名称 2 行 → 描述 3 行 → 作者沉底；
+                          纵向空间富余、横向窄，故描述换行更多。
+     small 128×128 最小：  只有图标 + 名称，不塞描述（面积不够，塞了必裁）。
+
+   实现方式：骨架元素（`.tileBodyScaffold`）按形状切换 `flex-direction`，
+   而不是给每种形状写一套 JSX —— 结构一份、布局四档，消费方无需分支。
+   -------------------------------------------------------------------------- */
+
+.tileBodyScaffold {
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+
+/* wide：图文并排——图标与文字块左右分栏，图标不再独占一行。 */
+.tile[data-tile-size='wide'] .tileBodyScaffold {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+.tile[data-tile-size='wide'] .tileBodyText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* tall：纵向富余 ⇒ 让描述多吃行数、作者沉底。 */
+.tile[data-tile-size='tall'] .tileBodyScaffold {
+  justify-content: space-between;
+}
+
+/* big：描述是主角，给它 3 行；名称 2 行。small 不渲染描述（由消费方决定）。 */
+.tile[data-tile-size='big'] .tileDesc { -webkit-line-clamp: 3; }
+.tile[data-tile-size='wide'] .tileDesc { -webkit-line-clamp: 2; }
+.tile[data-tile-size='tall'] .tileDesc { -webkit-line-clamp: 3; }
+
 /* ── 磁贴角标：状态点 / 启停开关 ─────────────────────────────────────────── */
 
 .tileDot {

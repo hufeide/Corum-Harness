@@ -35,6 +35,58 @@ const TINT_CLASS: Readonly<Record<MosaicTint, string>> = {
   mauve: css.tileTintMauve,
 }
 
+/**
+ * 贴内骨架的 props：**一份结构、四种布局**。
+ *
+ * 形状由外层贴的 `data-tile-size` 决定（CSS 按它切 `flex-direction` 与行数），
+ * 故这里不需要 `size` 参数 —— 消费方把骨架放进已带 `data-tile-size` 的贴里即可。
+ *
+ * 各形状的取舍（用户 2026-10-02 定调）：
+ * - `big`：图标居左上 → 名称 2 行 → 描述 3 行 → 作者；
+ * - `wide`：图文**并排**（图标左、文字右），描述 2 行；
+ * - `tall`：纵向 → 名称 2 行 → 描述 3 行 → 作者沉底；
+ * - `small`：只有图标 + 名称（不传 `desc` 即不渲染，面积不够）。
+ */
+export interface MosaicTileBodyProps {
+  /** 图标（消费方按形状自定尺寸；骨架只负责落位）。 */
+  readonly icon: ReactNode
+  /** 名称（必给）。 */
+  readonly name: ReactNode
+  /** 版本徽章；省略则不渲染。窄贴会被容器查询自动隐去。 */
+  readonly version?: ReactNode
+  /** 描述；省略则不渲染（`small` 应省略）。 */
+  readonly desc?: ReactNode
+  /** 底部小字（作者 / 地址等）；省略则不渲染。 */
+  readonly sub?: ReactNode
+  /** 右上角角标（热度 / 状态点 / 开关）；绝对定位，不参与排版。 */
+  readonly corner?: ReactNode
+}
+
+/**
+ * 按形状分档的贴内骨架。
+ *
+ * @param props - 见 {@link MosaicTileBodyProps}。
+ * @returns 贴内结构（外层应是一个带 `data-tile-size` 的磁贴元素）。
+ */
+export function MosaicTileBody({ icon, name, version, desc, sub, corner }: MosaicTileBodyProps): ReactNode {
+  return (
+    <>
+      {corner}
+      <div className={css.tileBodyScaffold}>
+        <span className={css.tileIcon}>{icon}</span>
+        <div className={`${css.tileBottom} ${css.tileBodyText}`}>
+          <div className={css.tileNameRow}>
+            <span className={css.tileName}>{name}</span>
+            {version !== undefined && <span className={css.tileVersion}>{version}</span>}
+          </div>
+          {desc !== undefined && <span className={css.tileDesc}>{desc}</span>}
+          {sub !== undefined && <span className={css.tileSub}>{sub}</span>}
+        </div>
+      </div>
+    </>
+  )
+}
+
 /** 磁贴墙：把块序列渲染成块行 + 列 + 贴。 */
 export interface MosaicWallProps<T> {
   /** 贴的数据源（按渲染顺序，与 {@link flattenMosaic} 的顺序一致）。 */
@@ -141,6 +193,8 @@ export interface MosaicStyleSheet {
   readonly mosaicCol: string
   readonly tile: string
   readonly tileTop: string
+  readonly tileBodyScaffold: string
+  readonly tileBodyText: string
   readonly tileIcon: string
   readonly tileCorner: string
   readonly tileBottom: string
@@ -169,6 +223,8 @@ export const mosaicStyles: MosaicStyleSheet = {
   mosaicCol: css.mosaicCol,
   tile: css.tile,
   tileTop: css.tileTop,
+  tileBodyScaffold: css.tileBodyScaffold,
+  tileBodyText: css.tileBodyText,
   tileIcon: css.tileIcon,
   tileCorner: css.tileCorner,
   tileBottom: css.tileBottom,

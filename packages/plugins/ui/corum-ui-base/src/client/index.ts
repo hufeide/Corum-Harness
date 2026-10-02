@@ -29,6 +29,6 @@ export * from './grid.ts'
 // 三个内容页（插件 / MCP / 技能）共用这一份——收敛前它们各持副本且已分叉。
 export { buildMosaic, buildColSkeleton, buildColSkeleton128, flattenMosaic, pickMosaicColumns, MOSAIC_SEED, MIN_UNIT_FOR_6COL } from './mosaic.ts'
 export type { MosaicSize, MosaicBlock, MosaicCol, MosaicSlot, MosaicBlockKind, MosaicColumns, MosaicItemHint, MosaicOptions } from './mosaic.ts'
-export { MosaicWall, useMosaicColumns, mosaicStyles, mosaicTileClass, mosaicTileAttrs } from './MosaicWall.tsx'
-export type { MosaicWallProps, MosaicTileProps, MosaicTint, MosaicStyleSheet } from './MosaicWall.tsx'
+export { MosaicWall, MosaicTileBody, useMosaicColumns, mosaicStyles, mosaicTileClass, mosaicTileAttrs } from './MosaicWall.tsx'
+export type { MosaicWallProps, MosaicTileBodyProps, MosaicTileProps, MosaicTint, MosaicStyleSheet } from './MosaicWall.tsx'
 import './base-theme.css'
