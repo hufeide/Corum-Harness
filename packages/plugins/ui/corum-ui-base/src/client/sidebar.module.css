@@ -16,7 +16,11 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  padding: calc(14px * var(--corum-density-scale, 1));
+  /* **水平**内边距固定 14px、不随密度缩放：侧栏宽度被锁死 220px，若水平 padding
+     也跟着密度放大（宽松档 14→15.75），内容宽就被吃掉、品牌区的产品名会被截断
+     （实测宽松档下可用 111 < 需 113）。垂直方向照旧随密度走 —— 那里只影响留白，
+     不影响「放不放得下」。 */
+  padding: calc(14px * var(--corum-density-scale, 1)) 14px;
   gap: calc(8px * var(--corum-density-scale, 1));
 }
 
@@ -56,10 +60,20 @@
   min-width: 0;
 }
 .brandName {
-  /* 主标题：与产品名一致的字面（不随 --corum-ui-font-scale 之外的排版变化跳动）。 */
+  /* 主标题「Corum Harness」。
+     侧栏锁 220px 是**死的**，故这一行的可用宽是固定的：标题行 188 − 档位徽标 − 间隙。
+     默认字号下刚好放得下（113px 可用 = 113px 需要，余量 0）；一旦用户把「界面密度」
+     或字号调大，徽标与文字一起变宽就会把产品名挤到截断（实测 density 1.25 时可用 104
+     而需 113）。故这里用 `flex: 1 1 auto` 让它**先占满可用宽**，并以 `overflow: hidden`
+     + 省略号兜底 —— 宁可省略号，也不要半截字。
+     字号用 clamp 把下限压住：字号放大时优先保证**放得下**，而不是无限变大到被切。 */
+  flex: 1 1 auto;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
-  font-size: calc(15px * var(--corum-ui-font-scale, 1));
+  /* 字号**封顶在 15px**：侧栏锁 220 放不下更大的字号（实测字号 ×1.3 时需 147px、
+     可用仅 119px）。用 `min(1, fontScale)` 让放大到 1 倍为止——宁可这个品牌词不随
+     「界面字号」放大，也不要它被截断（会话名等正文仍正常跟随该设置）。 */
+  font-size: calc(15px * min(1, var(--corum-ui-font-scale, 1)));
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: 0.01em;
@@ -76,12 +90,14 @@
   gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
-/* 标题行右端成组（档位徽标 + 复制按钮）：被标题行的 space-between 推到右端，
-   与左端产品名分列两侧。 */
+/* 标题行右端成组（档位徽标）：被标题行的 space-between 推到右端，与左端产品名
+   分列两侧。`flex: none` 让它保持自身宽度、不参与压缩（被压缩的应是产品名那侧，
+   且产品名有省略号兜底）。 */
 .brandMetaEnd {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: calc(6px * var(--corum-density-scale, 1));
+  gap: 6px;
   min-width: 0;
 }
 /* 版本号一行：左版本、右复制按钮。复制按钮移到这一行（原在标题行）是为了
@@ -131,9 +147,14 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: calc(3px * var(--corum-density-scale, 1));
+  /* ⚠️ 本徽标的 gap / 内边距 / 图标**不随 `--corum-density-scale` 缩放**（用固定 px）。
+     原因：侧栏宽度被锁死 220px，标题行只有 188px，产品名「Corum Harness」在 15px 下
+     需要 113px。徽标一旦随密度变大，就会把产品名挤到截断（实测 density 1.25 时
+     可用从 115 掉到 104，产品名被切）。徽标是 22px 的小标签，固定尺寸在两种密度下
+     都合适，把宽度让给主标题更划算。 */
+  gap: 4px;
   height: 22px;
-  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  padding: 0 6px;
   border: 1px solid var(--corum-glass-border);
   border-radius: 999px;
   background: var(--corum-glass-2);
@@ -149,8 +170,17 @@
   border-color: var(--dsw-alias-brand-primary);
   color: var(--dsw-alias-brand-primary);
 }
+/* 档位图标（社区版 = 品牌「C」位图；PRO = 星形矢量）统一尺寸与基线：
+   两个档位共用同一盒模型，故图标换成位图也不会让文字位移或基线跳动。 */
+/* 档位图标（社区版 = 品牌「C」位图；PRO = 星形矢量）统一尺寸与基线：
+   两个档位共用同一盒模型，故图标换成位图也不会让文字位移或基线跳动。
+   固定 14px（不随密度缩放，理由见 .editionBadge）。 */
 .editionBadgeIcon {
   flex: none;
+  display: block;
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
 }
 .brandDivider {
   flex: none;

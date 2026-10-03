@@ -1153,8 +1153,14 @@
   border-color: var(--dsw-alias-brand-primary);
   color: var(--dsw-alias-brand-primary);
 }
+/* 活动栏档位图标：与侧栏同一套口径（14px、同盒模型），
+   社区版位图与 PRO 星形共用尺寸 ⇒ 两个档位视觉重量一致。 */
 .railEditionBadgeIcon {
   flex: none;
+  display: block;
+  width: calc(14px * var(--corum-density-scale, 1));
+  height: calc(14px * var(--corum-density-scale, 1));
+  object-fit: contain;
 }
 .railUserMenuDivider {
   flex: none;

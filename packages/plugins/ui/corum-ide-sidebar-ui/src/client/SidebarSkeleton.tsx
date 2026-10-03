@@ -158,8 +158,13 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
           <div className={css.brandTitleRow}>
             <span className={css.brandName}>Corum Harness</span>
             <span className={css.brandMetaEnd}>
+              {/* 档位徽标：两个档位**用同一套结构**（图标 + 文字），只换图标与配色，
+                  故视觉重量与基线完全一致（用户 2026-10-03：「注意和 PRO 版本要一致」）。
+                  社区版 = 品牌「C」图标（彩色，用户提供的素材）；PRO = 星形。 */}
               <span className={css.editionBadge} data-edition={edition}>
-                {edition === 'pro' && <Star className={css.editionBadgeIcon} size={16} aria-hidden="true" />}
+                {edition === 'pro'
+                  ? <Star className={css.editionBadgeIcon} size={14} strokeWidth={2} aria-hidden="true" />
+                  : <img className={css.editionBadgeIcon} src="corumapp://app/assets/edition-community.png" alt="" aria-hidden="true" />}
                 {editionLabel}
               </span>
             </span>

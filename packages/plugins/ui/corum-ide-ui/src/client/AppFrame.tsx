@@ -371,8 +371,13 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
               <span className={css.railUserMenuTitle}>本机使用</span>
               <span className={css.railUserMenuSub}>未登录</span>
             </span>
+            {/* 与侧栏品牌行同源、**结构也一致**（图标 + 文字，只换图标与配色）：
+                社区版 = 品牌「C」图标，PRO = 星形。两处图标都 14px，两个档位共用同一
+                基线，故在活动栏菜单里社区版与 PRO 的视觉重量相同。 */}
             <span className={css.railEditionBadge} data-edition={edition}>
-              {edition === 'pro' && <Star className={css.railEditionBadgeIcon} size={12} strokeWidth={2} aria-hidden="true" />}
+              {edition === 'pro'
+                ? <Star className={css.railEditionBadgeIcon} size={14} strokeWidth={2} aria-hidden="true" />
+                : <img className={css.railEditionBadgeIcon} src="corumapp://app/assets/edition-community.png" alt="" aria-hidden="true" />}
               {editionLabel}
             </span>
           </div>
