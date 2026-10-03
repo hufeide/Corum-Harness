@@ -52,6 +52,9 @@
   trees, code do/don't, evidence index; §4a = subagent dual-instance discipline,
   §8 = event bus, §9 = mounting, §10 = agent/LLM mechanism, §11 = documentation
   discipline, §12 = team scheduler log, §13 = UI interaction red lines).
+- `docs/VERSIONING.md` — **版本号规则与发布台账**（2026-10-03 定）：应用版本与 dsh
+  基座版本**分两条线**（界面只显示应用版本，基座版本只进「复制诊断信息」）；取值一律从
+  安装产物读、不许手填；**每次发版在台账追一行**（应用版 ↔ 基座版映射的唯一事实源）。
 - `docs/LESSONS.md` — **the single home for experience**: phenomenon → root cause
   → practice, with source anchors (build/bundling, cordis, cross-bundle state,
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging

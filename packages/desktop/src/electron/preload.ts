@@ -36,8 +36,10 @@ ipcRenderer.on('corum:open-notification-center', () => {
  * 几个方法（tray-bridge / session-archive 的既有形态），不 import 本文件。
  */
 export interface CorumDesktopBridge {
-  /** 应用版本号（主进程 `app.getVersion()`）：品牌行的版本小字用。 */
+  /** 应用版本号（读 `packages/desktop/package.json`）：品牌行的版本小字用。 */
   getAppVersion: () => Promise<string>
+  /** dsh 基座版本号（实际安装的官方锚点包）：只进「复制诊断信息」，不在界面单独展示。 */
+  getDshBaselineVersion: () => Promise<string | undefined>
   /** Dev: hot-restart the host bridge child (host-side code changed). */
   restartHost: () => Promise<{ ok: boolean }>
   /** Open one slot's content in a detached floating window (?floating=<slotKey>). */
@@ -87,6 +89,9 @@ contextBridge.exposeInMainWorld('corumDesktop', {
    */
   getAppVersion: (): Promise<string> =>
     ipcRenderer.invoke('corum:app-version'),
+
+  getDshBaselineVersion: (): Promise<string | undefined> =>
+    ipcRenderer.invoke('corum:dsh-baseline-version'),
 
   /** Dev: hot-restart the host bridge child (host-side code changed). */
   restartHost: (): Promise<{ ok: boolean }> =>

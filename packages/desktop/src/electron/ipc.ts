@@ -461,6 +461,27 @@ export function registerIpc(
   ).version as string
   ipcMain.handle('corum:app-version', () => appVersion)
 
+  /**
+   * dsh 基座版本（用户 2026-10-03 定调：**侧栏只显示应用版本号，基座号��进诊断信息**）。
+   *
+   * 从**实际安装**的官方锚点包读，不从任何手写常量或依赖声明区间读 —— 声明区间是
+   * `^0.1.5-rc.3` 这种范围，写进界面会撒谎；而 `.pnpm` 里可能同时存在多个版本
+   * （实测同时有 0.1.3-alpha.1 与 0.1.5-rc.3），只有**解析后的**那一份才是真话。
+   * 取不到就返回 undefined，调用方在诊断串里省略这一段，不编造。
+   */
+  const dshBaselineVersion: string | undefined = ((): string | undefined => {
+    try {
+      const pkgPath = join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../node_modules/@deepseek-ai/dsh-base/package.json',
+      )
+      return JSON.parse(readFileSync(pkgPath, 'utf8')).version as string
+    } catch {
+      return undefined
+    }
+  })()
+  ipcMain.handle('corum:dsh-baseline-version', () => dshBaselineVersion)
+
   // ── 壳层 combo 管理（纯壳页面使用；进程级切换，废弃旧的进程内 comboLoad）──
 
   // 读取所有已配置且可用的 combo（内置 + 用户自定义，壳层文件）。

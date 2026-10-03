@@ -51,6 +51,7 @@ const FLIP_TOTAL_MS = 240
 /** `window.corumDesktop` 的窄化面（只用到版本号一项；本地能力接口，红线 3）。 */
 interface AppVersionFace {
   getAppVersion?: () => Promise<string>
+  getDshBaselineVersion?: () => Promise<string | undefined>
 }
 
 /** 诊断信息里的平台标签：UA-CH 优先，回落已废弃但仍普遍可用的 navigator.platform。 */
@@ -76,6 +77,12 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
   // 应用版本号：品牌行挂载时经 window.corumDesktop 拉一次并缓存进 state（非桌面壳 /
   // 老 preload 下没有该方法，静默不显示版本）。
   const [appVersion, setAppVersion] = useState<string | null>(null)
+  /**
+   * dsh 基座版本：**只进「复制诊断信息」，不在界面单独展示**（用户 2026-10-03 定调
+   * 「只显示应用版，基座号藏进诊断信息」）。与应用版号同一个 effect 一并取；
+   * 取不到就省略那一段（不编造）。
+   */
+  const [dshVersion, setDshVersion] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -85,6 +92,12 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
         if (!cancelled && version !== undefined) setAppVersion(version)
       } catch (error) {
         console.warn('[sidebar] 读取应用版本号失败', error)
+      }
+      try {
+        const dsh = await bridge?.getDshBaselineVersion?.()
+        if (!cancelled && dsh !== undefined && dsh !== '') setDshVersion(dsh)
+      } catch (error) {
+        console.warn('[sidebar] 读取 dsh 基座版本号失败', error)
       }
     })()
     return () => { cancelled = true }
@@ -111,7 +124,9 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
       clipboard?: { writeText: (text: string) => Promise<void> }
     }).clipboard
     if (clipboard === undefined) return
-    void clipboard.writeText(`Corum v${appVersion ?? 'unknown'} · ${platformLabel()}`).catch((error: unknown) => {
+    // 诊断串 = 应用版 + dsh 基座版 + 平台（基座号无处展示，只有这里能看到）。
+    const baseline = dshVersion !== null ? ` · dsh ${dshVersion}` : ''
+    void clipboard.writeText(`Corum v${appVersion ?? 'unknown'}${baseline} · ${platformLabel()}`).catch((error: unknown) => {
       console.warn('[sidebar] 复制诊断信息失败', error)
     })
   }
