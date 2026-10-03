@@ -40,8 +40,8 @@
 .brandRow {
   flex: none;
   display: flex;
-  align-items: flex-start;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-height: 40px;
 }
 /* brand-logo（design W7RwT1 2026-08-28 定稿 v7）：矩道品牌卡 134×54 圆角 10
@@ -50,35 +50,51 @@
 .brand {
   position: relative;
   flex: none;
-  width: 168px;
-  height: 64px;
-  border-radius: 12px;
+  /* 品牌卡**横向撑满侧栏**（用户 2026-10-02：原先固定 168 宽、右侧空 100px），
+     高度按 **6:1** 横幅比例出台。
+     为什么是 6:1 而不是原图的 2.49:1：原图在侧栏实宽下高达 108px（品牌块总高 136px），
+     用户实测判定「拉伸后太大、不适用」。6:1 在侧栏 240→320 全程给出 35~48px 高：
+       侧栏 240（最小）→ 35px ；260（默认）→ 38px ；298（当前）→ 45px ；320 → 48px
+     配合下方 16px 元信息行与 6px 间隙，品牌块总高 73~80px（原 136px），
+     既有品牌存在感又不挤占会话列表。 */
+  width: 100%;
+  aspect-ratio: 6 / 1;
+  border-radius: 10px;
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
 }
 .brandImg {
   display: block;
-  width: 168px;
-  height: 64px;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
 }
 /* 品牌卡 + 版本小字行的列容器（PR1：品牌行左侧）。brand-row 的行高由它撑开
    （54 卡 + 一行 11px 小字），右侧档位徽标垂直居中。 */
 .brandCol {
   flex: none;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: calc(4px * var(--corum-density-scale, 1));
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
-/* 品牌卡下方一行：版本号 + 档位徽标 + 复制诊断信息按钮（三者同一行）。
-   早先这里是「v0.1.0 · 社区版」纯文本、档位徽标在整行的最右端，与它语义重复；
-   现在档位只在徽标里出现一次。极窄侧栏下允许换行兜底（不裁切、不重叠）。 */
+/* 品牌卡下方一行：版本号（左）+ 档位徽标与复制按钮（右）。
+   用 `space-between` 让这一行**横向撑满**——早先版本与徽标都挤在左侧、整行右侧空着
+   （用户 2026-10-02：「右侧非常空」）。档位只在徽标里出现一次（版本号不再带后缀）。 */
 .brandMeta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+/* 元信息行右端成组（徽标 + 复制按钮）：与左端版本号一起被 space-between 分列两端，
+   中间留白 ⇒ 整行不空。 */
+.brandMetaEnd {
+  display: inline-flex;
+  align-items: center;
   gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }

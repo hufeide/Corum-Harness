@@ -148,24 +148,27 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
               draggable={false}
             />
           </span>
-          {/* 版本与档位**同一行**（logo 右侧）：原先版本单独占一排写「v0.1.0 · 社区版」，
-              而右侧徽标又写「社区版」⇒ 同一信息出现两次、且平白多占一行（用户 2026-10-02
-              报障）。现在版本行只留号（档位归徽标表达），与徽标并排在同一行。 */}
+          {/* 品牌卡**下方一行**（不是右侧）：左端 = 版本号，右端 = 档位徽标 + 复制按钮。
+              两处修为：① 版本号不再带「· 社区版」后缀（档位归徽标表达，消除重复）；
+              ② 这一行用 space-between 撑满整宽，不再把徽标挤在版本号旁边、右侧留空
+              （用户 2026-10-02：「右侧非常空」）。 */}
           <div className={css.brandMeta}>
             <span className={css.brandVersion}>{versionLabel}</span>
-            <span className={css.editionBadge} data-edition={edition}>
-              {edition === 'pro' && <Star className={css.editionBadgeIcon} size={16} aria-hidden="true" />}
-              {editionLabel}
+            <span className={css.brandMetaEnd}>
+              <span className={css.editionBadge} data-edition={edition}>
+                {edition === 'pro' && <Star className={css.editionBadgeIcon} size={16} aria-hidden="true" />}
+                {editionLabel}
+              </span>
+              <button
+                type="button"
+                className={css.copyDiag}
+                title="复制诊断信息"
+                aria-label="复制诊断信息"
+                onClick={copyDiagnostics}
+              >
+                <Copy size={12} aria-hidden="true" />
+              </button>
             </span>
-            <button
-              type="button"
-              className={css.copyDiag}
-              title="复制诊断信息"
-              aria-label="复制诊断信息"
-              onClick={copyDiagnostics}
-            >
-              <Copy size={12} aria-hidden="true" />
-            </button>
           </div>
         </div>
       </header>
