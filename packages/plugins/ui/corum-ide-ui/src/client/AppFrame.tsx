@@ -57,6 +57,12 @@ import css from './AppFrame.module.css'
 const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
 
 /**
+ * 会话列表固定宽（px，用户 2026-10-03 定调）：锁死后两侧 sash 隐藏、不可拖拽。
+ * 改这个值即可调整侧栏宽；它不是「最小宽」而是「唯一宽」。
+ */
+const SIDEBAR_LOCKED_WIDTH = 220
+
+/**
  * 活动栏宽（px）：与标题栏红绿灯让位区严格同宽（2026-09-30 定案）。
  * macOS 红绿灯实占 x=12..64（13px 灯 ×3 + 8px 间距）+ 右侧 12px 留白 = 76
  * （见 .navTitleBarInset 与 main.ts 的 trafficLightPosition{12,13}）。原 56
@@ -1193,16 +1199,16 @@ export function IdeAppFrame({
     () => new Set([...detached, ...hiddenByDefault]),
     [detached, hiddenByDefault],
   )
-  // 右侧全隐藏时侧栏锁 300（2026-08-30 用户定调 A）：root row 只剩
-  // sidebar+conversation 可见时，侧栏固定 300（不按 300:509 占比被拉宽），
-  // 会话区占满剩余。lockedSlots 运行时锁定宽（不动 collapsedWidth 折叠轨）。
-  // 折叠守卫（2026-08-31 PROGRESS 修复落地）：GridView 里 lockedSlots 优先于
-  // collapsedSlots——用户主动折叠时必须从 lockedSlots 移除 sidebar，否则
-  // collapsedWidth=0 永远被 300 压制（折叠失效，宽度仍 300）。
-  const rightAllHidden = hiddenByDefault.size === DEFAULT_HIDDEN.length
+  // 会话列表**恒锁 220**（用户 2026-10-03：「把 session list 的最小宽度再调小，
+  // 然后固定，不允许变更宽度」）。原先只在「右侧三栏全隐藏」时才锁 300；现在改为
+  // **无条件锁**（折叠态除外）：
+  //   - 走 lockedSlots 而非 SlotMeta.minWidth —— locked 格宽度锁定、不参与 weight
+  //     分配、**两侧 sash 隐藏不可拖**，正是「不允许变更宽度」的现成机制；
+  //   - 显式排除折叠态：GridView 里 lockedSlots 优先于 collapsedSlots，若折叠时仍
+  //     锁着，collapsedWidth=0 会被压制、折叠失效（2026-08-31 已付过这笔学费）。
   const lockedSlots = useMemo<ReadonlyMap<string, number>>(
-    () => (rightAllHidden && !sidebarCollapsed ? new Map([['corum.sidebar', 300]]) : new Map()),
-    [rightAllHidden, sidebarCollapsed],
+    () => (sidebarCollapsed ? new Map() : new Map([['corum.sidebar', SIDEBAR_LOCKED_WIDTH]])),
+    [sidebarCollapsed],
   )
 
   // ── Floating-window mode ──

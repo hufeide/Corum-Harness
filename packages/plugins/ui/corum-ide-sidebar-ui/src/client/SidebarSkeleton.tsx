@@ -132,43 +132,37 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
 
   return (
     <div className={css.sidebar} data-wide={wide || undefined}>
-      {/* brand-row（PR1 定稿形态）：左侧 = 品牌卡（134×54 r10，鲸鱼+矩道+Corum
-          Harness+Powered by DSH 一体卡，深/浅主题同一张）+ 其下版本小字行
-          「v{版本} · 档位」与复制诊断信息按钮；右侧 = 档位徽标胶囊（社区版中性灰/
-          PRO brand 色 + 星形）。PR1 删除了原 modeSwitch「项目|任务」滑块——模式切换
-          改由活动栏承担（PR3），模式状态服务与下面两个面板的联动原样保留。
-          侧边栏不可关闭（2026-08-25 设计：移除 region-actions）。 */}
+      {/* brand-row：**纯文案**标题区（用户 2026-10-03：「我感觉这个图片还不如不要，
+          直接按照这种用文案描述算了，但是不要那个发现应用」）。
+          形态参考 WorkBuddy：上行产品名（主标题）、下行版本号（次级小字）；
+          右端是档位徽标 + 复制诊断按钮（用户定调：徽标保留）。
+          此前用 2172×724 的品牌卡图片撑满整行，实测过高、视觉压迫，故撤图改文案；
+          复制功能保留（只有它需要鼠标悬停才显形，避免常驻图标抢视线）。 */}
       <header className={css.brandRow}>
         <div className={css.brandCol}>
-          <span className={css.brand}>
-            <img
-              className={css.brandImg}
-              src="corumapp://app/assets/brand_card.png"
-              alt="矩道 Corum Harness"
-              draggable={false}
-            />
-          </span>
-          {/* 品牌卡**下方一行**（不是右侧）：左端 = 版本号，右端 = 档位徽标 + 复制按钮。
-              两处修为：① 版本号不再带「· 社区版」后缀（档位归徽标表达，消除重复）；
-              ② 这一行用 space-between 撑满整宽，不再把徽标挤在版本号旁边、右侧留空
-              （用户 2026-10-02：「右侧非常空」）。 */}
-          <div className={css.brandMeta}>
-            <span className={css.brandVersion}>{versionLabel}</span>
+          <div className={css.brandTitleRow}>
+            <span className={css.brandName}>Corum Harness</span>
             <span className={css.brandMetaEnd}>
               <span className={css.editionBadge} data-edition={edition}>
                 {edition === 'pro' && <Star className={css.editionBadgeIcon} size={16} aria-hidden="true" />}
                 {editionLabel}
               </span>
-              <button
-                type="button"
-                className={css.copyDiag}
-                title="复制诊断信息"
-                aria-label="复制诊断信息"
-                onClick={copyDiagnostics}
-              >
-                <Copy size={12} aria-hidden="true" />
-              </button>
             </span>
+          </div>
+          {/* 版本号一行：左版本、右复制按钮。复制按钮**放这一行而非标题行**——
+              侧栏锁 220 时标题行要先保住产品名，多一个 16px 按钮正好把
+              「Corum Harness」挤到截断（实测需 113px、可用 109px）。 */}
+          <div className={css.brandSubRow}>
+            <span className={css.brandVersion}>{versionLabel}</span>
+            <button
+              type="button"
+              className={css.copyDiag}
+              title="复制诊断信息"
+              aria-label="复制诊断信息"
+              onClick={copyDiagnostics}
+            >
+              <Copy size={12} aria-hidden="true" />
+            </button>
           </div>
         </div>
       </header>

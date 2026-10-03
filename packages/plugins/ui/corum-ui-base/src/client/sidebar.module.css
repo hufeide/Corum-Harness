@@ -35,7 +35,7 @@
   display: none;
 }
 
-/* ── 品牌行（品牌卡 + 版本小字 + 档位徽标；模式切换见下方 modeSwitch 组）────── */
+/* ── 品牌标题行（产品名 + 版本号 + 档位徽标；模式切换见下方 modeSwitch 组）── */
 
 .brandRow {
   flex: none;
@@ -44,34 +44,30 @@
   gap: calc(6px * var(--corum-density-scale, 1));
   min-height: 40px;
 }
-/* brand-logo（design W7RwT1 2026-08-28 定稿 v7）：矩道品牌卡 134×54 圆角 10
-   （鲸鱼+矩道+Corum Harness+Powered by DSH 一体卡，自带彩色描边，深/浅主题
-   同一张）。PR1 起卡下多一行版本小字（.brandMeta），右侧档位徽标垂直居中。 */
-.brand {
-  position: relative;
-  flex: none;
-  /* 品牌卡横向撑满侧栏（用户 2026-10-02：「右侧没有留白」）。
-     高度按 **素材自身比例 3:1** 出台（现用素材 2172×724）；圆角与渐变描边已烘进素材，
-     这里只给 10px 圆角兜底（视觉以素材自带的圆角为准）。
-     为什么不再用 6:1：6:1 是为「旧素材 2.49:1 撑满后过高」定的临时比例；2026-10-03
-     用户交付了 3:1 新素材，故改按素材原始比例铺满，**画面不再被拉伸**。 */
-  width: 100%;
-  aspect-ratio: 3 / 1;
-  border-radius: 10px;
+/* 品牌标题区（纯文案，用户 2026-10-03 定调：撤图改文案）。
+   形态参考 WorkBuddy：上行产品名（主标题 15px/600）、下行版本号（次级 11px），
+   右端与产品名同一行放档位徽标 + 复制按钮。原 2172×724 品牌卡图片撑满整行过高，
+   已撤；样式表里 `.brand` / `.brandImg` 两条规则一并删除（无引用者）。 */
+.brandTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+.brandName {
+  /* 主标题：与产品名一致的字面（不随 --corum-ui-font-scale 之外的排版变化跳动）。 */
   overflow: hidden;
-  user-select: none;
-  -webkit-user-select: none;
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
-.brandImg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  /* 框已按素材比例 ⇒ contain 与 fill 等效，取 contain：日后换其它比例的素材也不变形，
-     多余的一侧只留极窄空白。 */
-  object-fit: contain;
-}
-/* 品牌卡 + 版本小字行的列容器（PR1：品牌行左侧）。brand-row 的行高由它撑开
-   （54 卡 + 一行 11px 小字），右侧档位徽标垂直居中。 */
+/* 标题区列容器：标题行（产品名 + 徽标）在上、版本号在下。 */
 .brandCol {
   flex: none;
   width: 100%;
@@ -80,21 +76,20 @@
   gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
-/* 品牌卡下方一行：版本号（左）+ 档位徽标与复制按钮（右）。
-   用 `space-between` 让这一行**横向撑满**——早先版本与徽标都挤在左侧、整行右侧空着
-   （用户 2026-10-02：「右侧非常空」）。档位只在徽标里出现一次（版本号不再带后缀）。 */
-.brandMeta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(6px * var(--corum-density-scale, 1));
-  min-width: 0;
-}
-/* 元信息行右端成组（徽标 + 复制按钮）：与左端版本号一起被 space-between 分列两端，
-   中间留白 ⇒ 整行不空。 */
+/* 标题行右端成组（档位徽标 + 复制按钮）：被标题行的 space-between 推到右端，
+   与左端产品名分列两侧。 */
 .brandMetaEnd {
   display: inline-flex;
   align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+/* 版本号一行：左版本、右复制按钮。复制按钮移到这一行（原在标题行）是为了
+   在侧栏锁 220 的宽度下先保住产品名不被截断。 */
+.brandSubRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
