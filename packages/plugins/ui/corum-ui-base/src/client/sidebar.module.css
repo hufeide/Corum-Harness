@@ -40,8 +40,7 @@
 .brandRow {
   flex: none;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
   gap: calc(8px * var(--corum-density-scale, 1));
   min-height: 40px;
 }
@@ -51,17 +50,17 @@
 .brand {
   position: relative;
   flex: none;
-  width: 134px;
-  height: 54px;
-  border-radius: 10px;
+  width: 168px;
+  height: 64px;
+  border-radius: 12px;
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
 }
 .brandImg {
   display: block;
-  width: 134px;
-  height: 54px;
+  width: 168px;
+  height: 64px;
   object-fit: contain;
 }
 /* 品牌卡 + 版本小字行的列容器（PR1：品牌行左侧）。brand-row 的行高由它撑开
@@ -73,12 +72,14 @@
   gap: calc(4px * var(--corum-density-scale, 1));
   min-width: 0;
 }
-/* 版本小字行：「v0.1.0 · 社区版」+ 复制诊断信息按钮（11px 次级色，见设计稿）。
-   复制按钮用「默认隐形、hover / 聚焦才显形」的形态，避免常驻图标抢品牌卡的视觉。 */
+/* 品牌卡下方一行：版本号 + 档位徽标 + 复制诊断信息按钮（三者同一行）。
+   早先这里是「v0.1.0 · 社区版」纯文本、档位徽标在整行的最右端，与它语义重复；
+   现在档位只在徽标里出现一次。极窄侧栏下允许换行兜底（不裁切、不重叠）。 */
 .brandMeta {
   display: flex;
   align-items: center;
-  gap: calc(4px * var(--corum-density-scale, 1));
+  flex-wrap: wrap;
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
 }
 .brandVersion {

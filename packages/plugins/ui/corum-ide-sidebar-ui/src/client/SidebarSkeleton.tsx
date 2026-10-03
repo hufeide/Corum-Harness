@@ -95,7 +95,14 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
   // 版本小字行：「v0.1.0 · 社区版 / PRO」；档位文案与右侧徽标同源（同一 edition 判定）。
   // 版本号异步到位：未到位时不显示「v」，避免出现「v · 社区版」这种半截文案。
   const editionLabel = edition === 'pro' ? 'PRO' : '社区版'
-  const versionLabel = appVersion !== null ? `v${appVersion} · ${editionLabel}` : editionLabel
+  /**
+   * 版本小字：只写版本号本身（如 `v0.1.0`）。
+   *
+   * **不再带档位后缀**：档位由同一行右侧的徽标表达，早先写成「v0.1.0 · 社区版」
+   * 会让「社区版」在同一行出现两次（用户 2026-10-02 报障）。版本号异步到位，
+   * 未到位时留空 —— 避免出现「v · 社区版」这种半截文案。
+   */
+  const versionLabel = appVersion !== null ? `v${appVersion}` : ''
 
   /** 复制诊断信息（版本 + 平台）到系统剪贴板；剪贴板不可用时只记日志，不打断用户。 */
   const copyDiagnostics = (): void => {
@@ -141,8 +148,15 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
               draggable={false}
             />
           </span>
+          {/* 版本与档位**同一行**（logo 右侧）：原先版本单独占一排写「v0.1.0 · 社区版」，
+              而右侧徽标又写「社区版」⇒ 同一信息出现两次、且平白多占一行（用户 2026-10-02
+              报障）。现在版本行只留号（档位归徽标表达），与徽标并排在同一行。 */}
           <div className={css.brandMeta}>
             <span className={css.brandVersion}>{versionLabel}</span>
+            <span className={css.editionBadge} data-edition={edition}>
+              {edition === 'pro' && <Star className={css.editionBadgeIcon} size={16} aria-hidden="true" />}
+              {editionLabel}
+            </span>
             <button
               type="button"
               className={css.copyDiag}
@@ -154,10 +168,6 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
             </button>
           </div>
         </div>
-        <span className={css.editionBadge} data-edition={edition}>
-          {edition === 'pro' && <Star className={css.editionBadgeIcon} size={16} aria-hidden="true" />}
-          {editionLabel}
-        </span>
       </header>
       <div className={css.brandDivider} />
 
