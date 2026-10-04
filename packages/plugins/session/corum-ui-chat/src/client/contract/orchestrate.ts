@@ -307,6 +307,7 @@ export function parseCallArguments(args: unknown): {
     if (typeof entry !== 'object' || entry === null) return
     const task = entry as Record<string, unknown>
     const isolation = str(task['isolation'])
+    const prompt = str(task['prompt'])
     const model = typeof task['model'] === 'object' && task['model'] !== null
       ? task['model'] as Record<string, unknown>
       : undefined
@@ -317,7 +318,7 @@ export function parseCallArguments(args: unknown): {
       index,
       label: str(task['label']) ?? `task ${index}`,
       ...isolation === 'worktree' || isolation === 'main' || isolation === 'always' || isolation === 'write-tasks' || isolation === 'off' ? { isolation } : {},
-      ...str(task['prompt']) === undefined ? {} : { prompt: str(task['prompt']) },
+      ...prompt === undefined ? {} : { prompt },
       ...bool(task['research']) === true ? { research: true } : {},
       ...bool(task['background']) === true ? { background: true } : {},
       ...modelLabel === undefined || modelLabel === '' ? {} : { model: modelLabel },
