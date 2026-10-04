@@ -100,17 +100,6 @@ interface DetailFields {
   readonly loading?: boolean | undefined
 }
 
-/**
- * 系统插件聚合的详情面板数据（已装 tab 点聚合卡展开）：
- * 一组 = 同一底座版本下的全部 runtime 条目；列表**只读**——
- * 本面不渲染任何操作入口，也不调用任何变更 RPC（产品红线）。
- */
-interface SystemGroup {
-  /** 分组键：底座版本号；条目无 version 时归「未知」组，不伪造版本号。 */
-  readonly version: string
-  /** 该版本下的 runtime 条目（moduleName / version / enabled / fiberPhase 逐条展示）。 */
-  readonly entries: readonly InstalledEntry[]
-}
 
 /** pluginManager.search 的一条结果（npm registry 候选）。 */
 interface SearchResult {
@@ -452,6 +441,8 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   const [searchError, setSearchError] = useState<string | null>(null)
   // 已装清单（已装 tab 的数据源；市场「个人」范围也用它）。
   const [entries, setEntries] = useState<readonly InstalledEntry[] | null>(null)
+  /** dsh 底座版本（host `list` 的顶层字段）：系统插件聚合卡的标题用它，不逐条取。 */
+  const [dshVersion, setDshVersion] = useState<string | undefined>(undefined)
 
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [notice, setNotice] = useState<string | null>(null)
@@ -461,7 +452,8 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   const [marketId, setMarketId] = useState<string | null>(null)
   const [installedId, setInstalledId] = useState<string | null>(null)
   // 系统插件聚合卡的展开态（已装 tab）：记录点开的底座版本分组。
-  const [systemOpen, setSystemOpen] = useState<string | null>(null)
+  /** 系统插件聚合卡是否展开（**单卡**，故是布尔；早先是按版本分组的多卡、用版本号作键）。 */
+  const [systemOpen, setSystemOpen] = useState(false)
   // 已装详情投影（pluginManager/detail，选中条目变化时拉取）。
   const [detail, setDetail] = useState<PluginDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -472,6 +464,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     try {
       const snapshot = await callRemote<ListSnapshot>('list', {})
       setEntries(snapshot.entries)
+      setDshVersion(snapshot.dshVersion)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -574,20 +567,24 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   )
 
   /**
-   * 系统插件（kind==='runtime'）按底座版本聚合：数量 = 该版本下的条目数；
-   * version 缺失的条目归「未知」组。顺序 = 版本首次出现的顺序（分组稳定）。
+   * 系统插件（`kind === 'runtime'`）**统一按底座版本聚合为一张卡**。
+   *
+   * 用户 2026-10-03 定调：「不再按照之前显示那么详细，而是**统一按照底座版本展示**，
+   * 并附带说明使用底座的插件数量，再设计一个更深的交互，用户可以点进去可查看详细列表，
+   * 但是不能做任何操作」。
+   *
+   * ⚠️ 底座版本取 host `pluginManager/list` 返回的**顶层 `dshVersion`**
+   * （= 实际安装的 `@deepseek-ai/dsh-base` 版本），**不是**逐条目的 `entry.version`：
+   * runtime 条目多是 loader 伪模块（`cordis:include`、`@deepseek-ai/dsh-tool-…/…`），
+   * 它们**没有真实包**、`entry.version` 恒为空 —— 早先按逐条目版本分组，结果全部落进
+   * 「未知」组、聚合卡显示「底座 未知」，等于把用户要的核心信息（底座版本）丢了。
+   * `dshVersion` 缺失时才回落「未知」（不伪造版本号）。
    */
-  const systemGroups = useMemo<SystemGroup[]>(() => {
-    const byVersion = new Map<string, InstalledEntry[]>()
-    for (const entry of entries ?? []) {
-      if (entry.kind !== 'runtime') continue
-      const key = entry.version ?? '未知'
-      const bucket = byVersion.get(key)
-      if (bucket !== undefined) bucket.push(entry)
-      else byVersion.set(key, [entry])
-    }
-    return [...byVersion].map(([version, list]) => ({ version, entries: list }))
-  }, [entries])
+  const systemPlugins = useMemo(
+    () => (entries ?? []).filter(entry => entry.kind === 'runtime'),
+    [entries],
+  )
+  const systemBaseline = dshVersion ?? '未知'
 
   const keyword = query.trim().toLowerCase()
   const matches = useCallback((moduleName: string, description?: string): boolean => (
@@ -726,7 +723,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
    */
   const selectedEntry = useMemo<InstalledEntry | null>(() => {
     if (tab === 'installed') {
-      if (systemOpen !== null) return null
+      if (systemOpen) return null
       return selectedInstalled
     }
     if (selectedMarket === null) return null
@@ -1123,25 +1120,31 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     </li>
   )
 
-  /** 一张底座版本聚合卡：标题 + 数量徽标 + 点开后的只读详情列表。 */
-  const renderSystemGroup = (group: SystemGroup): ReactNode => {
-    const open = systemOpen === group.version
+  /**
+   * 系统插件聚合卡：**一张**（底座版本 + 数量）+ 点开后的只读详情列表。
+   *
+   * 标题里版本与数量之间留空格（早先渲染成「底座 未知4 个」，数字与词黏在一起）。
+   */
+  const renderSystemCard = (): ReactNode => {
+    const open = systemOpen
     return (
-      <div className={`${css.systemCard}${open ? ' ' + css.systemCardOpen : ''}`} key={group.version}>
+      <div className={`${css.systemCard}${open ? ' ' + css.systemCardOpen : ''}`}>
         <button
           type="button"
           className={css.systemCardHead}
           aria-expanded={open}
-          onClick={() => { setSystemOpen(open ? null : group.version) }}
+          aria-label={`系统插件，底座 ${systemBaseline}，${systemPlugins.length} 个`}
+          onClick={() => { setSystemOpen(!open) }}
         >
           <ServerCog size={16} className={css.systemCardIcon} />
-          <span className={css.systemCardTitle}>系统插件 · 底座 {group.version}</span>
-          <span className={css.systemCardCount}>{group.entries.length} 个</span>
+          <span className={css.systemCardTitle}>系统插件</span>
+          <span className={css.systemCardBaseline}>底座 {systemBaseline}</span>
+          <span className={css.systemCardCount}>{systemPlugins.length} 个</span>
           <ChevronLeft size={14} className={css.systemCardChevron} />
         </button>
         {open && (
           <div className={css.systemCardList}>
-            <ul className={css.systemRows}>{group.entries.map(renderSystemRow)}</ul>
+            <ul className={css.systemRows}>{systemPlugins.map(renderSystemRow)}</ul>
             <p className={css.systemReadOnlyNote}>只读展示，系统插件由底座统一装配管理。</p>
           </div>
         )}
@@ -1247,10 +1250,10 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
           {tab === 'installed' && (
             <>
-              {systemGroups.length > 0 && (
+              {systemPlugins.length > 0 && (
                 <div className={css.systemSection}>
                   {renderSectionHead('系统插件', false)}
-                  {systemGroups.map(renderSystemGroup)}
+                  {renderSystemCard()}
                 </div>
               )}
               {error !== null && entries === null && <p className={css.errorText}>加载失败：{error}</p>}

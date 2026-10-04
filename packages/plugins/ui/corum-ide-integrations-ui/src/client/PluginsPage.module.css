@@ -219,6 +219,17 @@
 }
 
 /* 数量徽标：与磁贴版本徽章同语言的胶囊。 */
+/* 底座版本（系统插件聚合卡的副标题）：与标题同行、数量徽标之前。
+   单列一段是为了让「底座 <版本>」在窄窗下可截断，而数量徽标始终可见。 */
+.systemCardBaseline {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+}
+
 .systemCardCount {
   flex: none;
   padding: calc(1px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
