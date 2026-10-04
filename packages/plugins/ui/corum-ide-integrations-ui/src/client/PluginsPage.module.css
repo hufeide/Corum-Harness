@@ -1,6 +1,15 @@
 /*
- * PluginsPage —— 集成中心 ·「插件」页样式（对应 design.pen iYTAN「集成中心·插件市场」
- * + fngID「已装插件」两个 frame 的定稿口径）。
+ * PluginsPage —— 集成中心 ·「插件」页样式。
+ *
+ * 两份设计事实源：
+ *   市场 tab —— design.pen iYTAN「集成中心·插件市场」（磁贴群，几何由共享包
+ *                corum-ui-base/client 的 mosaic.module.css 提供，本文件只给页面骨架）；
+ *   已装 tab —— design.pen g0Dv2n 首版 / VkLsk 点「Corum 内置」/ KRu20 点「dsh 基座」
+ *                / a34ZQb 空态 / c0nBrl 市场错误态 —— **卡片列表**形态，样式全在本文件。
+ *
+ * 两套形态刻意不共享几何：市场态是磁贴群（大小贴混排，排布一个事实源在共享包），
+ * 已装态是 3 列卡片网格 + 一行两张只读系统卡 + 右侧详情栏。磁贴的块几何仍由共享包
+ * 承担（MCP / 技能两页也在用，不得改动）。
  *
  * token 口径（不出现裸 hex，全部走 corum 玻璃层 / 官方 alias 层）：
  *   $glass-1/2/3                → --corum-glass-1/2/3
@@ -10,12 +19,6 @@
  *   $state-error                → --dsw-alias-state-error-primary
  *   $interactive-bg-hover       → --dsw-alias-interactive-bg-hover
  *   $label-on-brand             → --corum-label-on-brand（品牌底上的近黑可读色）
- *
- * 本文件只负责**页面骨架**（页头 / 分节头 / 磁贴群容器 / 详情面板 / 反馈条）。
- * 磁贴本体与块排布（tileGrid / mosaicBlock / mosaicCol / tile / tint / 贴内顶行底行 /
- * 开关 / 版式字号）由共享包 `corum-ui-base/client` 的 mosaic.module.css 提供，
- * 本页按 mosaicStyles 的类名拼结构、按 mosaicTileClass 拼贴类名；故这里不再定义任何
- * 磁贴与排布规则（跨包 CSS module 不能互相 import，共享表是这类样式的唯一家）。
  *
  * 字号一律 `calc(<N>px * var(--corum-ui-font-scale, 1))`（界面字号设置联动），
  * 间距/圆角一律乘 --corum-density-scale（界面密度设置）。图标尺寸保持固定 px。
@@ -34,7 +37,7 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* ── 1. 页头：一行横排 = tab·市场 / tab·已装 / 搜索框 280×31 / 分类 chips ────── */
+/* ── 1. 页头：一行横排 = tab·市场 / tab·已装 / 搜索框 / 分类 chips ─────────── */
 
 .header {
   display: flex;
@@ -43,7 +46,7 @@
   flex-wrap: wrap;
 }
 
-/* 页头下方全宽 1px 分隔线（iYTAN：横行与磁贴群之间的界线）。 */
+/* 页头下方全宽 1px 分隔线（iYTAN：横行与内容区之间的界线）。 */
 .headerDivider {
   flex: none;
   height: 1px;
@@ -132,10 +135,8 @@
   font-weight: 600;
 }
 
-/* ── 2. 内容区：左磁贴群（808 基准）+ 右详情面板（fill）────────────────────── */
+/* ── 2. 内容区：左侧列表列 + 右侧详情栏 ──────────────────────────────────── */
 
-/* 卡片网格（iYTAN `nVsoY`）：左磁贴群 808 + gap 16 + 右详情 fill = 1334，
-   与稿逐像素一致。 */
 .body {
   flex: 1;
   min-height: 0;
@@ -144,10 +145,9 @@
   gap: calc(16px * var(--corum-density-scale, 1));
 }
 
-/* 磁贴群：纵向 flex、gap 8（iYTAN 分节结构：最热门 / 全部插件 两节）。
-   基准 816 = 808 内容 + 8 滚动槽（808 = 6×128 + 5×8，稿里两套排法的公共宽度），
-   但它是**首选宽而非固定宽**：窗口变窄时本列先收缩，由共享排布样式
-   （mosaic.module.css）的流体单位把整面墙等比缩小——始终 6 列、零空洞。
+/* 左侧列表列（市场态 = 磁贴群，已装态 = 卡片网格 + 系统卡行）。
+   基准 816（iYTAN 定稿：左 808 内容 + 8 滚动槽）但是**首选宽而非固定宽**：
+   窗口变窄时本列先收缩，由共享排布样式（市场态）把整面墙等比缩小——始终 6 列、零空洞。
    早期写成不可收缩的固定 816，窄窗下详情面板被挤到几十像素（实测默认窗口
    1280 只剩 50px、最小宽 1219 只剩 2px 且块溢出）。 */
 .tiles {
@@ -158,218 +158,339 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 
 .hintText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 .errorText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-state-error-primary); }
 
-/* ── 系统插件聚合区（已装 tab；runtime 条目按底座版本聚合，只读）─────────────
- * 产品口径：不再逐条详列系统插件，卡面 = 底座版本 + 该版本的插件数量；
- * 点卡就地展开只读详情列表（包名 / 版本 / 运行态），无任何操作入口。
- * 视觉与磁贴群其他节同语言：节头复用 .sectionHead，卡片走玻璃层 + 描边。 */
+/* ── 3. 已装 tab · 卡片（design.pen g0Dv2n 首版）─────────────────────────────
+ * 3 列网格，每张卡 p12 / r12 / $glass-2 底 + $glass-border 描边。
+ * 两段结构：head（图标 + 名称/描述 + 启停开关）/ footer（版本 chip / 配置 / 卸载）。
+ */
 
-.systemSection {
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+
+/* 普通插件卡与系统卡共用卡壳（系统卡只用 .systemCard 改底色与只读语义）。 */
+.card {
   display: flex;
   flex-direction: column;
   gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(12px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.card:hover { border-color: var(--corum-glass-border-active); }
+.card:focus-visible { outline: 2px solid var(--corum-glass-border-active); outline-offset: 1px; }
+/* 选中卡：品牌色描边 + 一档更亮的玻璃底（g0Dv2n 记住点开过哪张）。 */
+.cardActive {
+  border-color: var(--corum-glass-border-active);
+  background: var(--corum-glass-2);
 }
 
-/* 一张聚合卡：玻璃底 + 描边，展开态描边转品牌色提示「这里点开过」。 */
-.systemCard {
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+/* 卡头图标：36×36 / r10 / $glass-3 + 描边。位图 logo 与 lucide 图标共用这个盒子。 */
+.cardIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   border: 1px solid var(--corum-glass-border);
   border-radius: calc(10px * var(--corum-density-scale, 1));
-  background: var(--corum-glass-1);
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-brand-text);
   overflow: hidden;
 }
 
-.systemCardOpen { border-color: var(--corum-glass-border-active); }
-
-/* 卡头（整卡可点）：图标 + 标题 + 数量徽标 + 展开箭头，行高与 note 相当。 */
-.systemCardHead {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
-  width: 100%;
-  padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 0;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background .15s, color .15s;
+/* 品牌图标（Corum 彩色鲸鱼 / dsh 线条鲸鱼）：透明底，占满 36 盒子的 28。 */
+.cardLogo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
 }
-.systemCardHead:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.systemCardHead:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+/*
+ * dsh 线条鲸鱼是**单色线条图**，深浅主题各一版：深色主题要白线
+ * （dsh_logo_dark.png）、浅色主题要黑线（dsh_logo_light.png）。两个 <img> 都挂着，
+ * 由这里的翻转轴择一显示 —— 位图无法用 token 着色，故只能换文件而不是换颜色。
+ */
+.cardLogoDark { display: none; }
+.cardLogoLight { display: inline-block; }
+body[data-ds-dark-theme] .cardLogoDark { display: inline-block; }
+body[data-ds-dark-theme] .cardLogoLight { display: none; }
 
-.systemCardIcon { flex: none; color: var(--dsw-alias-brand-text); }
-
-.systemCardTitle {
+.cardText {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--corum-density-scale, 1));
+}
+
+.cardName {
+  font-size: calc(12.5px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
-}
-
-/* 数量徽标：与磁贴版本徽章同语言的胶囊。 */
-/* 底座版本（系统插件聚合卡的副标题）：与标题同行、数量徽标之前。
-   单列一段是为了让「底座 <版本>」在窄窗下可截断，而数量徽标始终可见。 */
-.systemCardBaseline {
-  flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cardDesc {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.systemCardCount {
+/* 启停开关 36×20：开 = $brand-primary / 关 = $glass-3，knob 14×14。 */
+.cardSwitch {
   flex: none;
-  padding: calc(1px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
-  border: 1px solid var(--corum-glass-border);
+  position: relative;
+  width: calc(36px * var(--corum-density-scale, 1));
+  height: calc(20px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: var(--corum-glass-2);
-  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.cardSwitch[data-off] {
+  background: var(--corum-glass-3);
+  border-color: var(--corum-glass-border);
+}
+.cardSwitch:disabled { opacity: .5; cursor: default; }
+
+.cardSwitchKnob {
+  position: absolute;
+  top: calc(2px * var(--corum-density-scale, 1));
+  left: calc(100% - 16px);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--corum-label-on-brand);
+  transition: left .15s, background .15s;
+}
+.cardSwitch[data-off] .cardSwitchKnob {
+  left: calc(2px * var(--corum-density-scale, 1));
+  background: var(--dsw-alias-label-dimmed);
 }
 
-/* 展开箭头：收起时箭头朝右（ChevronLeft 旋转 180°），展开朝左指示「收起」。 */
-.systemCardChevron { flex: none; transform: rotate(180deg); transition: transform .15s; }
-.systemCardOpen .systemCardChevron { transform: rotate(0deg); }
-
-/* 展开后的只读详情：上缘细线分隔，行间 4。 */
-.systemCardList {
-  display: flex;
-  flex-direction: column;
-  gap: calc(4px * var(--corum-density-scale, 1));
-  padding: calc(6px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
-  border-top: 1px solid var(--corum-glass-border);
-}
-
-.systemRows {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: calc(4px * var(--corum-density-scale, 1));
-}
-
-/* 一条系统插件（只读行）：图标 + 包名（等宽）+ 版本 + 运行态；无任何按钮。 */
-.systemRow {
+/* 卡底行：版本 chip → 弹性空隙 → 配置 → 卸载（垃圾桶）。 */
+.cardFooter {
   display: flex;
   align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
 }
 
-.systemRowIcon { flex: none; display: inline-flex; color: var(--dsw-alias-label-tertiary); }
+/* 版本 / 数量 chip：p[0,5] / r6 / $glass-3 + 描边 / 9.5。 */
+.cardChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: calc(15px * var(--corum-density-scale, 1));
+  padding: 0 calc(5px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(6px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(9.5px * var(--corum-ui-font-scale, 1));
+}
 
-.systemRowName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+.cardSpacer { flex: 1; min-width: 0; }
+
+/* 「配置」：h20 / r6 / 描边 / 10.5 label-secondary。 */
+.cardBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(20px * var(--corum-density-scale, 1));
+  padding: 0 calc(7px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(6px * var(--corum-density-scale, 1));
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.cardBtn:hover { border-color: var(--corum-glass-border-active); color: var(--dsw-alias-label-primary); }
+.cardBtn:disabled { opacity: .5; cursor: default; }
+
+/* 「卸载」：20×20 方形描边钮，内嵌 trash-2 12。 */
+.cardIconBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(20px * var(--corum-density-scale, 1));
+  height: calc(20px * var(--corum-density-scale, 1));
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(6px * var(--corum-density-scale, 1));
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.cardIconBtn:hover { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
+.cardIconBtn:disabled { opacity: .5; cursor: default; }
+
+/* ── 4. 两张系统只读卡（3 列网格下方，一行两张）──────────────────────────────
+ * 底色 $glass-1（普通卡是 $glass-2）—— 一档更暗，暗示「不可操作的背景层」；
+ * 卡面除选中外**没有任何按钮**：footer 用锁图标 + 「仅可查看，不可操作」替代
+ * 普通卡的配置/卸载位（硬约束，见 PluginsPage.tsx 的 renderSystemCard）。
+ */
+
+.systemPair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(10px * var(--corum-density-scale, 1));
 }
 
-.systemRowVersion { flex: none; color: var(--dsw-alias-label-tertiary); }
-.systemRowPhase { flex: none; color: var(--dsw-alias-label-tertiary); }
+.card.systemCard { background: var(--corum-glass-1); }
+.card.systemCard:hover { border-color: var(--corum-glass-border); }
 
-/* 只读声明（展开列表底部）： tertiary 一句话，说明这面不允许操作。 */
-.systemReadOnlyNote {
-  margin: 0;
+/* 选中态：`.card.systemCard`（0,2,0）会压过普通卡的 `.cardActive`（0,1,0），
+   故系统卡的选中样式必须写成同特异性的两条 —— 否则选中只留下普通卡的描边、
+   底色仍是 $glass-1，看不出「点开的是哪一张」。 */
+.card.systemCard.cardActive {
+  border-color: var(--corum-glass-border-active);
+  background: var(--corum-glass-2);
+}
+.card.systemCard.cardActive:hover { border-color: var(--corum-glass-border-active); }
+
+/* 只读行的锁图标与说明文字：均 tertiary，比卡面其它文字更弱。 */
+.cardLock { flex: none; color: var(--dsw-alias-label-tertiary); }
+.cardReadOnly {
   font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* ── 磁贴群分节（节标题 = 磁贴群内的分节头，不是 tab 也不是 chip）──────────── */
+/* ── 5. 已装空态（design.pen a34ZQb：网格位置换一块占位卡）────────────────── */
 
-/* 「最热门」节：padding-top 16 + 节头与热排间距 10。 */
-.hotSection {
+.emptyCard {
   display: flex;
   flex-direction: column;
-  gap: calc(10px * var(--corum-density-scale, 1));
-  padding-top: calc(16px * var(--corum-density-scale, 1));
-}
-
-/* 「全部插件」/具名分类节：节头下缘留 4（其下直接是共享排布的块行容器）。 */
-.allSection {
-  display: flex;
-  flex-direction: column;
-}
-
-.sectionHead {
-  display: flex;
   align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  justify-content: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(36px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(12px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-1);
+  text-align: center;
 }
-.allSection .sectionHead { padding-bottom: calc(4px * var(--corum-density-scale, 1)); }
 
-.sectionHeadIcon {
-  flex: none;
+.emptyCardIcon { color: var(--dsw-alias-label-tertiary); }
+.emptyCardTitle {
+  margin: 0;
+  font-size: calc(12.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.emptyCardDesc {
+  margin: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 6. 市场错误态（design.pen c0nBrl：内容区居中一列）─────────────────────── */
+
+.errorState {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(14px * var(--corum-density-scale, 1));
+  overflow-y: auto;
+}
+
+/* 圆形玻璃底图标 72：$glass-2 + 描边，内嵌 cloud-off 28。 */
+.errorIconBig {
   display: inline-flex;
-  color: var(--dsw-alias-brand-text);
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-tertiary);
 }
 
-.sectionHeadText {
-  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+.errorTitle {
+  margin: 0;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
-/* ── 「最热门」热排贴（196×120 ×4）────────────────────────────────────────────
-   行本身（flex / gap 8 / 每张 flex:1 / min-height 120）走共享 .hotRow；这里只补
-   该形态专属的三处：贴内边距 11（设计稿定稿，比块内贴小一档）、名称字号 12、
-   版本徽章 h15 / pad 0 6。
-   热排不进块几何 ⇒ 贴挂 data-tile-size="hot"，共享表按 data-tile-size 的尺寸规则
-   都不命中，故这三处必须由本页给。选择器写成两段（`.tiles .hotTile` /
-   `.hotTile .hotName`），特异性高于共享 `.tileName`，不依赖两份 CSS 的注入顺序。 */
-.tiles .hotTile {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: calc(11px * var(--corum-density-scale, 1));
+.errorDesc {
+  margin: 0;
+  max-width: calc(340px * var(--corum-density-scale, 1));
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  line-height: 1.5;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
 }
 
-.hotTile .hotName {
-  font-size: calc(12px * var(--corum-ui-font-scale, 1));
-  min-height: calc(2 * 1.3 * 12px * var(--corum-ui-font-scale, 1));
-}
-
-/* 热排贴的徽章收一档：h15 / pad 0 6。 */
-.hotTile .hotVersion {
-  height: calc(15px * var(--corum-density-scale, 1));
-  padding: 0 calc(6px * var(--corum-density-scale, 1));
-}
-
-/* 磁贴角标：热度（火焰 + 周下载量；定位与底行由共享 .tileCorner 承担）。 */
-.tileHeatIcon { flex: none; color: var(--dsw-alias-label-secondary); }
-.tileHeatValue {
-  font-size: calc(10px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
+/* 「重试」：p[8,16] / r8 / $glass-2 + 描边 + refresh-cw 13 + 12/600。 */
+.errorRetry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
   color: var(--dsw-alias-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
 }
+.errorRetry:hover { border-color: var(--corum-glass-border-active); color: var(--dsw-alias-label-primary); }
 
-/* 已装磁贴的停用态（启停开关关闭）：名称降一档。共享磁贴表只覆盖开关与角标，
-   不含这条语义，故由本页补；同样用两段类选择器压过共享 .tileName。 */
-.tiles .installedOff .installedOffName { color: var(--dsw-alias-label-tertiary); }
-
-/* ── 右侧详情简介面板（fill；面板无内边距，内边距全部由 body 承担）────────── */
+/* ── 7. 右侧详情栏（宽 400；面板无内边距，内边距全部由 body 承担）───────────── */
 
 .detail {
-  /* 详情简介 = fill_container：宽窗下它的宽度由磁贴群 816 与间隙反推（1600 窗口
-     实测 370，与稿标 ≈510 同口径）。面板自身无 padding，内边距由 body 承担。
-     `min-width: 320px` 是**可读性保底**：窗口窄到磁贴群与详情无法兼顾时，磁贴群
-     继续按流体单位缩小（始终 6 列），详情不再被压到几十像素。 */
+  /* 详情栏 = fill_container：宽窗下它的宽度由左侧列 816 与间隙反推（1600 窗口
+     实测 ≈400，与稿标 400 同口径）。面板自身无 padding，内边距由 body 承担。
+     `min-width: 320px` 是**可读性保底**：窗口窄到左侧列与详情无法兼顾时，列表列
+     继续按流体单位缩小，详情不再被压到几十像素。 */
   flex: 1 1 0;
   min-width: calc(320px * var(--corum-density-scale, 1));
   display: flex;
@@ -378,10 +499,10 @@
   border: 1px solid var(--corum-glass-border);
   border-radius: calc(14px * var(--corum-density-scale, 1));
   background: var(--corum-glass-1);
-  overflow-y: auto;
+  overflow: hidden;
 }
 
-/* hero 区：150 高 $glass-2 底 + 品牌 glow；圆角由面板 r14 裁切，自身不带圆角。 */
+/* hero 区：150 高 $glass-2 底；圆角由面板 r14 裁切，自身不带圆角。 */
 .detailHero {
   position: relative;
   flex: none;
@@ -392,6 +513,7 @@
   overflow: hidden;
   background: var(--corum-glass-2);
 }
+/* 市场态 hero 的氛围光（历史形态，保留不动）。 */
 .detailHero::before {
   content: '';
   position: absolute;
@@ -402,7 +524,30 @@
     transparent 60%);
 }
 
-/* 大图标徽章：64×64 / r16 / $glass-3 + 玻璃描边，内图标 30。 */
+/*
+ * 已装 tab 的 hero glow：图标身后一颗品牌色光斑（120×120、opacity .4、径向渐变
+ * 从 $brand-primary 到透明）。设计稿把它画成 hero 内的居中椭圆，**不能漏** —— 少了
+ * 它 hero 只剩一块纯玻璃底，视觉上非常空。
+ * 市场态不换材质：它的氛围光仍是上面的 ::before，故这里显式关掉。
+ */
+.detailHeroInstalled::before { display: none; }
+
+.detailGlow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: .4;
+  background: radial-gradient(circle,
+    var(--dsw-alias-brand-primary) 0%,
+    transparent 100%);
+}
+
+/* 大图标徽章 64×64 / r16 / $glass-3 + 玻璃描边，内图标 30。 */
 .detailHeroBadge {
   position: relative;
   display: inline-flex;
@@ -414,9 +559,28 @@
   border-radius: calc(16px * var(--corum-density-scale, 1));
   background: var(--corum-glass-3);
   color: var(--dsw-alias-brand-text);
+  overflow: hidden;
 }
 
-/* body：面板内边距 [16, 18] + gap 10 + space-between（内容上满、操作沉底）。 */
+/* 详情 hero 里的系统卡品牌图标：同一份 <img> 在卡头是 28、在 hero 里放大到 44
+   （设计稿 VkLsk / KRu20 的 icon-badge 内嵌 44）。 */
+.detailHeroBadge .cardLogo { width: 44px; height: 44px; }
+
+/* 已装空态的 hero 图标：56×56（比品牌徽章小一档），内嵌 mouse-pointer-click 22。 */
+.detailHeroBadgeSm {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(14px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* body：面板内边距 [16,18] + gap 10 + space-between（内容上满、操作沉底）。 */
 .detailBody {
   flex: 1;
   min-height: 0;
@@ -425,9 +589,281 @@
   justify-content: space-between;
   gap: calc(10px * var(--corum-density-scale, 1));
   padding: calc(16px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
 }
 
-/* 详情面板空态（未选中任何磁贴）：产品 logo + glow + 引导文案。 */
+/*
+ * 系统只读详情：body 直接摆 6 段内容（标题行 / 版本行 / 说明 / 列表 / 另有行 /
+ * 声明），若沿用 detailBody 的 `space-between` 它们会被均匀撑开、说明与列表之间
+ * 裂出大空档。改成从上往下自然堆叠（列表靠自身 flex:1 吃掉剩余高度）。
+ */
+.detailBodySystem { justify-content: flex-start; }
+
+/* 主体上方的内容块（标题 + 字段表 + 简介），底部操作行由 detailBody 沉底。 */
+.detailMain {  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.detailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.detailName {
+  font-size: calc(17px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 版本胶囊 / 「只读」胶囊：p[0,8] / r999 / $glass-3 + 描边 / 10。 */
+.detailPill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  height: calc(14px * var(--corum-density-scale, 1));
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+}
+.detailPillIcon { flex: none; }
+
+/* 作者行（`@corum · 官方插件`）/ 系统卡的版本行：11 tertiary。 */
+.detailAuthor {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailDesc {
+  margin: 0;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.5;
+}
+
+/* 元信息 k/v 行：k 11 tertiary 固定宽 64 / v 11 secondary；行间 6、k/v 间 8。 */
+.detailMeta {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+
+.detailMetaRow { display: flex; gap: calc(8px * var(--corum-density-scale, 1)); }
+
+.detailMetaKey {
+  flex: none;
+  width: 64px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailMetaValue {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-all;
+}
+
+/* id 值等宽展示（包名全称）。 */
+.detailMono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* 加载中一类的小字（市场态详情 body 用）。 */
+.detailSub {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 「日志」（更新日志）区：每条 = 版本号 + 日期 一行、说明一行；纵向 gap 6。 */
+.detailLogList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+
+.detailLogEntry {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+}
+
+.detailLogHead {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+.detailLogVersion {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.detailLogDate { flex: none; color: var(--dsw-alias-label-tertiary); }
+
+.detailLogNote { color: var(--dsw-alias-label-secondary); }
+
+.detailLogEmpty { color: var(--dsw-alias-label-tertiary); }
+
+/* ── 8. 详情栏底行：配置（$glass-2 底 + 描边）+ 卸载（$state-error 字）──────── */
+
+.detailFoot {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding-top: calc(8px * var(--corum-density-scale, 1));
+}
+
+.detailBtnPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  color: var(--corum-label-on-brand);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.detailBtnPrimary:hover { border-color: var(--corum-glass-border-active); }
+
+.detailBtnDanger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 0;
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.detailBtnDanger:hover { text-decoration: underline; }
+.detailBtnDanger:disabled { opacity: .5; cursor: default; }
+
+/* ── 9. 两张系统只读卡的只读详情列表（VkLsk / KRu20）─────────────────────────
+ * 列表**可滚动**且不撑破详情栏：靠 flex 拿剩余高度（min-height:0 允许它收缩），
+ * 而不是靠固定 max-height —— 窗口高度变化时固定值会立刻失真。
+ * 两卡的行形态不同：Corum = 名称（150 定宽）+ 描述；dsh = 等宽包名（250 定宽）+ 版本。
+ */
+
+.readOnlyList {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  margin-top: calc(6px * var(--corum-density-scale, 1));
+  overflow-y: auto;
+}
+
+.readOnlyRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  min-height: calc(24px * var(--corum-density-scale, 1));
+}
+
+.readOnlyName {
+  flex: none;
+  width: 150px;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readOnlyDesc {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* dsh 行的包名：等宽 250 定宽（包名长度差异大，等宽才好逐条比对）。 */
+.readOnlyMono {
+  flex: none;
+  width: 250px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readOnlyVersion {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readOnlyEmpty {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 「⋯ 另有 N 个，可滚动查看」：折叠提示，不随列表滚动而消失（列表外的一行）。 */
+.readOnlyMore {
+  flex: none;
+  margin-top: calc(2px * var(--corum-density-scale, 1));
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 只读声明（列表底部一句话）：说明这一面不允许操作。 */
+.readOnlyNote {
+  flex: none;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 10. 已装 tab 的详情空态（a34ZQb：未选中任何卡）───────────────────────── */
+
+.detailEmptyBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+}
+
+.detailEmptyIcon { color: var(--dsw-alias-label-tertiary); }
+
+/* ── 11. 市场 tab 详情栏的空态（未选中任何磁贴）：产品 logo + glow + 引导 ──── */
+
 .detailEmpty {
   flex: 1;
   display: flex;
@@ -484,95 +920,83 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 主体上方的内容块（名称 + 字段表 + 简介），底部操作行由 detailBody 的
-   space-between 沉底。 */
-.detailMain {
+/* 已装空态的文案收一档（a34ZQb：标题 13.5 / 说明 11.5，且标题居中、说明左对齐）。 */
+.detailEmptyBody .detailEmptyTitle {
+  font-size: calc(13.5px * var(--corum-ui-font-scale, 1));
+  text-align: center;
+}
+.detailEmptyBody .detailEmptyDesc {
+  max-width: none;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+}
+
+/* ── 12. 市场 tab：磁贴群分节与热排 ───────────────────────────────────────── */
+
+/* 「最热门」节：padding-top 16 + 节头与热排间距 10。 */
+.hotSection {
   display: flex;
   flex-direction: column;
-  gap: calc(8px * var(--corum-density-scale, 1));
-  min-width: 0;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding-top: calc(16px * var(--corum-density-scale, 1));
 }
 
-.detailName {
-  font-size: calc(17px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detailSub {
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  color: var(--dsw-alias-label-tertiary);
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.detailDesc {
-  margin: 0;
-  font-size: calc(12px * var(--corum-ui-font-scale, 1));
-  color: var(--dsw-alias-label-secondary);
-  line-height: 1.5;
-}
-
-/* 元信息 k/v 行：k 11 tertiary / v 11 secondary；无块顶距（上方由 detailMain 的 gap 承担）、
-   行间 6、k/v 间 8。 */
-.detailMeta {
+/* 「全部插件」/具名分类节：节头下缘留 4（其下直接是共享排布的块行容器）。 */
+.allSection {
   display: flex;
   flex-direction: column;
-  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
-.detailMetaRow { display: flex; gap: calc(8px * var(--corum-density-scale, 1)); }
-
-.detailMetaKey {
-  flex: none;
-  width: 56px;
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.detailMetaValue {
-  flex: 1;
-  min-width: 0;
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  color: var(--dsw-alias-label-secondary);
-  word-break: break-all;
-}
-
-/* id 值等宽展示（包名全称）。 */
-.detailMono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-/* 「日志」（更新日志）区：每条 = 版本号 + 日期 一行、说明一行；纵向 gap 6。 */
-.detailLogList {
-  display: flex;
-  flex-direction: column;
-  gap: calc(6px * var(--corum-density-scale, 1));
-}
-
-.detailLogEntry {
-  display: flex;
-  flex-direction: column;
-  gap: calc(2px * var(--corum-density-scale, 1));
-}
-
-.detailLogHead {
+.sectionHead {
   display: flex;
   align-items: center;
   gap: calc(8px * var(--corum-density-scale, 1));
 }
+.allSection .sectionHead { padding-bottom: calc(4px * var(--corum-density-scale, 1)); }
 
-.detailLogVersion {
+.sectionHeadIcon {
   flex: none;
-  color: var(--dsw-alias-label-primary);
-  font-weight: 600;
+  display: inline-flex;
+  color: var(--dsw-alias-brand-text);
 }
 
-.detailLogDate { flex: none; color: var(--dsw-alias-label-tertiary); }
+.sectionHeadText {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
 
-.detailLogNote { color: var(--dsw-alias-label-secondary); }
+/* 「最热门」热排贴（196×120 ×4）：行本身（flex / gap 8 / 每张 flex:1 /
+   min-height 120）走共享 .hotRow；这里只补该形态专属的三处：贴内边距 11、
+   名称字号 12、版本徽章 h15 / pad 0 6。
+   热排不进块几何 ⇒ 贴挂 data-tile-size="hot"，共享表按 data-tile-size 的尺寸规则
+   都不命中，故这三处必须由本页给。选择器写成两段（`.tiles .hotTile` /
+   `.hotTile .hotName`），特异性高于共享 `.tileName`，不依赖两份 CSS 的注入顺序。 */
+.tiles .hotTile {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: calc(11px * var(--corum-density-scale, 1));
+}
 
-.detailLogEmpty { color: var(--dsw-alias-label-tertiary); }
+.hotTile .hotName {
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  min-height: calc(2 * 1.3 * 12px * var(--corum-ui-font-scale, 1));
+}
+
+/* 热排贴的徽章收一档：h15 / pad 0 6。 */
+.hotTile .hotVersion {
+  height: calc(15px * var(--corum-density-scale, 1));
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+}
+
+/* 磁贴角标：热度（火焰 + 周下载量；定位与底行由共享 .tileCorner 承担）。 */
+.tileHeatIcon { flex: none; color: var(--dsw-alias-label-secondary); }
+.tileHeatValue {
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* ── 13. 市场 tab 详情栏的字段与操作 ──────────────────────────────────────── */
 
 /* 底部操作行：居中（iYTAN：安装 / 卸载+开关都沉底居中）、顶距 8、按钮间距 10。 */
 .detailActions {
@@ -583,7 +1007,7 @@
   padding-top: calc(8px * var(--corum-density-scale, 1));
 }
 
-/* 详情面板的启停开关：与磁贴角标开关同形态，落位在「卸载」右侧。 */
+/* 详情面板的启停开关：与卡片开关同形态，落位在「卸载」右侧。 */
 .detailSwitch {
   flex: none;
   position: relative;
@@ -653,7 +1077,7 @@
 }
 .actionDanger:hover { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
 
-/* ── 操作反馈条 ──────────────────────────────────────────────────────────── */
+/* ── 14. 操作反馈条 ──────────────────────────────────────────────────────── */
 
 .notice {
   display: flex;
