@@ -2957,6 +2957,9 @@ export function apply(ctx: Context, config: Config): void {
             name: 'orchestrate',
             description: [
               'Orchestrate several subagents in ONE call. Two modes, same isolation and merge machinery:',
+              // fork（corum）2026-10：用户实测单任务被派进编排模式（orchestrate 收到 1 个 task），
+              // 机制只拦 0 个，提示词此前也没有反向禁令 ⇒ 此处补一句单任务引导（仅文案）。
+              'For a SINGLE task call `subagent` instead — `orchestrate` is only worth it with two or more independent tasks.',
               '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `schema` (structured output) and `background`.',
               '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await). Hook signatures — `agent(prompt, opts)`: the PROMPT IS THE FIRST ARGUMENT and must be a non-empty string (`opts` is optional: `{ label, phase, schema }` — pass `schema` when that child must return a schema-valid structured result); `parallel(thunks)`, `pipeline(items, ...stages)`, `phase(title)`, `log(message)`. End with `return <json-value>`. Calling `agent({ prompt })` with a single object is REJECTED by the engine (`agent() requires a non-empty prompt string`) — always pass the prompt first. Use script mode when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
               'ISOLATION: a write task is ISOLATED by default in its own git worktree + branch — declarative tasks and scripted children alike, foreground or background. Isolated children branch off HEAD, and the mechanism commits the parent tree right before creating the worktree, so an isolated child always sees the parent\'s latest committed work. A task that must work in your REAL tree instead (builds/installs, `git push`, merging, another repository, a path outside this one) declares `isolation: "main"` — it then runs directly in your main working tree with no branch and nothing to merge, and it is the only route that can do those things. Read-only research tasks are not isolated (they write nothing).',
@@ -3582,6 +3585,9 @@ export function apply(ctx: Context, config: Config): void {
           }
           if (hasOrchestrate) {
             lines.push(
+              // fork（corum）2026-10：用户实测单任务被派进编排模式（orchestrate 只收到 1 个 task，
+              // 机制只拦 0 个）⇒ 提示词补反向禁令：单任务永远走 subagent（仅文案，不改机制）。
+              '- ONE piece of work → `subagent` (or `subagent_research` when read-only), NEVER a single-task `orchestrate`: a one-task fan-out adds a flow card and an integration surface for zero parallelism gain.',
               '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls.',
               '  - Cost of N separate delegations: N tool calls; N settlement notices landing in your context; one session isolation slot each, and exceeding it FAILS the call; plus a manual `integrate` afterwards when they are writes.',
               // 2026-09-27 修 P3（审查员 B 报；我写的错）：原句声称 orchestrate 有「更宽的并发上限」——不成立。
