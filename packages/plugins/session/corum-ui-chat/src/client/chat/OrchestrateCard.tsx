@@ -330,7 +330,7 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
             <span className={css.branchDetailTitle}>{t('subagent.taskDetail')}</span>
           </div>
           <div className={css.branchDetailBody}>
-            {task.prompt ?? '无任务详情'}
+            {task.prompt ?? t('subagent.noTaskDetail')}
           </div>
           <SubagentChanges childSessionId={child} worktree={worktreeForChanges} t={t} />
         </div>
