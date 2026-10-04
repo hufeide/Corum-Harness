@@ -306,16 +306,20 @@ export function applyCorumModelDecision(
 
   switch (decision.kind) {
     case 'temporary': {
-      // 用户原话：临时生效、不覆盖设置 ⇒ 只写会话级内存（不落 settings.yaml / 预设）。
-      // role 透传（2026-09-19）：research 角色的临时决定必须落 research 键。
-      deps.state.setModelOverride(sessionId, decision.route, facts.role)
+      // ★ 2026-10-04 裁决「方案A：一次性消费」（用户实测后拍板）：
+      // 旧实现把临时选择写进会话级 modelOverrides Map（无 TTL / 无任务边界清理），
+      // 而每次 spawn 的路由解析 `corumSessionOverride ?? config.model` 都会读到它 ⇒
+      // 后续所有新派发也被污染，与 UI 承诺的「仅本次任务」语义相悖。
+      // 裁决定性：temporary **不落任何跨委派状态**——不调用 setModelOverride，
+      // 只把生效路由作为返回值交给调用方就地消费（前台 attempt 重跑用它做 per-run
+      // agentOptions，continuable 续跑用它做 per-delivery agentOptions，见 index.ts）。
       return {
         ...base,
         override: decision.route,
         summary:
-          `You chose to switch this session's child-Agent model to ${decision.route.provider}/${decision.route.model} `
-          + `(temporary — your saved configuration is untouched, so a new session will still use ${facts.configured.provider}/${facts.configured.model}). `
-          + `Re-issuing the same delegation will now run on that model.`,
+          `You chose to run THIS retry on ${decision.route.provider}/${decision.route.model} `
+          + `(one-shot — it applies only to this delegation retry; your saved configuration is untouched `
+          + `and the next new delegation will use ${facts.configured.provider}/${facts.configured.model} again).`,
       }
     }
     case 'permanent-follow': {

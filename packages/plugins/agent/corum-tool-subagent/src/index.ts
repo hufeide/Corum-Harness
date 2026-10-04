@@ -1551,8 +1551,14 @@ export function apply(ctx: Context, config: Config): void {
      *
      * ⚠️ 只在「当前生效路由与失败路由**不同**」时才跳过：相同 ⇒ 换了也还是坏的，
      * 那时必须问（那是真·新的信息）。
+     *
+     * ★ 2026-10-04 语义收窄（temporary 档改判「一次性消费」）：temporary 自该日起
+     * **不再写会话级覆盖**（旧实现写了且无清理 ⇒ 后续所有派发都被污染，已修复），
+     * 故本判据只会命中 **permanent 两档**写下的覆盖，语义收窄为「用户已永久换过
+     * 路由，这条失败是旧路由遗留」。temporary 的一次性消费天然免疫陈旧失败：
+     * 每次重试的路由都是调用方显式给的，不会残留进任何跨委派状态。
      */
-    const effectiveNow = corumPolicyState.modelOverrideOf(String(parent.session.id))
+    const effectiveNow = corumPolicyState.modelOverrideOf(String(parent.session.id), role)
     if (effectiveNow !== undefined
       && (effectiveNow.provider !== configuredModel.provider || effectiveNow.model !== configuredModel.model)) {
       ctx.logger.info(

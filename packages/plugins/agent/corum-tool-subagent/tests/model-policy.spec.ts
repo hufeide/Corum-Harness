@@ -90,8 +90,11 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     // 用户 2026-09-18 澄清：「跟随主 Agent 就是主 Agent 当前预设哪个，子 Agent 也预设哪个。
     // 全局页面的配置只是说你创建一个新预设的时候默认使用这套配置……**始终是两档**」。
     // ⇒ 运行期**不得**读 `corum-subagent` 的 defaultModel/defaultResearchModel。
-    // 2026-09-18：解析式多了一层**会话级临时覆盖**（机制问过用户之后写的内存值），
+    // 2026-09-18：解析式多了一层**会话级覆盖**（机制问过用户之后写的内存值），
     // 但它不是"配置档"——用户从未配置它、不落盘、新会话自然消失。
+    // 2026-10-04 语义收窄：自该日起只有 **permanent 两档**会写这层覆盖（temporary 改判
+    // 「一次性消费」、不落任何跨委派状态，见下方临时档断言），此处的覆盖读取因此
+    // 只会命中 permanent 写入的值。
     expect(SRC).toContain('const corumEffectiveModel = corumSessionOverride ?? config.model')
     // 2026-09-19：覆盖读取升级为**按角色**取（corumOrchestration 双键：sessionId+角色）——
     // corum preset 的 tool-subagent 双实例各有独立锁面，取错角色会覆盖另一实例的锁面。
@@ -179,15 +182,25 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(branch).toMatch(/may still delegate/i)
   })
 
-  it('★ 临时档只写会话内存，**不落盘**（用户要求「临时生效，不覆盖用户的设置」）', () => {
-    // 临时决定必须走 corumOrchestration 的会话级覆盖，而不是 settings/预设。
-    expect(SRC).toContain('setModelOverride')
+  it('★ 临时档是**一次性消费**：不写会话级覆盖、不落盘，只由调用方就地消费返回值（2026-10-04 裁决）', () => {
+    // 2026-10-04 用户实测裁决「方案A：一次性消费」：旧实现把临时选择写进会话级
+    // modelOverrides（无 TTL / 无任务边界清理）⇒ 后续所有新派发都被污染，与 UI 承诺的
+    // 「仅本次任务」相悖。新语义：temporary 不落任何跨委派状态，只返回 override 交给
+    // 调用方就地消费（前台重跑 / continuable 续跑用它做 per-run / per-delivery agentOptions）。
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
     const tempCase = source.slice(source.indexOf("case 'temporary'"), source.indexOf("case 'permanent-follow'"))
-    expect(tempCase).toContain('setModelOverride')
+    // 反向断言：temporary 分支**不得**再写会话级覆盖。
+    // ⚠️ 必须剥注释再判：分支上方的裁决注释正当地引用了 `setModelOverride` 这个词，
+    // 裸子串判会把说明性注释也算成回潮（本仓已有这个学费，见 stripComments 的说明）。
+    expect(stripComments(tempCase), 'temporary 又写回了会话级覆盖 ⇒ 后续派发被污染（2026-10-04 裁决禁止）')
+      .not.toContain('setModelOverride')
+    // 必须返回生效路由，调用方才能就地消费。
+    expect(tempCase).toContain('override: decision.route')
     // 临时档**不许**出现任何持久化调用。
     expect(tempCase).not.toContain('applySubagentModelForSession')
     expect(tempCase).not.toContain('saveProfile')
+    // 文案必须点明 one-shot 语义。
+    expect(tempCase).toContain('one-shot')
   })
 
   it('★ 永久档才写预设，且走 corum-agent 的写入面（机制写，非 LLM 调工具）', () => {
@@ -439,6 +452,9 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     // 起跑；用户在第 1 个弹窗选了「永久改为 glm-5.3-flash」；第 2 个兄弟带着**已过时**的
     // 「配置模型」事实来问 ⇒ 用户被同一个根因连问两次（seq 191「No choice was made」）。
     const guard = between('const effectiveNow = corumPolicyState.modelOverrideOf', 'const parentOptions =')
+    // 2026-10-04 语义收窄：temporary 档自该日起不再写会话级覆盖（一次性消费裁决），
+    // 本判据只会命中 permanent 两档写的覆盖；读取必须**带角色**（worker/research 键分开）。
+    expect(guard).toContain("modelOverrideOf(String(parent.session.id), role)")
     expect(guard).toContain('effectiveNow.provider !== configuredModel.provider')
     expect(guard).toContain('effectiveNow.model !== configuredModel.model')
     // 跳过时必须返回「无决议」而不是伪造一个 route —— 伪造等于替用户同意重跑。
