@@ -208,6 +208,55 @@
   min-width: 0;
 }
 
+/* 分支行外层（2026-10-04 用户实测缺陷①）：第一行 = 原 branchRow（横线 + 节点 + 卡），
+   展开时第二行 = 详情区（左缩进 30px 与 branchCard 对齐）。 */
+.branchRowWrap {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+/* 分支详情区（任务提示词 + 改动）：宽度与 branchCard 对齐（branchLine 22 + gap 8 = 30）。 */
+.branchDetail {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  margin-left: 30px;
+  padding: calc(9px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.4));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  min-width: 0;
+}
+
+.branchDetailHead {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+
+.branchDetailIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+}
+
+.branchDetailTitle {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+}
+
+.branchDetailBody {
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
 /* 分支横线（设计稿 brX-line：22px 宽 2px 高的 dash）。 */
 .branchLine {
   flex: none;

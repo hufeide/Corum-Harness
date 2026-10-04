@@ -22,7 +22,7 @@
 // 数据源 = 本卡自己的 node data（orchestrate.ts 从 tool/call arguments + 结果正文
 // 折叠），无新宿主通路。子会话跳转复用 subagent 卡同一套 runtime 桥。
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Ban, Check, ChevronDown, ChevronUp, Cpu, GitMerge, Layers, Loader, X } from 'lucide-react'
+import { ArrowRight, Ban, Check, ChevronDown, ChevronUp, Cpu, FileText, GitMerge, Layers, Loader, X } from 'lucide-react'
 import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
@@ -30,6 +30,7 @@ import type { OrchestrateChatData, OrchestrateTask } from '../contract/orchestra
 import { summarize } from '../contract/orchestrate.ts'
 import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentChildrenOf, worktreeLedgerSubscribe } from '../chat-runtime.ts'
 import { useChildProgress } from './SubagentCard.tsx'
+import { SubagentChanges } from './SubagentChanges.tsx'
 import css from './OrchestrateCard.module.css'
 
 /** 一条分支的渲染态。 */
@@ -69,24 +70,22 @@ function branchState(data: OrchestrateChatData, index: number, stopReason?: Suba
 }
 
 /** 分支副行文案（设计稿 sub：`worktree · wt-1b3dcf` / `research · 只读`）。
- *  隔离任务的 worktree 名来自台账（宿主 emit 的 `slug`，实测形如 `wt-062c9d`）；
- *  台账未到达（页面刷新后无回放帧）时降级为「worktree · 隔离运行」。 */
+ *  判定对齐**机制不变式**：readonly research 不隔离；`isolation === 'main'` 不隔离；
+ *  其余写任务**恒隔离**（`worktree` / `always` / `write-tasks` / 未声明，含旧值 `off`
+ *  兜底——机制已无 off 逃生口）。
+ *  隔离任务的 worktree 名三层兜底：① 实时台账（推送帧，按 spawn 顺序对齐）→
+ *  ② 结果正文里的 slug（刷新后耐久兜底）→ ③ 泛化文案「worktree · 隔离运行」。
+ *  background 修饰不再单独成行（副行保持单行）。 */
 function branchSubtitle(
   task: OrchestrateTask,
   worktrees: readonly { readonly slug: string; readonly branch: string }[],
   slugFallback: string | undefined,
 ): string {
   if (task.research === true) return 'research · 只读'
-  if (task.isolation === 'always') {
-    // ① 实时台账（推送帧，按 spawn 顺序对齐）→ ② 结果正文里的 slug（刷新后耐久兜底）
-    // → ③ 泛化文案。三层都取不到时说明该任务确实没隔离成功。
-    const entry = worktrees[task.index]
-    const slug = entry?.slug ?? slugFallback
-    return slug === undefined ? 'worktree · 隔离运行' : `worktree · ${slug}`
-  }
-  if (task.isolation === 'write-tasks') return '并发写时隔离'
-  if (task.background === true) return 'background · 后台'
-  return 'foreground · 父树直跑'
+  if (task.isolation === 'main') return 'main · 主树直跑'
+  const entry = worktrees[task.index]
+  const slug = entry?.slug ?? slugFallback
+  return slug === undefined ? 'worktree · 隔离运行' : `worktree · ${slug}`
 }
 
 /** 状态 chip 文案 + 语义色键。tone 直接复用 `subagentOutcomeChipTone`（词表逐项
@@ -252,6 +251,12 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
 }) {
   const child = useChildOfTask(callId, task.label, task.index, fallbackChildId)
   /**
+   * 展开区（2026-10-04 用户实测缺陷①）：分支卡原先只看得到 label/副行/chip，
+   * 与 SubagentCard 不一致——用户无法查看该分支的**任务提示词**与**改动内容**。
+   * 展开态放组件顶部，hooks 顺序恒定。
+   */
+  const [expanded, setExpanded] = useState(false)
+  /**
    * **逐分支实时状态**（2026-09-12 用户实测缺陷修复）：工具结果整批返回，运行中它是空的，
    * 旧实现于是把每条分支恒判为「运行中」，某个分支自己跑完也不翻，必须等全部完成才一起翻。
    * 这里用该分支**自己子会话**的进度兜底：outcome 给终态（aborted 不算完成，终态=failed 时不覆盖）。
@@ -269,38 +274,67 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
   // （与 SubagentCard 同源——机制锁定的模型只有子会话自己知道）。
   const childModel = useChildModel(child)
   const model = task.model ?? childModel
+  // 改动区需要的 worktree 三件套：slug 可得才给（SubagentChanges 缺 summary 时自返 null）。
+  const slug = worktrees[task.index]?.slug ?? slugFallback
+  const worktreeForChanges = slug === undefined
+    ? undefined
+    : { slug, branch: worktrees[task.index]?.branch ?? '' }
   return (
-    <div className={css.branchRow} data-state={state}>
-      <span className={css.branchLine} data-tone={chip.tone} />
-      <span className={css.branchNode} data-tone={chip.tone}>
-        {state === 'done' ? <Check size={9} /> : state === 'failed' ? <X size={9} /> : state === 'aborted' ? <Ban size={9} /> : <Loader size={9} />}
-      </span>
-      {/* ★ 锚点（2026-09-18）：分支行就是该子会话在瀑布里的「卡片」——详情卡的跳转按钮按
-          `data-child-session-id` 定位，缺了它就只对 SubagentCard 生效、对编排模式失效。 */}
-      <div className={css.branchCard} data-child-session-id={child || undefined}>
-        <span className={css.branchTx}>
-          <span className={css.branchLabel}>{task.label}</span>
-          <span className={css.branchSub}>{branchSubtitle(task, worktrees, slugFallback)}</span>
-          {model !== undefined && (
-            <span className={css.branchModel}>
-              <Cpu size={11} strokeWidth={2} />
-              <span className={css.branchModelText}>{model}</span>
-            </span>
-          )}
+    <div className={css.branchRowWrap} data-state={state}>
+      <div className={css.branchRow}>
+        <span className={css.branchLine} data-tone={chip.tone} />
+        <span className={css.branchNode} data-tone={chip.tone}>
+          {state === 'done' ? <Check size={9} /> : state === 'failed' ? <X size={9} /> : state === 'aborted' ? <Ban size={9} /> : <Loader size={9} />}
         </span>
-        <span className={css.branchChip} data-tone={chip.tone}>{chip.text}</span>
-        {child !== undefined && (
+        {/* ★ 锚点（2026-09-18）：分支行就是该子会话在瀑布里的「卡片」——详情卡的跳转按钮按
+            `data-child-session-id` 定位，缺了它就只对 SubagentCard 生效、对编排模式失效。 */}
+        <div className={css.branchCard} data-child-session-id={child || undefined}>
+          <span className={css.branchTx}>
+            <span className={css.branchLabel}>{task.label}</span>
+            <span className={css.branchSub}>{branchSubtitle(task, worktrees, slugFallback)}</span>
+            {model !== undefined && (
+              <span className={css.branchModel}>
+                <Cpu size={11} strokeWidth={2} />
+                <span className={css.branchModelText}>{model}</span>
+              </span>
+            )}
+          </span>
+          <span className={css.branchChip} data-tone={chip.tone}>{chip.text}</span>
           <button
             type="button"
             className={css.gotoBtn}
-            aria-label={`进入子会话 ${task.label}`}
-            title={`进入子会话 ${child}`}
-            onClick={() => { chatRuntimeRef.current?.openSession?.(child) }}
+            aria-expanded={expanded}
+            aria-label={expanded ? t('subagent.collapse') : t('subagent.expand')}
+            title={expanded ? t('subagent.collapse') : t('subagent.expand')}
+            onClick={() => { setExpanded(open => !open) }}
           >
-            <ArrowRight size={14} />
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
-        )}
+          {child !== undefined && (
+            <button
+              type="button"
+              className={css.gotoBtn}
+              aria-label={`进入子会话 ${task.label}`}
+              title={`进入子会话 ${child}`}
+              onClick={() => { chatRuntimeRef.current?.openSession?.(child) }}
+            >
+              <ArrowRight size={14} />
+            </button>
+          )}
+        </div>
       </div>
+      {expanded && (
+        <div className={css.branchDetail}>
+          <div className={css.branchDetailHead}>
+            <FileText size={13} strokeWidth={2} className={css.branchDetailIcon} />
+            <span className={css.branchDetailTitle}>{t('subagent.taskDetail')}</span>
+          </div>
+          <div className={css.branchDetailBody}>
+            {task.prompt ?? t('subagent.noTaskDetail')}
+          </div>
+          <SubagentChanges childSessionId={child} worktree={worktreeForChanges} t={t} />
+        </div>
+      )}
     </div>
   )
 }
@@ -359,6 +393,13 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
   const integrating = data.integration === undefined && !data.settled && branchesAllTerminal
   // 集成者子会话（运行期靠 spawn 广播 label 'integrate'；刷新后靠结果里的 id）。
   const integratorChild = useIntegratorChild(data.callId, data.integration?.kind === 'integrated' ? data.integration.childSessionId : undefined)
+  /**
+   * 合并阶段渲染门（2026-10-04 用户实测缺陷③）：原先只认 `data.hasMerge`，于是**未声明
+   * merge 的编排整段合并阶段不渲染**——用户看不到「待集成」。机制对未集成编排会发
+   * pending-integration 并写进结果（`data.integration.kind === 'pending'`），故门放宽为
+   * 「声明了 merge ∨ 结果里有集成信息」。导轨 trunk 延伸与 node-merge 渲染同用此布尔。
+   */
+  const showMergeStage = data.hasMerge || data.integration !== undefined
   const doneCount = Math.max(summary.done, Math.min(liveCompleted.size, summary.total))
   const abortedCount = Math.max(summary.aborted, liveAborted.size)
   const failedCount = Math.max(summary.failed, liveFailed.size)
@@ -402,12 +443,12 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
       {expanded && (
         <div className={css.flow}>
           {/* 导轨列（设计稿 x=4）：node-start + trunk 虚线主干向下延伸，
-              有 merge 时主干一路汇到 node-merge（承担「N→1」的汇聚连接线），
-              无 merge 时主干只在分支区间。 */}
+              有 merge（或结果里已有集成信息，见 showMergeStage）时主干一路汇到
+              node-merge（承担「N→1」的汇聚连接线），无 merge 时主干只在分支区间。 */}
           <div className={css.rail}>
             <span className={css.startNode}><span className={css.startDot} /></span>
-            <span className={css.trunk} data-extend={data.hasMerge || undefined} data-merge-converge={data.hasMerge || undefined} />
-            {data.hasMerge && (
+            <span className={css.trunk} data-extend={showMergeStage || undefined} data-merge-converge={showMergeStage || undefined} />
+            {showMergeStage && (
               <span className={css.mergeNode} data-state={data.integration?.kind === 'integrated' ? 'done' : 'idle'}>
                 <GitMerge size={10} />
               </span>
@@ -442,19 +483,23 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                 />
               ))}
             </div>
-            {data.hasMerge && (
+            {showMergeStage && (
               // 合并汇总阶段——独立于并行分支列表（设计稿 card-merge x=64 整行宽、
               // 无 brX-line、底色更弱）。node-merge 在导轨列(x=4)由 trunk 汇聚，
               // 此处不画横虚线。
               <div className={css.mergeStage} data-merge-stage>
                 <span className={css.mergeStageTitle}>串行汇总</span>
-                {/* 三种态（2026-09-12 用户实测后定稿，BUG-29 的 UI 半边）：
+                {/* 三态（2026-09-12 用户实测后定稿，BUG-29 的 UI 半边）：
                     ① 还没轮到（integration 缺省）= 队列中——**不能写「未启动」**：那让人
                        以为这个阶段永远不会自己跑（用户就是据此判断「始终不会运行」）；
                        声明了 merge ⇒ 机制保证会跑（merge.verify 即默认自动集成）。
                     ② 跑完 = 已集成。
                     ③ 跑过但没落地 = 待集成（含原因与分支数），这才是需要人/主 Agent
-                       插手的状态（`pending` 的 reason 由折叠器给出，如「2 个分支待集成」）。 */}
+                       插手的状态（`pending` 的 reason 由折叠器给出，如「2 个分支待集成」）。
+                    ★ 补充（2026-10-04）：**未声明 merge 但 integration 存在** = 分支留待
+                       手动集成——机制对未集成编排发 pending-integration 并写进结果，
+                       此时也渲染本阶段（否则用户完全看不到「待集成」）；那种情况下
+                       integration 恒为 pending，故不会走①的「队列中」文案。 */}
                 <div className={css.mergeCard} data-integrator
                   data-child-session-id={integratorChild || undefined}
                   data-state={integrating
@@ -464,7 +509,7 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                       : integrationSettledWithoutLine
                         ? 'pending'
                         : data.integration === undefined
-                          ? 'queued'
+                          ? (data.hasMerge ? 'queued' : 'idle')
                           : data.integration.kind === 'integrated' ? 'done' : 'pending'}>
                   <span className={css.mergeIcon}>
                     {integrating ? <Loader size={16} className={css.spin} /> : <GitMerge size={16} />}
