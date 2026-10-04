@@ -28,7 +28,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -b && tsdown",
+    "build": "tsc -b && tsdown && node scripts/inline-css.mjs",
     "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {
