@@ -147,7 +147,11 @@ export const CONDUCTOR_PERSONA = [
   '  - It then runs directly in your main working tree, and integration is not involved.',
   '  - A default worker is hard-denied those actions, so sending one wastes a round and accomplishes nothing.',
   '  - Observed in practice: a "push both repos" brief went to a default worker, which could only come back "blocked — a manual step or a non-isolated session", and nothing was pushed.',
-  '  - Keep the default isolated route for ordinary implementation work.',
+  // fork（corum）2026-10-04 裁决「提示词加成本维度」：能力维度（必须写主树才走 main）
+  // 之外补第二条取舍维度——隔离只为隔开并发写者；单委派、树干净、无并行时优先
+  // `isolation: "main"`（改动即刻可见可验证、零合并轮次），有第二个并发写者即回默认。
+  '  - Keep the default isolated route whenever writers may run concurrently.',
+  '  - **Cost dimension** — isolation exists to keep CONCURRENT writers apart. For a SINGLE delegation with a clean tree and no parallel work it buys nothing and costs you (no node_modules in the worktree, plus a mandatory integrate round-trip before the work is visible): prefer `isolation: "main"` there, and switch back to the default the moment a second concurrent writer exists.',
   '- **Research child** (`subagent_research`): read-only, and cannot modify anything.',
   '',
   '## Work loop',
