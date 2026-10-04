@@ -16,7 +16,7 @@
  *     corum-ui-base/client 的 buildMosaic + MosaicWall 提供，排布只有一个事实源）。
  *     选中具名分类时只渲染该分类的节（节头文字 = 分类名）。
  *   - 磁贴群首张即第一个插件磁贴（设计稿无「添加」磁贴；本地包 / URL 安装入口
- *     在设置中心「插件管理」页）。
+ *     在市场「个人」范围，本地/开发中插件直达安装）。
  *   - 磁贴底色 = 四档语义 tint（紫/深紫/灰蓝/堇），直接消费 --corum-tile-* token；
  *     热度角标（火焰 + 周下载量）只出现在市场态；已装态角标位 = 启停开关。
  *   - 磁贴自身没有任何操作按钮（点磁贴只做选中）；安装 / 卸载 / 启停统一只在
@@ -27,7 +27,10 @@
  *     / id / 版本 / 发布日期 / 作者 / 日志（更新日志）；其余有真值的字段（描述 /
  *     许可证 / 主页 / 仓库 / 安装自 / 关键词 / 热度 / 分类 / 状态）排在「日志」之后。
  *     全部信息就地展示，无二级跳转。
- *     系统插件（runtime）不在此列表暴露，仅 note 声明。
+ *   - 已装 tab 另有一个「系统插件」聚合区（2026-10-03 接管设置中心「插件管理」）：
+ *     runtime 条目统一按底座版本聚合成卡（卡面 = 底座版本 + 该版本的插件数量），
+ *     点卡展开只读详情列表（包名 / 版本 / 运行态）——**没有任何操作入口**，
+ *     不调用 install / uninstall / setEnabled / update 任何一个变更 RPC。
  *
  * 色值一律走 --corum-* / --dsw-alias-* token（见同目录 PluginsPage.module.css），
  * 本文件不出现裸 hex。
@@ -36,7 +39,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Blocks, BrainCircuit, Cable, Cpu, Flame, KeyRound,
+  Blocks, BrainCircuit, Cable, ChevronLeft, Cpu, Flame, KeyRound,
   LoaderCircle, Palette, Plus, Puzzle, Route, Search, Server, ServerCog,
   SquareTerminal, Trash2, WandSparkles, X,
 } from 'lucide-react'
@@ -95,6 +98,18 @@ interface DetailFields {
   readonly description?: string | undefined
   readonly extras?: ReadonlyArray<readonly [string, ReactNode]> | undefined
   readonly loading?: boolean | undefined
+}
+
+/**
+ * 系统插件聚合的详情面板数据（已装 tab 点聚合卡展开）：
+ * 一组 = 同一底座版本下的全部 runtime 条目；列表**只读**——
+ * 本面不渲染任何操作入口，也不调用任何变更 RPC（产品红线）。
+ */
+interface SystemGroup {
+  /** 分组键：底座版本号；条目无 version 时归「未知」组，不伪造版本号。 */
+  readonly version: string
+  /** 该版本下的 runtime 条目（moduleName / version / enabled / fiberPhase 逐条展示）。 */
+  readonly entries: readonly InstalledEntry[]
 }
 
 /** pluginManager.search 的一条结果（npm registry 候选）。 */
@@ -445,6 +460,8 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   // 详情面板选中态：每个 tab 各记一个选中 id（null = 默认选第一个）。
   const [marketId, setMarketId] = useState<string | null>(null)
   const [installedId, setInstalledId] = useState<string | null>(null)
+  // 系统插件聚合卡的展开态（已装 tab）：记录点开的底座版本分组。
+  const [systemOpen, setSystemOpen] = useState<string | null>(null)
   // 已装详情投影（pluginManager/detail，选中条目变化时拉取）。
   const [detail, setDetail] = useState<PluginDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -550,11 +567,27 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
   /* ── 视图投影 ── */
 
-  // 已装：**过滤 kind==='runtime'**（系统插件不在本列表暴露，只有 note 声明它）。
+  // 已装：**过滤 kind==='runtime'**（系统插件不在本列表暴露，聚合为底座版本卡）。
   const installedPlugins = useMemo(
     () => (entries ?? []).filter(entry => entry.kind === 'plugin'),
     [entries],
   )
+
+  /**
+   * 系统插件（kind==='runtime'）按底座版本聚合：数量 = 该版本下的条目数；
+   * version 缺失的条目归「未知」组。顺序 = 版本首次出现的顺序（分组稳定）。
+   */
+  const systemGroups = useMemo<SystemGroup[]>(() => {
+    const byVersion = new Map<string, InstalledEntry[]>()
+    for (const entry of entries ?? []) {
+      if (entry.kind !== 'runtime') continue
+      const key = entry.version ?? '未知'
+      const bucket = byVersion.get(key)
+      if (bucket !== undefined) bucket.push(entry)
+      else byVersion.set(key, [entry])
+    }
+    return [...byVersion].map(([version, list]) => ({ version, entries: list }))
+  }, [entries])
 
   const keyword = query.trim().toLowerCase()
   const matches = useCallback((moduleName: string, description?: string): boolean => (
@@ -688,16 +721,18 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     return hit ?? visibleInstalled[0]
   }, [installedId, visibleInstalled])
 
-  /**
-   * 详情面板的已装条目兜底：已装态 = 选中条目；市场态已安装的卡片也走「已安装」
+  /** 详情面板的已装条目兜底：已装态 = 选中条目；市场态已安装的卡片也走「已安装」
    * 形态（卸载 + 启停开关），按包名在已装清单里对回条目。
    */
   const selectedEntry = useMemo<InstalledEntry | null>(() => {
-    if (tab === 'installed') return selectedInstalled
+    if (tab === 'installed') {
+      if (systemOpen !== null) return null
+      return selectedInstalled
+    }
     if (selectedMarket === null) return null
     const name = 'name' in selectedMarket ? selectedMarket.name : selectedMarket.moduleName
     return (entries ?? []).find(entry => entry.moduleName === name) ?? null
-  }, [tab, selectedInstalled, selectedMarket, entries])
+  }, [tab, systemOpen, selectedInstalled, selectedMarket, entries])
 
   // 已装态选中项变化：拉一次 pluginManager/detail（失败静默——详情投影是增强面）。
   useEffect(() => {
@@ -1068,6 +1103,52 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     </div>
   )
 
+  /* ── 系统插件聚合卡（已装 tab）────────────────────────────────────────────
+   * 产品口径：系统插件不再逐条详列，统一按「底座版本 + 使用该底座的插件数量」
+   * 聚合展示；点开只读详情列表——**不渲染任何操作入口，不调用任何变更 RPC**
+   * （启停 / 卸载 / 安装 / 更新都只属于上面的用户插件磁贴面）。
+   */
+
+  /** 一条系统插件只读行：图标 + 包名（等宽）+ 版本 + 运行态，无任何按钮。 */
+  const renderSystemRow = (entry: InstalledEntry): ReactNode => (
+    <li className={css.systemRow} key={entry.entryId}>
+      <span className={css.systemRowIcon}>{pluginIcon(entry.moduleName, 14)}</span>
+      <span className={css.systemRowName} title={entry.moduleName}>{entry.moduleName}</span>
+      <span className={css.systemRowVersion}>{entry.version !== undefined ? `v${entry.version}` : '版本未知'}</span>
+      <span className={css.systemRowPhase}>
+        {entry.fiberPhase === null
+          ? '未观测'
+          : ({ pending: '等待依赖', loading: '加载中', active: '运行中', failed: '启动失败', unloading: '卸载中' } as const)[entry.fiberPhase]}
+      </span>
+    </li>
+  )
+
+  /** 一张底座版本聚合卡：标题 + 数量徽标 + 点开后的只读详情列表。 */
+  const renderSystemGroup = (group: SystemGroup): ReactNode => {
+    const open = systemOpen === group.version
+    return (
+      <div className={`${css.systemCard}${open ? ' ' + css.systemCardOpen : ''}`} key={group.version}>
+        <button
+          type="button"
+          className={css.systemCardHead}
+          aria-expanded={open}
+          onClick={() => { setSystemOpen(open ? null : group.version) }}
+        >
+          <ServerCog size={16} className={css.systemCardIcon} />
+          <span className={css.systemCardTitle}>系统插件 · 底座 {group.version}</span>
+          <span className={css.systemCardCount}>{group.entries.length} 个</span>
+          <ChevronLeft size={14} className={css.systemCardChevron} />
+        </button>
+        {open && (
+          <div className={css.systemCardList}>
+            <ul className={css.systemRows}>{group.entries.map(renderSystemRow)}</ul>
+            <p className={css.systemReadOnlyNote}>只读展示，系统插件由底座统一装配管理。</p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   /** 「全部插件」分类节头文字：全部 = 固定文案；具名分类 = 该分类名。 */
   const gridSectionLabel = filter === 'all'
     ? '全部插件'
@@ -1166,7 +1247,12 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
           {tab === 'installed' && (
             <>
-              <p className={css.note}>系统插件（runtime）不在此列表暴露，仅运行时装配。</p>
+              {systemGroups.length > 0 && (
+                <div className={css.systemSection}>
+                  {renderSectionHead('系统插件', false)}
+                  {systemGroups.map(renderSystemGroup)}
+                </div>
+              )}
               {error !== null && entries === null && <p className={css.errorText}>加载失败：{error}</p>}
               {entries === null && error === null && <p className={css.hintText}>加载中…</p>}
               {entries !== null && visibleInstalled.length === 0 && (

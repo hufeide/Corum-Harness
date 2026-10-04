@@ -41,7 +41,8 @@ export const zh = {
   //    ⚠️ 不要加回：本字典只服务设置中心剩下的 section，留着是死键。
   'nav.aiPolish': 'AI 润色',
   'nav.advanced': '高级',
-  'nav.extensions': '插件管理',
+  // ✂️ 'nav.extensions' 已随「插件管理」分区删除（2026-10-03：插件管理由集成中心
+  //    「插件」页接管）。⚠️ 不要加回：本字典只服务设置中心剩下的 section，留着是死键。
 } satisfies Record<string, string>
 
 /** The settings namespace key union. */
@@ -76,5 +77,4 @@ export const en = {
   'nav.data': 'Data Management',
   'nav.aiPolish': 'AI Polish',
   'nav.advanced': 'Advanced',
-  'nav.extensions': 'Plugins',
 } satisfies Record<SettingsKey, string>

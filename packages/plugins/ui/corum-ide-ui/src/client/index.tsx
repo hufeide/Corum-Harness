@@ -67,7 +67,6 @@ import type {
 } from './shell-contract.ts'
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
 import { SECTION_DEFS } from './settings/SettingsSections.tsx'
-import { ExtensionsSection } from './settings/sections/SettingsExtensionsSection.tsx'
 import { DataSection } from './settings/sections/SettingsDataSection.tsx'
 import { AppearanceSection } from './settings/sections/SettingsAppearanceSection.tsx'
 import { CorumRpcContext, CorumSettingsContext, FontPrefsContext, NotificationPrefsContext, type CorumSettingsFace } from './settings/shared.tsx'
@@ -716,13 +715,14 @@ export function apply(ctx: ClientContext): void {
       </CorumRpcContext.Provider>
     )))
     const disposeSections = SECTION_DEFS.map(def => {
-      // 「插件管理」section 额外声明 settings.plugins.tab 子槽——corum-ui-settings-
-      // plugins 的「插件配置」tab（含 Bash/Agent Loop/Web Search 三卡）与官方
-      // plugin-inventory「插件列表」tab 都注册进此共享槽（官方 settings 底座声明）。
-      // 重构 2 决策 2：去掉独立「插件」入口，其 tab 内容并入「插件管理」扩展 section。
+      // 「插件管理」section 已整块移除（2026-10-03）：插件管理由集成中心「插件」页
+      // 接管，本壳不再注册 extensions 分区。随它消失的还有 settings.plugins.tab
+      // 子槽的唯一渲染者——corum fork 的「插件配置」tab（corum-ui-settings-plugins）
+      // 与官方 plugin-inventory「插件列表」tab 都注册进该共享槽，而该槽只在被删除的
+      // ExtensionsSection 的 renderTabSlot 里被渲染 ⇒ 两个 tab 均不再出现。
       // 「数据管理」section 声明 settings.data.item 子槽 ——
       // 供 corum-session-archive 的「导入会话日志」行迁入（PRD §4.8 DA5）。
-      // ⚠️ 三件事缺一不可：① SlotMap 登记键名（见上方增强块）；
+      // ⚠️ 两件事缺一不可：① SlotMap 登记键名（见上方增强块）；
       // ② 此处的 children 声明；③ 注册方改挂到该 key。
       if (def.id === 'data') {
         return ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -736,25 +736,6 @@ export function apply(ctx: ClientContext): void {
           <CorumRpcContext.Provider value={corumRpc}>
             <CorumSettingsContext.Provider value={corumSettings}>
               <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} />} />
-            </CorumSettingsContext.Provider>
-          </CorumRpcContext.Provider>
-        )))
-      }
-      if (def.id === 'extensions') {
-        return ctx.slots.inject('settings.section', () => ctx.slots.register({
-          name: 'settings.section',
-          id: def.id,
-          order: def.order,
-          // label 传 thunk（SlotLabel 支持 `() => string`，每次读取时求值）⇒
-          // 导航标签跟随当前语言，无需重新注册。SECTION_DEFS 只存 key，
-          // 绑 t 的动作在注册处（此处 t 已由 ctx.locale.bind(NS) 得到）。
-          label: () => t(def.label),
-          locale: NS,
-          children: { 'settings.plugins.tab': { kind: 'list', scope: 'root' } },
-        }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.plugins.tab', owner: {}, opts?: { only?: string }) => ReactNode }) => (
-          <CorumRpcContext.Provider value={corumRpc}>
-            <CorumSettingsContext.Provider value={corumSettings}>
-              <SettingsSectionHost {...props} render={() => <ExtensionsSection renderTabSlot={() => props.renderSlot('settings.plugins.tab', {})} />} />
             </CorumSettingsContext.Provider>
           </CorumRpcContext.Provider>
         )))

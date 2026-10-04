@@ -164,16 +164,121 @@
 .hintText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 .errorText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-state-error-primary); }
 
-/* 系统插件 note（runtime 条目不进本列表） */
-.note {
-  margin: 0;
+/* ── 系统插件聚合区（已装 tab；runtime 条目按底座版本聚合，只读）─────────────
+ * 产品口径：不再逐条详列系统插件，卡面 = 底座版本 + 该版本的插件数量；
+ * 点卡就地展开只读详情列表（包名 / 版本 / 运行态），无任何操作入口。
+ * 视觉与磁贴群其他节同语言：节头复用 .sectionHead，卡片走玻璃层 + 描边。 */
+
+.systemSection {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+/* 一张聚合卡：玻璃底 + 描边，展开态描边转品牌色提示「这里点开过」。 */
+.systemCard {
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(10px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-1);
+  overflow: hidden;
+}
+
+.systemCardOpen { border-color: var(--corum-glass-border-active); }
+
+/* 卡头（整卡可点）：图标 + 标题 + 数量徽标 + 展开箭头，行高与 note 相当。 */
+.systemCardHead {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: 100%;
   padding: calc(7px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
   box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: calc(9px * var(--corum-density-scale, 1));
-  background: var(--corum-glass-2);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  border: 0;
+  background: transparent;
   color: var(--dsw-alias-label-secondary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.systemCardHead:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.systemCardHead:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+
+.systemCardIcon { flex: none; color: var(--dsw-alias-brand-text); }
+
+.systemCardTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 数量徽标：与磁贴版本徽章同语言的胶囊。 */
+.systemCardCount {
+  flex: none;
+  padding: calc(1px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 展开箭头：收起时箭头朝右（ChevronLeft 旋转 180°），展开朝左指示「收起」。 */
+.systemCardChevron { flex: none; transform: rotate(180deg); transition: transform .15s; }
+.systemCardOpen .systemCardChevron { transform: rotate(0deg); }
+
+/* 展开后的只读详情：上缘细线分隔，行间 4。 */
+.systemCardList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
+  border-top: 1px solid var(--corum-glass-border);
+}
+
+.systemRows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+}
+
+/* 一条系统插件（只读行）：图标 + 包名（等宽）+ 版本 + 运行态；无任何按钮。 */
+.systemRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+}
+
+.systemRowIcon { flex: none; display: inline-flex; color: var(--dsw-alias-label-tertiary); }
+
+.systemRowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.systemRowVersion { flex: none; color: var(--dsw-alias-label-tertiary); }
+.systemRowPhase { flex: none; color: var(--dsw-alias-label-tertiary); }
+
+/* 只读声明（展开列表底部）： tertiary 一句话，说明这面不允许操作。 */
+.systemReadOnlyNote {
+  margin: 0;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* ── 磁贴群分节（节标题 = 磁贴群内的分节头，不是 tab 也不是 chip）──────────── */

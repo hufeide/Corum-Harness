@@ -26,7 +26,6 @@ import { AgentPresetsSection } from './sections/SettingsAgentPresetsSection.tsx'
 import { AccountSection } from './sections/SettingsAccountSection.tsx'
 import { PolishSection } from './sections/SettingsPolishSection.tsx'
 import { AdvancedSection } from './sections/SettingsAdvancedSection.tsx'
-import { ExtensionsSection } from './sections/SettingsExtensionsSection.tsx'
 
 // 共享面 re-export（保持 SettingsShell.tsx / SettingsGeneralSection.tsx /
 // index.tsx 的既有 import 路径零破坏）。
@@ -79,10 +78,10 @@ export interface SectionDef {
    * section 组件；多数无 props。
    *
    * 声明了**子槽**的 section 会额外收到渲染器：
-   * - `extensions`（插件管理）收 `renderTabSlot`（`settings.plugins.tab`）
    * - `data`（数据管理）收 `renderSlot`（`settings.data.item`）
    *
-   * 两者合成一个可选 props 形 —— 组件各自只取自己需要的那个。
+   * `extensions`（插件管理）的 `renderTabSlot` 已随该分区移除（2026-10-03）——
+   * 组件仍留在可选 props 形里，`renderTabSlot` 一支暂无使用方。
    */
   Component: (props?: {
     renderTabSlot?: () => ReactNode
@@ -92,8 +91,8 @@ export interface SectionDef {
 /**
  * 所有 section 定义（用于 index.tsx 批量注册）。
  * 归属分组由 section 自声明 `navGroup`，缺省归 'extensions'。
- * 「子 Agent」迁归 AGENT；「插件管理」归扩展；「插件」独立入口已去掉
- * （ExtensionsSection「插件管理」承接）。
+ * 「子 Agent」迁归 AGENT；「插件管理」分区已整块移除（2026-10-03，
+ * 插件管理由集成中心「插件」页接管，见 SECTION_DEFS 里的 ➖ 注释）。
  *
  * ⚠️ PR6 起本表**不再含 mcp / skills**：两条分区已迁出为集成中心的内容页
  * （见下方 SECTION_DEFS 里的 ➖ 注释）。
@@ -148,7 +147,14 @@ export const SECTION_DEFS: SectionDef[] = [
   //   （档案 ≠ Agent 预设：预设 = 单 Agent 配置集合，与本次移除无关，仍保留。）
   // 扩展组次序按设计稿：插件管理 → AI 润色 → Ollama(195) → 本地文生图(197)。
   // （「MCP 与集成 / 技能」原在本组，PR6 起归集成中心，见上方 ➖ 注释。）
-  { id: 'extensions', order: 145, label: 'nav.extensions', navGroup: 'extensions', Component: ExtensionsSection },
+  // ➖ extensions（插件管理，order 145）分区已按用户裁定整块移除（2026-10-03）：
+  //   插件管理全部收编进集成中心「插件」页的「已装」tab（启停 / 卸载 / 搜索与市场同面）；
+  //   系统插件按底座版本聚合展示在同一个 tab（只读详情）。⚠️ 不要恢复：恢复会造出
+  //   第二份插件管理入口与第二份 pluginManager RPC 消费面（同 mcp/skills 迁出口径）。
+  //   随本行消失的还有 settings.plugins.tab 子槽的唯一渲染者——corum fork 的
+  //   「插件配置」tab（corum-ui-settings-plugins）与官方 plugin-inventory「插件列表」
+  //   tab 都注册进该槽，而该槽只在原 ExtensionsSection 的 renderTabSlot 里被渲染；
+  //   分区删除后两个 tab 自然不再出现（官方卡片列表不再渲染，无需 fork 官方包）。
 ]
 
 /**
