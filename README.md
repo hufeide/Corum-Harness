@@ -16,6 +16,11 @@
   <img alt="Status" src="https://img.shields.io/badge/status-early%20development-yellow">
 </p>
 
+<p align="center">
+  <b>📣 进交流群</b>：微信扫码加入「Corum 交流群」，反馈问题、共建工作流<br>
+  <img src="docs/assets/wechat-group-qrcode.webp" alt="Corum 交流群二维码" width="200">
+</p>
+
 ---
 
 ## 这是什么
