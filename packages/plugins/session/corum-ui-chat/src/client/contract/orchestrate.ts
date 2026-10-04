@@ -2,8 +2,9 @@
  * fork（corum）：orchestrate 编排卡的数据形与折叠逻辑。
  *
  * 数据源（全部来自父会话自身的事件窗口，无需新宿主通路）：
- * - `tool/call` name='orchestrate' 的 `arguments`：`tasks[]`（label / isolation /
- *   research / background）或 scripted 模式（`script` + `meta`）；`merge` 声明
+ * - `tool/call` name='orchestrate' 的 `arguments`：`tasks[]`（label / prompt /
+ *   isolation（worktree / main / always / write-tasks / off）/ research /
+ *   background）或 scripted 模式（`script` + `meta`）；`merge` 声明
  *   决定是否有「集成者」节点。
  * - `tool/result` 的正文：宿主 `render` 按固定格式拼串——
  *   `[task N · label] done\n<输出>` 或 `[task N · label] failed: <错误>`，
@@ -23,8 +24,17 @@ export interface OrchestrateTask {
   readonly index: number
   /** 展示标签（`tasks[i].label`，缺省回退 `task N`）。 */
   readonly label: string
-  /** 隔离策略：always=强制 worktree；write-tasks=并发写才隔离；off=不隔离。 */
-  readonly isolation?: 'always' | 'write-tasks' | 'off'
+  /**
+   * 隔离策略：worktree=隔离 worktree（机制缺省）；main=父树直跑；
+   * always/write-tasks=旧档位（兼容历史会话）；off=旧「不隔离」（机制已废弃，
+   * 仅历史会话出现）。
+   */
+  readonly isolation?: 'worktree' | 'main' | 'always' | 'write-tasks' | 'off'
+  /**
+   * 任务提示词全文（`tasks[i].prompt`，tool/call arguments 耐久携带，刷新后仍在；
+   * 分支卡展开区的任务详情数据源，免去 RPC）。
+   */
+  readonly prompt?: string
   /** 只读研究任务（无 worktree）。 */
   readonly research?: boolean
   /** 后台运行（continuable，可 send_message 续接）。 */
@@ -306,7 +316,8 @@ export function parseCallArguments(args: unknown): {
     tasks.push({
       index,
       label: str(task['label']) ?? `task ${index}`,
-      ...isolation === 'always' || isolation === 'write-tasks' || isolation === 'off' ? { isolation } : {},
+      ...isolation === 'worktree' || isolation === 'main' || isolation === 'always' || isolation === 'write-tasks' || isolation === 'off' ? { isolation } : {},
+      ...str(task['prompt']) === undefined ? {} : { prompt: str(task['prompt']) },
       ...bool(task['research']) === true ? { research: true } : {},
       ...bool(task['background']) === true ? { background: true } : {},
       ...modelLabel === undefined || modelLabel === '' ? {} : { model: modelLabel },
