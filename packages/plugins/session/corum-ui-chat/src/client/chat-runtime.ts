@@ -100,6 +100,7 @@ export interface CorumSessionListRow {
 /** `projections.values.modelSelection` 的窄化形。 */
 export interface CorumModelSelectionProjection {
   readonly lastUsed?: { readonly provider?: string; readonly model?: string; readonly reasoningEffort?: string }
+  readonly next?: { readonly provider?: string; readonly model?: string; readonly reasoningEffort?: string }
 }
 
 /**

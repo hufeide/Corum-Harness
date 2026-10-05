@@ -471,6 +471,37 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     expect(SRC).not.toContain('await corumAskAboutModelFailure(')
   })
 
+  it('★★ 决策落地后回写子会话 model/selection 投影（2026-10-04 用户实测：卡片仍显示旧模型）', () => {
+    // 实测缺陷：决策落地后子 Agent 卡片仍显示旧模型——卡片读子会话
+    // modelSelection.lastUsed，而换模型走父会话侧 per-run agentOptions /
+    // coldResume 覆盖 / 预设写入，子会话投影从不翻。修复：对该子会话 append
+    // model/selection，让投影 pending 命中（官方 view: next = pending ?? lastUsed）。
+    // 回写块必须在 corumNotifyModelDecision 调用点之前落地。
+    const writeIdx = SRC.indexOf("child?.session.append('model/selection'")
+    const notifyIdx = SRC.indexOf('corumNotifyModelDecision(parent, childId, label, outcome.summary')
+    expect(writeIdx, '回写块缺失：子会话 model/selection 投影从不翻 ⇒ 卡片恒显示旧模型').toBeGreaterThan(-1)
+    expect(notifyIdx, 'corumNotifyModelDecision 调用点缺失（对账锚点）').toBeGreaterThan(-1)
+    expect(writeIdx, '回写必须先于通知：通知引用的是新决策，投影必须先翻').toBeLessThan(notifyIdx)
+    // 双闸条件：有 childId 且拿到了 override。
+    const block = between('const outcome = await corumAskAboutModelOnce(', 'corumNotifyModelDecision(parent, childId')
+    const code = stripComments(block)
+    expect(code).toContain('childId !== undefined && outcome.override !== undefined')
+    // 事件名与数据形状（与官方 modelSelectionSchema 对齐：provider/model 必填，reasoningEffort 可选）。
+    expect(code).toContain("append('model/selection', {")
+    expect(code).toContain('provider: outcome.override.provider')
+    expect(code).toContain('model: outcome.override.model')
+    expect(code).toContain('reasoningEffort: outcome.override.reasoningEffort')
+    // 取子 Agent 走本文件既有的 ctx.get('agents') 先例。
+    expect(code).toContain("ctx.get('agents')?.get(childId as never)")
+    // 失败不得炸掉决策落地：try/catch + warn。
+    expect(code).toContain('catch (error: unknown)')
+    expect(code).toContain('failed to record the model override on the child session')
+    // 安全性锚点：注释必须说明「用户选择粘住」只装主任务会话、子 Agent 会话不装。
+    expect(block).toContain('installTaskModelSelection')
+    // 投影回写是状态面修正，与通知开关无关：回写块不得被 notify 条件包住。
+    expect(code).not.toContain('if (notify && outcome.summary !==')
+  })
+
   it('★ 机制提示词不再宣告 per-task model（否则等于教模型用已删的参数）', () => {
     expect(SRC).not.toContain('a per-task `model` on an `orchestrate` task wins')
   })
