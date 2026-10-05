@@ -100,6 +100,12 @@ export interface CorumSessionListRow {
 /** `projections.values.modelSelection` 的窄化形。 */
 export interface CorumModelSelectionProjection {
   readonly lastUsed?: { readonly provider?: string; readonly model?: string; readonly reasoningEffort?: string }
+  /**
+   * 官方 wire.view 的 `next = pending ?? lastUsed`——用户/机制刚做的选择。
+   * 2026-10-04（机制回写子会话投影）：模型决策落地后对子会话 append `model/selection`，
+   * 投影 `pending` 命中并映射为 `next`；卡片取值 `next ?? lastUsed`（next 优先）。
+   */
+  readonly next?: { readonly provider?: string; readonly model?: string; readonly reasoningEffort?: string }
 }
 
 /**
