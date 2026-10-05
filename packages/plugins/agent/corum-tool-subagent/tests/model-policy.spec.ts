@@ -471,6 +471,35 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     expect(SRC).not.toContain('await corumAskAboutModelFailure(')
   })
 
+  it('★★ 决策落地回写子会话投影（2026-10-04 裁决）：卡片模型行才显示新模型', () => {
+    // 实测缺陷：子 Agent 模型不可用、用户在决策面板选了新模型后，子 Agent 卡片的
+    // 模型行仍显示旧模型——卡片读子会话 modelSelection 投影（wire.view: next = pending ?? lastUsed），
+    // 而换模型的路由走的是父会话侧 per-run agentOptions / coldResume 覆盖 / 预设写入，
+    // 子会话投影从不翻。裁决「机制回写子会话投影」：决策落地且 childId/override 齐备时，
+    // 对该子会话 append 一条 model/selection 事件，让 pending 命中。
+    const block = between('const outcome = await corumAskAboutModelOnce(', 'route: outcome.override,')
+    // 回写在通知投递**之前**（先修状态面，再告知）。
+    expect(block.indexOf("append('model/selection'")).toBeGreaterThanOrEqual(0)
+    expect(block.indexOf("append('model/selection'"))
+      .toBeLessThan(block.indexOf('corumNotifyModelDecision'))
+    // 双闸：子会话已 settle（childId 存在）且决策带 override（permanent 持久化失败时
+    // override 为 undefined，跳过回写——不能拿旧模型污染投影）。
+    expect(block).toContain('childId !== undefined && outcome.override !== undefined')
+    // 事件数据形状与官方 modelSelectionSchema 对齐（provider/model/reasoningEffort?）。
+    expect(block).toContain('provider: outcome.override.provider')
+    expect(block).toContain('model: outcome.override.model')
+    expect(block).toContain('reasoningEffort: outcome.override.reasoningEffort')
+    // 回写失败不许炸决策链：try/catch 兜底 + warn（子会话可能已回收）。
+    expect(block).toContain('catch (error: unknown)')
+    expect(block).toContain('failed to record the model override on the child session')
+    // 安全性锚点：installTaskModelSelection 只装主任务会话的依据必须在注释里留痕，
+    // 防止后人误删回写块（误以为会触发「用户选择粘住」语义）。
+    expect(block).toContain('installTaskModelSelection')
+    // 与 notify 开关无关：回写是状态面修正，不是「告知」（notify=false 也要翻投影）。
+    const writeback = between('// ★ 2026-10-04 用户实测缺陷修复', 'if (notify && outcome.summary')
+    expect(writeback).toContain("append('model/selection'")
+  })
+
   it('★ 机制提示词不再宣告 per-task model（否则等于教模型用已删的参数）', () => {
     expect(SRC).not.toContain('a per-task `model` on an `orchestrate` task wins')
   })
