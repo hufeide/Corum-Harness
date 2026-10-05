@@ -18,6 +18,17 @@ declare module '@deepseek-ai/dsh-session/types' {
       /** Exact routes this Session may select explicitly for a child. */
       allowedModels: AllowedModelRoute[]
     }
+    /**
+     * Records this session's current model selection (user choice via
+     * `session/selectModel`, or a mechanism-level override such as the
+     * subagent model-ask fallback written onto the child session).
+     * Drives the `modelSelection` projection (`pending`, view `next`).
+     */
+    'model/selection': {
+      provider: string
+      model: string
+      reasoningEffort?: string
+    }
   }
 }
 

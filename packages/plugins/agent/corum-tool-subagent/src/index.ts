@@ -1612,6 +1612,26 @@ export function apply(ctx: Context, config: Config): void {
       `subagent (${label}): model decision=${outcome.decision.kind} persisted=${outcome.persisted} `
       + `persisted=${outcome.persisted}`,
     )
+    // ★ 2026-10-04 用户实测缺陷修复（裁决「机制回写子会话投影」）：
+    // 决策落地后子 Agent 卡片仍显示旧模型——卡片读子会话 modelSelection.lastUsed，
+    // 而换模型的路由走父会话侧 per-run agentOptions / coldResume 覆盖 / 预设写入，
+    // 子会话投影从不翻。此处对该子会话 append model/selection，让投影 pending
+    // 命中（官方 view: next = pending ?? lastUsed），卡片即显示新模型。
+    // 安全性：installTaskModelSelection 的「用户选择粘住」语义只装主任务会话
+    // （agent-service.ts 五个安装点全是 task 会话），子 Agent 会话不装（spawn
+    // driver / continuation-activation 均无），不会误触发让位。
+    if (childId !== undefined && outcome.override !== undefined) {
+      try {
+        const child = ctx.get('agents')?.get(childId as never)
+        child?.session.append('model/selection', {
+          provider: outcome.override.provider,
+          model: outcome.override.model,
+          ...(outcome.override.reasoningEffort !== undefined ? { reasoningEffort: outcome.override.reasoningEffort } : {}),
+        })
+      } catch (error: unknown) {
+        ctx.logger.warn(`subagent (${label}): failed to record the model override on the child session: ${String(error)}`)
+      }
+    }
     if (notify && outcome.summary !== '') {
       // 子会话已 settle（attempt 0 失败 / 异步 end 失败）⇒ 有 childId，注入 subagent-settled
       // notice（senderSessionId = "the child that settled"）。

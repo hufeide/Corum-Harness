@@ -92,6 +92,7 @@ interface SubagentMetaValue {
 /** session/list 行 projections.values.modelSelection 的窄化形。 */
 interface ModelSelectionProjection {
   lastUsed?: { provider?: string; model?: string; reasoningEffort?: string }
+  next?: { provider?: string; model?: string; reasoningEffort?: string }
 }
 
 /** 已知 provider/model 段的官方显示名（kebab 段的非常规大小写映射）。 */
@@ -101,7 +102,7 @@ const MODEL_SEGMENT_DISPLAY: Readonly<Record<string, string>> = {
 
 /** 模型显示文案：「DeepSeek-V4-Flash · High」——model 字段 kebab 段映射显示名。 */
 function modelLabel(projection: ModelSelectionProjection | undefined): string | undefined {
-  const m = projection?.lastUsed
+  const m = projection?.next ?? projection?.lastUsed
   if (m?.model === undefined || m.model === '') return undefined
   const name = m.model
     .split('-')

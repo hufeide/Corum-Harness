@@ -218,7 +218,7 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
         const rows = await runtime.sessionRows()
         if (cancelled) return
         const row = (rows ?? []).find(item => item.sessionId === childSessionId)
-        const last = row?.projections?.values?.modelSelection?.lastUsed
+        const last = row?.projections?.values?.modelSelection?.next ?? row?.projections?.values?.modelSelection?.lastUsed
         if (last?.model === undefined) return
         setLabel([last.model, last.reasoningEffort].filter(part => part !== undefined && part !== '').join(' · '))
       } catch {
