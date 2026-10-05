@@ -59,8 +59,9 @@ dsh 运行时内核 + Electron 桌面承载层 + 38 个自研插件 + 一套默�
 ### 工程化
 
 - **插件化发行**：38 个插件包按 `ui` / `session` / `agent` 分组，能力与界面同包。
-- **零内核篡改**：官方包一律从 npm registry 引用，不 fork、不 vendored、不改源码；所有定制通过
-  「写插件 + overlay 覆盖行」完成。
+- **最小内核侵入**：官方包尽量从 npm registry 原样引用；必要的定制集中在 **16 个 fork 包**
+  （修补底座在上层暴露的能力缺口），差异全部登记在 [`docs/fork-delta.md`](docs/fork-delta.md)
+  并由 `scripts/verify-fork-drift.sh` 守卫字节级一致性——其余定制仍通过「写插件 + overlay 覆盖行」完成。
 - **可验证性优先**：CDP 实机验证技能 + 声明式断言跑器，界面改动必须跑真机三层验证
   （渲染 / 行为 / 零控制台错误）。
 
@@ -141,9 +142,9 @@ fork 差异台账见 [`docs/fork-delta.md`](docs/fork-delta.md)（改 fork 包�
 |---|---|---|
 | 角色 | Agent 运行时内核 | Agent 产品发行版 |
 | 提供 | Cordis 框架、agent loop、工具系统、capability seam | Agent 能力产品化、38 个插件、默认配置 |
-| 依赖方式 | — | 全部从 npm registry 引用官方包（`@deepseek-ai/dsh-*`），**不 fork、不改源码** |
+| 依赖方式 | — | 大部分从 npm registry 引用官方包（`@deepseek-ai/dsh-*`）；另维护 **16 个 fork 包**修补能力缺口 |
 
-本项目维护少量必要的 **fork 包**（用于修补底座在上层暴露的能力缺口），差异全部登记在
+本项目维护 16 个 **fork 包**（用于修补底座在上层暴露的能力缺口），差异全部登记在
 [`docs/fork-delta.md`](docs/fork-delta.md)，并有 `scripts/verify-fork-drift.sh` 守卫字节级一致性。
 
 ---
