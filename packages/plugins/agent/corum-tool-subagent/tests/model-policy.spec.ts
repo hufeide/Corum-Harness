@@ -499,7 +499,14 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     // 安全性锚点：注释必须说明「用户选择粘住」只装主任务会话、子 Agent 会话不装。
     expect(block).toContain('installTaskModelSelection')
     // 投影回写是状态面修正，与通知开关无关：回写块不得被 notify 条件包住。
-    expect(code).not.toContain('if (notify && outcome.summary !==')
+    // 判据用「定位」而非「取样区间」：回写语句必须出现在 notify 条件行之前，
+    // 早于它的语句不可能被该条件包住（between 的终点锚点在 notify 块内部，
+    // 若用区间判据会把 if 行本身采进来 ⇒ 恒红）。
+    const notifyCondIdx = SRC.indexOf("if (notify && outcome.summary !== ''")
+    const appendIdx = SRC.indexOf("append('model/selection', {")
+    expect(appendIdx, "回写语句缺失：append('model/selection', { 未找到").toBeGreaterThan(-1)
+    expect(notifyCondIdx, 'notify 条件行缺失（对账锚点）').toBeGreaterThan(-1)
+    expect(appendIdx, '回写必须先于 notify 条件行：早于它 ⇒ 不可能被它包住').toBeLessThan(notifyCondIdx)
   })
 
   it('★ 机制提示词不再宣告 per-task model（否则等于教模型用已删的参数）', () => {
