@@ -218,10 +218,7 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
         const rows = await runtime.sessionRows()
         if (cancelled) return
         const row = (rows ?? []).find(item => item.sessionId === childSessionId)
-        // next 优先（用户/机制刚做的选择，官方 view: next = pending ?? lastUsed）；
-        // lastUsed 兜底（实际跑过的模型）。2026-10-04 机制回写子会话投影后 next 才有值。
-        const selection = row?.projections?.values?.modelSelection
-        const last = selection?.next ?? selection?.lastUsed
+        const last = row?.projections?.values?.modelSelection?.lastUsed
         if (last?.model === undefined) return
         setLabel([last.model, last.reasoningEffort].filter(part => part !== undefined && part !== '').join(' · '))
       } catch {
