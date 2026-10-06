@@ -255,6 +255,8 @@ function AgentCardPreview({ draft }: { draft: EditDraft }) {
 
 const OFFICIAL_MODE_META: Record<string, { label: string; desc: string }> = {
   standard: { label: '标准模式', desc: '功能完整的编码 Agent，支持文件编辑 / Shell / 检索 / Skills' },
+  // fork（corum）2026-10-06：补 conductor 翻译——此前缺，卡片上 conductor 显示英文 id。
+  conductor: { label: '指挥模式', desc: '只编排、不亲手执行：拆解并分派给子 Agent / 团队' },
   ptc: { label: 'PTC 模式', desc: '标准模式 + Code Mode SDK 多步操作' },
   minimal: { label: '极简模式', desc: '仅持久 bash + 编辑器的双工具 Agent' },
   cordis: { label: '创造模式', desc: '用于创建自定义 Agent preset' },
