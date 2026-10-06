@@ -63,3 +63,8 @@ docs/
 doc/
 .trae/
 *.pen
+
+# ── 打包产物（防 auto-commit 卷入大文件，2026-10-05 实测 126MB tgz 超 GitHub 上限）──
+*.tgz
+corum-harness-*.tgz
+packages/desktop/dist/
