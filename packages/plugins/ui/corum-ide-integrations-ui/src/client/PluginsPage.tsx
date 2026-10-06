@@ -781,11 +781,13 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
   /** 市场态选中的检索结果（默认第一个；切换 tab/视图后回落）。 */
   const selectedMarket = useMemo<SearchResult | InstalledEntry | null>(() => {
+    // fork（corum）2026-10-06：市场 tab 已占位「建设中」，无可选磁贴 ⇒ 详情栏恒空态。
+    if (tab === 'market') return null
     const pool: readonly (SearchResult | InstalledEntry)[] = scope === 'public' ? marketTiles : personalTiles
     if (pool.length === 0) return null
     const hit = marketId !== null ? pool.find(r => 'name' in r && r.name === marketId) : undefined
     return hit ?? pool[0]
-  }, [marketId, scope, marketTiles, personalTiles])
+  }, [tab, marketId, scope, marketTiles, personalTiles])
 
   /**
    * 已装 tab 选中的条目（**只在选中 `kind === 'plugin'` 的卡片时非空**）。

@@ -420,13 +420,15 @@ body[data-ds-dark-theme] .cardLogoLight { display: none; }
 }
 
 .wipTile {
-  /* big 磁贴自身已是 glow 大贴；这里只需让副文案换行可读。 */
+  /* 脱离 MosaicWall 的块几何单独渲染 ⇒ .tile 无列高分配会塌；显式给 big 尺寸。 */
+  width: calc(264px * var(--corum-density-scale, 1));
+  height: calc(264px * var(--corum-density-scale, 1));
   cursor: default;
 }
 
 .wipTile [data-tile-sub],
 .wipTile p {
-  max-width: 240px;
+  max-width: 230px;
   line-height: 1.5;
 }
 
