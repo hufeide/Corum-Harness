@@ -409,6 +409,27 @@ body[data-ds-dark-theme] .cardLogoLight { display: none; }
   text-align: center;
 }
 
+/* ── 「建设中」占位磁贴（2026-10-06：在线市场未开放，整块收成一张卡）───────── */
+
+.wipWrap {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  padding-top: calc(8px * var(--corum-density-scale, 1));
+}
+
+.wipTile {
+  /* big 磁贴自身已是 glow 大贴；这里只需让副文案换行可读。 */
+  cursor: default;
+}
+
+.wipTile [data-tile-sub],
+.wipTile p {
+  max-width: 240px;
+  line-height: 1.5;
+}
+
 .emptyCardIcon { color: var(--dsw-alias-label-tertiary); }
 .emptyCardTitle {
   margin: 0;
