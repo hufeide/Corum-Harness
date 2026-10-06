@@ -41,6 +41,12 @@
    reload via HMR. Any cross-package state / shell / scheduler change must pass
    the three-layer on-device CDP verification (UI renders + behavior + zero
    console errors). "It compiles" is not "done".
+6. **UI-plugin builds are three steps, all required** — `tsc -b && tsdown &&
+   node scripts/inline-css.mjs`. Running `tsdown` alone extracts CSS to an
+   external `lib/style.css` that the dev runtime cannot load (404), so all
+   styles vanish (bare UI, `--corum-glass-1` empty). inline-css is the ONLY
+   channel that makes a UI package's styles take effect. Evidence:
+   `docs/LESSONS.md` §1.1c (2026-10-06).
 
 ## Key Documents (read as needed)
 
