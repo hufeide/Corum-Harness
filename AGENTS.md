@@ -66,7 +66,16 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
-- `docs/HANDOFF-2026-09-25-model-ask-key-and-memory-mechanism.md` — **最新交接**
+- `docs/HANDOFF-2026-10-06-presets-two-columns-and-marketplace-wip.md` — **最新交接**
+  （2026-10-06 场：① 子 Agent 模型设置回弹修复（settings object 字段成对写入陷阱）；
+  ② 经验系统性沉淀（记忆/skill/AGENTS 红线 6 = UI 包构建三步缺一不可）；
+  ③ Agent 预设分「通用/专用」两栏 + 32 张日系立绘头像 + 退役 Task 助理
+  （机制兜底改 `general-assistant`，104 老会话已迁移）+ 收编 corum-dev 进 spec；
+  ④ 集成中心三市场（插件/技能/MCP）全部占位「建设中」（自添加入口保留）。
+  **§4 = 下个阶段大头：在线市场对接**——插件（原 npm registry 检索，代码保留未删）、
+  技能（需新 RPC 面）、MCP（需服务器目录源），统一分叉点已就位；源形态待拍板。
+  主实例 :9222 未重启（host + 3 UI 包改动待生效）。**下个 session 从这里开始。**）
+- `docs/HANDOFF-2026-09-25-model-ask-key-and-memory-mechanism.md` — 上一份交接
   （2026-09-22/25 场：① **J+K 决策面板卡死真因修复**；② 记忆机制方案定稿；③ 台账大清账；
   已推送 `origin/main`）。
   **§2 = 本场最值钱的部分**：同一缺陷**两次归因都错**（旧交接判「等待链过长」；用户测试
