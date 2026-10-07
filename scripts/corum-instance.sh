@@ -509,8 +509,41 @@ assert_no_active_turns() {
 }
 
 # ── 沙箱守卫（应用绝不能在 Agent 文件沙箱内启动）───────────────────────────
+#
+# 探针必须**按平台分派**：
+#   · macOS：`sandbox-exec` 起一个空 profile 的 /usr/bin/true —— 嵌套沙箱会拒绝
+#     应用 profile（sandbox_apply: Operation not permitted），故「跑得通」即
+#     「不在沙箱里」。
+#   · Linux：没有 sandbox-exec。用**与 Agent 沙箱同款**的 bwrap 探针：
+#     裸机上成功；在 bwrap 沙箱里嵌套调用会失败。若本机根本没装 bwrap（Linux 上
+#     它是 Agent 沙箱的必备前置），说明这台机器提供不了沙箱 —— 此时**不能**判成
+#     「在沙箱里」而拒绝启动，否则本机永远起不了实例；记一条前置告警后放行。
+probe_not_sandboxed() {
+  case "$(uname -s)" in
+    Darwin)
+      sandbox-exec -p '(version 1)(allow default)' /usr/bin/true >/dev/null 2>&1
+      return $?
+      ;;
+    Linux)
+      if ! command -v bwrap >/dev/null 2>&1; then
+        log "⚠️ 未找到 bwrap：本机无法提供 Agent 文件沙箱（Linux 上 bwrap 是必备前置）。"
+        log "   缺它时沙箱会 fail-closed —— 每一次 bash 工具调用都会失败（不是退化成无沙箱）。"
+        log "   装法（Debian/Ubuntu）：sudo apt install bubblewrap"
+        return 0
+      fi
+      bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent \
+        /usr/bin/true >/dev/null 2>&1
+      return $?
+      ;;
+    *)
+      # 其他平台没有已知的嵌套沙箱形态，不做判断。
+      return 0
+      ;;
+  esac
+}
+
 assert_not_sandboxed() {
-  sandbox-exec -p '(version 1)(allow default)' /usr/bin/true >/dev/null 2>&1 && return 0
+  probe_not_sandboxed && return 0
   if [[ "$ALLOW_SANDBOXED" == "1" ]]; then
     log "⚠️ 检测到**沙箱内启动**，但已显式放行（--allow-sandboxed）。"
     log "   后果自负：实例内子 Agent 的 bash 会全部失败（sandbox_apply: Operation not permitted），"
