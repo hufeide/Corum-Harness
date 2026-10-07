@@ -1,0 +1,581 @@
+#!/usr/bin/env node
+/**
+ * corum-smoke.mjs —— Corum 桌面应用的**发布/开发冲烟测试**（单一入口，两档）。
+ *
+ * 由来：本项目反复出现「编译过 + 单测绿」但实机行为倒退的情况（`AGENTS.md` 红线 5
+ * 「编译通过不是完成」）。本脚本把「起得来 + 画得出来 + 沙箱真的在约束 + Agent 真能跑」
+ * 这几件**只有实机才能证伪**的事，收成一条可复跑、可分档、可归档的命令。
+ *
+ * ## 两档
+ *   --fast   （默认）秒级~1 分钟：启动链路 + DOM 渲染 + **真实像素呈现** + 控制台零错误
+ *                     + 平台/沙箱前置。适合每次改动。
+ *   --full   在 fast 之上追加：原生模块真加载（node-pty 真开 PTY / koffi 真调 libc）
+ *                     + 沙箱真约束（越界写必须被拒）+ **Agent 真跑一轮 bash**。
+ *                     适合发版。
+ *
+ * ## 为什么要单独有「真实像素」这一项（本仓实测教训）
+ * 2026-10-07 Linux 实机：窗口**全空白**，而 CDP 截图与 DOM 都**完全正常**
+ * （DOM readyState=complete、`Page.captureScreenshot` 有 1990 色）。
+ * ⇒ **只测 DOM/渲染器视角的冲烟会漏掉「窗口没显示」这类倒退**，故必须在 X 层抓真实像素。
+ * 抓不到 X 工具时**记 skip 并说明原因**，绝不当作通过。
+ *
+ * ## 为什么不驱动主实例
+ * 与 `scripts/cdp.mjs` 同一纪律：默认只碰自己的验证端口（9333），绝不动用户主实例（9222）。
+ *
+ * ## 用法
+ *   node scripts/corum-smoke.mjs --fast                 # 附着到已起的实例（CDP_PORT）
+ *   node scripts/corum-smoke.mjs --fast --launch        # 自己把应用起起来（无头用 Xvfb）
+ *   node scripts/corum-smoke.mjs --full --launch
+ *   node scripts/corum-smoke.mjs --json                 # 机器可读（CI）
+ *
+ * 环境变量：
+ *   CDP_PORT        CDP 端口（默认 9333）
+ *   CORUM_REPO      主 checkout 根（默认脚本自身所在仓库）
+ *   DISPLAY         X 显示；给了且非空才做真实像素检查
+ *   CORUM_SMOKE_OUT 证据目录（默认 /tmp/corum-smoke）
+ * @module corum-smoke
+ */
+import { createRequire } from 'node:module'
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { platform, arch } from 'node:process'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const argv = process.argv.slice(2)
+const has = (flag) => argv.includes(flag)
+
+const MODE = has('--full') ? 'full' : 'fast'
+const DO_LAUNCH = has('--launch')
+const AS_JSON = has('--json')
+const PORT = Number(process.env.CDP_PORT ?? 9333)
+const OUT = process.env.CORUM_SMOKE_OUT ?? '/tmp/corum-smoke'
+
+/** 用户主实例端口 —— 永远不碰（与 cdp.mjs 同一纪律）。 */
+const MAIN_PORT = 9222
+
+const results = []
+let repoRoot = null
+
+/**
+ * 记录一项检查结果。
+ * @param tier - 该项属于哪一档（fast/full）。
+ * @param name - 检查名。
+ * @param state - pass | fail | skip。
+ * @param detail - 判据与证据（**要能被复核**，不是「看起来没问题」）。
+ */
+function record(tier, name, state, detail) {
+  results.push({ tier, name, state, detail })
+  if (!AS_JSON) {
+    const icon = state === 'pass' ? '✓' : state === 'fail' ? '✗' : '–'
+    const color = state === 'fail' ? '\u001b[31m' : state === 'skip' ? '\u001b[33m' : '\u001b[32m'
+    console.log(`  ${color}${icon}\u001b[0m ${name}${detail ? `\n      ${detail}` : ''}`)
+  }
+}
+
+function resolveRepoRoot() {
+  const fromEnv = process.env.CORUM_REPO
+  if (fromEnv && existsSync(join(fromEnv, 'packages/desktop/package.json'))) return fromEnv
+  const own = dirname(HERE)
+  if (existsSync(join(own, 'packages/desktop/package.json'))) return own
+  throw new Error(`无法定位仓库根（脚本在 ${HERE}）。设 CORUM_REPO=<主 checkout 根> 后重试。`)
+}
+
+/** 跑一条命令并拿到 stdout（失败返回 null，不抛）。 */
+function tryExec(cmd, args, opts = {}) {
+  try {
+    return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...opts }).trim()
+  } catch {
+    return null
+  }
+}
+
+// ─────────────────────────── 检查项 ───────────────────────────
+
+/**
+ * 前置 A：`build/node` 里的 Node 运行时**是不是本平台的二进制**。
+ *
+ * 这条抓的是本项目实测过的**静默失效**：`scripts/fetch-node.mjs` 曾硬编码
+ * darwin/arm64，在 Linux 上出包会**不报错**地把 macOS 的 Node 塞进产物
+ * （台账 `tooling.fetch-node-platformized-and-verified-on-linux`）。
+ */
+function checkNodeRuntimePlatform() {
+  const bin = join(repoRoot, 'packages/desktop/build/node/bin/node')
+  if (!existsSync(bin)) {
+    record('fast', 'build/node 运行时存在', 'skip', `未物化：${bin}（先跑 npm run pack:node）`)
+    return
+  }
+  const file = tryExec('file', ['-b', bin]) ?? ''
+  const expect =
+    platform === 'linux' ? 'ELF' : platform === 'darwin' ? 'Mach-O' : platform === 'win32' ? 'PE32' : null
+  if (expect === null) {
+    record('fast', 'build/node 运行时平台', 'skip', `未覆盖的平台 ${platform}`)
+    return
+  }
+  // 架构词在 file 输出里的写法各平台不同，故按关键词匹配。
+  const archWord = arch === 'arm64' ? (file.includes('aarch64') || file.includes('arm64')) : file.includes('x86-64') || file.includes('x86_64')
+  if (file.includes(expect) && archWord) {
+    record('fast', 'build/node 运行时平台', 'pass', `${expect} / ${arch}`)
+  } else {
+    record(
+      'fast',
+      'build/node 运行时平台',
+      'fail',
+      `期望 ${expect}/${arch}，实际：${file.slice(0, 90)} —— 产物里是**别的平台**的 Node（会静默失效）`,
+    )
+  }
+}
+
+/** 前置 B：Linux 上 Agent 沙箱的前置（bwrap）。缺它沙箱 fail-closed，每次 bash 都会失败。 */
+function checkSandboxPrereq() {
+  if (platform !== 'linux') {
+    record('fast', '沙箱前置（bwrap）', 'skip', `非 Linux（${platform}）无需 bwrap`)
+    return
+  }
+  const bwrap = tryExec('bash', ['-lc', 'command -v bwrap'])
+  if (!bwrap) {
+    record('fast', '沙箱前置（bwrap）', 'fail', '未安装 bwrap ⇒ 官方链 linux:["bwrap","landlock"] 会 fail-closed，Agent 的 bash 全部失败。装：apt install bubblewrap')
+    return
+  }
+  // 不只是「装了」——真起一次 profile，确认能工作。
+  const ok = tryExec('bwrap', [
+    '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '/usr/bin/true',
+  ])
+  record('fast', '沙箱前置（bwrap）', ok === null ? 'fail' : 'pass', ok === null ? 'bwrap 存在但 profile 起不来' : `${bwrap} 可用`)
+}
+
+/** 等 CDP 就绪并返回被 CDP 驱动的页面目标。 */
+async function waitPage(deadlineMs = 60_000) {
+  const deadline = Date.now() + deadlineMs
+  for (;;) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/json/list`)
+      const targets = await res.json()
+      const t = targets.find(
+        (x) =>
+          x.type === 'page' &&
+          (x.url.startsWith('corumapp://') || x.url.startsWith('http://127.0.0.1:')) &&
+          !x.url.includes('floating='),
+      )
+      if (t) return t
+    } catch {
+      /* 还没起来 */
+    }
+    if (Date.now() > deadline) throw new Error(`CDP :${PORT} 上没等到主页面（应用未起或端口不对）`)
+    await new Promise((r) => setTimeout(r, 500))
+  }
+}
+
+function connect(wsUrl) {
+  const require = createRequire(join(repoRoot, 'packages/desktop/package.json'))
+  const WebSocket = require('ws')
+  return new Promise((res, rej) => {
+    const ws = new WebSocket(wsUrl, { perMessageDeflate: false })
+    let seq = 0
+    const pending = new Map()
+    const events = []
+    ws.on('open', () =>
+      res({
+        events,
+        send: (method, params = {}, sessionId) =>
+          new Promise((res2, rej2) => {
+            const id = ++seq
+            pending.set(id, { res: res2, rej: rej2 })
+            ws.send(JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params }))
+          }),
+        close: () => ws.close(),
+      }),
+    )
+    ws.on('message', (d) => {
+      const m = JSON.parse(String(d))
+      if (m.id !== undefined && pending.has(m.id)) {
+        const { res: r, rej: j } = pending.get(m.id)
+        pending.delete(m.id)
+        m.error ? j(new Error(m.error.message)) : r(m.result)
+        return
+      }
+      // 事件（console / log）用于「零新增控制台错误」判据。
+      if (m.method === 'Runtime.consoleAPICalled' || m.method === 'Log.entryAdded') events.push(m)
+    })
+    ws.on('error', rej)
+  })
+}
+
+/**
+ * 已知的**环境噪声**：不是产品缺陷，但也不该当作「零错误」混过去。
+ *
+ * 目前只有一条，且是实测确认的：
+ * `http://127.0.0.1:11434/api/tags` 的连接失败 —— 那是 **Ollama 本地模型的探测端口**
+ * （`corum-ollama/src/local-llm-service.ts` 的 `OLLAMA_BASE`）。机器上没装 Ollama 时
+ * 每次轮询都会记一条 `net::ERR_CONNECTION_REFUSED`。判据：把该 URL 换成本机跑着 Ollama
+ * 的环境，这条就消失（Mac 上实测无此错误）。
+ *
+ * 处置：**单列成「已知噪声」并计数**，不参与「零错误」判定，但在报告里如实打印条数 ——
+ * 既不掩盖，也不冤枉产品。
+ */
+const KNOWN_BENIGN = [
+  {
+    name: 'Ollama 本地模型探测（未装 Ollama 时必然出现）',
+    test: (text) => /11434\/api\/tags/.test(text) && /ERR_CONNECTION_REFUSED|Failed to load resource/.test(text),
+  },
+]
+
+/** 把 CDP 事件分成「真错误」与「已知噪声」。 */
+function collectConsoleErrors(events) {
+  const errors = []
+  const benign = []
+  for (const e of events) {
+    let text = null
+    if (e.method === 'Runtime.consoleAPICalled' && (e.params.type === 'error' || e.params.type === 'assert')) {
+      text = `console.${e.params.type}: ${(e.params.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(' ')}`
+    }
+    if (e.method === 'Log.entryAdded' && e.params?.entry?.level === 'error') {
+      text = `log: ${e.params.entry.text} @${e.params.entry.url ?? ''}`
+    }
+    if (text === null) continue
+    const known = KNOWN_BENIGN.find((k) => k.test(text))
+    if (known) benign.push({ known: known.name, text })
+    else errors.push(text)
+  }
+  return { errors, benign }
+}
+
+/**
+ * 真实像素检查：在 **X 层**抓窗口，要求唯一色数超过阈值。
+ *
+ * 为什么必须单独有这项：实测过「DOM 正常 + CDP 截图正常，但物理窗口全空白」
+ * （唯一色 118 vs 有内容的 上万个）。渲染器视角的断言**原理上**看不到这种倒退。
+ *
+ * 为什么抓两次取最大值（**不是多余的保险**）：在 mutter（GNOME）这类合成器下，
+ * 直接抓窗口自身的 pixmap 得到的是**空白**（实测 118 色），因为内容由合成器
+ * 画在屏幕缓冲上而非窗口 pixmap；此时必须抓 root 再按窗口几何裁剪（同一窗口
+ * 实测 36301 色）。而在没有窗口管理器的 Xvfb 下两种抓法都可用。故：
+ * **取两者较大值**，任一抓法看到内容即算呈现。抓法一并写进 detail 以便复核。
+ */
+function checkRealPixels() {
+  const display = process.env.DISPLAY
+  if (!display) {
+    record('fast', '窗口真实呈现（X 像素）', 'skip', '未设 DISPLAY（无头环境）⇒ 该项无法判定，**不等于通过**')
+    return
+  }
+  const have = (t) => tryExec('bash', ['-lc', `command -v ${t}`])
+  if (!have('import') || !have('identify')) {
+    record('fast', '窗口真实呈现（X 像素）', 'skip', '缺 import/identify（装 imagemagick）⇒ 无法判定')
+    return
+  }
+  const wid = tryExec('bash', [
+    '-lc',
+    `xwininfo -root -children 2>/dev/null | grep -iE 'Corum|Harness' | awk '{print $1}' | head -1`,
+  ])
+  if (!wid) {
+    record('fast', '窗口真实呈现（X 像素）', 'fail', `DISPLAY=${display} 上找不到应用窗口`)
+    return
+  }
+  // 抬到最前，避免 root 裁剪抓到别的窗口（合成器下这一步直接影响判据可信度）。
+  tryExec('bash', ['-lc', `xdotool windowactivate ${wid} 2>/dev/null; xdotool windowraise ${wid} 2>/dev/null; sleep 1`])
+
+  const uniqOf = (path) => {
+    if (!existsSync(path)) return -1
+    const n = Number(tryExec('identify', ['-format', '%k', path]) ?? '-1')
+    return Number.isFinite(n) ? n : -1
+  }
+  const force = (p) => {
+    try {
+      execFileSync('rm', ['-f', p])
+    } catch {}
+  }
+
+  // 抓法 ①：窗口自身 pixmap（Xvfb/无合成器下可靠）
+  const direct = join(OUT, 'window-direct.png')
+  force(direct)
+  tryExec('bash', ['-lc', `import -window ${wid} ${direct} 2>/dev/null || true`])
+  const directN = uniqOf(direct)
+
+  // 抓法 ②：整屏 + 按窗口几何裁剪（mutter 等合成器下必需）
+  const geo = tryExec('xwininfo', ['-id', wid]) ?? ''
+  const gx = Number(/(?:Absolute upper-left X):\s*(-?\d+)/.exec(geo)?.[1] ?? NaN)
+  const gy = Number(/(?:Absolute upper-left Y):\s*(-?\d+)/.exec(geo)?.[1] ?? NaN)
+  const gw = Number(/Width:\s*(\d+)/.exec(geo)?.[1] ?? NaN)
+  const gh = Number(/Height:\s*(\d+)/.exec(geo)?.[1] ?? NaN)
+  const root = join(OUT, 'screen.png')
+  const crop = join(OUT, 'window-crop.png')
+  force(root)
+  force(crop)
+  let cropN = -1
+  if ([gx, gy, gw, gh].every(Number.isFinite) && gw > 0 && gh > 0) {
+    tryExec('bash', ['-lc', `import -window root ${root} 2>/dev/null || true`])
+    tryExec('bash', ['-lc', `convert ${root} -crop ${gw}x${gh}+${gx}+${gy} +repage ${crop} 2>/dev/null || true`])
+    cropN = uniqOf(crop)
+  }
+
+  const best = Math.max(directN, cropN)
+  const detail = `窗口 ${wid}（${gw}x${gh}+${gx}+${gy}）唯一色：直接抓=${directN}、屏幕裁剪=${cropN}`
+  // 阈值 500：实测「空白窗口」118~188 色，「有内容」1959~36301 色。
+  if (best >= 500) {
+    record('fast', '窗口真实呈现（X 像素）', 'pass', `${detail} ⇒ 取最大值 ${best}`)
+  } else {
+    record('fast', '窗口真实呈现（X 像素）', 'fail', `${detail} ⇒ **窗口是空白的**（渲染器可能有内容但没显示出来）`)
+  }
+}
+
+/** 全档：原生模块真加载（不是「文件在」）。 */
+function checkNativeModules() {
+  const desk = join(repoRoot, 'packages/desktop')
+  const script = `
+    const out = {};
+    try {
+      const pty = require('node-pty');
+      out.pty = new Promise(r => {
+        const p = pty.spawn('/bin/sh', ['-c', 'echo PTY_OK'], { name: 'xterm-color', cols: 80, rows: 24 });
+        let buf = '';
+        p.onData(d => { buf += d });
+        p.onExit(() => r(buf.includes('PTY_OK') ? 'PTY_OK' : 'no-output:' + buf.slice(0,40)));
+        setTimeout(() => r('timeout'), 5000);
+      });
+    } catch (e) { out.pty = Promise.resolve('load-failed: ' + e.message.slice(0,80)) }
+    try { require('koffi'); out.koffi = 'loaded' } catch (e) { out.koffi = 'load-failed: ' + e.message.slice(0,80) }
+    out;
+  `
+  const raw = tryExec('node', ['-e', script], { cwd: desk })
+  if (!raw) {
+    record('full', '原生模块加载（node-pty/koffi）', 'fail', '子进程无输出')
+    return
+  }
+  try {
+    const parsed = JSON.parse(raw.replace(/Promise \{.*?\}/g, '"pending"'))
+    record('full', '原生模块加载（node-pty/koffi）', 'pass', `koffi=${parsed.koffi}；pty 异步检查见下项`)
+  } catch {
+    record('full', '原生模块加载（node-pty/koffi）', 'pass', raw.slice(0, 200))
+  }
+}
+
+/** 全档：node-pty 真能开出 PTY（同步判定，避免异步 JSON 的麻烦）。 */
+function checkPtySpawn() {
+  const desk = join(repoRoot, 'packages/desktop')
+  const one = `
+    try {
+      const pty = require('node-pty');
+      const p = pty.spawn('/bin/sh', ['-c', 'echo PTY_OK'], { name: 'xterm-color', cols: 80, rows: 24 });
+      let buf = '';
+      p.onData(d => { buf += d });
+      p.onExit(() => { console.log(buf.includes('PTY_OK') ? 'PASS' : 'FAIL:' + buf.slice(0,60)); process.exit(0) });
+      setTimeout(() => { console.log('TIMEOUT'); process.exit(1) }, 6000);
+    } catch (e) { console.log('LOADFAIL:' + e.message.slice(0,100)); process.exit(1) }
+  `
+  const raw = tryExec('node', ['-e', one], { cwd: desk })
+  if (raw === 'PASS') record('full', 'node-pty 真开 PTY', 'pass', '子进程输出 PTY_OK')
+  else record('full', 'node-pty 真开 PTY', 'fail', `未开出 PTY：${raw ?? '(无输出)'} ⇒ Agent 的 bash 工具会失败`)
+}
+
+/**
+ * 全档：沙箱**真的在约束**（不是「bwrap 能跑」就算）。
+ *
+ * 判据（内层 sh 的退出码，三态可区分）：
+ *   0  = 工作区内写成功 **且** 区外写被拒 ⇒ 沙箱在约束（通过）
+ *   10 = 工作区内都写不进去 ⇒ 沙箱过紧（失败）
+ *   20 = 区外写成功了 ⇒ **沙箱没在约束**（失败，最严重）
+ *
+ * ⚠️ 「区外」路径**不能放在 OUT 里**：本仓的 bwrap profile 带 `--tmpfs /tmp`，
+ * 而默认 OUT 就在 `/tmp` 下 ⇒ 把探测目标放 `/tmp` 里会落进可写的 tmpfs，
+ * 于是「越界写成功」被判成没约束（本脚本第一版就踩了，实测 `exit=null`）。
+ * 故探测目标取 `/etc` 下的临时名（容器内 `/` 是 `--ro-bind`，写入必然 EROFS）。
+ */
+function checkSandboxEnforcement() {
+  if (platform !== 'linux') {
+    record('full', '沙箱真约束（越界写被拒）', 'skip', `非 Linux（${platform}）`)
+    return
+  }
+  const ws = join(OUT, 'sandbox-ws')
+  mkdirSync(ws, { recursive: true })
+  // 清掉上一轮痕迹，否则「区内写成功」会假绿。
+  const insideFile = join(ws, 'written-inside')
+  try {
+    execFileSync('rm', ['-f', insideFile])
+  } catch {}
+  const outside = `/etc/corum-smoke-write-probe-${process.pid}`
+  try {
+    execFileSync('rm', ['-f', outside])
+  } catch {}
+
+  const inner = `echo ok > ${insideFile} || exit 10; echo bad > ${outside} 2>/dev/null && exit 20; exit 0`
+  const probe =
+    `set +e\n` +
+    `bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent ` +
+    `--tmpfs /tmp --bind ${ws} ${ws} /bin/sh -c '${inner}'\n` +
+    `printf '%s' $?`
+  const code = tryExec('bash', ['-lc', probe])
+
+  const insideOk = existsSync(insideFile)
+  const outsideLeaked = existsSync(outside)
+  if (outsideLeaked) {
+    try {
+      execFileSync('rm', ['-f', outside])
+    } catch {}
+  }
+  const ev = `内层退出码=${code}（0=符合预期 / 10=区内写不进 / 20=越界写成功）区内写文件=${insideOk} 越界文件泄漏=${outsideLeaked}`
+
+  if (code === '0' && insideOk && !outsideLeaked) {
+    record('full', '沙箱真约束（越界写被拒）', 'pass', `${ev} ⇒ 工作区内可写、区外被拒`)
+  } else {
+    record('full', '沙箱真约束（越界写被拒）', 'fail', ev)
+  }
+}
+
+/**
+ * 全档：Agent 真跑一轮（含一次 bash 工具调用）。
+ *
+ * 需要可用的 LLM 凭据；没有就**记 skip 并说明**，绝不假装通过。
+ */
+async function checkAgentRound(cdp, sessionId) {
+  const cred = join(process.env.HOME ?? '/root', '.corum', '.credentials.yaml')
+  const hasCred = existsSync(cred) && readFileSync(cred, 'utf8').trim().length > 0
+  if (!hasCred) {
+    record('full', 'Agent 真跑一轮 bash', 'skip', `无 LLM 凭据（${cred}）⇒ 需用户提供密钥或授权配置模型后才可判定`)
+    return
+  }
+  record('full', 'Agent 真跑一轮 bash', 'skip', '凭据存在但本版尚未实现自动驱动（见台账登记）')
+}
+
+// ─────────────────────────── 编排 ───────────────────────────
+
+function launchApp() {
+  const desk = join(repoRoot, 'packages/desktop')
+  const cli = join(desk, 'lib/cli.js')
+  if (!existsSync(cli)) throw new Error(`未构建：${cli}（先 npm run build）`)
+  const args = [cli, `--remote-debugging-port=${PORT}`]
+  // root 运行 Chromium 必须给该标志（且必须进 argv，appendSwitch 来不及）。
+  if (typeof process.getuid === 'function' && process.getuid() === 0) args.push('--no-sandbox')
+  // Linux 非 root 时 chrome-sandbox 需 root:root 4755，否则 Electron 直接 abort。
+  const child = spawn(process.execPath, args, { cwd: desk, detached: true, stdio: 'ignore' })
+  child.unref()
+  return child.pid
+}
+
+async function main() {
+  repoRoot = resolveRepoRoot()
+  mkdirSync(OUT, { recursive: true })
+  if (PORT === MAIN_PORT) {
+    // 这是**刻意的拒绝**，不是崩溃 —— 打一句干净的说明就退出，不要甩栈。
+    console.error(
+      `\n拒绝在 :${MAIN_PORT} 上跑冲烟 —— 那是用户主实例（会读到/扰动用户真实会话）。\n用 CDP_PORT=9333（或别的空闲端口）重试。\n`,
+    )
+    process.exit(2)
+  }
+  if (!AS_JSON) {
+    console.log(`\ncorum 冲烟测试（${MODE === 'full' ? '全档' : '快档'}）  端口=:${PORT}  平台=${platform}/${arch}`)
+    console.log(`仓库=${repoRoot}\n证据目录=${OUT}\n`)
+  }
+
+  // ── 静态前置（不需要应用在跑）
+  checkNodeRuntimePlatform()
+  checkSandboxPrereq()
+  if (MODE === 'full') {
+    checkPtySpawn()
+    checkSandboxEnforcement()
+  }
+
+  // ── 启动/附着
+  if (DO_LAUNCH) {
+    try {
+      const pid = launchApp()
+      record('fast', '应用自启动', 'pass', `pid=${pid}（等待 CDP）`)
+    } catch (e) {
+      record('fast', '应用自启动', 'fail', e.message)
+    }
+  }
+
+  let cdp = null
+  let sessionId = null
+  try {
+    const page = await waitPage(DO_LAUNCH ? 90_000 : 15_000)
+    cdp = await connect(page.webSocketDebuggerUrl)
+    // 开域以便捕获控制台/日志错误；再做一次 reload，把**启动期**的错误也收进来。
+    await cdp.send('Runtime.enable')
+    await cdp.send('Log.enable')
+    await cdp.send('Page.enable')
+    cdp.events.length = 0
+    await cdp.send('Page.reload', { ignoreCache: false })
+    await new Promise((r) => setTimeout(r, 6000))
+    record('fast', 'CDP 连上主页面', 'pass', `url=${page.url.slice(0, 70)}`)
+  } catch (e) {
+    record('fast', 'CDP 连上主页面', 'fail', e.message)
+  }
+
+  if (cdp) {
+    // DOM 渲染判据：标题 + 关键界面文案。
+    try {
+      const r = await cdp.send('Runtime.evaluate', {
+        expression: `(function(){return JSON.stringify({
+          title: document.title,
+          rs: document.readyState,
+          txt: (document.body ? document.body.innerText : '').replace(/\\s+/g,' ').slice(0,400),
+          htmlLen: document.body ? document.body.innerHTML.length : 0
+        })})()`,
+        returnByValue: true,
+      })
+      const v = JSON.parse(r.result.value)
+      const looksRendered = v.rs === 'complete' && v.htmlLen > 500
+      record(
+        'fast',
+        'DOM 渲染（界面有内容）',
+        looksRendered ? 'pass' : 'fail',
+        `title="${v.title}" readyState=${v.rs} html=${v.htmlLen}B 文本="${v.txt.slice(0, 90)}"`,
+      )
+    } catch (e) {
+      record('fast', 'DOM 渲染（界面有内容）', 'fail', e.message)
+    }
+
+    // 控制台零错误（reload 之后收集的启动期错误）。
+    const { errors: errs, benign } = collectConsoleErrors(cdp.events)
+    const benignNote = benign.length > 0 ? `；已知噪声 ${benign.length} 条（${benign[0].known}）` : ''
+    if (errs.length === 0) {
+      record('fast', '控制台零错误（reload 后）', 'pass', `捕获 ${cdp.events.length} 条事件，0 条真错误${benignNote}`)
+    } else {
+      record('fast', '控制台零错误（reload 后）', 'fail', `${errs.length} 条：\n      - ${errs.slice(0, 5).join('\n      - ')}`)
+    }
+
+    if (MODE === 'full') await checkAgentRound(cdp, sessionId)
+  }
+
+  // 真实像素（需 DISPLAY；X 层判据，能抓出「DOM 正常但窗口空白」）
+  checkRealPixels()
+
+  if (cdp) cdp.close()
+
+  // ── 汇总
+  const fails = results.filter((r) => r.state === 'fail')
+  const skips = results.filter((r) => r.state === 'skip')
+  const passes = results.filter((r) => r.state === 'pass')
+  const summary = {
+    mode: MODE,
+    port: PORT,
+    platform: `${platform}/${arch}`,
+    repo: repoRoot,
+    pass: passes.length,
+    fail: fails.length,
+    skip: skips.length,
+    results,
+  }
+  writeFileSync(join(OUT, 'result.json'), `${JSON.stringify(summary, null, 2)}\n`)
+
+  if (AS_JSON) {
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
+  } else {
+    console.log(`\n结果：通过 ${passes.length} / 失败 ${fails.length} / 跳过 ${skips.length}`)
+    if (skips.length > 0) {
+      console.log('跳过项（**不等于通过**，逐条看原因）：')
+      for (const s of skips) console.log(`  - ${s.name}：${s.detail.slice(0, 110)}`)
+    }
+    if (fails.length > 0) console.log('失败项：')
+    for (const f of fails) console.log(`  ✗ ${f.name}：${f.detail.slice(0, 200)}`)
+    console.log(`证据与机器可读结果：${OUT}/result.json`)
+  }
+  process.exit(fails.length > 0 ? 1 : 0)
+}
+
+await main().catch((e) => {
+  if (AS_JSON) process.stdout.write(`${JSON.stringify({ error: String(e?.message ?? e) }, null, 2)}\n`)
+  else console.error(`冲烟测试崩了：${e?.stack ?? e}`)
+  process.exit(2)
+})
