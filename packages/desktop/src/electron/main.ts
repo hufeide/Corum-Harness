@@ -26,7 +26,7 @@ import { createCorumTray, type CorumTray } from './tray.ts'
 import { createCorumDock, type CorumDock } from './dock.ts'
 import type { ShellMenuHost } from './shell-menu.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
-import { findCombo, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
+import { findCombo, loadAllCombos, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
 import { resolveMasterKeyB64, MASTER_KEY_ENV } from './credentials-key.ts'
 
 /**
@@ -84,11 +84,24 @@ function comboArg(): string | null {
 }
 
 /**
- * 跳过 combo 页直接进入的初始 combo（开发快捷方式）：`--combo=<id>` 显式指定。
- * 默认（无参数）停在壳的 combo 启动器页——IDE（coding）等只是 combo 之一，
- * 通过启动器点击进入，不设特殊 flag。
+ * 本次启动要进入的 combo。
+ *
+ * corum 已收敛为**单一编程 Agent 应用**（`BUILTIN_COMBOS` 只剩 `coding` 一个），
+ * 「选工作流」这一步因此变成**只有一个选项的额外点击**——用户 2026-10-07 明确要求
+ * 直接进主界面。故规则改为：
+ *   · `--combo=<id>` 显式指定 ⇒ 进它（缺省即开发/自动化快捷方式）；
+ *   · 否则若**只存在一个 combo** ⇒ 直接进它（当前即 IDE）；
+ *   · 否则（0 个或多个，例如用户自建了额外 combo）⇒ 停在壳的启动器页由用户选。
+ * 保留了启动器页与 `combo` 切换链路，多 combo 场景不受影响。
  */
-const INITIAL_COMBO_ID = comboArg()
+function initialComboId(): string | null {
+  const explicit = comboArg()
+  if (explicit !== null) return explicit
+  const all = loadAllCombos()
+  return all.length === 1 ? all[0].id : null
+}
+
+const INITIAL_COMBO_ID = initialComboId()
 
 /**
  * Dev mode (HMR enabled): forward the renderer console to stderr so hot-swap
@@ -372,6 +385,23 @@ async function main(): Promise<void> {
   if (noSandbox) {
     app.commandLine.appendSwitch('no-sandbox')
   }
+  // Linux 的 safeStorage 后端必须**显式**指定：Chromium 在 Linux 上不像 macOS 那样
+  // 自动选中密钥环后端，默认落到「无可用后端」⇒ `safeStorage.isEncryptionAvailable()`
+  // 返回 false ⇒ 主密钥无法封装、凭证加密整层降级（用户可见症状是
+  // 「暂时无法保存确认状态，请重试」）。
+  //
+  // 2026-10-07 在 Ubuntu 24.04 上实测（三组对照，同一台机、同一用户、keyring 正常）：
+  //   默认                     ⇒ ❌ 不可用
+  //   --password-store=gnome-libsecret ⇒ ✅ 可用
+  //   --password-store=basic           ⇒ ❌ 不可用
+  // 故 Linux 上显式选 gnome-libsecret（`basic` 是 Chromium 的明文兜底，不能用于
+  // 真正要保护的主密钥，故不作为后备）。可用 CORUM_LINUX_PASSWORD_STORE 覆盖
+  // （例如无 GNOME 的桌面环境改用 kwallet 等）。
+  // Must run before app.whenReady().
+  if (process.platform === 'linux') {
+    const store = process.env.CORUM_LINUX_PASSWORD_STORE ?? 'gnome-libsecret'
+    if (store !== '') app.commandLine.appendSwitch('password-store', store)
+  }
   // GPU 合成：默认开启。历史上这里无条件 appendSwitch('disable-gpu')，让整个渲染
   // 走软件光栅——corum 的「液态玻璃」皮肤到处是 backdrop-filter，代价变成每帧全屏
   // 重算模糊：设置面板打开（整屏 mask blur 8px + 面板 blur 16px）时若背后内容在动
@@ -521,13 +551,15 @@ async function main(): Promise<void> {
   } else if (INITIAL_COMBO_ID !== null) {
     const combo = findCombo(INITIAL_COMBO_ID)
     if (combo === null) {
-      process.stderr.write(`[corum-desktop] unknown initial combo: ${INITIAL_COMBO_ID}; staying on the launcher\n`)
+      // 只有「显式 --combo=<不存在的 id>」才会走到这里（单 combo 的自动选择必然是
+      // 存在的），故退回启动器页并如实说明，而不是静默进错应用。
+      process.stderr.write(`[corum-desktop] unknown combo: ${INITIAL_COMBO_ID}; falling back to the launcher\n`)
       await mainWindow?.loadURL('corumapp://combo/index.html')
     } else {
       await launchCombo(combo.id)
     }
   } else {
-    // 纯壳：显示 combo 管理页（壳自带静态页，零 dsh 依赖）。
+    // 0 个或多个 combo：显示 combo 管理页由用户选（壳自带静态页，零 dsh 依赖）。
     await mainWindow?.loadURL('corumapp://combo/index.html')
   }
 }

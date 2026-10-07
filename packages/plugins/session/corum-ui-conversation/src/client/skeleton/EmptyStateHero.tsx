@@ -16,7 +16,7 @@
  * 空态入口）。开源侧空态只留任务模式。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Clock, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
+import { Check, ChevronDown, Clock, Folder, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
 import type { AgentOption, ConversationInjected, ModelProviderGroup, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
 import { AgentTwoLevelSelect } from './AgentTwoLevelSelect.tsx'
 import { ModelSelectWithEffort, type ModelRouteSelection } from './ModelSelectWithEffort.tsx'
@@ -102,7 +102,6 @@ function NewTaskForm({ emptyActions, onClose }: {
   const [profileId, setProfileId] = useState('')
   const [permission, setPermission] = useState('')
   const [cwd, setCwd] = useState('')
-  const [pickError, setPickError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   /** 模型选择当前值（provider/model/reasoningEffort）；null = 跟随 Agent 默认。 */
   const [modelSel, setModelSel] = useState<ModelRouteSelection | null>(null)
@@ -181,18 +180,6 @@ function NewTaskForm({ emptyActions, onClose }: {
         ...(agentDefault.reasoningEffort === undefined ? {} : { reasoningEffort: agentDefault.reasoningEffort }),
       })
 
-  const pick = useCallback(async (): Promise<void> => {
-    // 失败绝不静默吞（PROGRESS §4 同类坑）：弹不出选择器要让用户
-    // 看见原因，否则用户只看到「点了没反应」。
-    try {
-      const path = await emptyActions.pickDirectory()
-      if (path !== null && path !== '') setCwd(path)
-    } catch (error) {
-      console.error('[empty-hero] pickDirectory failed', error)
-      setPickError(error instanceof Error ? error.message : String(error))
-    }
-  }, [emptyActions])
-
   const submit = (): void => {
     if (cwd === '' || submitting) return
     setSubmitting(true)
@@ -262,22 +249,17 @@ function NewTaskForm({ emptyActions, onClose }: {
           </button>
           {wsOpen && (
             <div className={css.wsPanel} role="menu">
-              <button
-                type="button"
-                className={css.wsOptAdd}
-                onClick={() => { setWsOpen(false); setPickError(''); void pick() }}
-              >
-                <FolderPlus size={16} />
-                <span>选择新目录…</span>
-              </button>
-              <div className={css.wsDivider} />
+              {/* 2026-10-07 用户要求：新建任务表单里不再提供「选择新目录」。
+                  注册工作区改由**侧栏「添加工作区」**承担（SessionsPane 的操作组），
+                  表单只负责从已注册工作区里挑一个，避免同一动作两处入口。
+                  pick() 仍保留：侧栏注册新工作区后本表单会经工作区列表刷新看到它。 */}
               {workspaces.map((w) => (
                 <button
                   key={w.id}
                   type="button"
                   className={css.wsOpt}
                   data-active={w.path === cwd}
-                  onClick={() => { setCwd(w.path); setPickError(''); setWsOpen(false) }}
+                  onClick={() => { setCwd(w.path); setWsOpen(false) }}
                 >
                   <Folder size={16} />
                   <span className={css.wsOptTx}>
@@ -301,7 +283,6 @@ function NewTaskForm({ emptyActions, onClose }: {
             </div>
           )}
         </div>
-        {pickError !== '' && <span className={css.fieldError}>目录选择失败：{pickError}</span>}
       </div>
 
       <div className={css.field}>
