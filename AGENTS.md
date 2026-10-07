@@ -47,6 +47,16 @@
    styles vanish (bare UI, `--corum-glass-1` empty). inline-css is the ONLY
    channel that makes a UI package's styles take effect. Evidence:
    `docs/LESSONS.md` §1.1c (2026-10-06).
+7. **Three platforms, every change (core principle).** After any edit ask:
+   *does this differ on darwin / linux / win32 — and did I cover all three?*
+   "It compiles" and "it works on my machine" both mean **not done** here: the
+   expensive failures are the **implicit** assumptions (hardcoded `/bin/zsh`,
+   `~/.corum-desktop`, `/`-only path joins, macOS traffic-light pixel insets,
+   POSIX-only command allowlists) — they **do not error on a third platform,
+   they silently behave differently**. Full rules + both legitimate file-layout
+   styles (corum's own `platform/` dir vs the official sibling-file convention
+   kept inside fork packages): `docs/dev-conventions.md` **§16**; current
+   inventory ≈35 sites: `docs/PLATFORM-SPLIT.md` §4.2.
 
 ## Key Documents (read as needed)
 
