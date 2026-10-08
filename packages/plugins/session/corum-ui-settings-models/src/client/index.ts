@@ -27,6 +27,9 @@ import type { ModelsWire } from './store.ts'
 import { createSettingsSchemaOperations } from './schema-operations.ts'
 import { en, zh, type ModelsKey } from './locales.ts'
 import { WELCOME_NOTICE_SETTINGS_NAMESPACE } from '../onboarding-copy.ts'
+// IDE 模式下官方 ui-settings-general（负责注册 ui-onboarding 命名空间）被禁用，
+// 这里由消费方自行注册，使 WelcomeNotice 的 settings scope 可用且可持久化。
+import z from '@deepseek-ai/schemastery'
 
 export type { ModelsSectionInjected, ModelsSectionProps } from './ModelsSection.tsx'
 export type { ModelsFooterOwnerProps, ProviderCardExtrasOwnerProps } from './slot-contract.ts'
@@ -73,6 +76,22 @@ export const inject = [
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-models: copy dictionaries')
+
+  // IDE 模式下官方 ui-settings-general（负责注册 ui-onboarding 命名空间）被禁用，
+  // 消费方在此自行注册，使 WelcomeNotice 的 settings scope 可用且可持久化。
+  // 注册幂等：minimal 模式下官方包已注册时跳过，避免重复注册抛错。
+  // 注：客户端 Context 类型未声明 settings，运行时 inject(['settings']) 拿到
+  // 的 settingsCtx 确有 settings 服务，此处用 any 绕过类型。
+  ctx.inject(['settings'] as const, (settingsCtx: any) => {
+    try {
+      settingsCtx.settings.register(
+        WELCOME_NOTICE_SETTINGS_NAMESPACE,
+        z.object({ welcomeNoticeVersion: z.string() }),
+      )
+    } catch {
+      // 命名空间已被注册（如 minimal 模式下的官方 ui-settings-general），忽略。
+    }
+  })
 
   const schema = createSettingsSchemaOperations(ctx.settingsSchema)
   // Every configuration operation rides its owning Remote namespace.

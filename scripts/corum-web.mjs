@@ -77,6 +77,11 @@ const env = {
   CORUM_DESKTOP_MODE: process.env.CORUM_DESKTOP_MODE ?? 'ide',
   CORUM_PARENT_PID: String(process.pid),
   CORUM_CREDENTIALS_MASTER_KEY: masterKey,
+  // dsh-settings-file 默认把 harness home 解析为 ~/.dsh，而 corum 的数据都在
+  // ~/.corum（CORUM_HOME）。桌面实际运行也是把 dsh home 指向 corum home（见
+  // ~/.corum/profiles），否则 settings.yaml 会落到 ~/.dsh 而读不到预置/用户设置。
+  // 这里显式对齐，保证 settings.yaml（含下面预置的内测声明确认状态）被读到。
+  DSH_HOME: homeDir,
 }
 
 const child = spawn(process.execPath, [bridgePath], {
