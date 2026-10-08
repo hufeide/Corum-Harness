@@ -242,7 +242,7 @@ overrides:
   # 才能让「工具失败对象不再退化成 [object Object]」在真实链路上生效
   # （corum-tool-subagent / corum-orchestration / corum-subagent / corum-agent / corum-ui-chat 等都 import 它）。
   # 升级 runbook：官方 dsh-tools 升级时按 docs/fork-delta.md §5 第 3 步三方合并本 fork 的 index.ts。
-  '@deepseek-ai/dsh-tools': 'link:packages/plugins/agent/corum-tools'
+  '@deepseek-ai/dsh-tools': 'link:./packages/plugins/agent/corum-tools'
   '@deepseek-ai/dsh-typert-loader': '0.1.5-rc.3'
   '@deepseek-ai/dsh-typert-protocol': '0.1.5-rc.3'
   '@deepseek-ai/dsh-typert-registry': '0.1.5-rc.3'

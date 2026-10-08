@@ -53,7 +53,9 @@
     "pack:app": "electron-builder --mac --arm64",
     "pack:app:linux": "electron-builder --linux --x64",
     "pack": "npm run build && npm run pack:host && npm run pack:node && npm run pack:app",
-    "pack:linux": "npm run build && npm run pack:host && npm run pack:node && npm run pack:app:linux"
+    "pack:linux": "npm run build && npm run pack:host && npm run pack:node && npm run pack:app:linux",
+    "pack:app:win": "electron-builder --win --x64",
+    "pack:win": "npm run build && npm run pack:host && npm run pack:node && npm run pack:app:win"
   },
   "build": {
     "appId": "com.corum.agentos",
@@ -115,6 +117,15 @@
         "Comment": "Corum Agent OS",
         "Comment[zh_CN]": "矩道 · 智能体操作系统"
       }
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icon.png",
+      "artifactName": "Corum-${version}-${arch}-${target}.${ext}",
+      "npmRebuild": true
     }
   },
   "license": "Apache-2.0",

@@ -44,7 +44,12 @@ function isPackaged(): boolean {
  * Node at `Resources/node/bin/node`; dev: the CLI launcher's process.execPath.
  */
 function hostNode(): string {
-  if (isPackaged()) return join(process.resourcesPath, 'node', 'bin', 'node')
+  if (isPackaged()) {
+    // Windows 的 node 归档解压后是 `node.exe` 平铺在根（无 bin/ 子目录），
+    // macOS/Linux 则是 `bin/node`；两者布局不同，故按平台返回。
+    const base = join(process.resourcesPath, 'node')
+    return process.platform === 'win32' ? join(base, 'node.exe') : join(base, 'bin', 'node')
+  }
   return process.env.CORUM_HOST_NODE ?? 'node'
 }
 
@@ -110,6 +115,9 @@ const INITIAL_COMBO_ID = initialComboId()
  */
 const DEV = process.env.CORUM_DEV_HMR !== undefined && process.env.CORUM_DEV_HMR !== ''
 
+/** 当前平台是否为 macOS（标题栏样式 / 红绿灯 / Dock 等 OS 专属能力据此分支）。 */
+const isDarwin = process.platform === 'darwin'
+
 let mainWindow: BrowserWindow | null = null
 let quitting = false
 /** macOS 菜单栏托盘（常驻入口）；非 macOS 或创建失败时为 null。 */
@@ -138,14 +146,17 @@ function createWindow(): void {
     // 窗口标题（2026-08-28 改名）：中文「矩道」、英文「Corum」，按系统语言选。
     title: app.getLocale().startsWith('zh') ? '矩道' : 'Corum',
     show: !SMOKE,
-    // macOS：隐藏原生标题栏但保留左上角红绿灯（hiddenInset 让灯位内联到
-    // 内容区），顶部自定义栏由渲染层绘制（设置等按钮 + 整行 drag）。
-    // Windows/Linux 此值表现为 hidden（无灯位），渲染层同样自绘顶栏。
-    titleBarStyle: 'hiddenInset',
-    // 红绿灯定位（2026-08-28）：与标题栏图标中线对齐。标题栏行高 40 → 图标
-    // 中线 y=20；实测定标 y=13（y=14 偏低 2px、y=12 偏高 1px）。x=12 保持
-    // 系统标准 inset。
-    trafficLightPosition: { x: 12, y: 13 },
+    // macOS：hiddenInset 隐藏原生标题栏但保留左上角红绿灯（灯位内联到内容区），
+    // 顶部自定义栏由渲染层绘制。Windows/Linux 不支持 trafficLightPosition，改走
+    // hidden + titleBarOverlay，让系统「最小化/最大化/关闭」按钮浮在自绘栏右上角。
+    titleBarStyle: isDarwin ? 'hiddenInset' : 'hidden',
+    ...(isDarwin
+      ? {
+          trafficLightPosition: { x: 12, y: 13 },
+        }
+      : {
+          titleBarOverlay: { color: 'rgba(0,0,0,0)', symbolColor: '#9aa0a6' },
+        }),
     webPreferences: {
       preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
       contextIsolation: true,
@@ -344,6 +355,10 @@ async function main(): Promise<void> {
    * 使既有 `.master-key` 解不开，因此这里的字面量必须与 package.json 的 `name` 保持一致。
    */
   app.setName('corum-desktop')
+
+  // Windows：设置任务栏 / 系统通知分组的应用用户模型 ID（否则多实例与通知会各自分组）。
+  // 必须用稳定字面值（与 package.json 的 appId 一致），否则换 ID 会让既有跳转/通知失联。
+  if (process.platform === 'win32') app.setAppUserModelId('com.corum.agentos')
 
   // 多实例隔离：默认所有 corum-desktop 实例会挤在同一个 user-data-dir
   // （~/Library/Application Support/Electron），共享 Chromium profile/锁/

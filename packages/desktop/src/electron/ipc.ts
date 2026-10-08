@@ -40,6 +40,9 @@ export function registerIpc(
     getDock?: () => CorumDock | null
   },
 ): void {
+  // 当前平台是否为 macOS（红绿灯 / hiddenInset 仅 macOS 支持；其余平台转用
+  // titleBarOverlay 让系统「最小化/最大化/关闭」按钮浮在自绘栏右上角）。
+  const isDarwin = process.platform === 'darwin'
   // Push a message to the MAIN window's webContents. A closed floating
   // window or a reloaded/crashed main frame leaves the render frame disposed
   // even when `isDestroyed()` hasn't flipped yet (an Electron race), so guard
@@ -198,18 +201,19 @@ export function registerIpc(
       width: 900,
       height: 700,
       title: `corum · ${key}`,
-      // design.pen i5ie6（会话拖出为独立窗口）：顶栏 = 系统红绿灯 + 会话顶栏卡片
-      // 同一行。故这里用 'hiddenInset'（与主窗口一致：隐藏原生标题栏但保留左上角
-      // 红绿灯，灯位内联进内容区），渲染层在这行左侧留 traffic-light-inset 让位、
-      // 并让会话顶栏卡片承担整条拖窗。
-      // 非会话槽（编辑器/终端/轨迹…）没有会话顶栏，渲染层仍画自绘 Window Chrome
-      // 作为唯一顶栏——该情况下 titleBarStyle 仍是 hiddenInset，自绘 chrome 的
-      // 左 padding(84px) 已为红绿灯让位，行为与改动前一致。
-      titleBarStyle: 'hiddenInset',
-      // 红绿灯定位：与会话顶栏卡片中线对齐——卡片 min-height 44、上边距 12，
+      // design.pen i5ie6（会话拖出为独立窗口）：macOS 下顶栏 = 系统红绿灯 + 会话顶栏
+      // 卡片同一行，故 macOS 用 'hiddenInset'（隐藏原生标题栏但保留左上角红绿灯，灯位
+      // 内联进内容区），渲染层左侧留 traffic-light-inset 让位、会话顶栏卡片承担整条拖窗。
+      // 非 macOS 用 'hidden' + titleBarOverlay，把系统「最小化/最大化/关闭」按钮浮在自绘栏
+      // 右上角（非会话槽无会话顶栏，渲染层自绘 Window Chrome 作为唯一顶栏，左 padding 已让位）。
+      titleBarStyle: isDarwin ? 'hiddenInset' : 'hidden',
+      // 红绿灯定位（macOS）：与会话顶栏卡片中线对齐——卡片 min-height 44、上边距 12，
       // 中线 y = 12 + 22 = 34，灯高 13 → 定标 y = 34 - 6.5 ≈ 27。x=16 与卡片
       // 左缘（floatingBody padding 12 + 卡片 margin 12）留出视觉间距。
-      trafficLightPosition: { x: 16, y: 27 },
+      // 非 macOS 转用 titleBarOverlay 让系统「最小化/最大化/关闭」按钮浮在自绘栏右上角。
+      ...(isDarwin
+        ? { trafficLightPosition: { x: 16, y: 27 } }
+        : { titleBarOverlay: { color: 'rgba(0,0,0,0)', symbolColor: '#9aa0a6' } }),
       webPreferences: {
         preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
         contextIsolation: true,

@@ -75,9 +75,15 @@ dsh 运行时内核 + Electron 桌面承载层 + 38 个自研插件 + 一套默�
 pnpm install
 pnpm shell:dev        # 开发态启动桌面应用
 pnpm pack             # 打包 macOS 应用（.app / .dmg）
+pnpm pack:win         # 打包 Windows 应用（NSIS 安装包 + 免安装 portable）
+pnpm pack:linux       # 打包 Linux 应用（AppImage + deb）
 ```
 
-> **平台说明**：当前打包链路面向 **macOS（Apple Silicon）**；跨平台（Windows / Linux）尚在规划中。
+> **平台说明**：打包链路已覆盖 **macOS（Apple Silicon）/ Windows（x64）/ Linux（x64）** 三端。
+> 原生模块（`node-pty`、`koffi`）在 Windows 上由 electron-builder 按 Electron ABI 重建，
+> 构建机需预装 **Visual Studio 生成工具 + Python**（Windows 10+ 自带 `tar` 解压 Node 归档）。
+> Windows 同样支持**系统托盘常驻**（关窗最小化到托盘、左键唤起主窗口、右键弹出菜单）；
+> Linux 因原生托盘缺位（需 AppIndicator）暂留 TODO。
 
 ### 构建与检查
 

@@ -1,28 +1,28 @@
 /**
- * macOS 菜单栏常驻托盘（tray / status item）。
+ * 菜单栏 / 系统托盘常驻（tray / status item）。
  *
  * 用户定调（2026-09-10）：「托盘常驻要做」「被遮挡时**托盘提示消息数量**」
- * 「先做 macOS，Linux/Windows 放 TODO 低优先级」。
+ * 「先做 macOS，Linux/Windows 放 TODO 低优先级」—— Windows 现已落地，Linux 仍 TODO。
  *
  * 常驻的**意义**（不是「多一个图标」这么简单）：主窗关闭不再退出应用 —— 后台的
- * 会话轮次、子 Agent、编排批次继续跑，用户随时经菜单栏图标回到窗口。因此本模块
+ * 会话轮次、子 Agent、编排批次继续跑，用户随时经托盘图标回到窗口。因此本模块
  * 与主进程的关窗语义是一套东西（见 `main.ts` 的 `mainWindow.on('close')`）：
- * 只有托盘真的建起来了（macOS），关窗才降级为隐藏；没有托盘就维持原语义
+ * 只有托盘真的建起来了，关窗才降级为隐藏；没有托盘就维持原语义
  * （关窗即退出），避免用户关掉窗口后**再也找不回**应用。
  *
- * 未读数是菜单栏上的**文字标题**（`tray.setTitle`），不是图标角标：
+ * 未读数是托盘上的**文字标题**（`tray.setTitle`），不是图标角标：
  *   ① macOS 的 status item 没有「徽标」这种原生概念，能表达数字的只有标题文字；
+ *      Windows 同样用标题文字承载未读数（任务栏分组走 `app.setAppUserModelId`）。
  *   ② 标题数字与通知中心 bell 的数字**同源**（都是主窗 store 里 `!read` 的条数），
  *      不允许两处各算一套；
- *   ③ 有未读才写数字、清零后清空标题 —— 菜单栏空间紧张，常驻的「0」是噪音。
+ *   ③ 有未读才写数字、清零后清空标题 —— 托盘空间紧张，常驻的「0」是噪音。
  *
- * 跨平台现状：本模块**只在 darwin 上建托盘**（其余平台返回 null）。
- *   - Windows：需要 16x16 `.ico` + `app.setAppUserModelId`（任务栏/通知分组），
- *     且 `click`/`double-click` 语义与 mac 不同（详见
- *     `docs/ASSESSMENT-tray-floating-system-notification.md`）；
+ * 跨平台现状：本模块在 **darwin 与 win32** 上建托盘。
+ *   - macOS：template 图标（只取 alpha），标题字体用 `monospacedDigit`；
+ *   - Windows：彩色 png 图标（无 template 概念），左键点击唤起主窗口、
+ *     右键弹出菜单；任务栏/通知分组依赖 `main.ts` 里早设的 `app.setAppUserModelId`；
  *   - Linux：GNOME 无原生托盘（需 AppIndicator 扩展 + libappindicator），部分
- *     桌面环境下 `click` 事件根本不触发（只能靠菜单）。
- *   两条都属「先不做，记 TODO」的低优先级项，故这里显式早返回而不是留半成品。
+ *     桌面环境下 `click` 事件根本不触发（只能靠菜单），暂留 TODO。
  *
  * @module corum-desktop/electron/tray
  */
@@ -31,6 +31,11 @@ import { Tray, app, nativeImage } from 'electron'
 import { join } from 'node:path'
 import { buildShellMenu, countLabel, type ShellCount, type ShellMenuHost } from './shell-menu.ts'
 import { patchShellState, readShellState } from './shell-state.ts'
+
+/** 当前平台是否为 macOS（template 图标 / monospacedDigit 标题 / 点击弹菜单）。 */
+const isDarwin = process.platform === 'darwin'
+/** 当前平台是否为 Windows（彩色图标 / 左键唤起窗口 / 右键弹菜单）。 */
+const isWin = process.platform === 'win32'
 
 /**
  * 托盘图标的逻辑尺寸（pt）。
@@ -83,20 +88,22 @@ function trayImage(assetsDir: string): Electron.NativeImage {
     height: ICON_PT * 2,
     dataURL: source.resize({ width: ICON_PT * 2, height: ICON_PT * 2, quality: 'best' }).toDataURL(),
   })
-  image.setTemplateImage(true)
+  // template 是 macOS 概念（只取 alpha 当形状，深浅色自动适配）；Windows 用原色图标。
+  if (isDarwin) image.setTemplateImage(true)
   return image
 }
 
 /**
- * 建 macOS 菜单栏托盘。
+ * 建菜单栏 / 系统托盘（macOS + Windows；Linux 暂留 TODO）。
  *
  * 菜单保持**极简**（三条 + 一条状态行）：托盘是「回到应用」的入口，不是第二个
  * 主界面 —— 塞满菜单项是常见反模式（用户记不住两套功能树，也压缩了菜单栏价值）。
  * @param host - 窗口动作与资源目录。
- * @returns 托盘句柄；非 macOS 或创建失败时返回 null（调用方据此保持「关窗即退出」）。
+ * @returns 托盘句柄；非 macOS/Windows 或创建失败时返回 null（调用方据此保持「关窗即退出」）。
  */
 export function createCorumTray(host: CorumTrayHost): CorumTray | null {
-  if (process.platform !== 'darwin') return null
+  // 托盘在 macOS 与 Windows 上建；Linux 因原生托盘缺位（AppIndicator 依赖）暂留 TODO。
+  if (!isDarwin && !isWin) return null
 
   let count: ShellCount = { unread: 0, total: 0 }
   let tray: Tray
@@ -120,7 +127,8 @@ export function createCorumTray(host: CorumTrayHost): CorumTray | null {
    * `fontType: 'monospacedDigit'` 让 9→10 位宽变化时标题不左右跳动。
    */
   const apply = (): void => {
-    tray.setTitle(count.unread > 0 ? countLabel(count.unread) : '', { fontType: 'monospacedDigit' })
+    // `fontType` 仅 macOS 有效；Windows 走普通标题文字（同样承载未读数）。
+    tray.setTitle(count.unread > 0 ? countLabel(count.unread) : '', isDarwin ? { fontType: 'monospacedDigit' } : undefined)
     tray.setToolTip(count.unread > 0
       ? `矩道 Corum · ${count.unread} 条未读通知`
       : '矩道 Corum · 常驻运行中')
@@ -128,6 +136,11 @@ export function createCorumTray(host: CorumTrayHost): CorumTray | null {
   }
 
   apply()
+  // Windows：左键点击托盘图标 = 唤起主窗口（macOS 点击由 setContextMenu 决定弹菜单；
+  // Windows 右键弹菜单、左键需显式绑事件，否则点图标毫无反应）。
+  if (isWin) {
+    tray.on('click', () => { host.showMainWindow() })
+  }
   // 自检（dev）：上报托盘在屏幕上的实际位置。菜单栏图标由系统绘制，DOM/CDP 都看不见，
   // 实机验证只能靠 `screencapture -R` 截这一块 —— 坐标先打出来，截图脚本才不用猜。
   // ⚠️ 多显示器下这个坐标是**相对托盘所在显示器**的，不是全桌面坐标系（实测：

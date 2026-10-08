@@ -1,0 +1,55 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  # 若需在每次推送到主干时也构建，取消下方注释：
+  # push:
+  #   branches: [main]
+
+jobs:
+  build-windows:
+    name: Build Windows (NSIS + portable)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Get pnpm store path
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        # windows-latest 已预装 VS 生成工具 + Python，node-pty / koffi 可在打包时按 Electron ABI 重建。
+        run: pnpm install
+
+      - name: Build & package Windows app
+        run: pnpm --filter corum-desktop run pack:win
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: corum-windows
+          path: packages/desktop/dist/*
+          if-no-files-found: error
